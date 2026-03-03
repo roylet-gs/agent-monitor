@@ -1,0 +1,188 @@
+import React, { useState, useEffect } from "react";
+import { Box, Text, useInput } from "ink";
+import { readdirSync, statSync, existsSync } from "fs";
+import { join, resolve, basename, dirname } from "path";
+import { homedir } from "os";
+import { isGitRepo } from "../lib/git.js";
+
+interface FolderBrowserProps {
+  onSelect: (path: string) => void;
+  onCancel: () => void;
+}
+
+export function FolderBrowser({ onSelect, onCancel }: FolderBrowserProps) {
+  const [currentPath, setCurrentPath] = useState(
+    resolve(process.cwd() === "/" ? homedir() : process.cwd(), "..")
+  );
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [filter, setFilter] = useState("");
+  const [entries, setEntries] = useState<
+    { name: string; isDir: boolean; isRepo: boolean; fullPath: string }[]
+  >([]);
+
+  useEffect(() => {
+    try {
+      const items = readdirSync(currentPath)
+        .filter((name) => !name.startsWith("."))
+        .filter((name) => {
+          if (!filter) return true;
+          return name.toLowerCase().includes(filter.toLowerCase());
+        })
+        .map((name) => {
+          const fullPath = join(currentPath, name);
+          try {
+            const stat = statSync(fullPath);
+            if (!stat.isDirectory()) return null;
+            return {
+              name,
+              isDir: true,
+              isRepo: isGitRepo(fullPath),
+              fullPath,
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter((e): e is NonNullable<typeof e> => e !== null)
+        .sort((a, b) => {
+          // Repos first, then alphabetical
+          if (a.isRepo && !b.isRepo) return -1;
+          if (!a.isRepo && b.isRepo) return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+      // Add parent directory entry
+      const parent = dirname(currentPath);
+      if (parent !== currentPath) {
+        items.unshift({
+          name: "..",
+          isDir: true,
+          isRepo: false,
+          fullPath: parent,
+        });
+      }
+
+      setEntries(items);
+      setSelectedIndex(0);
+    } catch {
+      setEntries([]);
+    }
+  }, [currentPath, filter]);
+
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel();
+      return;
+    }
+
+    if (key.upArrow) {
+      setSelectedIndex((i) => Math.max(0, i - 1));
+      return;
+    }
+
+    if (key.downArrow) {
+      setSelectedIndex((i) => Math.min(entries.length - 1, i + 1));
+      return;
+    }
+
+    if (key.return) {
+      const entry = entries[selectedIndex];
+      if (!entry) return;
+
+      if (entry.isRepo) {
+        onSelect(entry.fullPath);
+        return;
+      }
+
+      // Navigate into directory
+      setCurrentPath(entry.fullPath);
+      setFilter("");
+      return;
+    }
+
+    if (key.backspace || key.delete) {
+      if (filter.length > 0) {
+        setFilter((f) => f.slice(0, -1));
+      } else {
+        // Go up
+        const parent = dirname(currentPath);
+        if (parent !== currentPath) {
+          setCurrentPath(parent);
+        }
+      }
+      return;
+    }
+
+    // Type to filter
+    if (input && !key.ctrl && !key.meta) {
+      setFilter((f) => f + input);
+    }
+  });
+
+  const displayPath = currentPath.replace(homedir(), "~");
+  const visibleEntries = entries.slice(0, 15);
+
+  return (
+    <Box flexDirection="column" borderStyle="single" paddingX={1}>
+      <Box justifyContent="space-between">
+        <Text bold color="cyan">
+          Add Repository
+        </Text>
+      </Box>
+
+      <Box marginTop={1} flexDirection="column">
+        <Text>Navigate to a git repository:</Text>
+        <Text bold>{displayPath}/</Text>
+        <Text dimColor>──────────────────────</Text>
+      </Box>
+
+      <Box flexDirection="column" marginTop={1}>
+        {visibleEntries.map((entry, i) => (
+          <Box key={entry.fullPath} gap={1}>
+            <Text>{i === selectedIndex ? "▸" : " "}</Text>
+            <Text>{entry.name === ".." ? "📁" : "📁"}</Text>
+            <Text
+              bold={i === selectedIndex}
+              color={i === selectedIndex ? "cyan" : undefined}
+            >
+              {entry.name}
+            </Text>
+            {entry.isRepo && (
+              <Text color="green">(git repo ✓)</Text>
+            )}
+          </Box>
+        ))}
+        {entries.length > 15 && (
+          <Text dimColor>... {entries.length - 15} more</Text>
+        )}
+        {entries.length === 0 && (
+          <Text dimColor>No directories found</Text>
+        )}
+      </Box>
+
+      {filter && (
+        <Box marginTop={1}>
+          <Text dimColor>Filter: </Text>
+          <Text>{filter}</Text>
+        </Box>
+      )}
+
+      <Box
+        marginTop={1}
+        borderStyle="single"
+        borderTop
+        borderBottom={false}
+        borderLeft={false}
+        borderRight={false}
+        paddingX={0}
+      >
+        <Text>
+          <Text color="yellow">[Enter]</Text> Select{" "}
+          <Text color="yellow">[↑↓]</Text> Navigate{" "}
+          <Text color="yellow">[Backspace]</Text> Go up{" "}
+          <Text color="yellow">[Esc]</Text> Cancel
+        </Text>
+      </Box>
+    </Box>
+  );
+}
