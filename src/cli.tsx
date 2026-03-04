@@ -12,17 +12,27 @@ import { runScript, waitForEnter } from "./lib/run-script.js";
 
 const cli = meow(
   `
+  Agent Monitor — TUI dashboard for git worktrees & Claude Code agents
+
   Usage
-    $ am                          Launch TUI
-    $ am hook-event               Receive hook event from stdin
-    $ am status --worktree <path> Print agent status
-    $ am install-hooks <path>     Install Claude hooks into worktree
+    $ am                            Launch the dashboard
+    $ am status -w <path>           Print agent status for a worktree
+    $ am install-hooks <path>       Install Claude hooks into a worktree
+    $ am hook-event -w <path>       Receive hook event from stdin (used by hooks)
 
   Options
-    --worktree, -w  Worktree path (for hook-event and status)
+    --worktree, -w  Worktree path
     --event, -e     Event name override (for hook-event)
+    --help          Show this help
+    --version       Show version
+
+  Dashboard Keys
+    j/k ↑/↓  Navigate        n  New worktree     d  Delete
+    Enter    Open in IDE      s  Settings         r  Refresh
+    g        Open PR          l  Open Linear      q  Quit
 `,
   {
+    description: false,
     importMeta: import.meta,
     flags: {
       worktree: { type: "string", shortFlag: "w" },
