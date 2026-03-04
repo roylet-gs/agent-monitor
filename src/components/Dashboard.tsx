@@ -17,7 +17,7 @@ interface DashboardProps {
   compactView: boolean;
 }
 
-export function Dashboard({
+export const Dashboard = React.memo(function Dashboard({
   repoName,
   groups,
   flatWorktrees,
@@ -39,4 +39,4 @@ export function Dashboard({
       <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0} escHint={escHint} />
     </Box>
   );
-}
+});

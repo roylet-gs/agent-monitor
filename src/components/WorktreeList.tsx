@@ -25,13 +25,13 @@ function statusColor(status: string | undefined): string {
   }
 }
 
-export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, compactView }: WorktreeListProps) {
+export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, compactView }: WorktreeListProps) {
   if (flatWorktrees.length === 0) {
     return (
       <Box
         flexDirection="column"
         borderStyle="single"
-        minWidth="40%"
+        width={40}
         paddingX={1}
       >
         <Text bold> Worktrees</Text>
@@ -49,7 +49,7 @@ export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, 
     <Box
       flexDirection="column"
       borderStyle="single"
-      minWidth="40%"
+      width={40}
       paddingX={1}
     >
       <Text bold> Worktrees</Text>
@@ -117,4 +117,4 @@ export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, 
       </Box>
     </Box>
   );
-}
+});

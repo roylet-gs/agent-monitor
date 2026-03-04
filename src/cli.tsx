@@ -54,7 +54,7 @@ async function launchTui(): Promise<void> {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const instance = render(<App onRunScript={onRunScript} />);
+    const instance = render(<App onRunScript={onRunScript} />, { patchConsole: true });
 
     try {
       await instance.waitUntilExit();

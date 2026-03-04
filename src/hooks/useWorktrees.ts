@@ -37,6 +37,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
   const [flatWorktrees, setFlatWorktrees] = useState<WorktreeWithStatus[]>([]);
   const prCacheRef = useRef<Map<string, PrInfo | null>>(new Map());
   const linearCacheRef = useRef<Map<string, LinearInfo | null>>(new Map());
+  const prevFingerprintRef = useRef("");
 
   // Keep refs for values that refresh needs, so it always reads the latest
   const reposRef = useRef(repositories);
@@ -169,8 +170,22 @@ export function useWorktrees(config: WorktreeHookConfig): {
       // Final staleness check before committing state
       if (myGen !== genRef.current) return;
 
-      setGroups(newGroups);
-      setFlatWorktrees(allFlat);
+      const fingerprint = JSON.stringify(allFlat.map(wt => ({
+        id: wt.id, branch: wt.branch, custom_name: wt.custom_name,
+        status: wt.agent_status?.status,
+        summary: wt.agent_status?.transcript_summary,
+        response: wt.agent_status?.last_response,
+        ahead: wt.git_status?.ahead, behind: wt.git_status?.behind,
+        dirty: wt.git_status?.dirty,
+        commit_msg: wt.last_commit?.message, commit_time: wt.last_commit?.relative_time,
+        pr: wt.pr_info?.number, pr_state: wt.pr_info?.state, checks: wt.pr_info?.checksStatus,
+        linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,
+      })));
+      if (fingerprint !== prevFingerprintRef.current) {
+        prevFingerprintRef.current = fingerprint;
+        setGroups(newGroups);
+        setFlatWorktrees(allFlat);
+      }
     } catch (err) {
       log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);
     }

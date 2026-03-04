@@ -36,7 +36,7 @@ function statusLabel(status: string | undefined): string {
   }
 }
 
-export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
+export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: WorktreeDetailProps) {
   if (!worktree) {
     return (
       <Box
@@ -158,4 +158,4 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
       </Box>
     </Box>
   );
-}
+});
