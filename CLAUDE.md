@@ -19,7 +19,7 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 ## Architecture
 
 ### Entry Flow
-`src/cli.tsx` parses args with meow and routes to either a subcommand (`hook-event`, `status`) or launches the TUI. The TUI runs in a `while(true)` loop: Ink renders → user exits → unmount → run any pending startup script in raw terminal → re-launch Ink. This loop exists because Ink takes over stdin/stdout and can't coexist with interactive child processes.
+`src/cli.tsx` uses `commander` for CLI parsing and routes to subcommands or launches the TUI (default action). Commands are organized as subcommand groups (`worktree`, `repo`, `settings`, `hooks`, `pr`, `linear`, `script`, `doctor`) with short aliases (`ls`, `new`, `open`). Each command handler lives in `src/commands/` and uses dynamic imports to avoid loading unnecessary modules. The TUI runs in a `while(true)` loop: Ink renders → user exits → unmount → run any pending startup script in raw terminal → re-launch Ink. This loop exists because Ink takes over stdin/stdout and can't coexist with interactive child processes.
 
 ### State Machine
 `src/app.tsx` is the root component managing an `AppMode` string union that controls rendering:
@@ -37,6 +37,21 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 - `src/lib/linear.ts` — Raw HTTPS POST to Linear GraphQL API (no SDK)
 - `src/lib/hooks-installer.ts` — Writes Claude hook config to `.claude/settings.json` in worktrees
 - `src/lib/settings.ts` — Loads/saves `~/.agent-monitor/settings.json`
+- `src/lib/output.ts` — CLI output formatting (table, key-value, JSON) for non-TUI commands
+- `src/lib/resolve.ts` — Resolves CLI targets (branch names, paths) to DB entities; CWD-based repo detection
+
+### CLI Commands
+Commands in `src/commands/` are organized by domain:
+- `src/commands/worktree/` — list, create, delete, open, sync, info
+- `src/commands/repo/` — list, add, remove
+- `src/commands/settings/` — list, get, set, reset
+- `src/commands/hooks.ts` — install, uninstall, status
+- `src/commands/pr.ts` — show, open
+- `src/commands/linear.ts` — show, open
+- `src/commands/script.ts` — edit, remove, show
+- `src/commands/doctor.ts` — system health check
+- `src/commands/status.ts` — get/set agent status (unchanged)
+- `src/commands/hook-event.ts` — receive hook events from stdin (unchanged)
 
 ### Persistence
 All data at `~/.agent-monitor/`: SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`.
