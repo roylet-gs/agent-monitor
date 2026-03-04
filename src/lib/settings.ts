@@ -9,7 +9,6 @@ export const DEFAULT_SETTINGS: Settings = {
   ide: "cursor",
   defaultBranchPrefix: "feature/",
   pollingIntervalMs: 2000,
-  autoInstallHooks: true,
   autoSyncOnStartup: true,
   compactView: false,
   hideMainBranch: true,

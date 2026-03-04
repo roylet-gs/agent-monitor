@@ -30,7 +30,7 @@ import {
   getRepoName,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
-import { installHooks } from "./lib/hooks-installer.js";
+import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
@@ -148,21 +148,22 @@ export function App({ onRunScript }: AppProps) {
     }
   }, [selectedIndex, flatWorktrees, unseenIds]);
 
+  // Auto-install global hooks on startup if not present
+  useEffect(() => {
+    if (!isGlobalHooksInstalled()) {
+      installGlobalHooks();
+    }
+  }, []);
+
   // Handle open in IDE
   const handleOpen = useCallback(async () => {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
     try {
-      if (settings.autoInstallHooks) {
-        setBusy("Installing hooks...");
-        installHooks(wt.path);
-      }
       openInIde(wt.path, settings.ide);
-      setBusy(null);
     } catch (err) {
       setError(`${err}`);
-      setBusy(null);
     }
   }, [flatWorktrees, selectedIndex, settings]);
 
@@ -218,9 +219,6 @@ export function App({ onRunScript }: AppProps) {
       const steps: StepInfo[] = [
         { label: "Creating git worktree", status: "active" },
         { label: "Syncing database", status: "pending" },
-        ...(settings.autoInstallHooks
-          ? [{ label: "Installing hooks", status: "pending" as const }]
-          : []),
         ...(hasScript
           ? [{ label: "Running startup script", status: "pending" as const }]
           : []),
@@ -274,14 +272,6 @@ export function App({ onRunScript }: AppProps) {
         await refreshRef.current();
         updateStep(stepIdx, "done");
         stepIdx++;
-
-        // Step: Install hooks
-        if (settings.autoInstallHooks) {
-          updateStep(stepIdx, "active");
-          installHooks(wtPath);
-          updateStep(stepIdx, "done");
-          stepIdx++;
-        }
 
         log("info", "app", `Created worktree ${branchName}`);
 

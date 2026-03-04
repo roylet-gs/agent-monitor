@@ -30,7 +30,7 @@ export async function handleHookEvent(
   // Find worktree in DB
   const worktree = getWorktreeByPath(worktreePath);
   if (!worktree) {
-    log("warn", "hook-event", `Worktree not found in DB for path: ${worktreePath}`);
+    log("debug", "hook-event", `Worktree not found in DB for path: ${worktreePath}`);
     return;
   }
 
