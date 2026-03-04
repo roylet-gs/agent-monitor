@@ -19,6 +19,7 @@ import {
   removeRepository,
   removeWorktree as removeWorktreeDb,
   updateWorktreeCustomName,
+  resetAll,
 } from "./lib/db.js";
 import {
   createWorktree as gitCreateWorktree,
@@ -32,7 +33,7 @@ import { syncWorktrees } from "./lib/sync.js";
 import { installHooks } from "./lib/hooks-installer.js";
 import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
-import { loadSettings, saveSettings } from "./lib/settings.js";
+import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
 import { log } from "./lib/logger.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
@@ -407,6 +408,15 @@ export function App({ onRunScript }: AppProps) {
     []
   );
 
+  // Handle factory reset
+  const handleFactoryReset = useCallback(() => {
+    resetAll();
+    saveSettings(DEFAULT_SETTINGS);
+    setSettings(DEFAULT_SETTINGS);
+    setRepositories([]);
+    setCurrentRepo(null);
+    setMode("folder-browse");
+  }, []);
 
   // Handle remove repo from settings
   const handleRemoveRepo = useCallback(
@@ -567,6 +577,7 @@ export function App({ onRunScript }: AppProps) {
           onClose={() => setMode("dashboard")}
           onAddRepo={() => setMode("folder-browse")}
           onRemoveRepo={handleRemoveRepo}
+          onFactoryReset={handleFactoryReset}
         />
       )}
 

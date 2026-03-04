@@ -5,7 +5,7 @@ import { isGhAvailable } from "./github.js";
 import { log } from "./logger.js";
 import type { Settings } from "./types.js";
 
-const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   ide: "cursor",
   defaultBranchPrefix: "feature/",
   pollingIntervalMs: 2000,

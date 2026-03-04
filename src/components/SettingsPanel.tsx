@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { verifyLinearApiKey } from "../lib/linear.js";
+import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
@@ -20,7 +21,9 @@ type SettingsField =
   | "linearEnabled"
   | "linearApiKey"
   | "linearPolling"
-  | "repos";
+  | "repos"
+  | "resetSettings"
+  | "factoryReset";
 
 const FIELDS: SettingsField[] = [
   "ide",
@@ -37,6 +40,8 @@ const FIELDS: SettingsField[] = [
   "linearApiKey",
   "linearPolling",
   "repos",
+  "resetSettings",
+  "factoryReset",
 ];
 
 const IDE_OPTIONS: Settings["ide"][] = ["cursor", "vscode", "terminal"];
@@ -49,6 +54,7 @@ interface SettingsPanelProps {
   onClose: () => void;
   onAddRepo: () => void;
   onRemoveRepo: (repoId: string) => void;
+  onFactoryReset: () => void;
 }
 
 export function SettingsPanel({
@@ -58,6 +64,7 @@ export function SettingsPanel({
   onClose,
   onAddRepo,
   onRemoveRepo,
+  onFactoryReset,
 }: SettingsPanelProps) {
   const [current, setCurrent] = useState({ ...settings });
   const [fieldIndex, setFieldIndex] = useState(0);
@@ -66,6 +73,7 @@ export function SettingsPanel({
   const [editValue, setEditValue] = useState("");
   const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
   const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
+  const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | null>(null);
 
   // Verify Linear API key whenever it changes
   useEffect(() => {
@@ -140,6 +148,23 @@ export function SettingsPanel({
   };
 
   useInput((input, key) => {
+    // When awaiting confirmation on a danger zone action
+    if (confirming) {
+      if (input === "y" || input === "Y") {
+        if (confirming === "resetSettings") {
+          const defaults = { ...DEFAULT_SETTINGS };
+          setCurrent(defaults);
+          onSave(defaults);
+        } else if (confirming === "factoryReset") {
+          onFactoryReset();
+        }
+        setConfirming(null);
+      } else if (input === "n" || input === "N" || key.escape) {
+        setConfirming(null);
+      }
+      return;
+    }
+
     // When editing a text field, only handle escape
     if (editing) {
       if (key.escape) {
@@ -246,6 +271,16 @@ export function SettingsPanel({
         setRepoIndex((i) => Math.min(repositories.length - 1, i + 1));
         return;
       }
+    }
+
+    if (activeField === "resetSettings" && key.return) {
+      setConfirming("resetSettings");
+      return;
+    }
+
+    if (activeField === "factoryReset" && key.return) {
+      setConfirming("factoryReset");
+      return;
     }
   });
 
@@ -470,6 +505,31 @@ export function SettingsPanel({
             <Text dimColor>
               {"    [a] Add  [r] Remove  [s] Script  [x] Remove script"}
             </Text>
+          )}
+        </Box>
+
+        {/* === Danger Zone === */}
+        {renderSectionHeader("Danger Zone")}
+        <Box>
+          <Text bold={activeField === "resetSettings"} color="red">
+            {activeField === "resetSettings" ? "▸" : " "} Reset Settings to Defaults
+          </Text>
+          {activeField === "resetSettings" && confirming === "resetSettings" && (
+            <Text color="yellow"> Are you sure? [y/n]</Text>
+          )}
+          {activeField === "resetSettings" && !confirming && (
+            <Text dimColor> (Enter to reset)</Text>
+          )}
+        </Box>
+        <Box>
+          <Text bold={activeField === "factoryReset"} color="red">
+            {activeField === "factoryReset" ? "▸" : " "} Factory Reset (delete all data)
+          </Text>
+          {activeField === "factoryReset" && confirming === "factoryReset" && (
+            <Text color="yellow"> Are you sure? [y/n]</Text>
+          )}
+          {activeField === "factoryReset" && !confirming && (
+            <Text dimColor> (Enter to reset)</Text>
           )}
         </Box>
       </Box>

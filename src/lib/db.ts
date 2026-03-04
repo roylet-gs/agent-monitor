@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { dirname } from "path";
 import { APP_DIR, DB_PATH } from "./paths.js";
 import { log } from "./logger.js";
@@ -219,5 +219,18 @@ export function closeDb(): void {
   if (db) {
     db.close();
     db = null;
+  }
+}
+
+export function resetAll(): void {
+  closeDb();
+  if (existsSync(DB_PATH)) {
+    unlinkSync(DB_PATH);
+  }
+  if (existsSync(DB_PATH + "-wal")) {
+    unlinkSync(DB_PATH + "-wal");
+  }
+  if (existsSync(DB_PATH + "-shm")) {
+    unlinkSync(DB_PATH + "-shm");
   }
 }
