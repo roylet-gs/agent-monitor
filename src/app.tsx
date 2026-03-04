@@ -114,6 +114,8 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
     linearEnabled: settings.linearEnabled,
     linearApiKey: settings.linearApiKey,
     hideMainBranch: settings.hideMainBranch,
+    ghRefreshOnManual: settings.ghRefreshOnManual,
+    linearRefreshOnManual: settings.linearRefreshOnManual,
   });
 
   // Keep refs to always call the latest refresh (avoids stale closures in async handlers)

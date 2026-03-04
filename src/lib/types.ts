@@ -86,6 +86,8 @@ export interface Settings {
   linearUseDesktopApp: boolean;
   linearApiKey: string;
   linearPollingIntervalMs: number;
+  ghRefreshOnManual: boolean;
+  linearRefreshOnManual: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
   latestKnownVersion?: string;

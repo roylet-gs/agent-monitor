@@ -19,10 +19,12 @@ type SettingsField =
   | "logLevel"
   | "ghPrStatus"
   | "ghPolling"
+  | "ghRefreshOnManual"
   | "linearEnabled"
   | "linearDesktopApp"
   | "linearApiKey"
   | "linearPolling"
+  | "linearRefreshOnManual"
   | "repos"
   | "checkForUpdates"
   | "resetSettings"
@@ -39,10 +41,12 @@ const FIELDS: SettingsField[] = [
   "logLevel",
   "ghPrStatus",
   "ghPolling",
+  "ghRefreshOnManual",
   "linearEnabled",
   "linearDesktopApp",
   "linearApiKey",
   "linearPolling",
+  "linearRefreshOnManual",
   "repos",
   "checkForUpdates",
   "resetSettings",
@@ -241,6 +245,11 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "ghRefreshOnManual" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, ghRefreshOnManual: !s.ghRefreshOnManual }));
+      return;
+    }
+
     if (activeField === "linearEnabled" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearEnabled: !s.linearEnabled }));
       return;
@@ -248,6 +257,11 @@ export function SettingsPanel({
 
     if (activeField === "linearDesktopApp" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearUseDesktopApp: !s.linearUseDesktopApp }));
+      return;
+    }
+
+    if (activeField === "linearRefreshOnManual" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, linearRefreshOnManual: !s.linearRefreshOnManual }));
       return;
     }
 
@@ -469,6 +483,15 @@ export function SettingsPanel({
           )}
         </Box>
 
+        <Box>
+          <Text bold={activeField === "ghRefreshOnManual"}>
+            {activeField === "ghRefreshOnManual" ? "▸" : " "} Include in Refresh:{" "}
+          </Text>
+          <Text color={current.ghRefreshOnManual ? "green" : "gray"}>
+            [{current.ghRefreshOnManual ? "✓" : " "}]
+          </Text>
+        </Box>
+
         {/* === Linear Section === */}
         {renderSectionHeader("Linear")}
         <Box>
@@ -525,6 +548,15 @@ export function SettingsPanel({
               {activeField === "linearPolling" && <Text dimColor> (Enter to edit, min 10s)</Text>}
             </Text>
           )}
+        </Box>
+
+        <Box>
+          <Text bold={activeField === "linearRefreshOnManual"}>
+            {activeField === "linearRefreshOnManual" ? "▸" : " "} Include in Refresh:{" "}
+          </Text>
+          <Text color={current.linearRefreshOnManual ? "green" : "gray"}>
+            [{current.linearRefreshOnManual ? "✓" : " "}]
+          </Text>
         </Box>
 
         {/* === Repositories Section === */}
