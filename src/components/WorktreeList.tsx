@@ -31,7 +31,7 @@ export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, 
       <Box
         flexDirection="column"
         borderStyle="single"
-        width={38}
+        minWidth="40%"
         paddingX={1}
       >
         <Text bold> Worktrees</Text>
@@ -49,7 +49,7 @@ export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, 
     <Box
       flexDirection="column"
       borderStyle="single"
-      width={38}
+      minWidth="40%"
       paddingX={1}
     >
       <Text bold> Worktrees</Text>

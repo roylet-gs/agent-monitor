@@ -179,14 +179,12 @@ export function SettingsPanel({
       return;
     }
 
-    const reposActive = activeField === "repos" && repositories.length > 0;
-
-    if (key.tab || (key.downArrow && !reposActive)) {
+    if (key.tab || key.downArrow) {
       setFieldIndex((i) => Math.min(FIELDS.length - 1, i + 1));
       return;
     }
 
-    if (key.upArrow && !reposActive) {
+    if (key.upArrow) {
       setFieldIndex((i) => Math.max(0, i - 1));
       return;
     }
@@ -265,11 +263,11 @@ export function SettingsPanel({
         removeStartupScript(repositories[repoIndex].id);
         return;
       }
-      if (key.leftArrow || key.upArrow) {
+      if (key.leftArrow) {
         setRepoIndex((i) => Math.max(0, i - 1));
         return;
       }
-      if (key.rightArrow || key.downArrow) {
+      if (key.rightArrow) {
         setRepoIndex((i) => Math.min(repositories.length - 1, i + 1));
         return;
       }
@@ -505,7 +503,7 @@ export function SettingsPanel({
           ))}
           {activeField === "repos" && (
             <Text dimColor>
-              {"    [a] Add  [r] Remove  [s] Script  [x] Remove script"}
+              {"    [←→] Select  [a] Add  [r] Remove  [s] Script  [x] Remove script"}
             </Text>
           )}
         </Box>
@@ -552,7 +550,7 @@ export function SettingsPanel({
             </>
           ) : (
             <>
-              <Text color="yellow">[Tab/↑↓]</Text> Navigate{" "}
+              <Text color="yellow">[↑↓]</Text> Navigate{" "}
               <Text color="yellow">[Enter/Space]</Text> Toggle/Edit{" "}
               <Text color="yellow">[Esc]</Text> Save & Close
             </>
