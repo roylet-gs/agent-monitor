@@ -63,6 +63,7 @@ export interface Settings {
 export type AppMode =
   | "dashboard"
   | "new-worktree"
+  | "branch-exists"
   | "delete-confirm"
   | "settings"
   | "repo-select"
@@ -73,6 +74,7 @@ export interface HookEvent {
   session_id?: string;
   cwd?: string;
   hook_event_name?: string;
+  permission_mode?: string;
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   tool_response?: string;

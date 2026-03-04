@@ -24,7 +24,8 @@ export async function handleHookEvent(
     }
   }
 
-  log("debug", "hook-event", `Received event: ${payload.event} for ${worktreePath}`);
+  log("debug", "hook-event", `Received event: ${payload.event} tool=${payload.tool_name ?? "none"} for ${worktreePath}`);
+  log("debug", "hook-event", `Payload keys: ${Object.keys(payload).join(", ")} permission_mode=${(payload as any).permission_mode ?? "N/A"}`);
 
   // Find worktree in DB
   const worktree = getWorktreeByPath(worktreePath);
@@ -56,21 +57,17 @@ function extractLastResponse(event: HookEvent): string | null {
 }
 
 function detectPlanMode(event: HookEvent): boolean | null {
-  const tool = event.tool_name ?? "";
-
-  // PreToolUse for EnterPlanMode → plan mode ON
-  if (event.event === "PreToolUse" && tool === "EnterPlanMode") {
+  // permission_mode field directly tells us if Claude is in plan mode
+  if (event.permission_mode === "plan") {
     return true;
   }
-  // PostToolUse for ExitPlanMode → plan mode OFF
-  if (event.event === "PostToolUse" && tool === "ExitPlanMode") {
+  if (event.permission_mode && event.permission_mode !== "plan") {
     return false;
   }
   // SessionStart resets plan mode
   if (event.event === "SessionStart") {
     return false;
   }
-  // null = no change
   return null;
 }
 

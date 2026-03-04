@@ -74,7 +74,7 @@ const HOOKS_CONFIG = {
 
 export function installHooks(worktreePath: string): void {
   const claudeDir = join(worktreePath, ".claude");
-  const settingsPath = join(claudeDir, "settings.local.json");
+  const settingsPath = join(claudeDir, "settings.json");
 
   if (!existsSync(claudeDir)) {
     mkdirSync(claudeDir, { recursive: true });

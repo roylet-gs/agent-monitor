@@ -6,6 +6,7 @@ import { RepoSelector } from "./components/RepoSelector.js";
 import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
 import { DeleteConfirm } from "./components/DeleteConfirm.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
+import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
 import {
@@ -41,6 +42,7 @@ export function App() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [escHint, setEscHint] = useState(false);
+  const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string } | null>(null);
 
   // Initialize DB and check for repos
   useEffect(() => {
@@ -94,29 +96,39 @@ export function App() {
   const handleCreate = useCallback(
     async (branchName: string, customName: string) => {
       if (!currentRepo) return;
+
+      // Check if branch already exists
+      const exists = await branchExists(currentRepo.path, branchName);
+      if (exists) {
+        setPendingBranch({ branch: branchName, customName });
+        setMode("branch-exists");
+        return;
+      }
+
+      await doCreateWorktree(branchName, customName, false);
+    },
+    [currentRepo]
+  );
+
+  // Actually create the worktree (called directly or after branch-exists confirmation)
+  const doCreateWorktree = useCallback(
+    async (branchName: string, customName: string, reuse: boolean) => {
+      if (!currentRepo) return;
       setMode("dashboard");
       setBusy(`Creating worktree ${branchName}...`);
 
       try {
-        const exists = await branchExists(currentRepo.path, branchName);
-        if (exists) {
-          setError(`Branch ${branchName} already exists`);
-          setBusy(null);
-          return;
-        }
-
         const mainBranch = await getMainBranch(currentRepo.path);
         const wtPath = await gitCreateWorktree(
           currentRepo.path,
           branchName,
-          mainBranch
+          mainBranch,
+          reuse
         );
 
         if (customName) {
-          // After sync, update the custom name
           await syncWorktrees(currentRepo.id);
           await refresh();
-          // Find the newly created worktree and set its custom name
           const { getWorktrees } = await import("./lib/db.js");
           const wts = getWorktrees(currentRepo.id);
           const newWt = wts.find((w) => w.branch === branchName);
@@ -139,7 +151,7 @@ export function App() {
         setBusy(null);
       }
     },
-    [currentRepo, refresh]
+    [currentRepo, refresh, settings]
   );
 
   // Handle delete worktree
@@ -288,6 +300,20 @@ export function App() {
           defaultPrefix={settings.defaultBranchPrefix}
           onSubmit={handleCreate}
           onCancel={() => setMode("dashboard")}
+        />
+      )}
+
+      {mode === "branch-exists" && pendingBranch && (
+        <BranchExistsPrompt
+          branchName={pendingBranch.branch}
+          onReuse={() => {
+            doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true);
+            setPendingBranch(null);
+          }}
+          onCancel={() => {
+            setPendingBranch(null);
+            setMode("new-worktree");
+          }}
         />
       )}
 

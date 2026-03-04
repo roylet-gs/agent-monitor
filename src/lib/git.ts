@@ -62,14 +62,17 @@ export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]
 export async function createWorktree(
   repoPath: string,
   branch: string,
-  baseBranch?: string
+  baseBranch?: string,
+  reuseExisting = false
 ): Promise<string> {
   const git = getGit(repoPath);
   // worktrees go into .worktrees/ directory next to .git
   const worktreePath = join(repoPath, ".worktrees", branch.replace(/\//g, "-"));
 
   const args = ["worktree", "add", worktreePath];
-  if (baseBranch) {
+  if (reuseExisting) {
+    args.push(branch);
+  } else if (baseBranch) {
     args.push("-b", branch, baseBranch);
   } else {
     args.push("-b", branch);
