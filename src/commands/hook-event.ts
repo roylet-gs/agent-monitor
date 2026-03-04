@@ -92,8 +92,16 @@ function mapEventToStatus(event: HookEvent): AgentStatusType | null {
     }
     return null;
   }
-  if (event.event === "SessionStart") {
+  if (event.event === "SessionStart" || event.event === "SessionEnd") {
+    log("debug", "hook-event", `${event.event} → idle`);
     return "idle";
+  }
+
+  // Prompt submit → immediately show executing (or planning if in plan mode)
+  if (event.event === "UserPromptSubmit") {
+    const status = event.permission_mode === "plan" ? "planning" : "executing";
+    log("debug", "hook-event", `UserPromptSubmit → ${status} (permission_mode=${event.permission_mode ?? "default"})`);
+    return status;
   }
 
   // Tools that block on user input → waiting
@@ -102,16 +110,24 @@ function mapEventToStatus(event: HookEvent): AgentStatusType | null {
     event.tool_name === "EnterPlanMode" ||
     event.tool_name === "ExitPlanMode"
   ) {
+    log("debug", "hook-event", `Tool ${event.tool_name} → waiting`);
     return "waiting";
   }
 
   // Plan mode folds into the planning status
   if (event.permission_mode === "plan") {
+    log("debug", "hook-event", `Plan mode (event=${event.event}) → planning`);
     return "planning";
   }
 
-  // PreToolUse/PostToolUse → actively working
-  if (event.event === "PreToolUse" || event.event === "PostToolUse") {
+  // PreToolUse/PostToolUse/Subagent events → actively working
+  if (
+    event.event === "PreToolUse" ||
+    event.event === "PostToolUse" ||
+    event.event === "SubagentStart" ||
+    event.event === "SubagentStop"
+  ) {
+    log("debug", "hook-event", `${event.event} → executing`);
     return "executing";
   }
 
