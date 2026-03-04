@@ -18,6 +18,7 @@ type SettingsField =
   | "ghPrStatus"
   | "ghPolling"
   | "linearEnabled"
+  | "linearDesktopApp"
   | "linearApiKey"
   | "linearPolling"
   | "repos"
@@ -35,6 +36,7 @@ const FIELDS: SettingsField[] = [
   "ghPrStatus",
   "ghPolling",
   "linearEnabled",
+  "linearDesktopApp",
   "linearApiKey",
   "linearPolling",
   "repos",
@@ -232,6 +234,11 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "linearDesktopApp" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, linearUseDesktopApp: !s.linearUseDesktopApp }));
+      return;
+    }
+
     if (activeField === "logLevel" && (key.return || input === " ")) {
       const idx = LOG_LEVELS.indexOf(current.logLevel);
       const next = LOG_LEVELS[(idx + 1) % LOG_LEVELS.length]!;
@@ -420,6 +427,14 @@ export function SettingsPanel({
           </Text>
           <Text color={current.linearEnabled ? "green" : "gray"}>
             [{current.linearEnabled ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "linearDesktopApp"}>
+            {activeField === "linearDesktopApp" ? "▸" : " "} Use Desktop App:{" "}
+          </Text>
+          <Text color={current.linearUseDesktopApp ? "green" : "gray"}>
+            [{current.linearUseDesktopApp ? "✓" : " "}]
           </Text>
         </Box>
         <Box>

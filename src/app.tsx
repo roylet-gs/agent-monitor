@@ -468,7 +468,11 @@ export function App({ onRunScript }: AppProps) {
     onOpenLinear: () => {
       const wt = flatWorktrees[selectedIndex];
       if (wt?.linear_info?.url) {
-        import("open").then((mod) => mod.default(wt.linear_info!.url)).catch(() => {});
+        let url = wt.linear_info!.url;
+        if (settings.linearUseDesktopApp) {
+          url = url.replace("https://linear.app/", "linear://");
+        }
+        import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
     onQuit: () => exit(),
