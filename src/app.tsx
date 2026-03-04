@@ -9,6 +9,7 @@ import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
+import { WelcomeScreen } from "./components/WelcomeScreen.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
 import { usePubSub } from "./hooks/usePubSub.js";
@@ -36,6 +37,7 @@ import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
 import { log } from "./lib/logger.js";
+import { getVersion, getReleaseNotes, isNewVersion } from "./lib/version.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
@@ -61,12 +63,24 @@ export function App({ onRunScript }: AppProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
+  const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
   useEffect(() => {
     getDb();
     const repos = getRepositories();
     setRepositories(repos);
+
+    if (settings.lastSeenVersion === undefined) {
+      // First launch — silently record version, no welcome screen
+      const updated = { ...settings, lastSeenVersion: currentVersion };
+      setSettings(updated);
+      saveSettings(updated);
+    } else if (isNewVersion(settings.lastSeenVersion, currentVersion)) {
+      setMode("welcome");
+      return;
+    }
+
     if (repos.length === 0) {
       setMode("folder-browse");
     }
@@ -417,6 +431,18 @@ export function App({ onRunScript }: AppProps) {
     []
   );
 
+  // Handle welcome screen dismiss
+  const handleWelcomeDismiss = useCallback(() => {
+    const updated = { ...settings, lastSeenVersion: currentVersion };
+    setSettings(updated);
+    saveSettings(updated);
+    if (repositories.length === 0) {
+      setMode("folder-browse");
+    } else {
+      setMode("dashboard");
+    }
+  }, [settings, currentVersion, repositories]);
+
   // Handle factory reset
   const handleFactoryReset = useCallback(() => {
     resetAll();
@@ -501,6 +527,14 @@ export function App({ onRunScript }: AppProps) {
         <Box paddingX={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
+      )}
+
+      {mode === "welcome" && (
+        <WelcomeScreen
+          version={currentVersion}
+          releaseNotes={getReleaseNotes()}
+          onDismiss={handleWelcomeDismiss}
+        />
       )}
 
       {mode === "folder-browse" && (
@@ -610,6 +644,7 @@ export function App({ onRunScript }: AppProps) {
           escHint={escHint}
           unseenIds={unseenIds}
           compactView={settings.compactView}
+          version={currentVersion}
         />
       )}
     </Box>
