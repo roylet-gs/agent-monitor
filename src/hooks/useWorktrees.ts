@@ -15,12 +15,15 @@ export interface WorktreeHookConfig {
   linearEnabled: boolean;
   linearApiKey: string;
   hideMainBranch: boolean;
+  ghRefreshOnManual: boolean;
+  linearRefreshOnManual: boolean;
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
   groups: WorktreeGroup[];
   flatWorktrees: WorktreeWithStatus[];
   refresh: () => Promise<void>;
+  lightRefresh: () => Promise<void>;
 } {
   const {
     repositories,
@@ -31,6 +34,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
     linearEnabled,
     linearApiKey,
     hideMainBranch,
+    ghRefreshOnManual,
+    linearRefreshOnManual,
   } = config;
 
   const [groups, setGroups] = useState<WorktreeGroup[]>([]);
@@ -48,6 +53,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
   ghPrStatusRef.current = ghPrStatus;
   const linearEnabledRef = useRef(linearEnabled);
   linearEnabledRef.current = linearEnabled;
+  const ghRefreshOnManualRef = useRef(ghRefreshOnManual);
+  ghRefreshOnManualRef.current = ghRefreshOnManual;
+  const linearRefreshOnManualRef = useRef(linearRefreshOnManual);
+  linearRefreshOnManualRef.current = linearRefreshOnManual;
 
   // Generation counter: stale refresh calls check this before setting state
   const genRef = useRef(0);
@@ -115,9 +124,11 @@ export function useWorktrees(config: WorktreeHookConfig): {
           }
           repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
         }
+        const shouldRefreshPr = shouldFetchPr && ghRefreshOnManualRef.current;
+        const shouldRefreshLinear = shouldFetchLinear && linearRefreshOnManualRef.current;
         await Promise.all([
-          shouldFetchPr ? refreshPrInfo(repoGroups) : Promise.resolve(),
-          shouldFetchLinear ? refreshLinearInfo(allBranchNames) : Promise.resolve(),
+          shouldRefreshPr ? refreshPrInfo(repoGroups) : Promise.resolve(),
+          shouldRefreshLinear ? refreshLinearInfo(allBranchNames) : Promise.resolve(),
         ]);
         // Bail if a newer refresh started while we were fetching
         if (myGen !== genRef.current) return;
@@ -247,6 +258,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
 
   // Exposed refresh always forces integrations fetch
   const forceRefresh = useCallback(() => refresh(true), [refresh]);
+  // Light refresh: just re-reads DB + git status, no network calls
+  const lightRefresh = useCallback(() => refresh(false), [refresh]);
 
-  return { groups, flatWorktrees, refresh: forceRefresh };
+  return { groups, flatWorktrees, refresh: forceRefresh, lightRefresh };
 }

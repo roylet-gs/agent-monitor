@@ -96,7 +96,7 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
     if (repositories.length > 0 && settings.autoSyncOnStartup) {
       setBusy("Syncing worktrees...");
       Promise.all(repositories.map((repo) => syncWorktrees(repo.id)))
-        .then(() => refreshRef.current())
+        .then(() => lightRefreshRef.current())
         .then(() => setBusy(null))
         .catch((err) => {
           log("error", "app", `Sync failed: ${err}`);
@@ -105,7 +105,7 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
     }
   }, [repositories.length > 0 && settings.autoSyncOnStartup]);
 
-  const { groups, flatWorktrees, refresh } = useWorktrees({
+  const { groups, flatWorktrees, refresh, lightRefresh } = useWorktrees({
     repositories,
     pollingIntervalMs: settings.pollingIntervalMs,
     ghPollingIntervalMs: settings.ghPollingIntervalMs,
@@ -114,11 +114,15 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
     linearEnabled: settings.linearEnabled,
     linearApiKey: settings.linearApiKey,
     hideMainBranch: settings.hideMainBranch,
+    ghRefreshOnManual: settings.ghRefreshOnManual,
+    linearRefreshOnManual: settings.linearRefreshOnManual,
   });
 
-  // Keep a ref to always call the latest refresh (avoids stale closures in async handlers)
+  // Keep refs to always call the latest refresh (avoids stale closures in async handlers)
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+  const lightRefreshRef = useRef(lightRefresh);
+  useEffect(() => { lightRefreshRef.current = lightRefresh; }, [lightRefresh]);
 
   // Pub/sub: instant refresh on agent status updates
   usePubSub((msg) => {
@@ -458,7 +462,7 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
   }, [settings, currentVersion, repositories]);
 
   // Check for updates
-  const updateInfo = useUpdateCheck(settings, handleSaveSettings);
+  const { updateInfo, recheck } = useUpdateCheck(settings, handleSaveSettings);
 
   // Handle factory reset
   const handleFactoryReset = useCallback(() => {
@@ -659,6 +663,7 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
           onAddRepo={() => setMode("folder-browse")}
           onRemoveRepo={handleRemoveRepo}
           onFactoryReset={handleFactoryReset}
+          onCheckForUpdates={recheck}
         />
       )}
 
@@ -676,6 +681,8 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
           terminalRows={stdout?.rows ?? 24}
           version={currentVersion}
           updateInfo={updateInfo}
+          ghPrStatus={settings.ghPrStatus}
+          linearEnabled={settings.linearEnabled}
         />
       )}
     </Box>

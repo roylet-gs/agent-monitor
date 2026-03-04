@@ -35,10 +35,10 @@ jobs:
           LAST_BUMP=$(git log --format=%H --grep="^chore: bump version" -1)
           if [ -n "$LAST_BUMP" ]; then
             git log ${LAST_BUMP}..HEAD \
-              --format='{"hash":"%h","message":"%s"}' \
+              --format='%h%x09%s' \
               --no-merges \
               --invert-grep --grep="^chore:" --grep="^Updated docs" \
-              | jq -s '.' > release-notes.json
+            | jq -R -s '[split("\n")[] | select(length > 0) | split("\t") | {hash: .[0], message: .[1:] | join("\t")}]' > release-notes.json
           else
             echo '[]' > release-notes.json
           fi

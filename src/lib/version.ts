@@ -53,15 +53,17 @@ export interface UpdateCheckResult {
   settings: Pick<Settings, "lastUpdateCheck" | "latestKnownVersion">;
 }
 
-const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export async function checkForUpdate(
-  settings: Pick<Settings, "lastUpdateCheck" | "latestKnownVersion">
+  settings: Pick<Settings, "lastUpdateCheck" | "latestKnownVersion">,
+  options?: { forceCheck?: boolean }
 ): Promise<UpdateCheckResult | null> {
   const current = getVersion();
 
-  // Return cached result if checked recently
+  // Return cached result if checked recently (unless forced)
   if (
+    !options?.forceCheck &&
     settings.lastUpdateCheck &&
     settings.latestKnownVersion &&
     Date.now() - settings.lastUpdateCheck < CHECK_INTERVAL_MS
@@ -107,7 +109,8 @@ export async function checkForUpdate(
         latestKnownVersion: latest,
       },
     };
-  } catch {
+  } catch (err) {
+    console.error("Update check failed:", err);
     return null;
   }
 }

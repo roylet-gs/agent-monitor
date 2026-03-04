@@ -20,6 +20,8 @@ export const DEFAULT_SETTINGS: Settings = {
   linearUseDesktopApp: false,
   linearApiKey: "",
   linearPollingIntervalMs: 60000,
+  ghRefreshOnManual: true,
+  linearRefreshOnManual: true,
 };
 
 export function loadSettings(): Settings {
