@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, Text, useApp } from "ink";
 import { Dashboard } from "./components/Dashboard.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
 import { RepoSelector } from "./components/RepoSelector.js";
 import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
-import { DeleteConfirm } from "./components/DeleteConfirm.js";
+import { DeleteConfirm, type DeleteOptions } from "./components/DeleteConfirm.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
+import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
+import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
 import {
@@ -21,6 +23,8 @@ import {
 import {
   createWorktree as gitCreateWorktree,
   deleteWorktree as gitDeleteWorktree,
+  deleteBranch,
+  deleteRemoteBranch,
   getMainBranch,
   branchExists,
   getRepoName,
@@ -28,11 +32,16 @@ import {
 import { syncWorktrees } from "./lib/sync.js";
 import { installHooks } from "./lib/hooks-installer.js";
 import { openInIde } from "./lib/ide-launcher.js";
+import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings } from "./lib/settings.js";
 import { log } from "./lib/logger.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
-export function App() {
+interface AppProps {
+  onRunScript?: (scriptPath: string, cwd: string) => void;
+}
+
+export function App({ onRunScript }: AppProps) {
   const { exit } = useApp();
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [mode, setMode] = useState<AppMode>("dashboard");
@@ -43,6 +52,12 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [escHint, setEscHint] = useState(false);
   const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string } | null>(null);
+  const [creatingBranch, setCreatingBranch] = useState("");
+  const [creationSteps, setCreationSteps] = useState<StepInfo[]>([]);
+  const [creationError, setCreationError] = useState<string | null>(null);
+  const [deletingBranch, setDeletingBranch] = useState("");
+  const [deleteSteps, setDeleteSteps] = useState<StepInfo[]>([]);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Initialize DB and check for repos
   useEffect(() => {
@@ -74,6 +89,49 @@ export function App() {
     settings.pollingIntervalMs
   );
 
+  // Track unseen status changes per worktree
+  const seenStatusRef = useRef<Map<string, string>>(new Map());
+  const [unseenIds, setUnseenIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const seen = seenStatusRef.current;
+    const newUnseen = new Set<string>();
+
+    for (const wt of worktrees) {
+      const currentStatus = wt.agent_status?.status ?? "idle";
+      const prevStatus = seen.get(wt.id);
+
+      if (prevStatus === undefined) {
+        // First time seeing this worktree — mark as seen
+        seen.set(wt.id, currentStatus);
+      } else if (prevStatus !== currentStatus) {
+        // Status changed — mark unseen
+        newUnseen.add(wt.id);
+        seen.set(wt.id, currentStatus);
+      }
+    }
+
+    if (newUnseen.size > 0) {
+      setUnseenIds((prev) => {
+        const merged = new Set(prev);
+        for (const id of newUnseen) merged.add(id);
+        return merged;
+      });
+    }
+  }, [worktrees]);
+
+  // Mark selected worktree as seen
+  useEffect(() => {
+    const selected = worktrees[selectedIndex];
+    if (selected && unseenIds.has(selected.id)) {
+      setUnseenIds((prev) => {
+        const next = new Set(prev);
+        next.delete(selected.id);
+        return next;
+      });
+    }
+  }, [selectedIndex, worktrees, unseenIds]);
+
   // Handle open in IDE
   const handleOpen = useCallback(async () => {
     const wt = worktrees[selectedIndex];
@@ -97,9 +155,19 @@ export function App() {
     async (branchName: string, customName: string) => {
       if (!currentRepo) return;
 
-      // Check if branch already exists
+      // Check if branch already exists (local or remote)
       const exists = await branchExists(currentRepo.path, branchName);
       if (exists) {
+        setPendingBranch({ branch: branchName, customName });
+        setMode("branch-exists");
+        return;
+      }
+
+      // Check if worktree path already exists on disk (stale from previous removal)
+      const { existsSync } = await import("fs");
+      const { join } = await import("path");
+      const wtDir = join(currentRepo.path, ".worktrees", branchName.replace(/\//g, "-"));
+      if (existsSync(wtDir)) {
         setPendingBranch({ branch: branchName, customName });
         setMode("branch-exists");
         return;
@@ -110,22 +178,75 @@ export function App() {
     [currentRepo]
   );
 
+  // Helper to update a single step in the creation steps array
+  const updateStep = useCallback((index: number, status: StepInfo["status"]) => {
+    setCreationSteps((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, status } : s))
+    );
+  }, []);
+
+  // Helper to update a single step in the delete steps array
+  const updateDeleteStep = useCallback((index: number, status: StepInfo["status"]) => {
+    setDeleteSteps((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, status } : s))
+    );
+  }, []);
+
   // Actually create the worktree (called directly or after branch-exists confirmation)
   const doCreateWorktree = useCallback(
     async (branchName: string, customName: string, reuse: boolean) => {
       if (!currentRepo) return;
-      setMode("dashboard");
-      setBusy(`Creating worktree ${branchName}...`);
+
+      const hasScript = hasStartupScript(currentRepo.id);
+
+      // Build steps list
+      const steps: StepInfo[] = [
+        { label: "Creating git worktree", status: "active" },
+        { label: "Syncing database", status: "pending" },
+        ...(settings.autoInstallHooks
+          ? [{ label: "Installing hooks", status: "pending" as const }]
+          : []),
+        ...(hasScript
+          ? [{ label: "Running startup script", status: "pending" as const }]
+          : []),
+      ];
+
+      setCreatingBranch(branchName);
+      setCreationSteps(steps);
+      setCreationError(null);
+      setMode("creating-worktree");
+
+      let stepIdx = 0;
 
       try {
+        // Step: Create git worktree
         const mainBranch = await getMainBranch(currentRepo.path);
-        const wtPath = await gitCreateWorktree(
-          currentRepo.path,
-          branchName,
-          mainBranch,
-          reuse
-        );
+        let wtPath: string;
+        try {
+          wtPath = await gitCreateWorktree(
+            currentRepo.path,
+            branchName,
+            mainBranch,
+            reuse
+          );
+        } catch (gitErr) {
+          // If branch/ref already exists, offer to reuse
+          const errMsg = String(gitErr);
+          if (errMsg.includes("already exists") || errMsg.includes("already checked out")) {
+            updateStep(stepIdx, "error");
+            setCreationError(null);
+            setMode("dashboard");
+            setPendingBranch({ branch: branchName, customName });
+            setMode("branch-exists");
+            return;
+          }
+          throw gitErr;
+        }
+        updateStep(stepIdx, "done");
+        stepIdx++;
 
+        // Step: Sync database
+        updateStep(stepIdx, "active");
         if (customName) {
           await syncWorktrees(currentRepo.id);
           await refresh();
@@ -136,43 +257,124 @@ export function App() {
             updateWorktreeCustomName(newWt.id, customName);
           }
         }
-
-        // Install hooks immediately so Claude picks them up
-        if (settings.autoInstallHooks) {
-          installHooks(wtPath);
-        }
-
         await syncWorktrees(currentRepo.id);
         await refresh();
-        setBusy(null);
+        updateStep(stepIdx, "done");
+        stepIdx++;
+
+        // Step: Install hooks
+        if (settings.autoInstallHooks) {
+          updateStep(stepIdx, "active");
+          installHooks(wtPath);
+          updateStep(stepIdx, "done");
+          stepIdx++;
+        }
+
         log("info", "app", `Created worktree ${branchName}`);
+
+        // Step: Run startup script — hand off to CLI runner
+        if (hasScript && onRunScript) {
+          updateStep(stepIdx, "active");
+          // Small delay so the user sees the "Running startup script" step
+          await new Promise((r) => setTimeout(r, 300));
+          onRunScript(getScriptPath(currentRepo.id), wtPath);
+          exit();
+          return;
+        }
+
+        // All done — go to dashboard
+        setMode("dashboard");
       } catch (err) {
-        setError(`Failed to create worktree: ${err}`);
-        setBusy(null);
+        updateStep(stepIdx, "error");
+        setCreationError(`${err}`);
+        // Stay on creating-worktree screen showing the error
+        // After 3s, go back to dashboard
+        setTimeout(() => {
+          setMode("dashboard");
+          setError(`Failed to create worktree: ${err}`);
+        }, 3000);
       }
     },
-    [currentRepo, refresh, settings]
+    [currentRepo, refresh, settings, onRunScript, exit, updateStep]
   );
 
   // Handle delete worktree
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(async (options: DeleteOptions) => {
     const wt = worktrees[selectedIndex];
     if (!wt || !currentRepo) return;
-    setMode("dashboard");
-    setBusy(`Deleting worktree ${wt.branch}...`);
+
+    // Build steps list
+    const steps: StepInfo[] = [
+      { label: "Removing worktree", status: "active" },
+      ...(options.deleteLocalBranch
+        ? [{ label: `Deleting local branch ${wt.branch}`, status: "pending" as const }]
+        : []),
+      ...(options.deleteRemoteBranch
+        ? [{ label: `Deleting remote branch origin/${wt.branch}`, status: "pending" as const }]
+        : []),
+      { label: "Syncing database", status: "pending" },
+    ];
+
+    setDeletingBranch(wt.custom_name ?? wt.branch);
+    setDeleteSteps(steps);
+    setDeleteError(null);
+    setMode("deleting-worktree");
+
+    let stepIdx = 0;
 
     try {
+      // Step: Remove worktree
       await gitDeleteWorktree(currentRepo.path, wt.path, true);
       removeWorktreeDb(wt.id);
+      updateDeleteStep(stepIdx, "done");
+      stepIdx++;
+
+      // Step: Delete local branch
+      if (options.deleteLocalBranch) {
+        updateDeleteStep(stepIdx, "active");
+        try {
+          await deleteBranch(currentRepo.path, wt.branch, true);
+          updateDeleteStep(stepIdx, "done");
+        } catch (err) {
+          updateDeleteStep(stepIdx, "error");
+          log("warn", "app", `Failed to delete local branch: ${err}`);
+        }
+        stepIdx++;
+      }
+
+      // Step: Delete remote branch
+      if (options.deleteRemoteBranch) {
+        updateDeleteStep(stepIdx, "active");
+        try {
+          await deleteRemoteBranch(currentRepo.path, wt.branch);
+          updateDeleteStep(stepIdx, "done");
+        } catch (err) {
+          updateDeleteStep(stepIdx, "error");
+          log("warn", "app", `Failed to delete remote branch: ${err}`);
+        }
+        stepIdx++;
+      }
+
+      // Step: Sync database
+      updateDeleteStep(stepIdx, "active");
       await refresh();
+      updateDeleteStep(stepIdx, "done");
+
       setSelectedIndex((i) => Math.max(0, i - 1));
-      setBusy(null);
       log("info", "app", `Deleted worktree ${wt.branch}`);
+
+      // Brief pause so user sees the completed steps
+      await new Promise((r) => setTimeout(r, 500));
+      setMode("dashboard");
     } catch (err) {
-      setError(`Failed to delete worktree: ${err}`);
-      setBusy(null);
+      updateDeleteStep(stepIdx, "error");
+      setDeleteError(`${err}`);
+      setTimeout(() => {
+        setMode("dashboard");
+        setError(`Failed to delete worktree: ${err}`);
+      }, 3000);
     }
-  }, [worktrees, selectedIndex, currentRepo, refresh]);
+  }, [worktrees, selectedIndex, currentRepo, refresh, updateDeleteStep]);
 
   // Handle repo selection from folder browser
   const handleSelectFolder = useCallback(
@@ -317,9 +519,27 @@ export function App() {
         />
       )}
 
-      {mode === "delete-confirm" && worktrees[selectedIndex] && (
+      {mode === "creating-worktree" && (
+        <CreatingWorktree
+          branchName={creatingBranch}
+          steps={creationSteps}
+          error={creationError}
+        />
+      )}
+
+      {mode === "deleting-worktree" && (
+        <ProgressSteps
+          title="Delete Worktree"
+          subtitle={`Deleting ${deletingBranch}...`}
+          steps={deleteSteps}
+          error={deleteError}
+        />
+      )}
+
+      {mode === "delete-confirm" && worktrees[selectedIndex] && currentRepo && (
         <DeleteConfirm
           worktree={worktrees[selectedIndex]}
+          repoPath={currentRepo.path}
           onConfirm={handleDelete}
           onCancel={() => setMode("dashboard")}
         />
@@ -343,6 +563,7 @@ export function App() {
           selectedIndex={selectedIndex}
           busy={busy}
           escHint={escHint}
+          unseenIds={unseenIds}
         />
       )}
     </Box>

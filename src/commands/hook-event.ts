@@ -24,8 +24,8 @@ export async function handleHookEvent(
     }
   }
 
-  log("debug", "hook-event", `Received event: ${payload.event} tool=${payload.tool_name ?? "none"} for ${worktreePath}`);
-  log("debug", "hook-event", `Payload keys: ${Object.keys(payload).join(", ")} permission_mode=${(payload as any).permission_mode ?? "N/A"}`);
+  log("info", "hook-event", `event=${payload.event} tool=${payload.tool_name ?? "none"} stop_hook_active=${payload.stop_hook_active ?? "N/A"} permission_prompt=${payload.permission_prompt ?? "N/A"} permission_mode=${payload.permission_mode ?? "N/A"} for ${worktreePath}`);
+  log("debug", "hook-event", `Full payload: ${JSON.stringify(payload).slice(0, 500)}`);
 
   // Find worktree in DB
   const worktree = getWorktreeByPath(worktreePath);
@@ -38,13 +38,14 @@ export async function handleHookEvent(
   const status = mapEventToStatus(payload);
   const sessionId = payload.session_id ?? null;
   const lastResponse = extractLastResponse(payload);
+  const transcriptSummary = payload.transcript_summary ?? null;
 
   if (status === null) {
     log("debug", "hook-event", `Skipped status update for ${worktreePath} (informational ${payload.event})`);
     return;
   }
 
-  upsertAgentStatus(worktree.id, status, sessionId, lastResponse);
+  upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary);
   log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`);
 }
 
@@ -68,10 +69,15 @@ function mapEventToStatus(event: HookEvent): AgentStatusType | null {
   if (event.event === "Notification") {
     // Permission prompts → waiting; other notifications are informational,
     // don't change status
-    return event.permission_prompt ? "waiting" : null;
+    return event.notification_type === "permission_prompt" ? "waiting" : null;
   }
   if (event.event === "SessionStart") {
     return "idle";
+  }
+
+  // Tools that block on user input → waiting
+  if (event.tool_name === "AskUserQuestion" || event.tool_name === "EnterPlanMode") {
+    return "waiting";
   }
 
   // Plan mode folds into the planning status

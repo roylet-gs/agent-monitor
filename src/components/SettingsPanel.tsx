@@ -3,6 +3,7 @@ import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
+import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
 
 type SettingsField =
   | "ide"
@@ -141,6 +142,14 @@ export function SettingsPanel({
         onRemoveRepo(repositories[repoIndex].id);
         return;
       }
+      if (input === "s" && repositories[repoIndex]) {
+        openScriptInEditor(repositories[repoIndex].id, current.ide);
+        return;
+      }
+      if (input === "x" && repositories[repoIndex]) {
+        removeStartupScript(repositories[repoIndex].id);
+        return;
+      }
       if (key.leftArrow) {
         setRepoIndex((i) => Math.max(0, i - 1));
         return;
@@ -261,6 +270,9 @@ export function SettingsPanel({
                 "  "
               )}
               {repo.name}
+              {hasStartupScript(repo.id) && (
+                <Text dimColor> [script]</Text>
+              )}
               <Text dimColor>
                 {"  "}
                 {repo.path.replace(homedir(), "~")}
@@ -269,7 +281,7 @@ export function SettingsPanel({
           ))}
           {activeField === "repos" && (
             <Text dimColor>
-              {"    [a] Add  [r] Remove selected"}
+              {"    [a] Add  [r] Remove  [s] Script  [x] Remove script"}
             </Text>
           )}
         </Box>

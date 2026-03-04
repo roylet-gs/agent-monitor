@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 
 interface BranchExistsPromptProps {
@@ -12,7 +12,16 @@ export function BranchExistsPrompt({
   onReuse,
   onCancel,
 }: BranchExistsPromptProps) {
+  // Ignore input on the first frame to avoid the Enter keypress
+  // that submitted the previous form from bleeding through
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setReady(true), 50);
+    return () => clearTimeout(timer);
+  }, []);
+
   useInput((input, key) => {
+    if (!ready) return;
     if (key.escape || input === "n") {
       onCancel();
       return;

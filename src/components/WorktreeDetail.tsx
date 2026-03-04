@@ -9,8 +9,9 @@ interface WorktreeDetailProps {
 function statusColor(status: string | undefined): string {
   switch (status) {
     case "executing":
-    case "planning":
       return "green";
+    case "planning":
+      return "cyan";
     case "waiting":
       return "yellow";
     default:
@@ -51,6 +52,13 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
   }
 
   const status = worktree.agent_status?.status;
+  const isActive = status === "executing" || status === "planning";
+
+  // Contextual response: show transcript_summary as "Task" when active, last_response as "Last Response" when idle
+  const responseText = isActive
+    ? (worktree.agent_status?.transcript_summary ?? worktree.agent_status?.last_response)
+    : (worktree.agent_status?.last_response ?? worktree.agent_status?.transcript_summary);
+  const responseLabel = isActive ? "Task" : "Last Response";
 
   return (
     <Box
@@ -62,6 +70,23 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
       <Text bold> Detail</Text>
 
       <Box flexDirection="column" marginTop={1} gap={1}>
+        {/* Claude Agent Status — first section */}
+        <Box>
+          <Text bold>Claude </Text>
+          <Text color={statusColor(status)}>● </Text>
+          <Text>{statusLabel(status)}</Text>
+        </Box>
+
+        {/* Contextual Response */}
+        {responseText && (
+          <Box flexDirection="column">
+            <Text bold>{responseLabel}</Text>
+            <Text wrap="truncate-end">
+              {responseText.slice(0, 300)}
+            </Text>
+          </Box>
+        )}
+
         {/* Name / Branch */}
         <Box flexDirection="column">
           {worktree.custom_name && (
@@ -99,25 +124,6 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
                   {worktree.git_status.dirty !== 1 ? "s" : ""} dirty
                 </Text>
               )}
-            </Text>
-          </Box>
-        )}
-
-        {/* Claude Agent Status */}
-        <Box flexDirection="column">
-          <Text bold>Claude</Text>
-          <Text>
-            <Text color={statusColor(status)}>●</Text>{" "}
-            <Text>{statusLabel(status)}</Text>
-          </Text>
-        </Box>
-
-        {/* Last Response */}
-        {worktree.agent_status?.last_response && (
-          <Box flexDirection="column">
-            <Text bold>Last Response</Text>
-            <Text wrap="truncate-end">
-              {worktree.agent_status.last_response.slice(0, 300)}
             </Text>
           </Box>
         )}

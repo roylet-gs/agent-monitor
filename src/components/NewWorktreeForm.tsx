@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 
@@ -16,8 +16,16 @@ export function NewWorktreeForm({
   const [activeField, setActiveField] = useState<"branch" | "name">("branch");
   const [branchName, setBranchName] = useState(defaultPrefix);
   const [customName, setCustomName] = useState("");
+  const submittedRef = useRef(false);
 
-  useInput((input, key) => {
+  const doSubmit = () => {
+    if (submittedRef.current) return;
+    if (!branchName.trim()) return;
+    submittedRef.current = true;
+    onSubmit(branchName.trim(), customName.trim());
+  };
+
+  useInput((_input, key) => {
     if (key.escape) {
       onCancel();
       return;
@@ -26,12 +34,6 @@ export function NewWorktreeForm({
     if (key.tab) {
       setActiveField((f) => (f === "branch" ? "name" : "branch"));
       return;
-    }
-
-    if (key.return && activeField === "name") {
-      if (branchName.trim()) {
-        onSubmit(branchName.trim(), customName.trim());
-      }
     }
   });
 
@@ -65,11 +67,7 @@ export function NewWorktreeForm({
             <TextInput
               value={customName}
               onChange={setCustomName}
-              onSubmit={() => {
-                if (branchName.trim()) {
-                  onSubmit(branchName.trim(), customName.trim());
-                }
-              }}
+              onSubmit={doSubmit}
             />
           ) : (
             <Text>{customName || <Text dimColor>(empty)</Text>}</Text>

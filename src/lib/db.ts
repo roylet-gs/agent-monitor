@@ -45,6 +45,7 @@ function initSchema(db: Database.Database): void {
       worktree_id TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
       status TEXT NOT NULL DEFAULT 'idle',
       last_response TEXT,
+      transcript_summary TEXT,
       session_id TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -70,6 +71,14 @@ function initSchema(db: Database.Database): void {
     log("info", "db", "Migrated agent_status: dropped plan_mode column");
   } catch {
     // Column doesn't exist — nothing to migrate
+  }
+
+  // Migration: add transcript_summary column if missing
+  try {
+    db.prepare("SELECT transcript_summary FROM agent_status LIMIT 0").run();
+  } catch {
+    db.exec("ALTER TABLE agent_status ADD COLUMN transcript_summary TEXT");
+    log("info", "db", "Migrated agent_status: added transcript_summary column");
   }
 }
 
@@ -168,19 +177,21 @@ export function upsertAgentStatus(
   worktreeId: string,
   status: AgentStatusType,
   sessionId?: string | null,
-  lastResponse?: string | null
+  lastResponse?: string | null,
+  transcriptSummary?: string | null
 ): void {
   getDb()
     .prepare(
-      `INSERT INTO agent_status (worktree_id, status, session_id, last_response, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
+      `INSERT INTO agent_status (worktree_id, status, session_id, last_response, transcript_summary, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(worktree_id) DO UPDATE SET
          status = excluded.status,
          session_id = COALESCE(excluded.session_id, agent_status.session_id),
          last_response = COALESCE(excluded.last_response, agent_status.last_response),
+         transcript_summary = COALESCE(excluded.transcript_summary, agent_status.transcript_summary),
          updated_at = datetime('now')`
     )
-    .run(worktreeId, status, sessionId ?? null, lastResponse ?? null);
+    .run(worktreeId, status, sessionId ?? null, lastResponse ?? null, transcriptSummary ?? null);
 }
 
 export function getAgentStatus(worktreeId: string): AgentStatus | undefined {

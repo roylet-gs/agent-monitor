@@ -45,6 +45,12 @@ export function useWorktrees(
         })
       );
 
+      enriched.sort((a, b) => {
+        const timeA = a.agent_status?.updated_at ?? "";
+        const timeB = b.agent_status?.updated_at ?? "";
+        return timeB.localeCompare(timeA);
+      });
+
       setWorktrees(enriched);
     } catch (err) {
       log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);

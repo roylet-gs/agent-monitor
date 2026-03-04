@@ -8,6 +8,7 @@ import { handleHookEvent } from "./commands/hook-event.js";
 import { printStatus } from "./commands/status.js";
 import { installHooks } from "./lib/hooks-installer.js";
 import { App } from "./app.js";
+import { runScript, waitForEnter } from "./lib/run-script.js";
 
 const cli = meow(
   `
@@ -33,6 +34,44 @@ const cli = meow(
 const [command] = cli.input;
 const settings = loadSettings();
 initLogger(settings.logLevel);
+
+async function launchTui(): Promise<void> {
+  let pendingScript: { scriptPath: string; cwd: string } | null = null;
+
+  const onRunScript = (scriptPath: string, cwd: string) => {
+    pendingScript = { scriptPath, cwd };
+  };
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const instance = render(<App onRunScript={onRunScript} />);
+
+    try {
+      await instance.waitUntilExit();
+    } catch {
+      // App exited
+    }
+
+    // Always unmount + clear to remove stale Ink output
+    instance.unmount();
+    instance.clear();
+
+    if (!pendingScript) {
+      // Normal exit (user pressed q)
+      process.exit(0);
+    }
+
+    // Run the script with full terminal access
+    const { scriptPath, cwd } = pendingScript;
+    pendingScript = null;
+
+    runScript(scriptPath, cwd);
+    waitForEnter();
+
+    // Clear screen before re-launching TUI
+    process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+  }
+}
 
 switch (command) {
   case "hook-event": {
@@ -67,7 +106,6 @@ switch (command) {
   default: {
     // Clear console before launching TUI
     process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
-    const { waitUntilExit } = render(<App />);
-    waitUntilExit().catch(() => process.exit(0));
+    launchTui();
   }
 }

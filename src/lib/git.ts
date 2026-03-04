@@ -173,6 +173,29 @@ export async function branchExists(repoPath: string, branch: string): Promise<bo
   }
 }
 
+export async function remoteBranchExists(repoPath: string, branch: string): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    await git.raw(["rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteBranch(repoPath: string, branch: string, force = false): Promise<void> {
+  const git = getGit(repoPath);
+  const flag = force ? "-D" : "-d";
+  await git.raw(["branch", flag, branch]);
+  log("info", "git", `Deleted local branch ${branch}`);
+}
+
+export async function deleteRemoteBranch(repoPath: string, branch: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(["push", "origin", "--delete", branch]);
+  log("info", "git", `Deleted remote branch origin/${branch}`);
+}
+
 export function getRepoName(repoPath: string): string {
   return basename(resolve(repoPath));
 }

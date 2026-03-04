@@ -19,6 +19,7 @@ export interface AgentStatus {
   worktree_id: string;
   status: AgentStatusType;
   last_response: string | null;
+  transcript_summary: string | null;
   session_id: string | null;
   updated_at: string;
 }
@@ -59,7 +60,9 @@ export type AppMode =
   | "delete-confirm"
   | "settings"
   | "repo-select"
-  | "folder-browse";
+  | "folder-browse"
+  | "creating-worktree"
+  | "deleting-worktree";
 
 export interface HookEvent {
   event: string;
