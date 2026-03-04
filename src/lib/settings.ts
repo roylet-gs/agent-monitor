@@ -34,7 +34,8 @@ export function loadSettings(): Settings {
     const raw = readFileSync(SETTINGS_PATH, "utf-8");
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_SETTINGS, ...parsed };
-  } catch {
+  } catch (err) {
+    log("warn", "settings", `Failed to parse settings file: ${err}`);
     return { ...DEFAULT_SETTINGS };
   }
 }

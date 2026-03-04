@@ -10,8 +10,8 @@ function resetTerminal(): void {
   if (process.stdin.isTTY) {
     try {
       process.stdin.setRawMode(false);
-    } catch {
-      // May fail if fd is already closed
+    } catch (err) {
+      log("debug", "scripts", `Failed to reset raw mode: ${err}`);
     }
   }
 

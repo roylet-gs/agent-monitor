@@ -1,17 +1,19 @@
 import { getWorktreeByPath, upsertAgentStatus } from "../lib/db.js";
-import { log } from "../lib/logger.js";
+import { log, generateCorrelationId, type LogContext } from "../lib/logger.js";
 import type { AgentStatusType, HookEvent } from "../lib/types.js";
 
 export async function handleHookEvent(
   worktreePath: string,
   eventOverride?: string
 ): Promise<void> {
+  const correlationId = generateCorrelationId();
+
   // Read stdin
   let stdinData = "";
   try {
     stdinData = await readStdin();
-  } catch {
-    // stdin might be empty for some events
+  } catch (err) {
+    log("debug", "hook-event", `Failed to read stdin: ${err}`, { correlationId });
   }
 
   let payload: HookEvent = { event: eventOverride ?? "unknown" };
@@ -20,19 +22,28 @@ export async function handleHookEvent(
       const parsed = JSON.parse(stdinData);
       payload = { ...parsed, event: eventOverride ?? parsed.event ?? parsed.hook_event_name ?? "unknown" };
     } catch {
-      log("warn", "hook-event", `Failed to parse stdin JSON: ${stdinData.slice(0, 200)}`);
+      log("warn", "hook-event", `Failed to parse stdin JSON: ${stdinData.slice(0, 200)}`, { correlationId });
     }
   }
 
-  log("info", "hook-event", `event=${payload.event} tool=${payload.tool_name ?? "none"} stop_hook_active=${payload.stop_hook_active ?? "N/A"} permission_prompt=${payload.permission_prompt ?? "N/A"} permission_mode=${payload.permission_mode ?? "N/A"} for ${worktreePath}`);
-  log("debug", "hook-event", `Full payload: ${JSON.stringify(payload).slice(0, 500)}`);
+  const ctx: LogContext = {
+    correlationId,
+    worktreeId: undefined, // set after DB lookup
+    sessionId: payload.session_id ?? undefined,
+    event: payload.event,
+  };
+
+  log("info", "hook-event", `event=${payload.event} tool=${payload.tool_name ?? "none"} stop_hook_active=${payload.stop_hook_active ?? "N/A"} permission_prompt=${payload.permission_prompt ?? "N/A"} permission_mode=${payload.permission_mode ?? "N/A"} for ${worktreePath}`, ctx);
+  log("debug", "hook-event", `Full payload: ${JSON.stringify(payload).slice(0, 500)}`, ctx);
 
   // Find worktree in DB
   const worktree = getWorktreeByPath(worktreePath);
   if (!worktree) {
-    log("warn", "hook-event", `Worktree not found in DB for path: ${worktreePath}`);
+    log("warn", "hook-event", `Worktree not found in DB for path: ${worktreePath}`, ctx);
     return;
   }
+
+  ctx.worktreeId = worktree.id;
 
   // Map event to status
   const status = mapEventToStatus(payload);
@@ -41,12 +52,12 @@ export async function handleHookEvent(
   const transcriptSummary = payload.transcript_summary ?? null;
 
   if (status === null) {
-    log("debug", "hook-event", `Skipped status update for ${worktreePath} (informational ${payload.event})`);
+    log("debug", "hook-event", `Skipped status update for ${worktreePath} (informational ${payload.event})`, ctx);
     return;
   }
 
   upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary);
-  log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`);
+  log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`, ctx);
 }
 
 function extractLastResponse(event: HookEvent): string | null {

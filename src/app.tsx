@@ -472,13 +472,17 @@ export function App({ onRunScript }: AppProps) {
     onOpenPr: () => {
       const wt = flatWorktrees[selectedIndex];
       if (wt?.pr_info?.url) {
-        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch(() => {});
+        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch((err) => {
+          log("warn", "app", `Failed to open PR URL: ${err}`);
+        });
       }
     },
     onOpenLinear: () => {
       const wt = flatWorktrees[selectedIndex];
       if (wt?.linear_info?.url) {
-        import("open").then((mod) => mod.default(wt.linear_info!.url)).catch(() => {});
+        import("open").then((mod) => mod.default(wt.linear_info!.url)).catch((err) => {
+          log("warn", "app", `Failed to open Linear URL: ${err}`);
+        });
       }
     },
     onQuit: () => exit(),
@@ -548,8 +552,8 @@ export function App({ onRunScript }: AppProps) {
             setPendingBranch(null);
             try {
               await deleteBranch(repo.path, branch, true);
-            } catch {
-              // Branch may only exist on remote, ignore local delete failure
+            } catch (err) {
+              log("debug", "app", `Local branch delete failed (may only exist on remote): ${err}`);
             }
             await doCreateWorktree(branch, customName, false, repo);
           }}

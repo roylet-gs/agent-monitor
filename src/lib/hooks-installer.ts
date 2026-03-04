@@ -85,7 +85,8 @@ export function installHooks(worktreePath: string): void {
   if (existsSync(settingsPath)) {
     try {
       existing = JSON.parse(readFileSync(settingsPath, "utf-8"));
-    } catch {
+    } catch (err) {
+      log("warn", "hooks", `Failed to parse existing settings at ${settingsPath}: ${err}`);
       existing = {};
     }
   }

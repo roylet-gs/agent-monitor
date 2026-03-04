@@ -1,7 +1,7 @@
 import { simpleGit, type SimpleGit } from "simple-git";
 import { existsSync } from "fs";
 import { basename, join, resolve } from "path";
-import { log } from "./logger.js";
+import { log, timeOperation } from "./logger.js";
 import type { GitStatus, CommitInfo } from "./types.js";
 
 export function getGit(cwd: string): SimpleGit {
@@ -19,6 +19,7 @@ export interface GitWorktreeInfo {
 }
 
 export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]> {
+  return timeOperation("debug", "git", `listWorktrees(${repoPath})`, async () => {
   const git = getGit(repoPath);
   try {
     const result = await git.raw(["worktree", "list", "--porcelain"]);
@@ -57,6 +58,7 @@ export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]
     log("error", "git", `Failed to list worktrees: ${err}`);
     return [];
   }
+  });
 }
 
 export async function createWorktree(
@@ -133,7 +135,8 @@ export async function getLastCommit(worktreePath: string): Promise<CommitInfo | 
       message: latest.message,
       relative_time: relTime.trim(),
     };
-  } catch {
+  } catch (err) {
+    log("debug", "git", `Failed to get last commit for ${worktreePath}: ${err}`);
     return null;
   }
 }

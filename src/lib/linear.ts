@@ -1,5 +1,5 @@
 import https from "node:https";
-import { log } from "./logger.js";
+import { log, timeOperation } from "./logger.js";
 import type { LinearInfo } from "./types.js";
 
 function httpsPost(
@@ -54,29 +54,31 @@ export async function fetchLinearInfo(
     }
   `;
 
-  try {
-    const raw = await httpsPost(
-      "https://api.linear.app/graphql",
-      { Authorization: apiKey },
-      JSON.stringify({ query, variables: { branch } })
-    );
+  return timeOperation("debug", "linear", `fetchLinearInfo(${branch})`, async () => {
+    try {
+      const raw = await httpsPost(
+        "https://api.linear.app/graphql",
+        { Authorization: apiKey },
+        JSON.stringify({ query, variables: { branch } })
+      );
 
-    const json = JSON.parse(raw);
-    const issue = json?.data?.issueVcsBranchSearch;
-    if (!issue) return null;
+      const json = JSON.parse(raw);
+      const issue = json?.data?.issueVcsBranchSearch;
+      if (!issue) return null;
 
-    return {
-      identifier: issue.identifier,
-      title: issue.title,
-      url: issue.url,
-      state: issue.state,
-      priorityLabel: issue.priorityLabel,
-      assignee: issue.assignee?.name ?? null,
-    };
-  } catch (err) {
-    log("debug", "linear", `Failed to fetch Linear info for ${branch}: ${err}`);
-    return null;
-  }
+      return {
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+        state: issue.state,
+        priorityLabel: issue.priorityLabel,
+        assignee: issue.assignee?.name ?? null,
+      };
+    } catch (err) {
+      log("debug", "linear", `Failed to fetch Linear info for ${branch}: ${err}`);
+      return null;
+    }
+  });
 }
 
 export async function verifyLinearApiKey(apiKey: string): Promise<{ ok: boolean; name?: string; error?: string }> {
