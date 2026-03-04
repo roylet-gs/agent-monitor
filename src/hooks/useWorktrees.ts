@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getWorktrees, getAgentStatuses } from "../lib/db.js";
 import { getGitStatus, getLastCommit } from "../lib/git.js";
-import { fetchPrInfo } from "../lib/github.js";
+import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo } from "../lib/linear.js";
 import { log } from "../lib/logger.js";
 import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
@@ -52,22 +52,22 @@ export function useWorktrees(config: WorktreeHookConfig): {
   // Generation counter: stale refresh calls check this before setting state
   const genRef = useRef(0);
 
-  // Fetch PR info for all branches and update cache
-  const refreshPrInfo = useCallback(async (branches: Array<{ path: string; branch: string }>) => {
-    if (branches.length === 0) return;
-    const entries = await Promise.all(
-      branches.map(async ({ path, branch }) => {
+  // Fetch PR info for all branches, batched by repo, and update cache
+  const refreshPrInfo = useCallback(async (repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }>) => {
+    if (repoGroups.length === 0) return;
+    await Promise.all(
+      repoGroups.map(async ({ repoPath, repoId, branches }) => {
+        if (branches.length === 0) return;
         try {
-          const info = await fetchPrInfo(path, branch);
-          return [branch, info] as const;
-        } catch {
-          return [branch, prCacheRef.current.get(branch) ?? null] as const;
+          const prMap = await fetchAllPrInfo(repoPath, branches);
+          for (const [branch, info] of prMap) {
+            prCacheRef.current.set(`${repoId}:${branch}`, info);
+          }
+        } catch (err) {
+          log("warn", "useWorktrees", `Batch PR fetch failed for repo ${repoId}, keeping stale cache: ${err}`);
         }
       })
     );
-    for (const [branch, info] of entries) {
-      prCacheRef.current.set(branch, info);
-    }
   }, []);
 
   const refreshLinearInfo = useCallback(async (branches: string[]) => {
@@ -104,17 +104,19 @@ export function useWorktrees(config: WorktreeHookConfig): {
     try {
       // Collect all branches for integration fetches if forced
       if (forceIntegrations) {
-        const allBranchesForPr: Array<{ path: string; branch: string }> = [];
+        const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
         const allBranchNames: string[] = [];
         for (const repo of repos) {
           const dbWorktrees = getWorktrees(repo.id);
+          const branches: string[] = [];
           for (const wt of dbWorktrees) {
-            allBranchesForPr.push({ path: wt.path, branch: wt.branch });
+            branches.push(wt.branch);
             allBranchNames.push(wt.branch);
           }
+          repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
         }
         await Promise.all([
-          shouldFetchPr ? refreshPrInfo(allBranchesForPr) : Promise.resolve(),
+          shouldFetchPr ? refreshPrInfo(repoGroups) : Promise.resolve(),
           shouldFetchLinear ? refreshLinearInfo(allBranchNames) : Promise.resolve(),
         ]);
         // Bail if a newer refresh started while we were fetching
@@ -146,7 +148,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
               agent_status: statuses.get(wt.id) ?? null,
               git_status,
               last_commit,
-              pr_info: prCacheRef.current.get(wt.branch) ?? null,
+              pr_info: prCacheRef.current.get(`${repo.id}:${wt.branch}`) ?? null,
               linear_info: linearCacheRef.current.get(wt.branch) ?? null,
             };
           })
@@ -207,14 +209,13 @@ export function useWorktrees(config: WorktreeHookConfig): {
     if (!ghPrStatus || repositories.length === 0) return;
 
     const doFetch = async () => {
-      const allBranches: Array<{ path: string; branch: string }> = [];
+      const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
       for (const repo of reposRef.current) {
         const dbWorktrees = getWorktrees(repo.id);
-        for (const wt of dbWorktrees) {
-          allBranches.push({ path: wt.path, branch: wt.branch });
-        }
+        const branches = dbWorktrees.map((wt) => wt.branch);
+        repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
       }
-      await refreshPrInfo(allBranches);
+      await refreshPrInfo(repoGroups);
       refresh(false);
     };
 
