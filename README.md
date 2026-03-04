@@ -13,17 +13,33 @@ TUI dashboard for managing git worktrees and monitoring Claude Code agents.
 
 ## Install
 
+### From GitHub Packages
+
+```sh
+npm install -g @roylet-gs/agent-monitor --registry=https://npm.pkg.github.com
+```
+
+Or configure your `~/.npmrc` once:
+
+```
+@roylet-gs:registry=https://npm.pkg.github.com
+```
+
+Then install with:
+
+```sh
+npm install -g @roylet-gs/agent-monitor
+```
+
 ### From source
 
 ```sh
-git clone https://github.com/your-org/agent-monitor.git
+git clone https://github.com/roylet-gs/agent-monitor.git
 cd agent-monitor
 pnpm install
 pnpm build
 pnpm link --global
 ```
-
-> Package registry publishing TBD
 
 ## Usage
 
