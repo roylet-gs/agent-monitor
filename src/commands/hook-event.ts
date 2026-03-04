@@ -38,10 +38,14 @@ export async function handleHookEvent(
   const status = mapEventToStatus(payload);
   const sessionId = payload.session_id ?? null;
   const lastResponse = extractLastResponse(payload);
-  const planMode = detectPlanMode(payload);
 
-  upsertAgentStatus(worktree.id, status, sessionId, lastResponse, planMode);
-  log("info", "hook-event", `Updated status for ${worktreePath}: ${status}${planMode != null ? ` (plan_mode=${planMode})` : ""}`);
+  if (status === null) {
+    log("debug", "hook-event", `Skipped status update for ${worktreePath} (informational ${payload.event})`);
+    return;
+  }
+
+  upsertAgentStatus(worktree.id, status, sessionId, lastResponse);
+  log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`);
 }
 
 function extractLastResponse(event: HookEvent): string | null {
@@ -56,52 +60,31 @@ function extractLastResponse(event: HookEvent): string | null {
   return null;
 }
 
-function detectPlanMode(event: HookEvent): boolean | null {
-  // permission_mode field directly tells us if Claude is in plan mode
-  if (event.permission_mode === "plan") {
-    return true;
+function mapEventToStatus(event: HookEvent): AgentStatusType | null {
+  // Stop/Notification waiting cases take priority
+  if (event.event === "Stop") {
+    return event.stop_hook_active ? "waiting" : "idle";
   }
-  if (event.permission_mode && event.permission_mode !== "plan") {
-    return false;
+  if (event.event === "Notification") {
+    // Permission prompts → waiting; other notifications are informational,
+    // don't change status
+    return event.permission_prompt ? "waiting" : null;
   }
-  // SessionStart resets plan mode
   if (event.event === "SessionStart") {
-    return false;
+    return "idle";
   }
-  return null;
-}
 
-function mapEventToStatus(event: HookEvent): AgentStatusType {
-  switch (event.event) {
-    case "SessionStart":
-      return "idle";
-
-    case "PreToolUse": {
-      const tool = event.tool_name ?? "";
-      if (tool === "Agent" || tool === "EnterPlanMode" || tool === "Plan") {
-        return "thinking";
-      }
-      return "executing";
-    }
-
-    case "PostToolUse":
-      return "executing";
-
-    case "Stop":
-      if (event.stop_hook_active) {
-        return "waiting_for_input";
-      }
-      return "idle";
-
-    case "Notification":
-      if (event.permission_prompt) {
-        return "waiting_for_input";
-      }
-      return "executing";
-
-    default:
-      return "idle";
+  // Plan mode folds into the planning status
+  if (event.permission_mode === "plan") {
+    return "planning";
   }
+
+  // PreToolUse/PostToolUse → actively working
+  if (event.event === "PreToolUse" || event.event === "PostToolUse") {
+    return "executing";
+  }
+
+  return "idle";
 }
 
 function readStdin(): Promise<string> {

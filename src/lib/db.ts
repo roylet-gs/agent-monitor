@@ -44,19 +44,32 @@ function initSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS agent_status (
       worktree_id TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
       status TEXT NOT NULL DEFAULT 'idle',
-      plan_mode INTEGER NOT NULL DEFAULT 0,
       last_response TEXT,
       session_id TEXT,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 
-  // Migration: add plan_mode column if missing
+  // Migration: drop plan_mode column if present (recreate table without it)
   try {
     db.prepare("SELECT plan_mode FROM agent_status LIMIT 0").run();
+    // Column exists — migrate it away
+    db.exec(`
+      CREATE TABLE agent_status_new (
+        worktree_id TEXT PRIMARY KEY REFERENCES worktrees(id) ON DELETE CASCADE,
+        status TEXT NOT NULL DEFAULT 'idle',
+        last_response TEXT,
+        session_id TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO agent_status_new (worktree_id, status, last_response, session_id, updated_at)
+        SELECT worktree_id, status, last_response, session_id, updated_at FROM agent_status;
+      DROP TABLE agent_status;
+      ALTER TABLE agent_status_new RENAME TO agent_status;
+    `);
+    log("info", "db", "Migrated agent_status: dropped plan_mode column");
   } catch {
-    db.exec("ALTER TABLE agent_status ADD COLUMN plan_mode INTEGER NOT NULL DEFAULT 0");
-    log("info", "db", "Migrated agent_status: added plan_mode column");
+    // Column doesn't exist — nothing to migrate
   }
 }
 
@@ -155,34 +168,19 @@ export function upsertAgentStatus(
   worktreeId: string,
   status: AgentStatusType,
   sessionId?: string | null,
-  lastResponse?: string | null,
-  planMode?: boolean | null
+  lastResponse?: string | null
 ): void {
-  const db = getDb();
-  if (planMode != null) {
-    // Update plan_mode explicitly
-    db.prepare(
-      `INSERT INTO agent_status (worktree_id, status, plan_mode, session_id, last_response, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(worktree_id) DO UPDATE SET
-         status = excluded.status,
-         plan_mode = excluded.plan_mode,
-         session_id = COALESCE(excluded.session_id, agent_status.session_id),
-         last_response = COALESCE(excluded.last_response, agent_status.last_response),
-         updated_at = datetime('now')`
-    ).run(worktreeId, status, planMode ? 1 : 0, sessionId ?? null, lastResponse ?? null);
-  } else {
-    // Don't touch plan_mode
-    db.prepare(
-      `INSERT INTO agent_status (worktree_id, status, plan_mode, session_id, last_response, updated_at)
-       VALUES (?, ?, 0, ?, ?, datetime('now'))
+  getDb()
+    .prepare(
+      `INSERT INTO agent_status (worktree_id, status, session_id, last_response, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
        ON CONFLICT(worktree_id) DO UPDATE SET
          status = excluded.status,
          session_id = COALESCE(excluded.session_id, agent_status.session_id),
          last_response = COALESCE(excluded.last_response, agent_status.last_response),
          updated_at = datetime('now')`
-    ).run(worktreeId, status, sessionId ?? null, lastResponse ?? null);
-  }
+    )
+    .run(worktreeId, status, sessionId ?? null, lastResponse ?? null);
 }
 
 export function getAgentStatus(worktreeId: string): AgentStatus | undefined {

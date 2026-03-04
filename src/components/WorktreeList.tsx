@@ -10,37 +10,23 @@ interface WorktreeListProps {
 function statusColor(status: string | undefined): string {
   switch (status) {
     case "executing":
-    case "thinking":
     case "planning":
       return "green";
-    case "waiting_for_input":
+    case "waiting":
       return "yellow";
-    case "error":
-      return "red";
     default:
       return "gray";
   }
 }
 
 function statusLabel(wt: WorktreeWithStatus): string {
-  const status = wt.agent_status?.status;
-  const planMode = wt.agent_status?.plan_mode;
-  const prefix = planMode ? "P:" : "";
-  switch (status) {
+  switch (wt.agent_status?.status) {
     case "executing":
-      return `${prefix}Exec`;
-    case "thinking":
-      return `${prefix}Think`;
+      return "Exec";
     case "planning":
-      return `${prefix}Plan`;
-    case "waiting_for_input":
-      return `${prefix}Wait`;
-    case "error":
-      return `${prefix}Err`;
-    case "idle":
-      return planMode ? "P:Idle" : "";
-    case "completed":
-      return "";
+      return "Plan";
+    case "waiting":
+      return "Wait";
     default:
       return "";
   }

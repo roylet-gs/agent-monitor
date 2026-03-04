@@ -159,10 +159,17 @@ export async function getMainBranch(repoPath: string): Promise<string> {
 export async function branchExists(repoPath: string, branch: string): Promise<boolean> {
   const git = getGit(repoPath);
   try {
-    await git.raw(["rev-parse", "--verify", branch]);
+    await git.raw(["rev-parse", "--verify", `refs/heads/${branch}`]);
     return true;
   } catch {
-    return false;
+    // Also check if a remote tracking branch exists, since
+    // `git worktree add -b <branch>` will fail if origin/<branch> exists
+    try {
+      await git.raw(["rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

@@ -9,13 +9,10 @@ interface WorktreeDetailProps {
 function statusColor(status: string | undefined): string {
   switch (status) {
     case "executing":
-    case "thinking":
     case "planning":
       return "green";
-    case "waiting_for_input":
+    case "waiting":
       return "yellow";
-    case "error":
-      return "red";
     default:
       return "gray";
   }
@@ -25,16 +22,10 @@ function statusLabel(status: string | undefined): string {
   switch (status) {
     case "executing":
       return "Executing";
-    case "thinking":
-      return "Thinking";
     case "planning":
       return "Planning";
-    case "waiting_for_input":
-      return "Waiting for input";
-    case "error":
-      return "Error";
-    case "completed":
-      return "Completed";
+    case "waiting":
+      return "Waiting";
     case "idle":
       return "Idle";
     default:
@@ -118,9 +109,6 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
           <Text>
             <Text color={statusColor(status)}>●</Text>{" "}
             <Text>{statusLabel(status)}</Text>
-            {worktree.agent_status?.plan_mode ? (
-              <Text color="magenta"> [Plan Mode]</Text>
-            ) : null}
           </Text>
         </Box>
 

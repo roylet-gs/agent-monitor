@@ -18,20 +18,12 @@ export interface Worktree {
 export interface AgentStatus {
   worktree_id: string;
   status: AgentStatusType;
-  plan_mode: number; // 0 or 1 (sqlite boolean)
   last_response: string | null;
   session_id: string | null;
   updated_at: string;
 }
 
-export type AgentStatusType =
-  | "idle"
-  | "thinking"
-  | "planning"
-  | "executing"
-  | "error"
-  | "waiting_for_input"
-  | "completed";
+export type AgentStatusType = "idle" | "executing" | "planning" | "waiting";
 
 export interface WorktreeWithStatus extends Worktree {
   agent_status: AgentStatus | null;
