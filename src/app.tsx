@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Box, Text, useApp } from "ink";
+import { Box, Text, useApp, useStdout } from "ink";
 import { Dashboard } from "./components/Dashboard.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
 import { RepoSelector } from "./components/RepoSelector.js";
@@ -43,6 +43,7 @@ interface AppProps {
 
 export function App({ onRunScript }: AppProps) {
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [mode, setMode] = useState<AppMode>("dashboard");
   const [busy, setBusy] = useState<string | null>(null);
@@ -493,7 +494,7 @@ export function App({ onRunScript }: AppProps) {
   }, [error]);
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={stdout?.rows ?? 24}>
       {error && (
         <Box paddingX={1}>
           <Text color="red">Error: {error}</Text>
