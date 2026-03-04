@@ -21,6 +21,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
   groups: WorktreeGroup[];
   flatWorktrees: WorktreeWithStatus[];
   refresh: () => Promise<void>;
+  lightRefresh: () => Promise<void>;
 } {
   const {
     repositories,
@@ -247,6 +248,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
 
   // Exposed refresh always forces integrations fetch
   const forceRefresh = useCallback(() => refresh(true), [refresh]);
+  // Light refresh: just re-reads DB + git status, no network calls
+  const lightRefresh = useCallback(() => refresh(false), [refresh]);
 
-  return { groups, flatWorktrees, refresh: forceRefresh };
+  return { groups, flatWorktrees, refresh: forceRefresh, lightRefresh };
 }
