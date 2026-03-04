@@ -1,6 +1,6 @@
 import React from "react";
 import { Box } from "ink";
-import { StatusBar } from "./StatusBar.js";
+import { StatusBar, type UpdateInfo } from "./StatusBar.js";
 import { WorktreeList } from "./WorktreeList.js";
 import { WorktreeDetail } from "./WorktreeDetail.js";
 import { ActionBar } from "./ActionBar.js";
@@ -19,6 +19,7 @@ interface DashboardProps {
   showLogs: boolean;
   terminalRows: number;
   version?: string;
+  updateInfo?: UpdateInfo | null;
 }
 
 export const Dashboard = React.memo(function Dashboard({
@@ -33,12 +34,13 @@ export const Dashboard = React.memo(function Dashboard({
   showLogs,
   terminalRows,
   version,
+  updateInfo,
 }: DashboardProps) {
   const selected = flatWorktrees[selectedIndex] ?? null;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} version={version} />
+      <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} version={version} updateInfo={updateInfo} />
       <Box flexGrow={1}>
         <WorktreeList groups={groups} flatWorktrees={flatWorktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
         <WorktreeDetail worktree={selected} />
