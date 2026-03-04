@@ -4,6 +4,7 @@ import { readdirSync, statSync, existsSync } from "fs";
 import { join, resolve, basename, dirname } from "path";
 import { homedir } from "os";
 import { isGitRepo } from "../lib/git.js";
+import { log } from "../lib/logger.js";
 
 interface FolderBrowserProps {
   onSelect: (path: string) => void;
@@ -64,7 +65,8 @@ export function FolderBrowser({ onSelect, onCancel }: FolderBrowserProps) {
 
       setEntries(items);
       setSelectedIndex(0);
-    } catch {
+    } catch (err) {
+      log("warn", "FolderBrowser", `Failed to read directory ${currentPath}: ${err}`);
       setEntries([]);
     }
   }, [currentPath, filter]);

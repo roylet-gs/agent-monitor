@@ -37,15 +37,18 @@ import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installe
 import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
+import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { getVersion, getReleaseNotes, isNewVersion } from "./lib/version.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
+  watch?: boolean;
+  onUpdate?: () => void;
 }
 
-export function App({ onRunScript }: AppProps) {
+export function App({ onRunScript, watch, onUpdate }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -54,6 +57,7 @@ export function App({ onRunScript }: AppProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
   const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string; baseBranch: string } | null>(null);
   const [creatingBranch, setCreatingBranch] = useState("");
@@ -453,6 +457,9 @@ export function App({ onRunScript }: AppProps) {
     }
   }, [settings, currentVersion, repositories]);
 
+  // Check for updates
+  const updateInfo = useUpdateCheck(settings, handleSaveSettings);
+
   // Handle factory reset
   const handleFactoryReset = useCallback(() => {
     resetAll();
@@ -506,7 +513,9 @@ export function App({ onRunScript }: AppProps) {
     onOpenPr: () => {
       const wt = flatWorktrees[selectedIndex];
       if (wt?.pr_info?.url) {
-        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch(() => {});
+        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch((err) => {
+          log("warn", "app", `Failed to open PR URL: ${err}`);
+        });
       }
     },
     onOpenLinear: () => {
@@ -519,6 +528,13 @@ export function App({ onRunScript }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
+    onToggleLogs: () => setShowLogs((v) => !v),
+    onUpdate: updateInfo?.updateAvailable
+      ? () => {
+          onUpdate?.();
+          exit();
+        }
+      : undefined,
     onQuit: () => exit(),
     onEscHint: setEscHint,
   });
@@ -596,8 +612,8 @@ export function App({ onRunScript }: AppProps) {
             setPendingBranch(null);
             try {
               await deleteBranch(repo.path, branch, true);
-            } catch {
-              // Branch may only exist on remote, ignore local delete failure
+            } catch (err) {
+              log("debug", "app", `Local branch delete failed (may only exist on remote): ${err}`);
             }
             await doCreateWorktree(branch, customName, false, repo, baseBranch);
           }}
@@ -656,7 +672,10 @@ export function App({ onRunScript }: AppProps) {
           escHint={escHint}
           unseenIds={unseenIds}
           compactView={settings.compactView}
+          showLogs={showLogs}
+          terminalRows={stdout?.rows ?? 24}
           version={currentVersion}
+          updateInfo={updateInfo}
         />
       )}
     </Box>

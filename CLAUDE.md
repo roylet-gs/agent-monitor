@@ -60,6 +60,14 @@ All data at `~/.agent-monitor/`: SQLite DB (`agent-monitor.db`), `settings.json`
 
 When making changes to architecture, data flow, modules, or conventions, update this file (CLAUDE.md) and README.md to keep them in sync with the codebase.
 
+## Logging
+
+When adding or modifying code paths, add appropriate `log()` calls to maintain observability:
+- `log("info", ...)` for key state changes (status updates, hook install/uninstall, config changes)
+- `log("debug", ...)` for branching decisions, mapping logic, and detailed context (e.g. which branch was taken in `mapEventToStatus` and why)
+- `log("warn", ...)` for recoverable errors or unexpected state
+- Always include relevant context in log messages (event names, tool names, computed values) to aid debugging
+
 ## Conventions
 
 - ESM (`"type": "module"`) with NodeNext module resolution

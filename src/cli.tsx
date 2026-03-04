@@ -2,7 +2,8 @@
 import { Command } from "commander";
 import { render } from "ink";
 import React from "react";
-import { initLogger } from "./lib/logger.js";
+import { execFileSync } from "child_process";
+import { initLogger, log } from "./lib/logger.js";
 import { loadSettings } from "./lib/settings.js";
 import { getVersion } from "./lib/version.js";
 import { App } from "./app.js";
@@ -13,11 +14,15 @@ import { runScript, waitForEnter } from "./lib/run-script.js";
 const settings = loadSettings();
 initLogger(settings.logLevel);
 
+let watchFlag = false;
+
 const program = new Command()
   .name("am")
   .description("Agent Monitor — TUI dashboard for git worktrees & Claude Code agents")
   .version(getVersion())
-  .action(() => {
+  .option("--watch", "Launch with log panel open")
+  .action((opts) => {
+    watchFlag = opts.watch ?? false;
     // Default: launch TUI
     process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
     launchTui();
@@ -301,6 +306,27 @@ program
     doctor(opts);
   });
 
+// --- Logs command (from main) ---
+
+program
+  .command("logs")
+  .description("Show recent logs")
+  .option("-n, --lines <number>", "Number of log lines to show", "50")
+  .option("-f, --follow", "Follow log output")
+  .option("--level <level>", "Filter by level (debug, info, warn, error)")
+  .option("--module <module>", "Filter by module")
+  .option("--clear", "Clear the log file")
+  .action(async (opts) => {
+    const { printLogs } = await import("./commands/logs.js");
+    printLogs({
+      lines: parseInt(opts.lines, 10),
+      follow: opts.follow ?? false,
+      level: opts.level,
+      module: opts.module,
+      clear: opts.clear ?? false,
+    });
+  });
+
 // --- Existing commands (backward compat) ---
 
 program
@@ -360,23 +386,59 @@ program
 
 async function launchTui(): Promise<void> {
   let pendingScript: { scriptPath: string; cwd: string } | null = null;
+  let pendingUpdate = false;
 
   const onRunScript = (scriptPath: string, cwd: string) => {
     pendingScript = { scriptPath, cwd };
   };
 
+  const onUpdate = () => {
+    pendingUpdate = true;
+  };
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const instance = render(<App onRunScript={onRunScript} />, { patchConsole: true });
+    const instance = render(
+      <App onRunScript={onRunScript} watch={watchFlag} onUpdate={onUpdate} />,
+      { patchConsole: true }
+    );
 
     try {
       await instance.waitUntilExit();
-    } catch {
-      // App exited
+    } catch (err) {
+      log("debug", "cli", `TUI exit: ${err}`);
     }
 
     instance.unmount();
     instance.clear();
+
+    if (pendingUpdate) {
+      pendingUpdate = false;
+      console.log("Updating Agent Monitor...\n");
+      try {
+        execFileSync(
+          "npm",
+          [
+            "install",
+            "-g",
+            "@roylet-gs/agent-monitor@latest",
+            "--registry=https://npm.pkg.github.com",
+          ],
+          { stdio: "inherit" }
+        );
+        console.log("\nUpdate complete! Restarting...\n");
+        // Run the updated binary, then exit so we don't fall back
+        // into the old code's while loop.
+        execFileSync("am", [], { stdio: "inherit" });
+        process.exit(0);
+      } catch (err) {
+        console.error(`\nUpdate failed: ${err}\n`);
+        console.log("Restarting current version...\n");
+      }
+      // Clear screen before re-launching TUI (only reached on failure)
+      process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+      continue;
+    }
 
     if (!pendingScript) {
       process.exit(0);

@@ -16,7 +16,7 @@ interface HookMatcher {
 
 type HooksConfig = Record<string, HookMatcher[]>;
 
-const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Stop", "Notification", "SessionStart"] as const;
+const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Stop", "Notification", "SessionStart", "SessionEnd", "UserPromptSubmit", "SubagentStart", "SubagentStop"] as const;
 
 const HOOK_MARKER = "am hook-event";
 
