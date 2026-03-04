@@ -11,7 +11,6 @@ type SettingsField =
   | "ide"
   | "prefix"
   | "polling"
-  | "autoHooks"
   | "autoSync"
   | "compactView"
   | "hideMainBranch"
@@ -32,7 +31,6 @@ const FIELDS: SettingsField[] = [
   "compactView",
   "hideMainBranch",
   "polling",
-  "autoHooks",
   "logLevel",
   "ghPrStatus",
   "ghPolling",
@@ -209,11 +207,6 @@ export function SettingsPanel({
       return;
     }
 
-    if (activeField === "autoHooks" && (key.return || input === " ")) {
-      setCurrent((s) => ({ ...s, autoInstallHooks: !s.autoInstallHooks }));
-      return;
-    }
-
     if (activeField === "autoSync" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, autoSyncOnStartup: !s.autoSyncOnStartup }));
       return;
@@ -376,14 +369,6 @@ export function SettingsPanel({
               {activeField === "polling" && <Text dimColor> (Enter to edit)</Text>}
             </Text>
           )}
-        </Box>
-        <Box>
-          <Text bold={activeField === "autoHooks"}>
-            {activeField === "autoHooks" ? "▸" : " "} Auto-install Hooks:{" "}
-          </Text>
-          <Text color={current.autoInstallHooks ? "green" : "gray"}>
-            [{current.autoInstallHooks ? "✓" : " "}]
-          </Text>
         </Box>
         <Box>
           <Text bold={activeField === "logLevel"}>

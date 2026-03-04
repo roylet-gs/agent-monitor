@@ -75,7 +75,6 @@ export interface Settings {
   ide: "cursor" | "vscode" | "terminal";
   defaultBranchPrefix: string;
   pollingIntervalMs: number;
-  autoInstallHooks: boolean;
   autoSyncOnStartup: boolean;
   compactView: boolean;
   hideMainBranch: boolean;
