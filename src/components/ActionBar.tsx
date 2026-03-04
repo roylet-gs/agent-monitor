@@ -6,9 +6,11 @@ interface ActionBarProps {
   busy: string | null;
   hasWorktrees: boolean;
   escHint: boolean;
+  ghPrStatus?: boolean;
+  linearEnabled?: boolean;
 }
 
-export function ActionBar({ busy, hasWorktrees, escHint }: ActionBarProps) {
+export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -34,8 +36,8 @@ export function ActionBar({ busy, hasWorktrees, escHint }: ActionBarProps) {
           <Text color="yellow">[Enter]</Text> Open
           <Text color="yellow"> [n]</Text>ew
           <Text color="yellow"> [d]</Text>elete
-          <Text color="yellow"> [g]</Text>ithub
-          <Text color="yellow"> [l]</Text>inear
+          {ghPrStatus && <><Text color="yellow"> [g]</Text>ithub</>}
+          {linearEnabled && <><Text color="yellow"> [l]</Text>inear</>}
           <Text color="yellow"> [r]</Text>efresh
           <Text color="yellow"> [w]</Text>atch
           <Text color="yellow"> [s]</Text>ettings
