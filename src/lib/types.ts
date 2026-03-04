@@ -87,6 +87,8 @@ export interface Settings {
   linearApiKey: string;
   linearPollingIntervalMs: number;
   lastSeenVersion?: string;
+  lastUpdateCheck?: number;
+  latestKnownVersion?: string;
 }
 
 export type AppMode =

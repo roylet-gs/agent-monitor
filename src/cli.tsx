@@ -2,6 +2,7 @@
 import meow from "meow";
 import { render } from "ink";
 import React from "react";
+import { execFileSync } from "child_process";
 import { initLogger, log } from "./lib/logger.js";
 import { loadSettings } from "./lib/settings.js";
 import { handleHookEvent } from "./commands/hook-event.js";
@@ -46,6 +47,7 @@ const cli = meow(
     j/k ↑/↓  Navigate        n  New worktree     d  Delete
     Enter    Open in IDE      s  Settings         r  Refresh
     g        Open PR          l  Open Linear      w  Watch logs
+    u        Update
     q        Quit
 `,
   {
@@ -71,14 +73,22 @@ initLogger(settings.logLevel);
 
 async function launchTui(): Promise<void> {
   let pendingScript: { scriptPath: string; cwd: string } | null = null;
+  let pendingUpdate = false;
 
   const onRunScript = (scriptPath: string, cwd: string) => {
     pendingScript = { scriptPath, cwd };
   };
 
+  const onUpdate = () => {
+    pendingUpdate = true;
+  };
+
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const instance = render(<App onRunScript={onRunScript} watch={cli.flags.watch} />, { patchConsole: true });
+    const instance = render(
+      <App onRunScript={onRunScript} watch={cli.flags.watch} onUpdate={onUpdate} />,
+      { patchConsole: true }
+    );
 
     try {
       await instance.waitUntilExit();
@@ -89,6 +99,34 @@ async function launchTui(): Promise<void> {
     // Always unmount + clear to remove stale Ink output
     instance.unmount();
     instance.clear();
+
+    if (pendingUpdate) {
+      pendingUpdate = false;
+      console.log("Updating Agent Monitor...\n");
+      try {
+        execFileSync(
+          "npm",
+          [
+            "install",
+            "-g",
+            "@roylet-gs/agent-monitor@latest",
+            "--registry=https://npm.pkg.github.com",
+          ],
+          { stdio: "inherit" }
+        );
+        console.log("\nUpdate complete! Restarting...\n");
+        // Run the updated binary, then exit so we don't fall back
+        // into the old code's while loop.
+        execFileSync("am", [], { stdio: "inherit" });
+        process.exit(0);
+      } catch (err) {
+        console.error(`\nUpdate failed: ${err}\n`);
+        console.log("Restarting current version...\n");
+      }
+      // Clear screen before re-launching TUI (only reached on failure)
+      process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+      continue;
+    }
 
     if (!pendingScript) {
       // Normal exit (user pressed q)
