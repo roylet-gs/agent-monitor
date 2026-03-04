@@ -4,10 +4,10 @@ import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchPrInfo } from "../lib/github.js";
 import { fetchLinearInfo } from "../lib/linear.js";
 import { log } from "../lib/logger.js";
-import type { WorktreeWithStatus, PrInfo, LinearInfo } from "../lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
 
 export interface WorktreeHookConfig {
-  repoId: string | null;
+  repositories: Repository[];
   pollingIntervalMs: number;
   ghPollingIntervalMs: number;
   linearPollingIntervalMs: number;
@@ -18,11 +18,12 @@ export interface WorktreeHookConfig {
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
-  worktrees: WorktreeWithStatus[];
+  groups: WorktreeGroup[];
+  flatWorktrees: WorktreeWithStatus[];
   refresh: () => Promise<void>;
 } {
   const {
-    repoId,
+    repositories,
     pollingIntervalMs,
     ghPollingIntervalMs,
     linearPollingIntervalMs,
@@ -32,13 +33,27 @@ export function useWorktrees(config: WorktreeHookConfig): {
     hideMainBranch,
   } = config;
 
-  const [worktrees, setWorktrees] = useState<WorktreeWithStatus[]>([]);
+  const [groups, setGroups] = useState<WorktreeGroup[]>([]);
+  const [flatWorktrees, setFlatWorktrees] = useState<WorktreeWithStatus[]>([]);
   const prCacheRef = useRef<Map<string, PrInfo | null>>(new Map());
   const linearCacheRef = useRef<Map<string, LinearInfo | null>>(new Map());
 
+  // Keep refs for values that refresh needs, so it always reads the latest
+  const reposRef = useRef(repositories);
+  reposRef.current = repositories;
+  const hideMainRef = useRef(hideMainBranch);
+  hideMainRef.current = hideMainBranch;
+  const ghPrStatusRef = useRef(ghPrStatus);
+  ghPrStatusRef.current = ghPrStatus;
+  const linearEnabledRef = useRef(linearEnabled);
+  linearEnabledRef.current = linearEnabled;
+
+  // Generation counter: stale refresh calls check this before setting state
+  const genRef = useRef(0);
+
   // Fetch PR info for all branches and update cache
   const refreshPrInfo = useCallback(async (branches: Array<{ path: string; branch: string }>) => {
-    if (!ghPrStatus || branches.length === 0) return;
+    if (branches.length === 0) return;
     const entries = await Promise.all(
       branches.map(async ({ path, branch }) => {
         try {
@@ -52,12 +67,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
     for (const [branch, info] of entries) {
       prCacheRef.current.set(branch, info);
     }
-  }, [ghPrStatus]);
+  }, []);
 
-  // Fetch Linear info for all branches and update cache
   const refreshLinearInfo = useCallback(async (branches: string[]) => {
-    if (!linearEnabled || !linearApiKey || branches.length === 0) return;
-
+    if (branches.length === 0) return;
     const entries = await Promise.all(
       branches.map(async (branch) => {
         try {
@@ -71,107 +84,153 @@ export function useWorktrees(config: WorktreeHookConfig): {
     for (const [branch, info] of entries) {
       linearCacheRef.current.set(branch, info);
     }
-  }, [linearEnabled, linearApiKey]);
+  }, [linearApiKey]);
 
+  // Single stable refresh function that reads latest values from refs
   const refresh = useCallback(async (forceIntegrations = false) => {
-    if (!repoId) {
-      setWorktrees([]);
+    const myGen = ++genRef.current;
+    const repos = reposRef.current;
+    const shouldHideMain = hideMainRef.current;
+    const shouldFetchPr = ghPrStatusRef.current;
+    const shouldFetchLinear = linearEnabledRef.current;
+
+    if (repos.length === 0) {
+      setGroups([]);
+      setFlatWorktrees([]);
       return;
     }
 
     try {
-      const dbWorktrees = getWorktrees(repoId);
-      const statuses = getAgentStatuses(repoId);
-
-      // On forced refresh, fetch integrations first
+      // Collect all branches for integration fetches if forced
       if (forceIntegrations) {
-        const branchesForPr = dbWorktrees.map((wt) => ({ path: wt.path, branch: wt.branch }));
-        const branchNames = dbWorktrees.map((wt) => wt.branch);
+        const allBranchesForPr: Array<{ path: string; branch: string }> = [];
+        const allBranchNames: string[] = [];
+        for (const repo of repos) {
+          const dbWorktrees = getWorktrees(repo.id);
+          for (const wt of dbWorktrees) {
+            allBranchesForPr.push({ path: wt.path, branch: wt.branch });
+            allBranchNames.push(wt.branch);
+          }
+        }
         await Promise.all([
-          ghPrStatus ? refreshPrInfo(branchesForPr) : Promise.resolve(),
-          linearEnabled ? refreshLinearInfo(branchNames) : Promise.resolve(),
+          shouldFetchPr ? refreshPrInfo(allBranchesForPr) : Promise.resolve(),
+          shouldFetchLinear ? refreshLinearInfo(allBranchNames) : Promise.resolve(),
         ]);
+        // Bail if a newer refresh started while we were fetching
+        if (myGen !== genRef.current) return;
       }
 
-      const enriched: WorktreeWithStatus[] = await Promise.all(
-        dbWorktrees.map(async (wt) => {
-          let git_status = null;
-          let last_commit = null;
-          try {
-            [git_status, last_commit] = await Promise.all([
-              getGitStatus(wt.path),
-              getLastCommit(wt.path),
-            ]);
-          } catch (err) {
-            log("warn", "useWorktrees", `Failed to get git info for ${wt.path}: ${err}`);
-          }
+      const newGroups: WorktreeGroup[] = [];
+      const allFlat: WorktreeWithStatus[] = [];
 
-          return {
-            ...wt,
-            agent_status: statuses.get(wt.id) ?? null,
-            git_status,
-            last_commit,
-            pr_info: prCacheRef.current.get(wt.branch) ?? null,
-            linear_info: linearCacheRef.current.get(wt.branch) ?? null,
-          };
-        })
-      );
+      for (const repo of repos) {
+        const dbWorktrees = getWorktrees(repo.id);
+        const statuses = getAgentStatuses(repo.id);
 
-      enriched.sort((a, b) => {
-        return b.created_at.localeCompare(a.created_at);
-      });
+        const enriched: WorktreeWithStatus[] = await Promise.all(
+          dbWorktrees.map(async (wt) => {
+            let git_status = null;
+            let last_commit = null;
+            try {
+              [git_status, last_commit] = await Promise.all([
+                getGitStatus(wt.path),
+                getLastCommit(wt.path),
+              ]);
+            } catch (err) {
+              log("warn", "useWorktrees", `Failed to get git info for ${wt.path}: ${err}`);
+            }
 
-      const filtered = hideMainBranch
-        ? enriched.filter((wt) => wt.branch !== "main" && wt.branch !== "master")
-        : enriched;
+            return {
+              ...wt,
+              agent_status: statuses.get(wt.id) ?? null,
+              git_status,
+              last_commit,
+              pr_info: prCacheRef.current.get(wt.branch) ?? null,
+              linear_info: linearCacheRef.current.get(wt.branch) ?? null,
+            };
+          })
+        );
 
-      setWorktrees(filtered);
+        // Bail if a newer refresh started while we were enriching
+        if (myGen !== genRef.current) return;
+
+        enriched.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+        const filtered = shouldHideMain
+          ? enriched.filter((wt) => wt.branch !== "main" && wt.branch !== "master")
+          : enriched;
+
+        if (filtered.length > 0 || repos.length === 1) {
+          newGroups.push({ repo, worktrees: filtered });
+        }
+        allFlat.push(...filtered);
+      }
+
+      // Final staleness check before committing state
+      if (myGen !== genRef.current) return;
+
+      setGroups(newGroups);
+      setFlatWorktrees(allFlat);
     } catch (err) {
       log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);
     }
-  }, [repoId, ghPrStatus, linearEnabled, hideMainBranch, refreshPrInfo, refreshLinearInfo]);
+  }, [refreshPrInfo, refreshLinearInfo]);
 
-  // Main polling loop (git status, agent status — no integrations)
+  // Re-fetch immediately when repositories change
   useEffect(() => {
     refresh();
+  }, [repositories]);
+
+  // Main polling loop
+  useEffect(() => {
     const timer = setInterval(() => refresh(false), pollingIntervalMs);
     return () => clearInterval(timer);
   }, [refresh, pollingIntervalMs]);
 
   // GitHub PR polling loop
   useEffect(() => {
-    if (!ghPrStatus || !repoId) return;
+    if (!ghPrStatus || repositories.length === 0) return;
 
     const doFetch = async () => {
-      const dbWorktrees = getWorktrees(repoId);
-      const branchesForPr = dbWorktrees.map((wt) => ({ path: wt.path, branch: wt.branch }));
-      await refreshPrInfo(branchesForPr);
+      const allBranches: Array<{ path: string; branch: string }> = [];
+      for (const repo of reposRef.current) {
+        const dbWorktrees = getWorktrees(repo.id);
+        for (const wt of dbWorktrees) {
+          allBranches.push({ path: wt.path, branch: wt.branch });
+        }
+      }
+      await refreshPrInfo(allBranches);
       refresh(false);
     };
 
     doFetch();
     const timer = setInterval(doFetch, ghPollingIntervalMs);
     return () => clearInterval(timer);
-  }, [repoId, ghPrStatus, ghPollingIntervalMs, refreshPrInfo, refresh]);
+  }, [repositories, ghPrStatus, ghPollingIntervalMs, refreshPrInfo, refresh]);
 
   // Linear polling loop
   useEffect(() => {
-    if (!linearEnabled || !repoId) return;
+    if (!linearEnabled || repositories.length === 0) return;
 
     const doFetch = async () => {
-      const dbWorktrees = getWorktrees(repoId);
-      const branchNames = dbWorktrees.map((wt) => wt.branch);
-      await refreshLinearInfo(branchNames);
+      const allBranches: string[] = [];
+      for (const repo of reposRef.current) {
+        const dbWorktrees = getWorktrees(repo.id);
+        for (const wt of dbWorktrees) {
+          allBranches.push(wt.branch);
+        }
+      }
+      await refreshLinearInfo(allBranches);
       refresh(false);
     };
 
     doFetch();
     const timer = setInterval(doFetch, linearPollingIntervalMs);
     return () => clearInterval(timer);
-  }, [repoId, linearEnabled, linearPollingIntervalMs, refreshLinearInfo, refresh]);
+  }, [repositories, linearEnabled, linearPollingIntervalMs, refreshLinearInfo, refresh]);
 
   // Exposed refresh always forces integrations fetch
   const forceRefresh = useCallback(() => refresh(true), [refresh]);
 
-  return { worktrees, refresh: forceRefresh };
+  return { groups, flatWorktrees, refresh: forceRefresh };
 }

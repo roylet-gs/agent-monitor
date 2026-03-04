@@ -4,11 +4,12 @@ import { StatusBar } from "./StatusBar.js";
 import { WorktreeList } from "./WorktreeList.js";
 import { WorktreeDetail } from "./WorktreeDetail.js";
 import { ActionBar } from "./ActionBar.js";
-import type { WorktreeWithStatus } from "../lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup } from "../lib/types.js";
 
 interface DashboardProps {
   repoName: string;
-  worktrees: WorktreeWithStatus[];
+  groups: WorktreeGroup[];
+  flatWorktrees: WorktreeWithStatus[];
   selectedIndex: number;
   busy: string | null;
   escHint: boolean;
@@ -18,23 +19,24 @@ interface DashboardProps {
 
 export function Dashboard({
   repoName,
-  worktrees,
+  groups,
+  flatWorktrees,
   selectedIndex,
   busy,
   escHint,
   unseenIds,
   compactView,
 }: DashboardProps) {
-  const selected = worktrees[selectedIndex] ?? null;
+  const selected = flatWorktrees[selectedIndex] ?? null;
 
   return (
     <Box flexDirection="column">
-      <StatusBar repoName={repoName} worktreeCount={worktrees.length} />
+      <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} />
       <Box>
-        <WorktreeList worktrees={worktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
+        <WorktreeList groups={groups} flatWorktrees={flatWorktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
         <WorktreeDetail worktree={selected} />
       </Box>
-      <ActionBar busy={busy} hasWorktrees={worktrees.length > 0} escHint={escHint} />
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0} escHint={escHint} />
     </Box>
   );
 }
