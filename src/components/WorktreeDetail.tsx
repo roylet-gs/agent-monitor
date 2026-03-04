@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { getPrStatusLabel } from "../lib/github.js";
 import type { WorktreeWithStatus } from "../lib/types.js";
 
 interface WorktreeDetailProps {
@@ -127,6 +128,31 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
             </Text>
           </Box>
         )}
+
+        {/* Pull Request */}
+        {worktree.pr_info && (() => {
+          const { label, color } = getPrStatusLabel(worktree.pr_info);
+          const pr = worktree.pr_info;
+          const checks = pr.checksStatus !== "none" ? (() => {
+            const icon = pr.checksStatus === "passing" ? "✓" : pr.checksStatus === "failing" ? "✗" : "◌";
+            const checkColor = pr.checksStatus === "passing" ? "green" : pr.checksStatus === "failing" ? "red" : "cyan";
+            return { icon, checkColor, statusText: pr.checksStatus === "pending" ? "running" : pr.checksStatus };
+          })() : null;
+          return (
+            <Box flexDirection="column">
+              <Text>
+                <Text bold>PR #{pr.number} </Text>
+                <Text color={color}>{label}</Text>
+              </Text>
+              <Text dimColor>{pr.title}</Text>
+              {checks && (
+                <Text color={checks.checkColor}>
+                  {checks.icon} Checks {checks.statusText}
+                </Text>
+              )}
+            </Box>
+          );
+        })()}
       </Box>
     </Box>
   );

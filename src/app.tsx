@@ -86,7 +86,9 @@ export function App({ onRunScript }: AppProps) {
 
   const { worktrees, refresh } = useWorktrees(
     currentRepo?.id ?? null,
-    settings.pollingIntervalMs
+    settings.pollingIntervalMs,
+    settings.ghPrStatus,
+    settings.ghPollingIntervalMs
   );
 
   // Track unseen status changes per worktree
@@ -456,6 +458,12 @@ export function App({ onRunScript }: AppProps) {
       await refresh();
       setBusy(null);
     },
+    onOpenPr: () => {
+      const wt = worktrees[selectedIndex];
+      if (wt?.pr_info?.url) {
+        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch(() => {});
+      }
+    },
     onQuit: () => exit(),
     onEscHint: setEscHint,
   });
@@ -511,6 +519,18 @@ export function App({ onRunScript }: AppProps) {
           onReuse={() => {
             doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true);
             setPendingBranch(null);
+          }}
+          onDeleteAndRecreate={async () => {
+            if (!currentRepo) return;
+            const branch = pendingBranch.branch;
+            const customName = pendingBranch.customName;
+            setPendingBranch(null);
+            try {
+              await deleteBranch(currentRepo.path, branch, true);
+            } catch {
+              // Branch may only exist on remote, ignore local delete failure
+            }
+            await doCreateWorktree(branch, customName, false);
           }}
           onCancel={() => {
             setPendingBranch(null);

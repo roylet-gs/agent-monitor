@@ -1,5 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
+import { getPrStatusLabel } from "../lib/github.js";
 import type { WorktreeWithStatus } from "../lib/types.js";
 
 interface WorktreeListProps {
@@ -61,6 +62,17 @@ export function WorktreeList({ worktrees, selectedIndex, unseenIds }: WorktreeLi
               >
                 {displayName}
               </Text>
+              {wt.custom_name && (
+                <Text dimColor>{wt.branch}</Text>
+              )}
+              {wt.pr_info && (() => {
+                const { label, color } = getPrStatusLabel(wt.pr_info);
+                return (
+                  <Text color={color} dimColor>
+                    {label}
+                  </Text>
+                );
+              })()}
               {unseen && <Text color="magenta" bold>*</Text>}
             </Box>
           );

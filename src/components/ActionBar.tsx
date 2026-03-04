@@ -34,6 +34,7 @@ export function ActionBar({ busy, hasWorktrees, escHint }: ActionBarProps) {
           <Text color="yellow">[Enter]</Text> Open
           <Text color="yellow"> [n]</Text>ew
           <Text color="yellow"> [d]</Text>elete
+          <Text color="yellow"> [p]</Text>r
           <Text color="yellow"> [r]</Text>efresh
           <Text color="yellow"> [s]</Text>ettings
           <Text color="yellow"> [q]</Text>uit

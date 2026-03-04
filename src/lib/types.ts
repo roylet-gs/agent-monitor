@@ -26,10 +26,22 @@ export interface AgentStatus {
 
 export type AgentStatusType = "idle" | "executing" | "planning" | "waiting";
 
+export interface PrInfo {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  isDraft: boolean;
+  reviewDecision: string;
+  hasFeedback: boolean;
+  checksStatus: "pending" | "passing" | "failing" | "none";
+}
+
 export interface WorktreeWithStatus extends Worktree {
   agent_status: AgentStatus | null;
   git_status: GitStatus | null;
   last_commit: CommitInfo | null;
+  pr_info: PrInfo | null;
 }
 
 export interface GitStatus {
@@ -50,6 +62,8 @@ export interface Settings {
   pollingIntervalMs: number;
   autoInstallHooks: boolean;
   autoSyncOnStartup: boolean;
+  ghPrStatus: boolean;
+  ghPollingIntervalMs: number;
   logLevel: "debug" | "info" | "warn" | "error";
 }
 

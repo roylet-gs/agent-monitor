@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname } from "path";
 import { SETTINGS_PATH, APP_DIR } from "./paths.js";
+import { isGhAvailable } from "./github.js";
+import { log } from "./logger.js";
 import type { Settings } from "./types.js";
 
 const DEFAULT_SETTINGS: Settings = {
@@ -9,12 +11,19 @@ const DEFAULT_SETTINGS: Settings = {
   pollingIntervalMs: 2000,
   autoInstallHooks: true,
   autoSyncOnStartup: true,
+  ghPrStatus: true,
+  ghPollingIntervalMs: 60000,
   logLevel: "info",
 };
 
 export function loadSettings(): Settings {
   if (!existsSync(SETTINGS_PATH)) {
-    return { ...DEFAULT_SETTINGS };
+    // First run — check if gh CLI is available
+    const ghAvailable = isGhAvailable();
+    if (!ghAvailable) {
+      log("info", "settings", "gh CLI not found — PR status disabled. Enable in settings if you install it later.");
+    }
+    return { ...DEFAULT_SETTINGS, ghPrStatus: ghAvailable };
   }
   try {
     const raw = readFileSync(SETTINGS_PATH, "utf-8");

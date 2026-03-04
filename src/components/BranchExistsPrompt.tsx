@@ -4,12 +4,14 @@ import { Box, Text, useInput } from "ink";
 interface BranchExistsPromptProps {
   branchName: string;
   onReuse: () => void;
+  onDeleteAndRecreate: () => void;
   onCancel: () => void;
 }
 
 export function BranchExistsPrompt({
   branchName,
   onReuse,
+  onDeleteAndRecreate,
   onCancel,
 }: BranchExistsPromptProps) {
   // Ignore input on the first frame to avoid the Enter keypress
@@ -29,6 +31,9 @@ export function BranchExistsPrompt({
     if (key.return || input === "y") {
       onReuse();
     }
+    if (input === "d") {
+      onDeleteAndRecreate();
+    }
   });
 
   return (
@@ -37,12 +42,16 @@ export function BranchExistsPrompt({
         Branch "{branchName}" already exists
       </Text>
       <Box marginTop={1} flexDirection="column">
-        <Text>A branch with this name already exists. Would you like to</Text>
-        <Text>create a worktree using the existing branch?</Text>
+        <Text>A branch with this name already exists. What would you like to do?</Text>
       </Box>
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
         <Text>
-          <Text color="yellow">[Enter/y]</Text> Reuse branch{" "}
+          <Text color="yellow">[Enter/y]</Text> Reuse existing branch
+        </Text>
+        <Text>
+          <Text color="red">[d]</Text> Delete branch and re-create from main
+        </Text>
+        <Text>
           <Text color="yellow">[Esc/n]</Text> Go back
         </Text>
       </Box>

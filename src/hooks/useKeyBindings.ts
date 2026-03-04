@@ -13,6 +13,7 @@ interface KeyBindingActions {
   onDelete: () => void;
   onSettings: () => void;
   onRefresh: () => void;
+  onOpenPr: () => void;
   onQuit: () => void;
   onEscHint: (show: boolean) => void;
 }
@@ -72,6 +73,10 @@ export function useKeyBindings(actions: KeyBindingActions): void {
     }
     if (input === "r") {
       actions.onRefresh();
+      return;
+    }
+    if (input === "p") {
+      actions.onOpenPr();
       return;
     }
     if (input === "q") {

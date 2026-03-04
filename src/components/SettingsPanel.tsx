@@ -11,6 +11,8 @@ type SettingsField =
   | "polling"
   | "autoHooks"
   | "autoSync"
+  | "ghPrStatus"
+  | "ghPolling"
   | "logLevel"
   | "repos";
 
@@ -20,6 +22,8 @@ const FIELDS: SettingsField[] = [
   "polling",
   "autoHooks",
   "autoSync",
+  "ghPrStatus",
+  "ghPolling",
   "logLevel",
   "repos",
 ];
@@ -59,6 +63,9 @@ export function SettingsPanel({
     } else if (activeField === "polling") {
       setEditValue(String(current.pollingIntervalMs / 1000));
       setEditing(true);
+    } else if (activeField === "ghPolling") {
+      setEditValue(String(current.ghPollingIntervalMs / 1000));
+      setEditing(true);
     }
   };
 
@@ -69,6 +76,11 @@ export function SettingsPanel({
       const seconds = parseFloat(editValue);
       if (!isNaN(seconds) && seconds >= 0.5) {
         setCurrent((s) => ({ ...s, pollingIntervalMs: Math.round(seconds * 1000) }));
+      }
+    } else if (activeField === "ghPolling") {
+      const seconds = parseFloat(editValue);
+      if (!isNaN(seconds) && seconds >= 10) {
+        setCurrent((s) => ({ ...s, ghPollingIntervalMs: Math.round(seconds * 1000) }));
       }
     }
     setEditing(false);
@@ -104,7 +116,7 @@ export function SettingsPanel({
     }
 
     // Enter on text fields starts editing
-    if ((activeField === "prefix" || activeField === "polling") && key.return) {
+    if ((activeField === "prefix" || activeField === "polling" || activeField === "ghPolling") && key.return) {
       startEditing();
       return;
     }
@@ -123,6 +135,11 @@ export function SettingsPanel({
 
     if (activeField === "autoSync" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, autoSyncOnStartup: !s.autoSyncOnStartup }));
+      return;
+    }
+
+    if (activeField === "ghPrStatus" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, ghPrStatus: !s.ghPrStatus }));
       return;
     }
 
@@ -239,6 +256,35 @@ export function SettingsPanel({
           <Text color={current.autoSyncOnStartup ? "green" : "gray"}>
             [{current.autoSyncOnStartup ? "✓" : " "}]
           </Text>
+        </Box>
+
+        {/* GitHub PR Status */}
+        <Box>
+          <Text bold={activeField === "ghPrStatus"}>
+            {activeField === "ghPrStatus" ? "▸" : " "} GitHub PR Status:{" "}
+          </Text>
+          <Text color={current.ghPrStatus ? "green" : "gray"}>
+            [{current.ghPrStatus ? "✓" : " "}]
+          </Text>
+        </Box>
+
+        {/* GitHub Polling Interval */}
+        <Box>
+          <Text bold={activeField === "ghPolling"}>
+            {activeField === "ghPolling" ? "▸" : " "} GitHub Poll Interval (s):{" "}
+          </Text>
+          {editing && activeField === "ghPolling" ? (
+            <TextInput
+              value={editValue}
+              onChange={setEditValue}
+              onSubmit={commitEdit}
+            />
+          ) : (
+            <Text>
+              {current.ghPollingIntervalMs / 1000}
+              {activeField === "ghPolling" && <Text dimColor> (Enter to edit, min 10s)</Text>}
+            </Text>
+          )}
         </Box>
 
         {/* Log Level */}

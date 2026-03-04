@@ -1,5 +1,7 @@
 Worktree agent Monitoring CLI Tool:
 
+/Users/roylet/Documents/Projects/gridsight
+
 I want to build a CLI tool that can be used to monitor progress on worktrees within a given repository.
 The way this will work is that I call a cli command like "am" (agent monitor) and it will open up a Terminal UI with a list of worktrees
 for a given repository.
@@ -49,3 +51,13 @@ Technology:
   a SQLite database stored in ~/.agent-monitor/agent-monitor.db
 - The TUI will have a live sync with the database so that the user can see the current status of the worktree in real time.
 - When hooks are installed, make sure that the appropriate .gitignore is created so that the hooks don't get committed to the repository.
+
+Statuses:
+
+idle - When nothing is happening and there is no question from the claude
+executing - When the permission mode is not plan and claude is actively building.
+thinking - Remove this, it should just be part of executing.
+planning - When the permission mode is planning show this, even while it is executing.
+waiting - When claude is asking the user for a decision. For example, asking a question or waiting for a response to start a plan
+
+Are we able to enable/disable the gh tool PR details in the settings. There may be cases where someone doesn't have the gh tool. Onstartup for the first time Enable it by default, but if the gh tool doesn't exist, disable it and tell the user.
