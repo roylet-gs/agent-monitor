@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ghPollingIntervalMs: 60000,
   logLevel: "info",
   linearEnabled: false,
+  linearUseDesktopApp: false,
   linearApiKey: "",
   linearPollingIntervalMs: 60000,
 };

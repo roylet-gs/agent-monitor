@@ -83,6 +83,7 @@ export interface Settings {
   ghPollingIntervalMs: number;
   logLevel: "debug" | "info" | "warn" | "error";
   linearEnabled: boolean;
+  linearUseDesktopApp: boolean;
   linearApiKey: string;
   linearPollingIntervalMs: number;
 }
