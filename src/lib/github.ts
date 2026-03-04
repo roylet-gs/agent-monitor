@@ -12,6 +12,7 @@ interface GhPrResult {
   latestReviews: Array<{ state: string }>;
   statusCheckRollup: Array<{ status: string; conclusion: string }>;
   comments: Array<unknown>;
+  headRefName: string;
 }
 
 function execGh(args: string[], cwd: string): Promise<string> {
@@ -65,28 +66,75 @@ export async function fetchPrInfo(
     const results: GhPrResult[] = JSON.parse(stdout);
     if (!results || results.length === 0) return null;
 
-    const pr = results[0]!;
-
-    const hasReviewFeedback = (pr.latestReviews ?? []).some(
-      (r) => r.state === "COMMENTED" || r.state === "CHANGES_REQUESTED"
-    );
-    const hasDraftComments = pr.isDraft && (pr.comments ?? []).length > 0;
-    const hasFeedback = hasReviewFeedback || hasDraftComments;
-
-    return {
-      number: pr.number,
-      title: pr.title,
-      url: pr.url,
-      state: pr.state,
-      isDraft: pr.isDraft,
-      reviewDecision: pr.reviewDecision ?? "",
-      hasFeedback,
-      checksStatus: deriveChecksStatus(pr.statusCheckRollup ?? []),
-    };
+    return ghResultToPrInfo(results[0]!);
   } catch (err) {
     log("debug", "github", `Failed to fetch PR info for ${branch}: ${err}`);
     return null;
   }
+}
+
+function ghResultToPrInfo(pr: GhPrResult): PrInfo {
+  const hasReviewFeedback = (pr.latestReviews ?? []).some(
+    (r) => r.state === "COMMENTED" || r.state === "CHANGES_REQUESTED"
+  );
+  const hasDraftComments = pr.isDraft && (pr.comments ?? []).length > 0;
+  const hasFeedback = hasReviewFeedback || hasDraftComments;
+
+  return {
+    number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    state: pr.state,
+    isDraft: pr.isDraft,
+    reviewDecision: pr.reviewDecision ?? "",
+    hasFeedback,
+    checksStatus: deriveChecksStatus(pr.statusCheckRollup ?? []),
+  };
+}
+
+export async function fetchAllPrInfo(
+  repoPath: string,
+  branches: string[]
+): Promise<Map<string, PrInfo | null>> {
+  const result = new Map<string, PrInfo | null>();
+  if (branches.length === 0) return result;
+
+  // Initialize all branches to null
+  for (const b of branches) {
+    result.set(b, null);
+  }
+
+  try {
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(
+        "gh",
+        [
+          "pr", "list",
+          "--state", "all",
+          "--json", "number,title,url,state,isDraft,reviewDecision,latestReviews,statusCheckRollup,comments,headRefName",
+          "--limit", "100",
+        ],
+        { cwd: repoPath, timeout: 10000 },
+        (err, out) => {
+          if (err) reject(err);
+          else resolve(out);
+        }
+      );
+    });
+
+    const prs: GhPrResult[] = JSON.parse(stdout);
+    const branchSet = new Set(branches);
+
+    for (const pr of prs) {
+      if (branchSet.has(pr.headRefName) && result.get(pr.headRefName) === null) {
+        result.set(pr.headRefName, ghResultToPrInfo(pr));
+      }
+    }
+  } catch (err) {
+    log("debug", "github", `Failed to batch-fetch PR info for ${repoPath}: ${err}`);
+  }
+
+  return result;
 }
 
 export function getPrStatusLabel(pr: PrInfo): { label: string; color: string } {
