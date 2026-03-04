@@ -1,11 +1,21 @@
 {
-  "name": "agent-monitor",
+  "name": "@roylet-gs/agent-monitor",
   "version": "0.1.0",
   "description": "CLI TUI tool for monitoring git worktrees and Claude Code agent status",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
     "am": "./dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/roylet-gs/agent-monitor.git"
+  },
+  "files": [
+    "dist/"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "build": "tsc",
