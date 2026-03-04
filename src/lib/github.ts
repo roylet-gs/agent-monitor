@@ -93,6 +93,12 @@ export function getPrStatusLabel(pr: PrInfo): { label: string; color: string } {
   const { state, reviewDecision, hasFeedback, isDraft, checksStatus } = pr;
 
   if (state === "MERGED") {
+    if (checksStatus === "failing") {
+      return { label: "Merged - Actions Failing", color: "magenta" };
+    }
+    if (checksStatus === "pending") {
+      return { label: "Merged - Actions Running", color: "magenta" };
+    }
     return { label: "Merged", color: "magenta" };
   }
   if (state === "CLOSED") {
