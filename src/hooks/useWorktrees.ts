@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getWorktrees, getAgentStatuses } from "../lib/db.js";
-import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchPrInfo } from "../lib/github.js";
 import { fetchLinearInfo } from "../lib/linear.js";
+import { enrichWorktree } from "../lib/enrich.js";
 import { log } from "../lib/logger.js";
 import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
 
@@ -129,27 +129,12 @@ export function useWorktrees(config: WorktreeHookConfig): {
         const statuses = getAgentStatuses(repo.id);
 
         const enriched: WorktreeWithStatus[] = await Promise.all(
-          dbWorktrees.map(async (wt) => {
-            let git_status = null;
-            let last_commit = null;
-            try {
-              [git_status, last_commit] = await Promise.all([
-                getGitStatus(wt.path),
-                getLastCommit(wt.path),
-              ]);
-            } catch (err) {
-              log("warn", "useWorktrees", `Failed to get git info for ${wt.path}: ${err}`);
-            }
-
-            return {
-              ...wt,
-              agent_status: statuses.get(wt.id) ?? null,
-              git_status,
-              last_commit,
-              pr_info: prCacheRef.current.get(wt.branch) ?? null,
-              linear_info: linearCacheRef.current.get(wt.branch) ?? null,
-            };
-          })
+          dbWorktrees.map((wt) =>
+            enrichWorktree(wt, statuses, repo.path, {
+              prCache: prCacheRef.current,
+              linearCache: linearCacheRef.current,
+            })
+          )
         );
 
         // Bail if a newer refresh started while we were enriching
