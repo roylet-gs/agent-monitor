@@ -1,5 +1,5 @@
 import React from "react";
-import { Box } from "ink";
+import { Box, useStdout } from "ink";
 import { StatusBar } from "./StatusBar.js";
 import { WorktreeList } from "./WorktreeList.js";
 import { WorktreeDetail } from "./WorktreeDetail.js";
@@ -28,11 +28,14 @@ export function Dashboard({
   compactView,
 }: DashboardProps) {
   const selected = flatWorktrees[selectedIndex] ?? null;
+  const { stdout } = useStdout();
+  // Reserve 2 lines for StatusBar and ActionBar
+  const contentHeight = (stdout?.rows ?? 24) - 2;
 
   return (
     <Box flexDirection="column">
       <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} />
-      <Box>
+      <Box height={contentHeight}>
         <WorktreeList groups={groups} flatWorktrees={flatWorktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
         <WorktreeDetail worktree={selected} />
       </Box>

@@ -31,7 +31,7 @@ export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, 
       <Box
         flexDirection="column"
         borderStyle="single"
-        width="40%"
+        width={38}
         paddingX={1}
       >
         <Text bold> Worktrees</Text>
@@ -49,7 +49,7 @@ export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, 
     <Box
       flexDirection="column"
       borderStyle="single"
-      width="40%"
+      width={38}
       paddingX={1}
     >
       <Text bold> Worktrees</Text>
@@ -106,7 +106,7 @@ export function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, 
           flatIdx += groupWorktrees.length;
 
           return (
-            <Box key={group.repo.id} flexDirection="column">
+            <Box key={group.repo.id} flexDirection="column" marginTop={showHeaders && startIdx > 0 ? 1 : 0}>
               {showHeaders && (
                 <Text dimColor>── {group.repo.name} ───</Text>
               )}
