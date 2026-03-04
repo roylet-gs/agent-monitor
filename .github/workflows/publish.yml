@@ -15,13 +15,18 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
           registry-url: https://npm.pkg.github.com
 
-      - run: npm ci
-      - run: npm run build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
 
       - name: Configure git
         run: |
@@ -32,12 +37,12 @@ jobs:
         run: npm version patch --no-git-tag-version
 
       - name: Publish to GitHub Packages
-        run: npm publish
+        run: pnpm publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push version bump
         run: |
-          git add package.json package-lock.json 2>/dev/null || git add package.json
+          git add package.json
           git commit -m "chore: bump version to $(node -p 'require(\"./package.json\").version')"
           git push
