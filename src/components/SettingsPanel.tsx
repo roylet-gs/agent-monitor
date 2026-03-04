@@ -179,12 +179,14 @@ export function SettingsPanel({
       return;
     }
 
-    if (key.tab || key.downArrow) {
+    const reposActive = activeField === "repos" && repositories.length > 0;
+
+    if (key.tab || (key.downArrow && !reposActive)) {
       setFieldIndex((i) => Math.min(FIELDS.length - 1, i + 1));
       return;
     }
 
-    if (key.upArrow) {
+    if (key.upArrow && !reposActive) {
       setFieldIndex((i) => Math.max(0, i - 1));
       return;
     }
@@ -263,11 +265,11 @@ export function SettingsPanel({
         removeStartupScript(repositories[repoIndex].id);
         return;
       }
-      if (key.leftArrow) {
+      if (key.leftArrow || key.upArrow) {
         setRepoIndex((i) => Math.max(0, i - 1));
         return;
       }
-      if (key.rightArrow) {
+      if (key.rightArrow || key.downArrow) {
         setRepoIndex((i) => Math.min(repositories.length - 1, i + 1));
         return;
       }
