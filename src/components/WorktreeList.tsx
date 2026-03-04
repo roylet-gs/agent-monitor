@@ -31,7 +31,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
       <Box
         flexDirection="column"
         borderStyle="single"
-        width={40}
+        width="40%"
         paddingX={1}
       >
         <Text bold> Worktrees</Text>
@@ -49,7 +49,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
     <Box
       flexDirection="column"
       borderStyle="single"
-      width={40}
+      width="40%"
       paddingX={1}
     >
       <Text bold> Worktrees</Text>
