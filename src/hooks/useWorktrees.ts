@@ -3,7 +3,7 @@ import { getWorktrees, getAgentStatuses } from "../lib/db.js";
 import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchPrInfo } from "../lib/github.js";
 import { fetchLinearInfo } from "../lib/linear.js";
-import { log, timeOperation } from "../lib/logger.js";
+import { log } from "../lib/logger.js";
 import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
 
 export interface WorktreeHookConfig {
@@ -60,8 +60,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         try {
           const info = await fetchPrInfo(path, branch);
           return [branch, info] as const;
-        } catch (err) {
-          log("debug", "useWorktrees", `Failed to fetch PR info for ${branch}: ${err}`);
+        } catch {
           return [branch, prCacheRef.current.get(branch) ?? null] as const;
         }
       })
@@ -78,8 +77,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         try {
           const info = await fetchLinearInfo(branch, linearApiKey);
           return [branch, info] as const;
-        } catch (err) {
-          log("debug", "useWorktrees", `Failed to fetch Linear info for ${branch}: ${err}`);
+        } catch {
           return [branch, linearCacheRef.current.get(branch) ?? null] as const;
         }
       })
@@ -91,7 +89,6 @@ export function useWorktrees(config: WorktreeHookConfig): {
 
   // Single stable refresh function that reads latest values from refs
   const refresh = useCallback(async (forceIntegrations = false) => {
-    const refreshStart = performance.now();
     const myGen = ++genRef.current;
     const repos = reposRef.current;
     const shouldHideMain = hideMainRef.current;
@@ -189,11 +186,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
         setGroups(newGroups);
         setFlatWorktrees(allFlat);
       }
-      const durationMs = Math.round(performance.now() - refreshStart);
-      log("debug", "useWorktrees", "refresh cycle completed", { durationMs, forceIntegrations: forceIntegrations });
     } catch (err) {
-      const durationMs = Math.round(performance.now() - refreshStart);
-      log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`, { durationMs });
+      log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);
     }
   }, [refreshPrInfo, refreshLinearInfo]);
 

@@ -9,8 +9,10 @@ import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
+import { WelcomeScreen } from "./components/WelcomeScreen.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
+import { usePubSub } from "./hooks/usePubSub.js";
 import {
   getDb,
   addRepository,
@@ -28,13 +30,15 @@ import {
   getMainBranch,
   branchExists,
   getRepoName,
+  fetchBranch,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
-import { installHooks } from "./lib/hooks-installer.js";
+import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
 import { log } from "./lib/logger.js";
+import { getVersion, getReleaseNotes, isNewVersion } from "./lib/version.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
@@ -53,7 +57,7 @@ export function App({ onRunScript, watch }: AppProps) {
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
-  const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string } | null>(null);
+  const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string; baseBranch: string } | null>(null);
   const [creatingBranch, setCreatingBranch] = useState("");
   const [creationSteps, setCreationSteps] = useState<StepInfo[]>([]);
   const [creationError, setCreationError] = useState<string | null>(null);
@@ -62,12 +66,24 @@ export function App({ onRunScript, watch }: AppProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
+  const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
   useEffect(() => {
     getDb();
     const repos = getRepositories();
     setRepositories(repos);
+
+    if (settings.lastSeenVersion === undefined) {
+      // First launch — silently record version, no welcome screen
+      const updated = { ...settings, lastSeenVersion: currentVersion };
+      setSettings(updated);
+      saveSettings(updated);
+    } else if (isNewVersion(settings.lastSeenVersion, currentVersion)) {
+      setMode("welcome");
+      return;
+    }
+
     if (repos.length === 0) {
       setMode("folder-browse");
     }
@@ -101,6 +117,13 @@ export function App({ onRunScript, watch }: AppProps) {
   // Keep a ref to always call the latest refresh (avoids stale closures in async handlers)
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
+  // Pub/sub: instant refresh on agent status updates
+  usePubSub((msg) => {
+    if (msg.type === "agent-status-update") {
+      refreshRef.current();
+    }
+  });
 
   // Derive the active repo from the currently selected worktree
   const activeRepo = useMemo((): Repository | null => {
@@ -150,33 +173,34 @@ export function App({ onRunScript, watch }: AppProps) {
     }
   }, [selectedIndex, flatWorktrees, unseenIds]);
 
+  // Auto-install global hooks on startup if not present
+  useEffect(() => {
+    if (!isGlobalHooksInstalled()) {
+      installGlobalHooks();
+    }
+  }, []);
+
   // Handle open in IDE
   const handleOpen = useCallback(async () => {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
     try {
-      if (settings.autoInstallHooks) {
-        setBusy("Installing hooks...");
-        installHooks(wt.path);
-      }
       openInIde(wt.path, settings.ide);
-      setBusy(null);
     } catch (err) {
       setError(`${err}`);
-      setBusy(null);
     }
   }, [flatWorktrees, selectedIndex, settings]);
 
   // Handle create worktree
   const handleCreate = useCallback(
-    async (branchName: string, customName: string) => {
+    async (branchName: string, customName: string, baseBranch: string) => {
       const repo = createTargetRepo ?? activeRepo;
       if (!repo) return;
 
       const exists = await branchExists(repo.path, branchName);
       if (exists) {
-        setPendingBranch({ branch: branchName, customName });
+        setPendingBranch({ branch: branchName, customName, baseBranch });
         setMode("branch-exists");
         return;
       }
@@ -185,12 +209,12 @@ export function App({ onRunScript, watch }: AppProps) {
       const { join } = await import("path");
       const wtDir = join(repo.path, ".worktrees", branchName.replace(/\//g, "-"));
       if (existsSync(wtDir)) {
-        setPendingBranch({ branch: branchName, customName });
+        setPendingBranch({ branch: branchName, customName, baseBranch });
         setMode("branch-exists");
         return;
       }
 
-      await doCreateWorktree(branchName, customName, false, repo);
+      await doCreateWorktree(branchName, customName, false, repo, baseBranch);
     },
     [activeRepo, createTargetRepo]
   );
@@ -211,18 +235,16 @@ export function App({ onRunScript, watch }: AppProps) {
 
   // Actually create the worktree (called directly or after branch-exists confirmation)
   const doCreateWorktree = useCallback(
-    async (branchName: string, customName: string, reuse: boolean, repo?: Repository) => {
+    async (branchName: string, customName: string, reuse: boolean, repo?: Repository, baseBranch?: string) => {
       const targetRepo = repo ?? createTargetRepo ?? activeRepo;
       if (!targetRepo) return;
 
       const hasScript = hasStartupScript(targetRepo.id);
 
       const steps: StepInfo[] = [
-        { label: "Creating git worktree", status: "active" },
+        { label: "Fetching latest base branch", status: "active" },
+        { label: "Creating git worktree", status: "pending" },
         { label: "Syncing database", status: "pending" },
-        ...(settings.autoInstallHooks
-          ? [{ label: "Installing hooks", status: "pending" as const }]
-          : []),
         ...(hasScript
           ? [{ label: "Running startup script", status: "pending" as const }]
           : []),
@@ -236,13 +258,21 @@ export function App({ onRunScript, watch }: AppProps) {
       let stepIdx = 0;
 
       try {
-        const mainBranch = await getMainBranch(targetRepo.path);
+        // Step: Fetch base branch
+        const effectiveBase = baseBranch?.trim() || await getMainBranch(targetRepo.path);
+        await fetchBranch(targetRepo.path, effectiveBase);
+        updateStep(stepIdx, "done");
+        stepIdx++;
+
+        // Step: Create worktree
+        updateStep(stepIdx, "active");
+        const baseRef = `origin/${effectiveBase}`;
         let wtPath: string;
         try {
           wtPath = await gitCreateWorktree(
             targetRepo.path,
             branchName,
-            mainBranch,
+            baseRef,
             reuse
           );
         } catch (gitErr) {
@@ -251,7 +281,7 @@ export function App({ onRunScript, watch }: AppProps) {
             updateStep(stepIdx, "error");
             setCreationError(null);
             setMode("dashboard");
-            setPendingBranch({ branch: branchName, customName });
+            setPendingBranch({ branch: branchName, customName, baseBranch: baseBranch ?? effectiveBase });
             setMode("branch-exists");
             return;
           }
@@ -276,14 +306,6 @@ export function App({ onRunScript, watch }: AppProps) {
         await refreshRef.current();
         updateStep(stepIdx, "done");
         stepIdx++;
-
-        // Step: Install hooks
-        if (settings.autoInstallHooks) {
-          updateStep(stepIdx, "active");
-          installHooks(wtPath);
-          updateStep(stepIdx, "done");
-          stepIdx++;
-        }
 
         log("info", "app", `Created worktree ${branchName}`);
 
@@ -421,6 +443,18 @@ export function App({ onRunScript, watch }: AppProps) {
     []
   );
 
+  // Handle welcome screen dismiss
+  const handleWelcomeDismiss = useCallback(() => {
+    const updated = { ...settings, lastSeenVersion: currentVersion };
+    setSettings(updated);
+    saveSettings(updated);
+    if (repositories.length === 0) {
+      setMode("folder-browse");
+    } else {
+      setMode("dashboard");
+    }
+  }, [settings, currentVersion, repositories]);
+
   // Handle factory reset
   const handleFactoryReset = useCallback(() => {
     resetAll();
@@ -482,9 +516,11 @@ export function App({ onRunScript, watch }: AppProps) {
     onOpenLinear: () => {
       const wt = flatWorktrees[selectedIndex];
       if (wt?.linear_info?.url) {
-        import("open").then((mod) => mod.default(wt.linear_info!.url)).catch((err) => {
-          log("warn", "app", `Failed to open Linear URL: ${err}`);
-        });
+        let url = wt.linear_info!.url;
+        if (settings.linearUseDesktopApp) {
+          url = url.replace("https://linear.app/", "linear://");
+        }
+        import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
     onToggleLogs: () => setShowLogs((v) => !v),
@@ -506,6 +542,14 @@ export function App({ onRunScript, watch }: AppProps) {
         <Box paddingX={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
+      )}
+
+      {mode === "welcome" && (
+        <WelcomeScreen
+          version={currentVersion}
+          releaseNotes={getReleaseNotes()}
+          onDismiss={handleWelcomeDismiss}
+        />
       )}
 
       {mode === "folder-browse" && (
@@ -532,6 +576,7 @@ export function App({ onRunScript, watch }: AppProps) {
       {mode === "new-worktree" && (
         <NewWorktreeForm
           defaultPrefix={settings.defaultBranchPrefix}
+          defaultBaseBranch={settings.defaultBaseBranch}
           onSubmit={handleCreate}
           onCancel={() => {
             setCreateTargetRepo(null);
@@ -544,7 +589,7 @@ export function App({ onRunScript, watch }: AppProps) {
         <BranchExistsPrompt
           branchName={pendingBranch.branch}
           onReuse={() => {
-            doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true);
+            doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true, undefined, pendingBranch.baseBranch);
             setPendingBranch(null);
           }}
           onDeleteAndRecreate={async () => {
@@ -552,13 +597,14 @@ export function App({ onRunScript, watch }: AppProps) {
             if (!repo) return;
             const branch = pendingBranch.branch;
             const customName = pendingBranch.customName;
+            const baseBranch = pendingBranch.baseBranch;
             setPendingBranch(null);
             try {
               await deleteBranch(repo.path, branch, true);
             } catch (err) {
               log("debug", "app", `Local branch delete failed (may only exist on remote): ${err}`);
             }
-            await doCreateWorktree(branch, customName, false, repo);
+            await doCreateWorktree(branch, customName, false, repo, baseBranch);
           }}
           onCancel={() => {
             setPendingBranch(null);
@@ -617,6 +663,7 @@ export function App({ onRunScript, watch }: AppProps) {
           compactView={settings.compactView}
           showLogs={showLogs}
           terminalRows={stdout?.rows ?? 24}
+          version={currentVersion}
         />
       )}
     </Box>

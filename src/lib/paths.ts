@@ -5,3 +5,4 @@ export const APP_DIR = join(homedir(), ".agent-monitor");
 export const DB_PATH = join(APP_DIR, "agent-monitor.db");
 export const SETTINGS_PATH = join(APP_DIR, "settings.json");
 export const LOG_PATH = join(APP_DIR, "debug.log");
+export const SOCKET_PATH = join(APP_DIR, "am.sock");

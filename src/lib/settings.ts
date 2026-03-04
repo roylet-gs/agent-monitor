@@ -8,8 +8,8 @@ import type { Settings } from "./types.js";
 export const DEFAULT_SETTINGS: Settings = {
   ide: "cursor",
   defaultBranchPrefix: "feature/",
-  pollingIntervalMs: 2000,
-  autoInstallHooks: true,
+  defaultBaseBranch: "main",
+  pollingIntervalMs: 10000,
   autoSyncOnStartup: true,
   compactView: false,
   hideMainBranch: true,
@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ghPollingIntervalMs: 60000,
   logLevel: "info",
   linearEnabled: false,
+  linearUseDesktopApp: false,
   linearApiKey: "",
   linearPollingIntervalMs: 60000,
 };

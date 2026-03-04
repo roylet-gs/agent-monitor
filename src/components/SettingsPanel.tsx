@@ -10,8 +10,8 @@ import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../li
 type SettingsField =
   | "ide"
   | "prefix"
+  | "baseBranch"
   | "polling"
-  | "autoHooks"
   | "autoSync"
   | "compactView"
   | "hideMainBranch"
@@ -19,6 +19,7 @@ type SettingsField =
   | "ghPrStatus"
   | "ghPolling"
   | "linearEnabled"
+  | "linearDesktopApp"
   | "linearApiKey"
   | "linearPolling"
   | "repos"
@@ -28,15 +29,16 @@ type SettingsField =
 const FIELDS: SettingsField[] = [
   "ide",
   "prefix",
+  "baseBranch",
   "autoSync",
   "compactView",
   "hideMainBranch",
   "polling",
-  "autoHooks",
   "logLevel",
   "ghPrStatus",
   "ghPolling",
   "linearEnabled",
+  "linearDesktopApp",
   "linearApiKey",
   "linearPolling",
   "repos",
@@ -104,6 +106,9 @@ export function SettingsPanel({
     if (activeField === "prefix") {
       setEditValue(current.defaultBranchPrefix);
       setEditing(true);
+    } else if (activeField === "baseBranch") {
+      setEditValue(current.defaultBaseBranch);
+      setEditing(true);
     } else if (activeField === "polling") {
       setEditValue(String(current.pollingIntervalMs / 1000));
       setEditing(true);
@@ -122,6 +127,8 @@ export function SettingsPanel({
   const commitEdit = () => {
     if (activeField === "prefix") {
       setCurrent((s) => ({ ...s, defaultBranchPrefix: editValue }));
+    } else if (activeField === "baseBranch") {
+      setCurrent((s) => ({ ...s, defaultBaseBranch: editValue }));
     } else if (activeField === "polling") {
       const seconds = parseFloat(editValue);
       if (!isNaN(seconds) && seconds >= 0.5) {
@@ -192,6 +199,7 @@ export function SettingsPanel({
     // Enter on text fields starts editing
     if (
       (activeField === "prefix" ||
+        activeField === "baseBranch" ||
         activeField === "polling" ||
         activeField === "ghPolling" ||
         activeField === "linearApiKey" ||
@@ -206,11 +214,6 @@ export function SettingsPanel({
       const idx = IDE_OPTIONS.indexOf(current.ide);
       const next = IDE_OPTIONS[(idx + 1) % IDE_OPTIONS.length]!;
       setCurrent((s) => ({ ...s, ide: next }));
-      return;
-    }
-
-    if (activeField === "autoHooks" && (key.return || input === " ")) {
-      setCurrent((s) => ({ ...s, autoInstallHooks: !s.autoInstallHooks }));
       return;
     }
 
@@ -236,6 +239,11 @@ export function SettingsPanel({
 
     if (activeField === "linearEnabled" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearEnabled: !s.linearEnabled }));
+      return;
+    }
+
+    if (activeField === "linearDesktopApp" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, linearUseDesktopApp: !s.linearUseDesktopApp }));
       return;
     }
 
@@ -334,6 +342,23 @@ export function SettingsPanel({
           )}
         </Box>
         <Box>
+          <Text bold={activeField === "baseBranch"}>
+            {activeField === "baseBranch" ? "▸" : " "} Default Base Branch:{" "}
+          </Text>
+          {editing && activeField === "baseBranch" ? (
+            <TextInput
+              value={editValue}
+              onChange={setEditValue}
+              onSubmit={commitEdit}
+            />
+          ) : (
+            <Text>
+              {current.defaultBaseBranch}
+              {activeField === "baseBranch" && <Text dimColor> (Enter to edit)</Text>}
+            </Text>
+          )}
+        </Box>
+        <Box>
           <Text bold={activeField === "autoSync"}>
             {activeField === "autoSync" ? "▸" : " "} Auto-sync on Startup:{" "}
           </Text>
@@ -376,14 +401,6 @@ export function SettingsPanel({
               {activeField === "polling" && <Text dimColor> (Enter to edit)</Text>}
             </Text>
           )}
-        </Box>
-        <Box>
-          <Text bold={activeField === "autoHooks"}>
-            {activeField === "autoHooks" ? "▸" : " "} Auto-install Hooks:{" "}
-          </Text>
-          <Text color={current.autoInstallHooks ? "green" : "gray"}>
-            [{current.autoInstallHooks ? "✓" : " "}]
-          </Text>
         </Box>
         <Box>
           <Text bold={activeField === "logLevel"}>
@@ -435,6 +452,14 @@ export function SettingsPanel({
           </Text>
           <Text color={current.linearEnabled ? "green" : "gray"}>
             [{current.linearEnabled ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "linearDesktopApp"}>
+            {activeField === "linearDesktopApp" ? "▸" : " "} Use Desktop App:{" "}
+          </Text>
+          <Text color={current.linearUseDesktopApp ? "green" : "gray"}>
+            [{current.linearUseDesktopApp ? "✓" : " "}]
           </Text>
         </Box>
         <Box>

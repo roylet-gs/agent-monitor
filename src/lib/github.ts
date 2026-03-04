@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "child_process";
-import { log, timeOperation } from "./logger.js";
+import { log } from "./logger.js";
 import type { PrInfo } from "./types.js";
 
 interface GhPrResult {
@@ -45,7 +45,6 @@ export async function fetchPrInfo(
   repoPath: string,
   branch: string
 ): Promise<PrInfo | null> {
-  return timeOperation("debug", "github", `fetchPrInfo(${branch})`, async () => {
   try {
     const stdout = await execGh(
       [
@@ -88,13 +87,18 @@ export async function fetchPrInfo(
     log("debug", "github", `Failed to fetch PR info for ${branch}: ${err}`);
     return null;
   }
-  });
 }
 
 export function getPrStatusLabel(pr: PrInfo): { label: string; color: string } {
   const { state, reviewDecision, hasFeedback, isDraft, checksStatus } = pr;
 
   if (state === "MERGED") {
+    if (checksStatus === "failing") {
+      return { label: "Merged - Actions Failing", color: "magenta" };
+    }
+    if (checksStatus === "pending") {
+      return { label: "Merged - Actions Running", color: "magenta" };
+    }
     return { label: "Merged", color: "magenta" };
   }
   if (state === "CLOSED") {

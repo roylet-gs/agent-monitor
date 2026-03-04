@@ -18,6 +18,7 @@ interface DashboardProps {
   compactView: boolean;
   showLogs: boolean;
   terminalRows: number;
+  version?: string;
 }
 
 export const Dashboard = React.memo(function Dashboard({
@@ -31,12 +32,13 @@ export const Dashboard = React.memo(function Dashboard({
   compactView,
   showLogs,
   terminalRows,
+  version,
 }: DashboardProps) {
   const selected = flatWorktrees[selectedIndex] ?? null;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} />
+      <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} version={version} />
       <Box flexGrow={1}>
         <WorktreeList groups={groups} flatWorktrees={flatWorktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
         <WorktreeDetail worktree={selected} />

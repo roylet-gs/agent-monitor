@@ -7,7 +7,7 @@ import { loadSettings } from "./lib/settings.js";
 import { handleHookEvent } from "./commands/hook-event.js";
 import { printStatus } from "./commands/status.js";
 import { printLogs } from "./commands/logs.js";
-import { installHooks } from "./lib/hooks-installer.js";
+import { installGlobalHooks, uninstallGlobalHooks } from "./lib/hooks-installer.js";
 import { App } from "./app.js";
 import { runScript, waitForEnter } from "./lib/run-script.js";
 
@@ -19,7 +19,9 @@ const cli = meow(
     $ am                            Launch the dashboard
     $ am --watch                    Launch with log panel open
     $ am status -w <path>           Print agent status for a worktree
-    $ am install-hooks <path>       Install Claude hooks into a worktree
+    $ am status -w <path> --set <s> Set agent status for a worktree
+    $ am install-hooks              Install Claude hooks into ~/.claude/settings.json
+    $ am uninstall-hooks            Remove agent-monitor hooks from ~/.claude/settings.json
     $ am hook-event -w <path>       Receive hook event from stdin (used by hooks)
     $ am logs                       Show recent logs
     $ am logs -f                    Follow log output
@@ -30,6 +32,7 @@ const cli = meow(
   Options
     --worktree, -w  Worktree path
     --event, -e     Event name override (for hook-event)
+    --set           Set agent status (idle, executing, planning, waiting)
     --lines, -n     Number of log lines to show (default: 50)
     --follow, -f    Follow log output
     --level         Filter logs by level (debug, info, warn, error)
@@ -51,6 +54,7 @@ const cli = meow(
     flags: {
       worktree: { type: "string", shortFlag: "w" },
       event: { type: "string", shortFlag: "e" },
+      set: { type: "string" },
       lines: { type: "number", shortFlag: "n", default: 50 },
       follow: { type: "boolean", shortFlag: "f", default: false },
       level: { type: "string" },
@@ -120,7 +124,10 @@ switch (command) {
   }
 
   case "status": {
-    printStatus(cli.flags.worktree);
+    printStatus(cli.flags.worktree, cli.flags.set).catch((err) => {
+      console.error("status error:", err);
+      process.exit(1);
+    });
     break;
   }
 
@@ -136,14 +143,14 @@ switch (command) {
   }
 
   case "install-hooks": {
-    const path = cli.input[1];
-    if (!path) {
-      log("error", "cli", "Missing path for install-hooks");
-      console.error("Usage: am install-hooks <path>");
-      process.exit(1);
-    }
-    installHooks(path);
-    console.log(`Hooks installed into ${path}/.claude/settings.local.json`);
+    installGlobalHooks();
+    console.log("Hooks installed into ~/.claude/settings.json");
+    break;
+  }
+
+  case "uninstall-hooks": {
+    uninstallGlobalHooks();
+    console.log("Hooks removed from ~/.claude/settings.json");
     break;
   }
 

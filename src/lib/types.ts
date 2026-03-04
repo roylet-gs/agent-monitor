@@ -74,8 +74,8 @@ export interface CommitInfo {
 export interface Settings {
   ide: "cursor" | "vscode" | "terminal";
   defaultBranchPrefix: string;
+  defaultBaseBranch: string;
   pollingIntervalMs: number;
-  autoInstallHooks: boolean;
   autoSyncOnStartup: boolean;
   compactView: boolean;
   hideMainBranch: boolean;
@@ -83,11 +83,14 @@ export interface Settings {
   ghPollingIntervalMs: number;
   logLevel: "debug" | "info" | "warn" | "error";
   linearEnabled: boolean;
+  linearUseDesktopApp: boolean;
   linearApiKey: string;
   linearPollingIntervalMs: number;
+  lastSeenVersion?: string;
 }
 
 export type AppMode =
+  | "welcome"
   | "dashboard"
   | "new-worktree"
   | "branch-exists"

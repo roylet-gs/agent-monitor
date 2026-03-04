@@ -1,7 +1,7 @@
 import { simpleGit, type SimpleGit } from "simple-git";
 import { existsSync } from "fs";
 import { basename, join, resolve } from "path";
-import { log, timeOperation } from "./logger.js";
+import { log } from "./logger.js";
 import type { GitStatus, CommitInfo } from "./types.js";
 
 export function getGit(cwd: string): SimpleGit {
@@ -19,7 +19,6 @@ export interface GitWorktreeInfo {
 }
 
 export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]> {
-  return timeOperation("debug", "git", `listWorktrees(${repoPath})`, async () => {
   const git = getGit(repoPath);
   try {
     const result = await git.raw(["worktree", "list", "--porcelain"]);
@@ -58,7 +57,6 @@ export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]
     log("error", "git", `Failed to list worktrees: ${err}`);
     return [];
   }
-  });
 }
 
 export async function createWorktree(
@@ -135,8 +133,7 @@ export async function getLastCommit(worktreePath: string): Promise<CommitInfo | 
       message: latest.message,
       relative_time: relTime.trim(),
     };
-  } catch (err) {
-    log("debug", "git", `Failed to get last commit for ${worktreePath}: ${err}`);
+  } catch {
     return null;
   }
 }
@@ -197,6 +194,16 @@ export async function deleteRemoteBranch(repoPath: string, branch: string): Prom
   const git = getGit(repoPath);
   await git.raw(["push", "origin", "--delete", branch]);
   log("info", "git", `Deleted remote branch origin/${branch}`);
+}
+
+export async function fetchBranch(repoPath: string, branch: string): Promise<void> {
+  const git = getGit(repoPath);
+  try {
+    await git.raw(["fetch", "origin", branch]);
+    log("info", "git", `Fetched origin/${branch}`);
+  } catch (err) {
+    log("warn", "git", `Failed to fetch origin/${branch}: ${err}`);
+  }
 }
 
 export function getRepoName(repoPath: string): string {
