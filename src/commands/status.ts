@@ -1,8 +1,12 @@
-import { getWorktreeByPath, getAgentStatus } from "../lib/db.js";
+import { getWorktreeByPath, getAgentStatus, upsertAgentStatus } from "../lib/db.js";
+import { publishMessage } from "../lib/pubsub-client.js";
+import type { AgentStatusType } from "../lib/types.js";
 
-export function printStatus(worktreePath?: string): void {
+const VALID_STATUSES: AgentStatusType[] = ["idle", "executing", "planning", "waiting"];
+
+export async function printStatus(worktreePath?: string, setStatus?: string): Promise<void> {
   if (!worktreePath) {
-    console.log("Usage: am status --worktree <path>");
+    console.log("Usage: am status --worktree <path> [--set <status>]");
     process.exit(1);
   }
 
@@ -12,6 +16,30 @@ export function printStatus(worktreePath?: string): void {
     process.exit(1);
   }
 
+  // Write mode: --set <status>
+  if (setStatus) {
+    if (!VALID_STATUSES.includes(setStatus as AgentStatusType)) {
+      console.log(`Invalid status: ${setStatus}. Must be one of: ${VALID_STATUSES.join(", ")}`);
+      process.exit(1);
+    }
+    const status = setStatus as AgentStatusType;
+    upsertAgentStatus(worktree.id, status, null, null, null);
+
+    await publishMessage({
+      type: "agent-status-update",
+      worktreeId: worktree.id,
+      status,
+      sessionId: null,
+      lastResponse: null,
+      transcriptSummary: null,
+      updatedAt: new Date().toISOString(),
+    }).catch(() => {});
+
+    console.log(`Status set to "${status}" for ${worktree.path}`);
+    return;
+  }
+
+  // Read mode (default)
   const status = getAgentStatus(worktree.id);
   console.log(`Worktree: ${worktree.path}`);
   console.log(`Branch:   ${worktree.branch}`);
