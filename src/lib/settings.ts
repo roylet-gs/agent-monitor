@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoInstallHooks: true,
   autoSyncOnStartup: true,
   compactView: false,
+  hideMainBranch: true,
   ghPrStatus: true,
   ghPollingIntervalMs: 60000,
   logLevel: "info",

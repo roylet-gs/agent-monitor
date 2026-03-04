@@ -14,6 +14,7 @@ export interface WorktreeHookConfig {
   ghPrStatus: boolean;
   linearEnabled: boolean;
   linearApiKey: string;
+  hideMainBranch: boolean;
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
@@ -28,6 +29,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     ghPrStatus,
     linearEnabled,
     linearApiKey,
+    hideMainBranch,
   } = config;
 
   const [worktrees, setWorktrees] = useState<WorktreeWithStatus[]>([]);
@@ -116,16 +118,18 @@ export function useWorktrees(config: WorktreeHookConfig): {
       );
 
       enriched.sort((a, b) => {
-        const timeA = a.agent_status?.updated_at ?? "";
-        const timeB = b.agent_status?.updated_at ?? "";
-        return timeB.localeCompare(timeA);
+        return b.created_at.localeCompare(a.created_at);
       });
 
-      setWorktrees(enriched);
+      const filtered = hideMainBranch
+        ? enriched.filter((wt) => wt.branch !== "main" && wt.branch !== "master")
+        : enriched;
+
+      setWorktrees(filtered);
     } catch (err) {
       log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);
     }
-  }, [repoId, ghPrStatus, linearEnabled, refreshPrInfo, refreshLinearInfo]);
+  }, [repoId, ghPrStatus, linearEnabled, hideMainBranch, refreshPrInfo, refreshLinearInfo]);
 
   // Main polling loop (git status, agent status — no integrations)
   useEffect(() => {

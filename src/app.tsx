@@ -91,6 +91,7 @@ export function App({ onRunScript }: AppProps) {
     ghPrStatus: settings.ghPrStatus,
     linearEnabled: settings.linearEnabled,
     linearApiKey: settings.linearApiKey,
+    hideMainBranch: settings.hideMainBranch,
   });
 
   // Track unseen status changes per worktree

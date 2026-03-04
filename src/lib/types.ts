@@ -73,6 +73,7 @@ export interface Settings {
   autoInstallHooks: boolean;
   autoSyncOnStartup: boolean;
   compactView: boolean;
+  hideMainBranch: boolean;
   ghPrStatus: boolean;
   ghPollingIntervalMs: number;
   logLevel: "debug" | "info" | "warn" | "error";

@@ -13,6 +13,7 @@ type SettingsField =
   | "autoHooks"
   | "autoSync"
   | "compactView"
+  | "hideMainBranch"
   | "logLevel"
   | "ghPrStatus"
   | "ghPolling"
@@ -26,6 +27,7 @@ const FIELDS: SettingsField[] = [
   "prefix",
   "autoSync",
   "compactView",
+  "hideMainBranch",
   "polling",
   "autoHooks",
   "logLevel",
@@ -197,6 +199,11 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "hideMainBranch" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, hideMainBranch: !s.hideMainBranch }));
+      return;
+    }
+
     if (activeField === "ghPrStatus" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, ghPrStatus: !s.ghPrStatus }));
       return;
@@ -305,6 +312,15 @@ export function SettingsPanel({
           </Text>
           <Text color={current.compactView ? "green" : "gray"}>
             [{current.compactView ? "✓" : " "}]
+          </Text>
+        </Box>
+        {/* Hide Main Branch */}
+        <Box>
+          <Text bold={activeField === "hideMainBranch"}>
+            {activeField === "hideMainBranch" ? "▸" : " "} Hide Main Branch:{" "}
+          </Text>
+          <Text color={current.hideMainBranch ? "green" : "gray"}>
+            [{current.hideMainBranch ? "✓" : " "}]
           </Text>
         </Box>
         {/* === Agent Section === */}
