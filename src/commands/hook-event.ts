@@ -1,5 +1,6 @@
 import { getWorktreeByPath, upsertAgentStatus } from "../lib/db.js";
 import { log } from "../lib/logger.js";
+import { publishMessage } from "../lib/pubsub-client.js";
 import type { AgentStatusType, HookEvent } from "../lib/types.js";
 
 export async function handleHookEvent(
@@ -30,7 +31,7 @@ export async function handleHookEvent(
   // Find worktree in DB
   const worktree = getWorktreeByPath(worktreePath);
   if (!worktree) {
-    log("warn", "hook-event", `Worktree not found in DB for path: ${worktreePath}`);
+    log("debug", "hook-event", `Worktree not found in DB for path: ${worktreePath}`);
     return;
   }
 
@@ -47,6 +48,17 @@ export async function handleHookEvent(
 
   upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary);
   log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`);
+
+  // Fire-and-forget publish for instant TUI update
+  await publishMessage({
+    type: "agent-status-update",
+    worktreeId: worktree.id,
+    status,
+    sessionId,
+    lastResponse,
+    transcriptSummary,
+    updatedAt: new Date().toISOString(),
+  }).catch(() => {});
 }
 
 function extractLastResponse(event: HookEvent): string | null {
@@ -64,19 +76,32 @@ function extractLastResponse(event: HookEvent): string | null {
 function mapEventToStatus(event: HookEvent): AgentStatusType | null {
   // Stop/Notification waiting cases take priority
   if (event.event === "Stop") {
+    // stop_hook_active is a loop-prevention flag (true = a Stop hook already
+    // blocked once). Since our hook never blocks, this is always false,
+    // so Stop always maps to "idle", which is correct: the turn is finished.
     return event.stop_hook_active ? "waiting" : "idle";
   }
   if (event.event === "Notification") {
     // Permission prompts → waiting; other notifications are informational,
     // don't change status
-    return event.notification_type === "permission_prompt" ? "waiting" : null;
+    if (
+      event.notification_type === "permission_prompt" ||
+      event.notification_type === "elicitation_dialog"
+    ) {
+      return "waiting";
+    }
+    return null;
   }
   if (event.event === "SessionStart") {
     return "idle";
   }
 
   // Tools that block on user input → waiting
-  if (event.tool_name === "AskUserQuestion" || event.tool_name === "EnterPlanMode") {
+  if (
+    event.tool_name === "AskUserQuestion" ||
+    event.tool_name === "EnterPlanMode" ||
+    event.tool_name === "ExitPlanMode"
+  ) {
     return "waiting";
   }
 

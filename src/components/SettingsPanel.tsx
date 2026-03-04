@@ -12,7 +12,6 @@ type SettingsField =
   | "prefix"
   | "baseBranch"
   | "polling"
-  | "autoHooks"
   | "autoSync"
   | "compactView"
   | "hideMainBranch"
@@ -20,6 +19,7 @@ type SettingsField =
   | "ghPrStatus"
   | "ghPolling"
   | "linearEnabled"
+  | "linearDesktopApp"
   | "linearApiKey"
   | "linearPolling"
   | "repos"
@@ -34,11 +34,11 @@ const FIELDS: SettingsField[] = [
   "compactView",
   "hideMainBranch",
   "polling",
-  "autoHooks",
   "logLevel",
   "ghPrStatus",
   "ghPolling",
   "linearEnabled",
+  "linearDesktopApp",
   "linearApiKey",
   "linearPolling",
   "repos",
@@ -217,11 +217,6 @@ export function SettingsPanel({
       return;
     }
 
-    if (activeField === "autoHooks" && (key.return || input === " ")) {
-      setCurrent((s) => ({ ...s, autoInstallHooks: !s.autoInstallHooks }));
-      return;
-    }
-
     if (activeField === "autoSync" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, autoSyncOnStartup: !s.autoSyncOnStartup }));
       return;
@@ -244,6 +239,11 @@ export function SettingsPanel({
 
     if (activeField === "linearEnabled" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearEnabled: !s.linearEnabled }));
+      return;
+    }
+
+    if (activeField === "linearDesktopApp" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, linearUseDesktopApp: !s.linearUseDesktopApp }));
       return;
     }
 
@@ -403,14 +403,6 @@ export function SettingsPanel({
           )}
         </Box>
         <Box>
-          <Text bold={activeField === "autoHooks"}>
-            {activeField === "autoHooks" ? "▸" : " "} Auto-install Hooks:{" "}
-          </Text>
-          <Text color={current.autoInstallHooks ? "green" : "gray"}>
-            [{current.autoInstallHooks ? "✓" : " "}]
-          </Text>
-        </Box>
-        <Box>
           <Text bold={activeField === "logLevel"}>
             {activeField === "logLevel" ? "▸" : " "} Log Level:{" "}
           </Text>
@@ -460,6 +452,14 @@ export function SettingsPanel({
           </Text>
           <Text color={current.linearEnabled ? "green" : "gray"}>
             [{current.linearEnabled ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "linearDesktopApp"}>
+            {activeField === "linearDesktopApp" ? "▸" : " "} Use Desktop App:{" "}
+          </Text>
+          <Text color={current.linearUseDesktopApp ? "green" : "gray"}>
+            [{current.linearUseDesktopApp ? "✓" : " "}]
           </Text>
         </Box>
         <Box>

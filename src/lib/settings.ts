@@ -9,8 +9,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ide: "cursor",
   defaultBranchPrefix: "feature/",
   defaultBaseBranch: "main",
-  pollingIntervalMs: 2000,
-  autoInstallHooks: true,
+  pollingIntervalMs: 10000,
   autoSyncOnStartup: true,
   compactView: false,
   hideMainBranch: true,
@@ -18,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ghPollingIntervalMs: 60000,
   logLevel: "info",
   linearEnabled: false,
+  linearUseDesktopApp: false,
   linearApiKey: "",
   linearPollingIntervalMs: 60000,
 };

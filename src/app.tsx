@@ -9,8 +9,10 @@ import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
+import { WelcomeScreen } from "./components/WelcomeScreen.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
+import { usePubSub } from "./hooks/usePubSub.js";
 import {
   getDb,
   addRepository,
@@ -31,11 +33,12 @@ import {
   fetchBranch,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
-import { installHooks } from "./lib/hooks-installer.js";
+import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
 import { log } from "./lib/logger.js";
+import { getVersion, getReleaseNotes, isNewVersion } from "./lib/version.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
@@ -61,12 +64,24 @@ export function App({ onRunScript }: AppProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
+  const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
   useEffect(() => {
     getDb();
     const repos = getRepositories();
     setRepositories(repos);
+
+    if (settings.lastSeenVersion === undefined) {
+      // First launch — silently record version, no welcome screen
+      const updated = { ...settings, lastSeenVersion: currentVersion };
+      setSettings(updated);
+      saveSettings(updated);
+    } else if (isNewVersion(settings.lastSeenVersion, currentVersion)) {
+      setMode("welcome");
+      return;
+    }
+
     if (repos.length === 0) {
       setMode("folder-browse");
     }
@@ -100,6 +115,13 @@ export function App({ onRunScript }: AppProps) {
   // Keep a ref to always call the latest refresh (avoids stale closures in async handlers)
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
+  // Pub/sub: instant refresh on agent status updates
+  usePubSub((msg) => {
+    if (msg.type === "agent-status-update") {
+      refreshRef.current();
+    }
+  });
 
   // Derive the active repo from the currently selected worktree
   const activeRepo = useMemo((): Repository | null => {
@@ -149,21 +171,22 @@ export function App({ onRunScript }: AppProps) {
     }
   }, [selectedIndex, flatWorktrees, unseenIds]);
 
+  // Auto-install global hooks on startup if not present
+  useEffect(() => {
+    if (!isGlobalHooksInstalled()) {
+      installGlobalHooks();
+    }
+  }, []);
+
   // Handle open in IDE
   const handleOpen = useCallback(async () => {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
     try {
-      if (settings.autoInstallHooks) {
-        setBusy("Installing hooks...");
-        installHooks(wt.path);
-      }
       openInIde(wt.path, settings.ide);
-      setBusy(null);
     } catch (err) {
       setError(`${err}`);
-      setBusy(null);
     }
   }, [flatWorktrees, selectedIndex, settings]);
 
@@ -220,9 +243,6 @@ export function App({ onRunScript }: AppProps) {
         { label: "Fetching latest base branch", status: "active" },
         { label: "Creating git worktree", status: "pending" },
         { label: "Syncing database", status: "pending" },
-        ...(settings.autoInstallHooks
-          ? [{ label: "Installing hooks", status: "pending" as const }]
-          : []),
         ...(hasScript
           ? [{ label: "Running startup script", status: "pending" as const }]
           : []),
@@ -284,14 +304,6 @@ export function App({ onRunScript }: AppProps) {
         await refreshRef.current();
         updateStep(stepIdx, "done");
         stepIdx++;
-
-        // Step: Install hooks
-        if (settings.autoInstallHooks) {
-          updateStep(stepIdx, "active");
-          installHooks(wtPath);
-          updateStep(stepIdx, "done");
-          stepIdx++;
-        }
 
         log("info", "app", `Created worktree ${branchName}`);
 
@@ -429,6 +441,18 @@ export function App({ onRunScript }: AppProps) {
     []
   );
 
+  // Handle welcome screen dismiss
+  const handleWelcomeDismiss = useCallback(() => {
+    const updated = { ...settings, lastSeenVersion: currentVersion };
+    setSettings(updated);
+    saveSettings(updated);
+    if (repositories.length === 0) {
+      setMode("folder-browse");
+    } else {
+      setMode("dashboard");
+    }
+  }, [settings, currentVersion, repositories]);
+
   // Handle factory reset
   const handleFactoryReset = useCallback(() => {
     resetAll();
@@ -488,7 +512,11 @@ export function App({ onRunScript }: AppProps) {
     onOpenLinear: () => {
       const wt = flatWorktrees[selectedIndex];
       if (wt?.linear_info?.url) {
-        import("open").then((mod) => mod.default(wt.linear_info!.url)).catch(() => {});
+        let url = wt.linear_info!.url;
+        if (settings.linearUseDesktopApp) {
+          url = url.replace("https://linear.app/", "linear://");
+        }
+        import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
     onQuit: () => exit(),
@@ -509,6 +537,14 @@ export function App({ onRunScript }: AppProps) {
         <Box paddingX={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
+      )}
+
+      {mode === "welcome" && (
+        <WelcomeScreen
+          version={currentVersion}
+          releaseNotes={getReleaseNotes()}
+          onDismiss={handleWelcomeDismiss}
+        />
       )}
 
       {mode === "folder-browse" && (
@@ -620,6 +656,7 @@ export function App({ onRunScript }: AppProps) {
           escHint={escHint}
           unseenIds={unseenIds}
           compactView={settings.compactView}
+          version={currentVersion}
         />
       )}
     </Box>

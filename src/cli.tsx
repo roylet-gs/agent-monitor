@@ -6,7 +6,7 @@ import { initLogger } from "./lib/logger.js";
 import { loadSettings } from "./lib/settings.js";
 import { handleHookEvent } from "./commands/hook-event.js";
 import { printStatus } from "./commands/status.js";
-import { installHooks } from "./lib/hooks-installer.js";
+import { installGlobalHooks, uninstallGlobalHooks } from "./lib/hooks-installer.js";
 import { App } from "./app.js";
 import { runScript, waitForEnter } from "./lib/run-script.js";
 
@@ -17,12 +17,15 @@ const cli = meow(
   Usage
     $ am                            Launch the dashboard
     $ am status -w <path>           Print agent status for a worktree
-    $ am install-hooks <path>       Install Claude hooks into a worktree
+    $ am status -w <path> --set <s> Set agent status for a worktree
+    $ am install-hooks              Install Claude hooks into ~/.claude/settings.json
+    $ am uninstall-hooks            Remove agent-monitor hooks from ~/.claude/settings.json
     $ am hook-event -w <path>       Receive hook event from stdin (used by hooks)
 
   Options
     --worktree, -w  Worktree path
     --event, -e     Event name override (for hook-event)
+    --set           Set agent status (idle, executing, planning, waiting)
     --help          Show this help
     --version       Show version
 
@@ -37,6 +40,7 @@ const cli = meow(
     flags: {
       worktree: { type: "string", shortFlag: "w" },
       event: { type: "string", shortFlag: "e" },
+      set: { type: "string" },
     },
   }
 );
@@ -98,18 +102,22 @@ switch (command) {
   }
 
   case "status": {
-    printStatus(cli.flags.worktree);
+    printStatus(cli.flags.worktree, cli.flags.set).catch((err) => {
+      console.error("status error:", err);
+      process.exit(1);
+    });
     break;
   }
 
   case "install-hooks": {
-    const path = cli.input[1];
-    if (!path) {
-      console.error("Usage: am install-hooks <path>");
-      process.exit(1);
-    }
-    installHooks(path);
-    console.log(`Hooks installed into ${path}/.claude/settings.local.json`);
+    installGlobalHooks();
+    console.log("Hooks installed into ~/.claude/settings.json");
+    break;
+  }
+
+  case "uninstall-hooks": {
+    uninstallGlobalHooks();
+    console.log("Hooks removed from ~/.claude/settings.json");
     break;
   }
 
