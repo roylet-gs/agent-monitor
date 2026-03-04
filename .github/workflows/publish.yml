@@ -30,6 +30,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+      - name: Generate release notes
+        run: |
+          LAST_BUMP=$(git log --format=%H --grep="^chore: bump version" -1)
+          if [ -n "$LAST_BUMP" ]; then
+            git log ${LAST_BUMP}..HEAD \
+              --format='{"hash":"%h","message":"%s"}' \
+              --no-merges \
+              --invert-grep --grep="^chore:" --grep="^Updated docs" \
+              | jq -s '.' > release-notes.json
+          else
+            echo '[]' > release-notes.json
+          fi
+
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"

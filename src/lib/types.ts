@@ -85,9 +85,11 @@ export interface Settings {
   linearEnabled: boolean;
   linearApiKey: string;
   linearPollingIntervalMs: number;
+  lastSeenVersion?: string;
 }
 
 export type AppMode =
+  | "welcome"
   | "dashboard"
   | "new-worktree"
   | "branch-exists"

@@ -12,7 +12,8 @@
     "url": "https://github.com/roylet-gs/agent-monitor.git"
   },
   "files": [
-    "dist/"
+    "dist/",
+    "release-notes.json"
   ],
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
