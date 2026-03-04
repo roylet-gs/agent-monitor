@@ -15,17 +15,21 @@ TUI dashboard for managing git worktrees and monitoring Claude Code agents.
 
 ### From GitHub Packages
 
+Since this is a private package, you need to authenticate first:
+
 ```sh
-npm install -g @roylet-gs/agent-monitor --registry=https://npm.pkg.github.com
+npm login --registry=https://npm.pkg.github.com
 ```
 
-Or configure your `~/.npmrc` once:
+Use your GitHub username and a [personal access token (classic)](https://github.com/settings/tokens) with `read:packages` scope as the password.
+
+Then configure your `~/.npmrc`:
 
 ```
 @roylet-gs:registry=https://npm.pkg.github.com
 ```
 
-Then install with:
+And install:
 
 ```sh
 npm install -g @roylet-gs/agent-monitor
