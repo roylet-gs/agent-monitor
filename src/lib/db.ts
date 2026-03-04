@@ -215,6 +215,23 @@ export function getAgentStatuses(repoId: string): Map<string, AgentStatus> {
   return map;
 }
 
+export function getAllWorktrees(): Worktree[] {
+  return getDb()
+    .prepare("SELECT * FROM worktrees ORDER BY repo_id, created_at DESC")
+    .all() as Worktree[];
+}
+
+export function getAllAgentStatuses(): Map<string, AgentStatus> {
+  const rows = getDb()
+    .prepare("SELECT * FROM agent_status")
+    .all() as AgentStatus[];
+  const map = new Map<string, AgentStatus>();
+  for (const row of rows) {
+    map.set(row.worktree_id, row);
+  }
+  return map;
+}
+
 export function closeDb(): void {
   if (db) {
     db.close();

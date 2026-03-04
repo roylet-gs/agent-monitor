@@ -46,6 +46,11 @@ export interface LinearInfo {
   assignee: string | null;
 }
 
+export interface WorktreeGroup {
+  repo: Repository;
+  worktrees: WorktreeWithStatus[];
+}
+
 export interface WorktreeWithStatus extends Worktree {
   agent_status: AgentStatus | null;
   git_status: GitStatus | null;

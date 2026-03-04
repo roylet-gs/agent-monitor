@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Box, Text, useApp } from "ink";
 import { Dashboard } from "./components/Dashboard.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
@@ -47,7 +47,6 @@ export function App({ onRunScript }: AppProps) {
   const [mode, setMode] = useState<AppMode>("dashboard");
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [currentRepo, setCurrentRepo] = useState<Repository | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [escHint, setEscHint] = useState(false);
@@ -58,34 +57,35 @@ export function App({ onRunScript }: AppProps) {
   const [deletingBranch, setDeletingBranch] = useState("");
   const [deleteSteps, setDeleteSteps] = useState<StepInfo[]>([]);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // For create-worktree flow: repo picked from RepoSelector
+  const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
 
   // Initialize DB and check for repos
   useEffect(() => {
     getDb();
     const repos = getRepositories();
     setRepositories(repos);
-    if (repos.length > 0) {
-      setCurrentRepo(repos[0]!);
-    } else {
+    if (repos.length === 0) {
       setMode("folder-browse");
     }
   }, []);
 
-  // Sync worktrees on startup if enabled
+  // Sync all repos on startup if enabled
   useEffect(() => {
-    if (currentRepo && settings.autoSyncOnStartup) {
+    if (repositories.length > 0 && settings.autoSyncOnStartup) {
       setBusy("Syncing worktrees...");
-      syncWorktrees(currentRepo.id)
+      Promise.all(repositories.map((repo) => syncWorktrees(repo.id)))
+        .then(() => refreshRef.current())
         .then(() => setBusy(null))
         .catch((err) => {
           log("error", "app", `Sync failed: ${err}`);
           setBusy(null);
         });
     }
-  }, [currentRepo?.id]);
+  }, [repositories.length > 0 && settings.autoSyncOnStartup]);
 
-  const { worktrees, refresh } = useWorktrees({
-    repoId: currentRepo?.id ?? null,
+  const { groups, flatWorktrees, refresh } = useWorktrees({
+    repositories,
     pollingIntervalMs: settings.pollingIntervalMs,
     ghPollingIntervalMs: settings.ghPollingIntervalMs,
     linearPollingIntervalMs: settings.linearPollingIntervalMs,
@@ -95,6 +95,17 @@ export function App({ onRunScript }: AppProps) {
     hideMainBranch: settings.hideMainBranch,
   });
 
+  // Keep a ref to always call the latest refresh (avoids stale closures in async handlers)
+  const refreshRef = useRef(refresh);
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
+  // Derive the active repo from the currently selected worktree
+  const activeRepo = useMemo((): Repository | null => {
+    const selected = flatWorktrees[selectedIndex];
+    if (!selected) return repositories[0] ?? null;
+    return repositories.find((r) => r.id === selected.repo_id) ?? repositories[0] ?? null;
+  }, [flatWorktrees, selectedIndex, repositories]);
+
   // Track unseen status changes per worktree
   const seenStatusRef = useRef<Map<string, string>>(new Map());
   const [unseenIds, setUnseenIds] = useState<Set<string>>(new Set());
@@ -103,15 +114,13 @@ export function App({ onRunScript }: AppProps) {
     const seen = seenStatusRef.current;
     const newUnseen = new Set<string>();
 
-    for (const wt of worktrees) {
+    for (const wt of flatWorktrees) {
       const currentStatus = wt.agent_status?.status ?? "idle";
       const prevStatus = seen.get(wt.id);
 
       if (prevStatus === undefined) {
-        // First time seeing this worktree — mark as seen
         seen.set(wt.id, currentStatus);
       } else if (prevStatus !== currentStatus) {
-        // Status changed — mark unseen
         newUnseen.add(wt.id);
         seen.set(wt.id, currentStatus);
       }
@@ -124,11 +133,11 @@ export function App({ onRunScript }: AppProps) {
         return merged;
       });
     }
-  }, [worktrees]);
+  }, [flatWorktrees]);
 
   // Mark selected worktree as seen
   useEffect(() => {
-    const selected = worktrees[selectedIndex];
+    const selected = flatWorktrees[selectedIndex];
     if (selected && unseenIds.has(selected.id)) {
       setUnseenIds((prev) => {
         const next = new Set(prev);
@@ -136,11 +145,11 @@ export function App({ onRunScript }: AppProps) {
         return next;
       });
     }
-  }, [selectedIndex, worktrees, unseenIds]);
+  }, [selectedIndex, flatWorktrees, unseenIds]);
 
   // Handle open in IDE
   const handleOpen = useCallback(async () => {
-    const wt = worktrees[selectedIndex];
+    const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
     try {
@@ -154,34 +163,33 @@ export function App({ onRunScript }: AppProps) {
       setError(`${err}`);
       setBusy(null);
     }
-  }, [worktrees, selectedIndex, settings]);
+  }, [flatWorktrees, selectedIndex, settings]);
 
   // Handle create worktree
   const handleCreate = useCallback(
     async (branchName: string, customName: string) => {
-      if (!currentRepo) return;
+      const repo = createTargetRepo ?? activeRepo;
+      if (!repo) return;
 
-      // Check if branch already exists (local or remote)
-      const exists = await branchExists(currentRepo.path, branchName);
+      const exists = await branchExists(repo.path, branchName);
       if (exists) {
         setPendingBranch({ branch: branchName, customName });
         setMode("branch-exists");
         return;
       }
 
-      // Check if worktree path already exists on disk (stale from previous removal)
       const { existsSync } = await import("fs");
       const { join } = await import("path");
-      const wtDir = join(currentRepo.path, ".worktrees", branchName.replace(/\//g, "-"));
+      const wtDir = join(repo.path, ".worktrees", branchName.replace(/\//g, "-"));
       if (existsSync(wtDir)) {
         setPendingBranch({ branch: branchName, customName });
         setMode("branch-exists");
         return;
       }
 
-      await doCreateWorktree(branchName, customName, false);
+      await doCreateWorktree(branchName, customName, false, repo);
     },
-    [currentRepo]
+    [activeRepo, createTargetRepo]
   );
 
   // Helper to update a single step in the creation steps array
@@ -200,12 +208,12 @@ export function App({ onRunScript }: AppProps) {
 
   // Actually create the worktree (called directly or after branch-exists confirmation)
   const doCreateWorktree = useCallback(
-    async (branchName: string, customName: string, reuse: boolean) => {
-      if (!currentRepo) return;
+    async (branchName: string, customName: string, reuse: boolean, repo?: Repository) => {
+      const targetRepo = repo ?? createTargetRepo ?? activeRepo;
+      if (!targetRepo) return;
 
-      const hasScript = hasStartupScript(currentRepo.id);
+      const hasScript = hasStartupScript(targetRepo.id);
 
-      // Build steps list
       const steps: StepInfo[] = [
         { label: "Creating git worktree", status: "active" },
         { label: "Syncing database", status: "pending" },
@@ -225,18 +233,16 @@ export function App({ onRunScript }: AppProps) {
       let stepIdx = 0;
 
       try {
-        // Step: Create git worktree
-        const mainBranch = await getMainBranch(currentRepo.path);
+        const mainBranch = await getMainBranch(targetRepo.path);
         let wtPath: string;
         try {
           wtPath = await gitCreateWorktree(
-            currentRepo.path,
+            targetRepo.path,
             branchName,
             mainBranch,
             reuse
           );
         } catch (gitErr) {
-          // If branch/ref already exists, offer to reuse
           const errMsg = String(gitErr);
           if (errMsg.includes("already exists") || errMsg.includes("already checked out")) {
             updateStep(stepIdx, "error");
@@ -254,17 +260,17 @@ export function App({ onRunScript }: AppProps) {
         // Step: Sync database
         updateStep(stepIdx, "active");
         if (customName) {
-          await syncWorktrees(currentRepo.id);
-          await refresh();
+          await syncWorktrees(targetRepo.id);
+          await refreshRef.current();
           const { getWorktrees } = await import("./lib/db.js");
-          const wts = getWorktrees(currentRepo.id);
+          const wts = getWorktrees(targetRepo.id);
           const newWt = wts.find((w) => w.branch === branchName);
           if (newWt) {
             updateWorktreeCustomName(newWt.id, customName);
           }
         }
-        await syncWorktrees(currentRepo.id);
-        await refresh();
+        await syncWorktrees(targetRepo.id);
+        await refreshRef.current();
         updateStep(stepIdx, "done");
         stepIdx++;
 
@@ -278,38 +284,38 @@ export function App({ onRunScript }: AppProps) {
 
         log("info", "app", `Created worktree ${branchName}`);
 
-        // Step: Run startup script — hand off to CLI runner
+        // Step: Run startup script
         if (hasScript && onRunScript) {
           updateStep(stepIdx, "active");
-          // Small delay so the user sees the "Running startup script" step
           await new Promise((r) => setTimeout(r, 300));
-          onRunScript(getScriptPath(currentRepo.id), wtPath);
+          onRunScript(getScriptPath(targetRepo.id), wtPath);
           exit();
           return;
         }
 
-        // All done — go to dashboard
+        // Clear create target repo
+        setCreateTargetRepo(null);
         setMode("dashboard");
       } catch (err) {
         updateStep(stepIdx, "error");
         setCreationError(`${err}`);
-        // Stay on creating-worktree screen showing the error
-        // After 3s, go back to dashboard
         setTimeout(() => {
           setMode("dashboard");
           setError(`Failed to create worktree: ${err}`);
         }, 3000);
       }
     },
-    [currentRepo, refresh, settings, onRunScript, exit, updateStep]
+    [activeRepo, createTargetRepo, settings, onRunScript, exit, updateStep]
   );
 
   // Handle delete worktree
   const handleDelete = useCallback(async (options: DeleteOptions) => {
-    const wt = worktrees[selectedIndex];
-    if (!wt || !currentRepo) return;
+    const wt = flatWorktrees[selectedIndex];
+    if (!wt || !activeRepo) return;
 
-    // Build steps list
+    // Find the repo for this worktree
+    const wtRepo = repositories.find((r) => r.id === wt.repo_id) ?? activeRepo;
+
     const steps: StepInfo[] = [
       { label: "Removing worktree", status: "active" },
       ...(options.deleteLocalBranch
@@ -326,17 +332,15 @@ export function App({ onRunScript }: AppProps) {
     let stepIdx = 0;
 
     try {
-      // Step: Remove worktree
-      await gitDeleteWorktree(currentRepo.path, wt.path, true);
+      await gitDeleteWorktree(wtRepo.path, wt.path, true);
       removeWorktreeDb(wt.id);
       updateDeleteStep(stepIdx, "done");
       stepIdx++;
 
-      // Step: Delete local branch
       if (options.deleteLocalBranch) {
         updateDeleteStep(stepIdx, "active");
         try {
-          await deleteBranch(currentRepo.path, wt.branch, true);
+          await deleteBranch(wtRepo.path, wt.branch, true);
           updateDeleteStep(stepIdx, "done");
         } catch (err) {
           updateDeleteStep(stepIdx, "error");
@@ -347,13 +351,12 @@ export function App({ onRunScript }: AppProps) {
 
       // Step: Sync database
       updateDeleteStep(stepIdx, "active");
-      await refresh();
+      await refreshRef.current();
       updateDeleteStep(stepIdx, "done");
 
       setSelectedIndex((i) => Math.max(0, i - 1));
       log("info", "app", `Deleted worktree ${wt.branch}`);
 
-      // Brief pause so user sees the completed steps
       await new Promise((r) => setTimeout(r, 500));
       setMode("dashboard");
     } catch (err) {
@@ -364,7 +367,7 @@ export function App({ onRunScript }: AppProps) {
         setError(`Failed to delete worktree: ${err}`);
       }, 3000);
     }
-  }, [worktrees, selectedIndex, currentRepo, refresh, updateDeleteStep]);
+  }, [flatWorktrees, selectedIndex, activeRepo, repositories, updateDeleteStep]);
 
   // Handle repo selection from folder browser
   const handleSelectFolder = useCallback(
@@ -372,31 +375,38 @@ export function App({ onRunScript }: AppProps) {
       const name = getRepoName(path);
       const repo = addRepository(path, name);
       setRepositories(getRepositories());
-      setCurrentRepo(repo);
       setMode("dashboard");
 
       setBusy("Syncing worktrees...");
       await syncWorktrees(repo.id);
-      await refresh();
+      await refreshRef.current();
       setBusy(null);
     },
-    [refresh]
+    []
   );
 
-  // Handle repo switch
+  // Handle repo switch (from RepoSelector in settings context)
   const handleSwitchRepo = useCallback(
     async (repo: Repository) => {
       touchRepository(repo.id);
-      setCurrentRepo(repo);
       setMode("dashboard");
       setSelectedIndex(0);
 
       setBusy("Syncing worktrees...");
       await syncWorktrees(repo.id);
-      await refresh();
+      await refreshRef.current();
       setBusy(null);
     },
-    [refresh]
+    []
+  );
+
+  // Handle repo pick for create-worktree flow
+  const handlePickRepoForCreate = useCallback(
+    (repo: Repository) => {
+      setCreateTargetRepo(repo);
+      setMode("new-worktree");
+    },
+    []
   );
 
   // Handle settings save
@@ -414,7 +424,6 @@ export function App({ onRunScript }: AppProps) {
     saveSettings(DEFAULT_SETTINGS);
     setSettings(DEFAULT_SETTINGS);
     setRepositories([]);
-    setCurrentRepo(null);
     setMode("folder-browse");
   }, []);
 
@@ -424,46 +433,49 @@ export function App({ onRunScript }: AppProps) {
       removeRepository(repoId);
       const repos = getRepositories();
       setRepositories(repos);
-      if (currentRepo?.id === repoId) {
-        if (repos.length > 0) {
-          setCurrentRepo(repos[0]!);
-        } else {
-          setCurrentRepo(null);
-          setMode("folder-browse");
-        }
+      if (repos.length === 0) {
+        setMode("folder-browse");
       }
     },
-    [currentRepo]
+    []
   );
 
   // Key bindings for dashboard mode
   useKeyBindings({
     selectedIndex,
-    worktreeCount: worktrees.length,
+    worktreeCount: flatWorktrees.length,
     mode,
     busy,
     onSelect: setSelectedIndex,
     onEnter: handleOpen,
-    onNew: () => setMode("new-worktree"),
+    onNew: () => {
+      if (repositories.length > 1) {
+        // Show repo picker first, then chain into new-worktree
+        setCreateTargetRepo(null);
+        setMode("repo-select");
+      } else {
+        setCreateTargetRepo(repositories[0] ?? null);
+        setMode("new-worktree");
+      }
+    },
     onDelete: () => {
-      if (worktrees[selectedIndex]) setMode("delete-confirm");
+      if (flatWorktrees[selectedIndex]) setMode("delete-confirm");
     },
     onSettings: () => setMode("settings"),
     onRefresh: async () => {
-      if (!currentRepo) return;
       setBusy("Syncing worktrees...");
-      await syncWorktrees(currentRepo.id);
-      await refresh();
+      await Promise.all(repositories.map((repo) => syncWorktrees(repo.id)));
+      await refreshRef.current();
       setBusy(null);
     },
     onOpenPr: () => {
-      const wt = worktrees[selectedIndex];
+      const wt = flatWorktrees[selectedIndex];
       if (wt?.pr_info?.url) {
         import("open").then((mod) => mod.default(wt.pr_info!.url)).catch(() => {});
       }
     },
     onOpenLinear: () => {
-      const wt = worktrees[selectedIndex];
+      const wt = flatWorktrees[selectedIndex];
       if (wt?.linear_info?.url) {
         import("open").then((mod) => mod.default(wt.linear_info!.url)).catch(() => {});
       }
@@ -492,7 +504,7 @@ export function App({ onRunScript }: AppProps) {
         <FolderBrowser
           onSelect={handleSelectFolder}
           onCancel={() => {
-            if (currentRepo) {
+            if (repositories.length > 0) {
               setMode("dashboard");
             } else {
               exit();
@@ -504,7 +516,7 @@ export function App({ onRunScript }: AppProps) {
       {mode === "repo-select" && (
         <RepoSelector
           repositories={repositories}
-          onSelect={handleSwitchRepo}
+          onSelect={handlePickRepoForCreate}
           onCancel={() => setMode("dashboard")}
         />
       )}
@@ -513,7 +525,10 @@ export function App({ onRunScript }: AppProps) {
         <NewWorktreeForm
           defaultPrefix={settings.defaultBranchPrefix}
           onSubmit={handleCreate}
-          onCancel={() => setMode("dashboard")}
+          onCancel={() => {
+            setCreateTargetRepo(null);
+            setMode("dashboard");
+          }}
         />
       )}
 
@@ -525,16 +540,17 @@ export function App({ onRunScript }: AppProps) {
             setPendingBranch(null);
           }}
           onDeleteAndRecreate={async () => {
-            if (!currentRepo) return;
+            const repo = createTargetRepo ?? activeRepo;
+            if (!repo) return;
             const branch = pendingBranch.branch;
             const customName = pendingBranch.customName;
             setPendingBranch(null);
             try {
-              await deleteBranch(currentRepo.path, branch, true);
+              await deleteBranch(repo.path, branch, true);
             } catch {
               // Branch may only exist on remote, ignore local delete failure
             }
-            await doCreateWorktree(branch, customName, false);
+            await doCreateWorktree(branch, customName, false, repo);
           }}
           onCancel={() => {
             setPendingBranch(null);
@@ -560,10 +576,10 @@ export function App({ onRunScript }: AppProps) {
         />
       )}
 
-      {mode === "delete-confirm" && worktrees[selectedIndex] && currentRepo && (
+      {mode === "delete-confirm" && flatWorktrees[selectedIndex] && activeRepo && (
         <DeleteConfirm
-          worktree={worktrees[selectedIndex]}
-          repoPath={currentRepo.path}
+          worktree={flatWorktrees[selectedIndex]}
+          repoPath={activeRepo.path}
           onConfirm={handleDelete}
           onCancel={() => setMode("dashboard")}
         />
@@ -583,8 +599,9 @@ export function App({ onRunScript }: AppProps) {
 
       {mode === "dashboard" && (
         <Dashboard
-          repoName={currentRepo?.name ?? "No repository"}
-          worktrees={worktrees}
+          repoName={activeRepo?.name ?? "No repository"}
+          groups={groups}
+          flatWorktrees={flatWorktrees}
           selectedIndex={selectedIndex}
           busy={busy}
           escHint={escHint}

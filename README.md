@@ -4,6 +4,7 @@ TUI dashboard for managing git worktrees and monitoring Claude Code agents.
 
 ## Features
 
+- **Multi-repo dashboard** — view worktrees from all added repos at once, grouped by repo
 - Create, delete, and manage git worktrees from a single dashboard
 - Monitor Claude Code agent status across worktrees
 - View GitHub PR status for each worktree
@@ -61,10 +62,10 @@ am hook-event -w <path>       # Receive hook event from stdin (used by hooks)
 | `j` / `↓` | Move down |
 | `k` / `↑` | Move up |
 | `Enter` | Open in IDE |
-| `n` | New worktree |
-| `d` | Delete worktree |
+| `n` | New worktree (picks repo first if multiple) |
+| `d` | Delete selected worktree |
 | `s` | Settings |
-| `r` | Refresh / sync |
+| `r` | Refresh / sync all repos |
 | `g` | Open PR in browser |
 | `l` | Open Linear ticket |
 | `q` / `Esc Esc` | Quit |
