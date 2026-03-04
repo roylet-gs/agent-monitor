@@ -74,6 +74,7 @@ export interface CommitInfo {
 export interface Settings {
   ide: "cursor" | "vscode" | "terminal";
   defaultBranchPrefix: string;
+  defaultBaseBranch: string;
   pollingIntervalMs: number;
   autoSyncOnStartup: boolean;
   compactView: boolean;

@@ -30,6 +30,7 @@ import {
   getMainBranch,
   branchExists,
   getRepoName,
+  fetchBranch,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
@@ -54,7 +55,7 @@ export function App({ onRunScript }: AppProps) {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [escHint, setEscHint] = useState(false);
-  const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string } | null>(null);
+  const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string; baseBranch: string } | null>(null);
   const [creatingBranch, setCreatingBranch] = useState("");
   const [creationSteps, setCreationSteps] = useState<StepInfo[]>([]);
   const [creationError, setCreationError] = useState<string | null>(null);
@@ -191,13 +192,13 @@ export function App({ onRunScript }: AppProps) {
 
   // Handle create worktree
   const handleCreate = useCallback(
-    async (branchName: string, customName: string) => {
+    async (branchName: string, customName: string, baseBranch: string) => {
       const repo = createTargetRepo ?? activeRepo;
       if (!repo) return;
 
       const exists = await branchExists(repo.path, branchName);
       if (exists) {
-        setPendingBranch({ branch: branchName, customName });
+        setPendingBranch({ branch: branchName, customName, baseBranch });
         setMode("branch-exists");
         return;
       }
@@ -206,12 +207,12 @@ export function App({ onRunScript }: AppProps) {
       const { join } = await import("path");
       const wtDir = join(repo.path, ".worktrees", branchName.replace(/\//g, "-"));
       if (existsSync(wtDir)) {
-        setPendingBranch({ branch: branchName, customName });
+        setPendingBranch({ branch: branchName, customName, baseBranch });
         setMode("branch-exists");
         return;
       }
 
-      await doCreateWorktree(branchName, customName, false, repo);
+      await doCreateWorktree(branchName, customName, false, repo, baseBranch);
     },
     [activeRepo, createTargetRepo]
   );
@@ -232,14 +233,15 @@ export function App({ onRunScript }: AppProps) {
 
   // Actually create the worktree (called directly or after branch-exists confirmation)
   const doCreateWorktree = useCallback(
-    async (branchName: string, customName: string, reuse: boolean, repo?: Repository) => {
+    async (branchName: string, customName: string, reuse: boolean, repo?: Repository, baseBranch?: string) => {
       const targetRepo = repo ?? createTargetRepo ?? activeRepo;
       if (!targetRepo) return;
 
       const hasScript = hasStartupScript(targetRepo.id);
 
       const steps: StepInfo[] = [
-        { label: "Creating git worktree", status: "active" },
+        { label: "Fetching latest base branch", status: "active" },
+        { label: "Creating git worktree", status: "pending" },
         { label: "Syncing database", status: "pending" },
         ...(hasScript
           ? [{ label: "Running startup script", status: "pending" as const }]
@@ -254,13 +256,21 @@ export function App({ onRunScript }: AppProps) {
       let stepIdx = 0;
 
       try {
-        const mainBranch = await getMainBranch(targetRepo.path);
+        // Step: Fetch base branch
+        const effectiveBase = baseBranch?.trim() || await getMainBranch(targetRepo.path);
+        await fetchBranch(targetRepo.path, effectiveBase);
+        updateStep(stepIdx, "done");
+        stepIdx++;
+
+        // Step: Create worktree
+        updateStep(stepIdx, "active");
+        const baseRef = `origin/${effectiveBase}`;
         let wtPath: string;
         try {
           wtPath = await gitCreateWorktree(
             targetRepo.path,
             branchName,
-            mainBranch,
+            baseRef,
             reuse
           );
         } catch (gitErr) {
@@ -269,7 +279,7 @@ export function App({ onRunScript }: AppProps) {
             updateStep(stepIdx, "error");
             setCreationError(null);
             setMode("dashboard");
-            setPendingBranch({ branch: branchName, customName });
+            setPendingBranch({ branch: branchName, customName, baseBranch: baseBranch ?? effectiveBase });
             setMode("branch-exists");
             return;
           }
@@ -561,6 +571,7 @@ export function App({ onRunScript }: AppProps) {
       {mode === "new-worktree" && (
         <NewWorktreeForm
           defaultPrefix={settings.defaultBranchPrefix}
+          defaultBaseBranch={settings.defaultBaseBranch}
           onSubmit={handleCreate}
           onCancel={() => {
             setCreateTargetRepo(null);
@@ -573,7 +584,7 @@ export function App({ onRunScript }: AppProps) {
         <BranchExistsPrompt
           branchName={pendingBranch.branch}
           onReuse={() => {
-            doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true);
+            doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true, undefined, pendingBranch.baseBranch);
             setPendingBranch(null);
           }}
           onDeleteAndRecreate={async () => {
@@ -581,13 +592,14 @@ export function App({ onRunScript }: AppProps) {
             if (!repo) return;
             const branch = pendingBranch.branch;
             const customName = pendingBranch.customName;
+            const baseBranch = pendingBranch.baseBranch;
             setPendingBranch(null);
             try {
               await deleteBranch(repo.path, branch, true);
             } catch {
               // Branch may only exist on remote, ignore local delete failure
             }
-            await doCreateWorktree(branch, customName, false, repo);
+            await doCreateWorktree(branch, customName, false, repo, baseBranch);
           }}
           onCancel={() => {
             setPendingBranch(null);

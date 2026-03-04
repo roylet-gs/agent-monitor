@@ -4,25 +4,28 @@ import TextInput from "ink-text-input";
 
 interface NewWorktreeFormProps {
   defaultPrefix: string;
-  onSubmit: (branchName: string, customName: string) => void;
+  defaultBaseBranch: string;
+  onSubmit: (branchName: string, customName: string, baseBranch: string) => void;
   onCancel: () => void;
 }
 
 export function NewWorktreeForm({
   defaultPrefix,
+  defaultBaseBranch,
   onSubmit,
   onCancel,
 }: NewWorktreeFormProps) {
-  const [activeField, setActiveField] = useState<"branch" | "name">("branch");
+  const [activeField, setActiveField] = useState<"branch" | "name" | "baseBranch">("branch");
   const [branchName, setBranchName] = useState(defaultPrefix);
   const [customName, setCustomName] = useState("");
+  const [baseBranch, setBaseBranch] = useState(defaultBaseBranch);
   const submittedRef = useRef(false);
 
   const doSubmit = () => {
     if (submittedRef.current) return;
     if (!branchName.trim()) return;
     submittedRef.current = true;
-    onSubmit(branchName.trim(), customName.trim());
+    onSubmit(branchName.trim(), customName.trim(), baseBranch.trim());
   };
 
   useInput((_input, key) => {
@@ -32,7 +35,11 @@ export function NewWorktreeForm({
     }
 
     if (key.tab) {
-      setActiveField((f) => (f === "branch" ? "name" : "branch"));
+      setActiveField((f) => {
+        if (f === "branch") return "name";
+        if (f === "name") return "baseBranch";
+        return "branch";
+      });
       return;
     }
   });
@@ -67,10 +74,25 @@ export function NewWorktreeForm({
             <TextInput
               value={customName}
               onChange={setCustomName}
-              onSubmit={doSubmit}
+              onSubmit={() => setActiveField("baseBranch")}
             />
           ) : (
             <Text>{customName || <Text dimColor>(empty)</Text>}</Text>
+          )}
+        </Box>
+
+        <Box>
+          <Text bold={activeField === "baseBranch"}>
+            Base branch:{" "}
+          </Text>
+          {activeField === "baseBranch" ? (
+            <TextInput
+              value={baseBranch}
+              onChange={setBaseBranch}
+              onSubmit={doSubmit}
+            />
+          ) : (
+            <Text>{baseBranch || <Text dimColor>(empty)</Text>}</Text>
           )}
         </Box>
       </Box>

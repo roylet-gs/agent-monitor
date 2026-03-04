@@ -10,6 +10,7 @@ import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../li
 type SettingsField =
   | "ide"
   | "prefix"
+  | "baseBranch"
   | "polling"
   | "autoSync"
   | "compactView"
@@ -28,6 +29,7 @@ type SettingsField =
 const FIELDS: SettingsField[] = [
   "ide",
   "prefix",
+  "baseBranch",
   "autoSync",
   "compactView",
   "hideMainBranch",
@@ -104,6 +106,9 @@ export function SettingsPanel({
     if (activeField === "prefix") {
       setEditValue(current.defaultBranchPrefix);
       setEditing(true);
+    } else if (activeField === "baseBranch") {
+      setEditValue(current.defaultBaseBranch);
+      setEditing(true);
     } else if (activeField === "polling") {
       setEditValue(String(current.pollingIntervalMs / 1000));
       setEditing(true);
@@ -122,6 +127,8 @@ export function SettingsPanel({
   const commitEdit = () => {
     if (activeField === "prefix") {
       setCurrent((s) => ({ ...s, defaultBranchPrefix: editValue }));
+    } else if (activeField === "baseBranch") {
+      setCurrent((s) => ({ ...s, defaultBaseBranch: editValue }));
     } else if (activeField === "polling") {
       const seconds = parseFloat(editValue);
       if (!isNaN(seconds) && seconds >= 0.5) {
@@ -192,6 +199,7 @@ export function SettingsPanel({
     // Enter on text fields starts editing
     if (
       (activeField === "prefix" ||
+        activeField === "baseBranch" ||
         activeField === "polling" ||
         activeField === "ghPolling" ||
         activeField === "linearApiKey" ||
@@ -330,6 +338,23 @@ export function SettingsPanel({
             <Text>
               {current.defaultBranchPrefix}
               {activeField === "prefix" && <Text dimColor> (Enter to edit)</Text>}
+            </Text>
+          )}
+        </Box>
+        <Box>
+          <Text bold={activeField === "baseBranch"}>
+            {activeField === "baseBranch" ? "▸" : " "} Default Base Branch:{" "}
+          </Text>
+          {editing && activeField === "baseBranch" ? (
+            <TextInput
+              value={editValue}
+              onChange={setEditValue}
+              onSubmit={commitEdit}
+            />
+          ) : (
+            <Text>
+              {current.defaultBaseBranch}
+              {activeField === "baseBranch" && <Text dimColor> (Enter to edit)</Text>}
             </Text>
           )}
         </Box>

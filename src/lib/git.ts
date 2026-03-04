@@ -196,6 +196,16 @@ export async function deleteRemoteBranch(repoPath: string, branch: string): Prom
   log("info", "git", `Deleted remote branch origin/${branch}`);
 }
 
+export async function fetchBranch(repoPath: string, branch: string): Promise<void> {
+  const git = getGit(repoPath);
+  try {
+    await git.raw(["fetch", "origin", branch]);
+    log("info", "git", `Fetched origin/${branch}`);
+  } catch (err) {
+    log("warn", "git", `Failed to fetch origin/${branch}: ${err}`);
+  }
+}
+
 export function getRepoName(repoPath: string): string {
   return basename(resolve(repoPath));
 }
