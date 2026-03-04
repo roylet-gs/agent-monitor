@@ -11,8 +11,8 @@ export async function handleHookEvent(
   let stdinData = "";
   try {
     stdinData = await readStdin();
-  } catch {
-    // stdin might be empty for some events
+  } catch (err) {
+    log("debug", "hook-event", `Failed to read stdin: ${err}`);
   }
 
   let payload: HookEvent = { event: eventOverride ?? "unknown" };

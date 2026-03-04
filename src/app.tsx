@@ -43,9 +43,10 @@ import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
+  watch?: boolean;
 }
 
-export function App({ onRunScript }: AppProps) {
+export function App({ onRunScript, watch }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -54,6 +55,7 @@ export function App({ onRunScript }: AppProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
   const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string; baseBranch: string } | null>(null);
   const [creatingBranch, setCreatingBranch] = useState("");
@@ -506,7 +508,9 @@ export function App({ onRunScript }: AppProps) {
     onOpenPr: () => {
       const wt = flatWorktrees[selectedIndex];
       if (wt?.pr_info?.url) {
-        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch(() => {});
+        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch((err) => {
+          log("warn", "app", `Failed to open PR URL: ${err}`);
+        });
       }
     },
     onOpenLinear: () => {
@@ -519,6 +523,7 @@ export function App({ onRunScript }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
+    onToggleLogs: () => setShowLogs((v) => !v),
     onQuit: () => exit(),
     onEscHint: setEscHint,
   });
@@ -596,8 +601,8 @@ export function App({ onRunScript }: AppProps) {
             setPendingBranch(null);
             try {
               await deleteBranch(repo.path, branch, true);
-            } catch {
-              // Branch may only exist on remote, ignore local delete failure
+            } catch (err) {
+              log("debug", "app", `Local branch delete failed (may only exist on remote): ${err}`);
             }
             await doCreateWorktree(branch, customName, false, repo, baseBranch);
           }}
@@ -656,6 +661,8 @@ export function App({ onRunScript }: AppProps) {
           escHint={escHint}
           unseenIds={unseenIds}
           compactView={settings.compactView}
+          showLogs={showLogs}
+          terminalRows={stdout?.rows ?? 24}
           version={currentVersion}
         />
       )}

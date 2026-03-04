@@ -37,6 +37,7 @@ export function ActionBar({ busy, hasWorktrees, escHint }: ActionBarProps) {
           <Text color="yellow"> [g]</Text>ithub
           <Text color="yellow"> [l]</Text>inear
           <Text color="yellow"> [r]</Text>efresh
+          <Text color="yellow"> [w]</Text>atch
           <Text color="yellow"> [s]</Text>ettings
           <Text color="yellow"> [q]</Text>uit
         </Text>

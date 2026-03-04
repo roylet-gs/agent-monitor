@@ -2,10 +2,11 @@
 import meow from "meow";
 import { render } from "ink";
 import React from "react";
-import { initLogger } from "./lib/logger.js";
+import { initLogger, log } from "./lib/logger.js";
 import { loadSettings } from "./lib/settings.js";
 import { handleHookEvent } from "./commands/hook-event.js";
 import { printStatus } from "./commands/status.js";
+import { printLogs } from "./commands/logs.js";
 import { installGlobalHooks, uninstallGlobalHooks } from "./lib/hooks-installer.js";
 import { App } from "./app.js";
 import { runScript, waitForEnter } from "./lib/run-script.js";
@@ -16,23 +17,36 @@ const cli = meow(
 
   Usage
     $ am                            Launch the dashboard
+    $ am --watch                    Launch with log panel open
     $ am status -w <path>           Print agent status for a worktree
     $ am status -w <path> --set <s> Set agent status for a worktree
     $ am install-hooks              Install Claude hooks into ~/.claude/settings.json
     $ am uninstall-hooks            Remove agent-monitor hooks from ~/.claude/settings.json
     $ am hook-event -w <path>       Receive hook event from stdin (used by hooks)
+    $ am logs                       Show recent logs
+    $ am logs -f                    Follow log output
+    $ am logs --level error         Filter by level
+    $ am logs --module hook-event   Filter by module
+    $ am logs --clear               Clear log file
 
   Options
     --worktree, -w  Worktree path
     --event, -e     Event name override (for hook-event)
     --set           Set agent status (idle, executing, planning, waiting)
+    --lines, -n     Number of log lines to show (default: 50)
+    --follow, -f    Follow log output
+    --level         Filter logs by level (debug, info, warn, error)
+    --module        Filter logs by module
+    --clear         Clear the log file
+    --watch         Launch with log panel open
     --help          Show this help
     --version       Show version
 
   Dashboard Keys
     j/k ↑/↓  Navigate        n  New worktree     d  Delete
     Enter    Open in IDE      s  Settings         r  Refresh
-    g        Open PR          l  Open Linear      q  Quit
+    g        Open PR          l  Open Linear      w  Watch logs
+    q        Quit
 `,
   {
     description: false,
@@ -41,6 +55,12 @@ const cli = meow(
       worktree: { type: "string", shortFlag: "w" },
       event: { type: "string", shortFlag: "e" },
       set: { type: "string" },
+      lines: { type: "number", shortFlag: "n", default: 50 },
+      follow: { type: "boolean", shortFlag: "f", default: false },
+      level: { type: "string" },
+      module: { type: "string" },
+      clear: { type: "boolean", default: false },
+      watch: { type: "boolean", default: false },
     },
   }
 );
@@ -58,12 +78,12 @@ async function launchTui(): Promise<void> {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const instance = render(<App onRunScript={onRunScript} />, { patchConsole: true });
+    const instance = render(<App onRunScript={onRunScript} watch={cli.flags.watch} />, { patchConsole: true });
 
     try {
       await instance.waitUntilExit();
-    } catch {
-      // App exited
+    } catch (err) {
+      log("debug", "cli", `TUI exit: ${err}`);
     }
 
     // Always unmount + clear to remove stale Ink output
@@ -91,10 +111,12 @@ switch (command) {
   case "hook-event": {
     const worktreePath = cli.flags.worktree;
     if (!worktreePath) {
+      log("error", "cli", "Missing --worktree flag for hook-event");
       console.error("Error: --worktree is required for hook-event");
       process.exit(1);
     }
     handleHookEvent(worktreePath, cli.flags.event).catch((err) => {
+      log("error", "cli", `hook-event error: ${err}`);
       console.error("hook-event error:", err);
       process.exit(1);
     });
@@ -105,6 +127,17 @@ switch (command) {
     printStatus(cli.flags.worktree, cli.flags.set).catch((err) => {
       console.error("status error:", err);
       process.exit(1);
+    });
+    break;
+  }
+
+  case "logs": {
+    printLogs({
+      lines: cli.flags.lines,
+      follow: cli.flags.follow,
+      level: cli.flags.level,
+      module: cli.flags.module,
+      clear: cli.flags.clear,
     });
     break;
   }
