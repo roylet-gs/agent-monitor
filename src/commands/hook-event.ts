@@ -1,5 +1,6 @@
 import { getWorktreeByPath, upsertAgentStatus } from "../lib/db.js";
 import { log } from "../lib/logger.js";
+import { publishMessage } from "../lib/pubsub-client.js";
 import type { AgentStatusType, HookEvent } from "../lib/types.js";
 
 export async function handleHookEvent(
@@ -47,6 +48,17 @@ export async function handleHookEvent(
 
   upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary);
   log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`);
+
+  // Fire-and-forget publish for instant TUI update
+  await publishMessage({
+    type: "agent-status-update",
+    worktreeId: worktree.id,
+    status,
+    sessionId,
+    lastResponse,
+    transcriptSummary,
+    updatedAt: new Date().toISOString(),
+  }).catch(() => {});
 }
 
 function extractLastResponse(event: HookEvent): string | null {

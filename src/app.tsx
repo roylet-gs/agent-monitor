@@ -11,6 +11,7 @@ import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.j
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
+import { usePubSub } from "./hooks/usePubSub.js";
 import {
   getDb,
   addRepository,
@@ -99,6 +100,13 @@ export function App({ onRunScript }: AppProps) {
   // Keep a ref to always call the latest refresh (avoids stale closures in async handlers)
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
+
+  // Pub/sub: instant refresh on agent status updates
+  usePubSub((msg) => {
+    if (msg.type === "agent-status-update") {
+      refreshRef.current();
+    }
+  });
 
   // Derive the active repo from the currently selected worktree
   const activeRepo = useMemo((): Repository | null => {

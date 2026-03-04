@@ -17,6 +17,7 @@ const cli = meow(
   Usage
     $ am                            Launch the dashboard
     $ am status -w <path>           Print agent status for a worktree
+    $ am status -w <path> --set <s> Set agent status for a worktree
     $ am install-hooks              Install Claude hooks into ~/.claude/settings.json
     $ am uninstall-hooks            Remove agent-monitor hooks from ~/.claude/settings.json
     $ am hook-event -w <path>       Receive hook event from stdin (used by hooks)
@@ -24,6 +25,7 @@ const cli = meow(
   Options
     --worktree, -w  Worktree path
     --event, -e     Event name override (for hook-event)
+    --set           Set agent status (idle, executing, planning, waiting)
     --help          Show this help
     --version       Show version
 
@@ -38,6 +40,7 @@ const cli = meow(
     flags: {
       worktree: { type: "string", shortFlag: "w" },
       event: { type: "string", shortFlag: "e" },
+      set: { type: "string" },
     },
   }
 );
@@ -99,7 +102,10 @@ switch (command) {
   }
 
   case "status": {
-    printStatus(cli.flags.worktree);
+    printStatus(cli.flags.worktree, cli.flags.set).catch((err) => {
+      console.error("status error:", err);
+      process.exit(1);
+    });
     break;
   }
 
