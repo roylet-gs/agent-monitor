@@ -24,7 +24,6 @@ import {
   createWorktree as gitCreateWorktree,
   deleteWorktree as gitDeleteWorktree,
   deleteBranch,
-  deleteRemoteBranch,
   getMainBranch,
   branchExists,
   getRepoName,
@@ -84,12 +83,15 @@ export function App({ onRunScript }: AppProps) {
     }
   }, [currentRepo?.id]);
 
-  const { worktrees, refresh } = useWorktrees(
-    currentRepo?.id ?? null,
-    settings.pollingIntervalMs,
-    settings.ghPrStatus,
-    settings.ghPollingIntervalMs
-  );
+  const { worktrees, refresh } = useWorktrees({
+    repoId: currentRepo?.id ?? null,
+    pollingIntervalMs: settings.pollingIntervalMs,
+    ghPollingIntervalMs: settings.ghPollingIntervalMs,
+    linearPollingIntervalMs: settings.linearPollingIntervalMs,
+    ghPrStatus: settings.ghPrStatus,
+    linearEnabled: settings.linearEnabled,
+    linearApiKey: settings.linearApiKey,
+  });
 
   // Track unseen status changes per worktree
   const seenStatusRef = useRef<Map<string, string>>(new Map());
@@ -311,9 +313,6 @@ export function App({ onRunScript }: AppProps) {
       ...(options.deleteLocalBranch
         ? [{ label: `Deleting local branch ${wt.branch}`, status: "pending" as const }]
         : []),
-      ...(options.deleteRemoteBranch
-        ? [{ label: `Deleting remote branch origin/${wt.branch}`, status: "pending" as const }]
-        : []),
       { label: "Syncing database", status: "pending" },
     ];
 
@@ -340,19 +339,6 @@ export function App({ onRunScript }: AppProps) {
         } catch (err) {
           updateDeleteStep(stepIdx, "error");
           log("warn", "app", `Failed to delete local branch: ${err}`);
-        }
-        stepIdx++;
-      }
-
-      // Step: Delete remote branch
-      if (options.deleteRemoteBranch) {
-        updateDeleteStep(stepIdx, "active");
-        try {
-          await deleteRemoteBranch(currentRepo.path, wt.branch);
-          updateDeleteStep(stepIdx, "done");
-        } catch (err) {
-          updateDeleteStep(stepIdx, "error");
-          log("warn", "app", `Failed to delete remote branch: ${err}`);
         }
         stepIdx++;
       }
@@ -420,6 +406,7 @@ export function App({ onRunScript }: AppProps) {
     []
   );
 
+
   // Handle remove repo from settings
   const handleRemoveRepo = useCallback(
     (repoId: string) => {
@@ -462,6 +449,12 @@ export function App({ onRunScript }: AppProps) {
       const wt = worktrees[selectedIndex];
       if (wt?.pr_info?.url) {
         import("open").then((mod) => mod.default(wt.pr_info!.url)).catch(() => {});
+      }
+    },
+    onOpenLinear: () => {
+      const wt = worktrees[selectedIndex];
+      if (wt?.linear_info?.url) {
+        import("open").then((mod) => mod.default(wt.linear_info!.url)).catch(() => {});
       }
     },
     onQuit: () => exit(),
@@ -584,6 +577,7 @@ export function App({ onRunScript }: AppProps) {
           busy={busy}
           escHint={escHint}
           unseenIds={unseenIds}
+          compactView={settings.compactView}
         />
       )}
     </Box>

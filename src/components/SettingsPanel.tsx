@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
+import { verifyLinearApiKey } from "../lib/linear.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
@@ -11,20 +12,28 @@ type SettingsField =
   | "polling"
   | "autoHooks"
   | "autoSync"
+  | "compactView"
+  | "logLevel"
   | "ghPrStatus"
   | "ghPolling"
-  | "logLevel"
+  | "linearEnabled"
+  | "linearApiKey"
+  | "linearPolling"
   | "repos";
 
 const FIELDS: SettingsField[] = [
   "ide",
   "prefix",
+  "autoSync",
+  "compactView",
   "polling",
   "autoHooks",
-  "autoSync",
+  "logLevel",
   "ghPrStatus",
   "ghPolling",
-  "logLevel",
+  "linearEnabled",
+  "linearApiKey",
+  "linearPolling",
   "repos",
 ];
 
@@ -53,6 +62,31 @@ export function SettingsPanel({
   const [repoIndex, setRepoIndex] = useState(0);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
+  const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
+
+  // Verify Linear API key whenever it changes
+  useEffect(() => {
+    if (!current.linearApiKey) {
+      setLinearVerify("idle");
+      setLinearVerifyMsg("");
+      return;
+    }
+    let cancelled = false;
+    setLinearVerify("checking");
+    setLinearVerifyMsg("");
+    verifyLinearApiKey(current.linearApiKey).then((result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        setLinearVerify("ok");
+        setLinearVerifyMsg(result.name ?? "Connected");
+      } else {
+        setLinearVerify("error");
+        setLinearVerifyMsg(result.error ?? "Invalid key");
+      }
+    });
+    return () => { cancelled = true; };
+  }, [current.linearApiKey]);
 
   const activeField = FIELDS[fieldIndex];
 
@@ -65,6 +99,12 @@ export function SettingsPanel({
       setEditing(true);
     } else if (activeField === "ghPolling") {
       setEditValue(String(current.ghPollingIntervalMs / 1000));
+      setEditing(true);
+    } else if (activeField === "linearApiKey") {
+      setEditValue(current.linearApiKey);
+      setEditing(true);
+    } else if (activeField === "linearPolling") {
+      setEditValue(String(current.linearPollingIntervalMs / 1000));
       setEditing(true);
     }
   };
@@ -81,6 +121,13 @@ export function SettingsPanel({
       const seconds = parseFloat(editValue);
       if (!isNaN(seconds) && seconds >= 10) {
         setCurrent((s) => ({ ...s, ghPollingIntervalMs: Math.round(seconds * 1000) }));
+      }
+    } else if (activeField === "linearApiKey") {
+      setCurrent((s) => ({ ...s, linearApiKey: editValue }));
+    } else if (activeField === "linearPolling") {
+      const seconds = parseFloat(editValue);
+      if (!isNaN(seconds) && seconds >= 10) {
+        setCurrent((s) => ({ ...s, linearPollingIntervalMs: Math.round(seconds * 1000) }));
       }
     }
     setEditing(false);
@@ -116,7 +163,14 @@ export function SettingsPanel({
     }
 
     // Enter on text fields starts editing
-    if ((activeField === "prefix" || activeField === "polling" || activeField === "ghPolling") && key.return) {
+    if (
+      (activeField === "prefix" ||
+        activeField === "polling" ||
+        activeField === "ghPolling" ||
+        activeField === "linearApiKey" ||
+        activeField === "linearPolling") &&
+      key.return
+    ) {
       startEditing();
       return;
     }
@@ -138,8 +192,18 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "compactView" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, compactView: !s.compactView }));
+      return;
+    }
+
     if (activeField === "ghPrStatus" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, ghPrStatus: !s.ghPrStatus }));
+      return;
+    }
+
+    if (activeField === "linearEnabled" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, linearEnabled: !s.linearEnabled }));
       return;
     }
 
@@ -178,14 +242,25 @@ export function SettingsPanel({
     }
   });
 
+  const renderSectionHeader = (title: string) => (
+    <Box flexDirection="column" key={`section-${title}`}>
+      <Text> </Text>
+      <Text dimColor bold>
+        {"  "}{title}
+      </Text>
+      <Text dimColor>{"  "}{"─".repeat(title.length + 2)}</Text>
+    </Box>
+  );
+
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1}>
       <Text bold color="cyan">
         Settings
       </Text>
 
-      <Box flexDirection="column" marginTop={1} gap={1}>
-        {/* IDE */}
+      <Box flexDirection="column" marginTop={1}>
+        {/* === Worktree Section === */}
+        {renderSectionHeader("Worktree")}
         <Box>
           <Text bold={activeField === "ide"}>
             {activeField === "ide" ? "▸" : " "} IDE / Editor:{" "}
@@ -199,8 +274,6 @@ export function SettingsPanel({
             </Text>
           ))}
         </Box>
-
-        {/* Default Branch Prefix */}
         <Box>
           <Text bold={activeField === "prefix"}>
             {activeField === "prefix" ? "▸" : " "} Default Branch Prefix:{" "}
@@ -218,11 +291,27 @@ export function SettingsPanel({
             </Text>
           )}
         </Box>
-
-        {/* Polling Interval */}
+        <Box>
+          <Text bold={activeField === "autoSync"}>
+            {activeField === "autoSync" ? "▸" : " "} Auto-sync on Startup:{" "}
+          </Text>
+          <Text color={current.autoSyncOnStartup ? "green" : "gray"}>
+            [{current.autoSyncOnStartup ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "compactView"}>
+            {activeField === "compactView" ? "▸" : " "} Compact List:{" "}
+          </Text>
+          <Text color={current.compactView ? "green" : "gray"}>
+            [{current.compactView ? "✓" : " "}]
+          </Text>
+        </Box>
+        {/* === Agent Section === */}
+        {renderSectionHeader("Agent")}
         <Box>
           <Text bold={activeField === "polling"}>
-            {activeField === "polling" ? "▸" : " "} Polling Interval (s):{" "}
+            {activeField === "polling" ? "▸" : " "} Status Poll Interval (s):{" "}
           </Text>
           {editing && activeField === "polling" ? (
             <TextInput
@@ -237,41 +326,41 @@ export function SettingsPanel({
             </Text>
           )}
         </Box>
-
-        {/* Auto Install Hooks */}
         <Box>
           <Text bold={activeField === "autoHooks"}>
-            {activeField === "autoHooks" ? "▸" : " "} Auto-install Claude Hooks:{" "}
+            {activeField === "autoHooks" ? "▸" : " "} Auto-install Hooks:{" "}
           </Text>
           <Text color={current.autoInstallHooks ? "green" : "gray"}>
             [{current.autoInstallHooks ? "✓" : " "}]
           </Text>
         </Box>
-
-        {/* Auto Sync */}
         <Box>
-          <Text bold={activeField === "autoSync"}>
-            {activeField === "autoSync" ? "▸" : " "} Auto-sync on Startup:{" "}
+          <Text bold={activeField === "logLevel"}>
+            {activeField === "logLevel" ? "▸" : " "} Log Level:{" "}
           </Text>
-          <Text color={current.autoSyncOnStartup ? "green" : "gray"}>
-            [{current.autoSyncOnStartup ? "✓" : " "}]
-          </Text>
+          {LOG_LEVELS.map((opt) => (
+            <Text key={opt}>
+              {" "}
+              <Text color={current.logLevel === opt ? "cyan" : "gray"}>
+                {current.logLevel === opt ? "●" : "○"} {opt}
+              </Text>
+            </Text>
+          ))}
         </Box>
 
-        {/* GitHub PR Status */}
+        {/* === GitHub Section === */}
+        {renderSectionHeader("GitHub")}
         <Box>
           <Text bold={activeField === "ghPrStatus"}>
-            {activeField === "ghPrStatus" ? "▸" : " "} GitHub PR Status:{" "}
+            {activeField === "ghPrStatus" ? "▸" : " "} Enabled:{" "}
           </Text>
           <Text color={current.ghPrStatus ? "green" : "gray"}>
             [{current.ghPrStatus ? "✓" : " "}]
           </Text>
         </Box>
-
-        {/* GitHub Polling Interval */}
         <Box>
           <Text bold={activeField === "ghPolling"}>
-            {activeField === "ghPolling" ? "▸" : " "} GitHub Poll Interval (s):{" "}
+            {activeField === "ghPolling" ? "▸" : " "} Poll Interval (s):{" "}
           </Text>
           {editing && activeField === "ghPolling" ? (
             <TextInput
@@ -287,22 +376,58 @@ export function SettingsPanel({
           )}
         </Box>
 
-        {/* Log Level */}
+        {/* === Linear Section === */}
+        {renderSectionHeader("Linear")}
         <Box>
-          <Text bold={activeField === "logLevel"}>
-            {activeField === "logLevel" ? "▸" : " "} Log Level:{" "}
+          <Text bold={activeField === "linearEnabled"}>
+            {activeField === "linearEnabled" ? "▸" : " "} Enabled:{" "}
           </Text>
-          {LOG_LEVELS.map((opt) => (
-            <Text key={opt}>
-              {" "}
-              <Text color={current.logLevel === opt ? "cyan" : "gray"}>
-                {current.logLevel === opt ? "●" : "○"} {opt}
-              </Text>
+          <Text color={current.linearEnabled ? "green" : "gray"}>
+            [{current.linearEnabled ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "linearApiKey"}>
+            {activeField === "linearApiKey" ? "▸" : " "} API Key:{" "}
+          </Text>
+          {editing && activeField === "linearApiKey" ? (
+            <TextInput
+              value={editValue}
+              onChange={setEditValue}
+              onSubmit={commitEdit}
+            />
+          ) : (
+            <Text>
+              {current.linearApiKey ? "***" : ""}
+              {activeField === "linearApiKey" && !current.linearApiKey && (
+                <Text dimColor> (Enter to edit)</Text>
+              )}
+              {linearVerify === "checking" && <Text color="cyan"> ◌ Verifying...</Text>}
+              {linearVerify === "ok" && <Text color="green"> ✓ {linearVerifyMsg}</Text>}
+              {linearVerify === "error" && <Text color="red"> ✗ {linearVerifyMsg}</Text>}
             </Text>
-          ))}
+          )}
+        </Box>
+        <Box>
+          <Text bold={activeField === "linearPolling"}>
+            {activeField === "linearPolling" ? "▸" : " "} Poll Interval (s):{" "}
+          </Text>
+          {editing && activeField === "linearPolling" ? (
+            <TextInput
+              value={editValue}
+              onChange={setEditValue}
+              onSubmit={commitEdit}
+            />
+          ) : (
+            <Text>
+              {current.linearPollingIntervalMs / 1000}
+              {activeField === "linearPolling" && <Text dimColor> (Enter to edit, min 10s)</Text>}
+            </Text>
+          )}
         </Box>
 
-        {/* Repositories */}
+        {/* === Repositories Section === */}
+        {renderSectionHeader("Repositories")}
         <Box flexDirection="column">
           <Text bold={activeField === "repos"}>
             {activeField === "repos" ? "▸" : " "} Repositories

@@ -11,9 +11,13 @@ const DEFAULT_SETTINGS: Settings = {
   pollingIntervalMs: 2000,
   autoInstallHooks: true,
   autoSyncOnStartup: true,
+  compactView: false,
   ghPrStatus: true,
   ghPollingIntervalMs: 60000,
   logLevel: "info",
+  linearEnabled: false,
+  linearApiKey: "",
+  linearPollingIntervalMs: 60000,
 };
 
 export function loadSettings(): Settings {

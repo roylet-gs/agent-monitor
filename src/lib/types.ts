@@ -37,11 +37,21 @@ export interface PrInfo {
   checksStatus: "pending" | "passing" | "failing" | "none";
 }
 
+export interface LinearInfo {
+  identifier: string;
+  title: string;
+  url: string;
+  state: { name: string; color: string; type: string };
+  priorityLabel: string;
+  assignee: string | null;
+}
+
 export interface WorktreeWithStatus extends Worktree {
   agent_status: AgentStatus | null;
   git_status: GitStatus | null;
   last_commit: CommitInfo | null;
   pr_info: PrInfo | null;
+  linear_info: LinearInfo | null;
 }
 
 export interface GitStatus {
@@ -62,9 +72,13 @@ export interface Settings {
   pollingIntervalMs: number;
   autoInstallHooks: boolean;
   autoSyncOnStartup: boolean;
+  compactView: boolean;
   ghPrStatus: boolean;
   ghPollingIntervalMs: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  linearEnabled: boolean;
+  linearApiKey: string;
+  linearPollingIntervalMs: number;
 }
 
 export type AppMode =

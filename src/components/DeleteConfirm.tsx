@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { WorktreeWithStatus } from "../lib/types.js";
-import { remoteBranchExists } from "../lib/git.js";
 
 export interface DeleteOptions {
   deleteLocalBranch: boolean;
@@ -15,22 +14,14 @@ interface DeleteConfirmProps {
   onCancel: () => void;
 }
 
-type Step = "confirm" | "local-branch" | "remote-branch";
+type Step = "confirm" | "local-branch";
 
 export function DeleteConfirm({
   worktree,
-  repoPath,
   onConfirm,
   onCancel,
 }: DeleteConfirmProps) {
   const [step, setStep] = useState<Step>("confirm");
-  const [deleteLocal, setDeleteLocal] = useState(false);
-  const [hasRemote, setHasRemote] = useState<boolean | null>(null);
-
-  // Check if remote branch exists on mount
-  useEffect(() => {
-    remoteBranchExists(repoPath, worktree.branch).then(setHasRemote);
-  }, [repoPath, worktree.branch]);
 
   useInput((input, key) => {
     if (key.escape) {
@@ -49,28 +40,9 @@ export function DeleteConfirm({
 
     if (step === "local-branch") {
       if (key.return || input === "y") {
-        setDeleteLocal(true);
-        if (hasRemote) {
-          setStep("remote-branch");
-        } else {
-          onConfirm({ deleteLocalBranch: true, deleteRemoteBranch: false });
-        }
+        onConfirm({ deleteLocalBranch: true, deleteRemoteBranch: false });
       } else if (input === "n") {
-        setDeleteLocal(false);
-        if (hasRemote) {
-          setStep("remote-branch");
-        } else {
-          onConfirm({ deleteLocalBranch: false, deleteRemoteBranch: false });
-        }
-      }
-      return;
-    }
-
-    if (step === "remote-branch") {
-      if (key.return || input === "y") {
-        onConfirm({ deleteLocalBranch: deleteLocal, deleteRemoteBranch: true });
-      } else if (input === "n") {
-        onConfirm({ deleteLocalBranch: deleteLocal, deleteRemoteBranch: false });
+        onConfirm({ deleteLocalBranch: false, deleteRemoteBranch: false });
       }
       return;
     }
@@ -123,20 +95,6 @@ export function DeleteConfirm({
         <Box flexDirection="column" marginTop={1}>
           <Text>
             Also delete local branch <Text bold>{worktree.branch}</Text>?
-          </Text>
-          <Box marginTop={1}>
-            <Text>
-              <Text color="yellow">[Enter/y]</Text> Yes{" "}
-              <Text color="yellow">[n]</Text> No, keep it
-            </Text>
-          </Box>
-        </Box>
-      )}
-
-      {step === "remote-branch" && (
-        <Box flexDirection="column" marginTop={1}>
-          <Text>
-            Also delete remote branch <Text bold>origin/{worktree.branch}</Text>?
           </Text>
           <Box marginTop={1}>
             <Text>

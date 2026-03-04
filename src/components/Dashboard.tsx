@@ -13,6 +13,7 @@ interface DashboardProps {
   busy: string | null;
   escHint: boolean;
   unseenIds: Set<string>;
+  compactView: boolean;
 }
 
 export function Dashboard({
@@ -22,6 +23,7 @@ export function Dashboard({
   busy,
   escHint,
   unseenIds,
+  compactView,
 }: DashboardProps) {
   const selected = worktrees[selectedIndex] ?? null;
 
@@ -29,7 +31,7 @@ export function Dashboard({
     <Box flexDirection="column">
       <StatusBar repoName={repoName} worktreeCount={worktrees.length} />
       <Box>
-        <WorktreeList worktrees={worktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} />
+        <WorktreeList worktrees={worktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
         <WorktreeDetail worktree={selected} />
       </Box>
       <ActionBar busy={busy} hasWorktrees={worktrees.length > 0} escHint={escHint} />

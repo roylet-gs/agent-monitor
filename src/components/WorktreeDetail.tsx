@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
+import { getLinearStatusColor } from "../lib/linear.js";
 import type { WorktreeWithStatus } from "../lib/types.js";
 
 interface WorktreeDetailProps {
@@ -88,47 +89,6 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
           </Box>
         )}
 
-        {/* Name / Branch */}
-        <Box flexDirection="column">
-          {worktree.custom_name && (
-            <Text>
-              <Text bold>Name </Text>
-              <Text>{worktree.custom_name}</Text>
-            </Text>
-          )}
-          <Text>
-            <Text bold>Branch </Text>
-            <Text>{worktree.branch}</Text>
-          </Text>
-        </Box>
-
-        {/* Last Commit */}
-        {worktree.last_commit && (
-          <Box flexDirection="column">
-            <Text bold>Last Commit</Text>
-            <Text>{worktree.last_commit.message}</Text>
-            <Text dimColor>{worktree.last_commit.relative_time}</Text>
-          </Box>
-        )}
-
-        {/* Git Status */}
-        {worktree.git_status && (
-          <Box flexDirection="column">
-            <Text bold>Git Status</Text>
-            <Text>
-              <Text color="green">↑{worktree.git_status.ahead}</Text>{" "}
-              <Text color="red">↓{worktree.git_status.behind}</Text>{" "}
-              ahead/behind{"  "}
-              {worktree.git_status.dirty > 0 && (
-                <Text color="yellow">
-                  ✎ {worktree.git_status.dirty} file
-                  {worktree.git_status.dirty !== 1 ? "s" : ""} dirty
-                </Text>
-              )}
-            </Text>
-          </Box>
-        )}
-
         {/* Pull Request */}
         {worktree.pr_info && (() => {
           const { label, color } = getPrStatusLabel(worktree.pr_info);
@@ -153,6 +113,48 @@ export function WorktreeDetail({ worktree }: WorktreeDetailProps) {
             </Box>
           );
         })()}
+
+        {/* Linear Ticket */}
+        {worktree.linear_info && (
+          <Box flexDirection="column">
+            <Text>
+              <Text bold>Linear </Text>
+              <Text bold color={getLinearStatusColor(worktree.linear_info.state.type)}>
+                {worktree.linear_info.identifier}
+              </Text>
+              <Text> </Text>
+              <Text color={getLinearStatusColor(worktree.linear_info.state.type)}>
+                {worktree.linear_info.state.name}
+              </Text>
+            </Text>
+            <Text dimColor>{worktree.linear_info.title}</Text>
+            <Text dimColor>
+              Priority: {worktree.linear_info.priorityLabel}
+              {worktree.linear_info.assignee && ` · Assigned: ${worktree.linear_info.assignee}`}
+            </Text>
+            <Text dimColor>{worktree.linear_info.url}</Text>
+          </Box>
+        )}
+
+        {/* Git Info */}
+        <Box flexDirection="column">
+          <Text bold>Git</Text>
+          <Text dimColor>{worktree.branch}</Text>
+          {worktree.last_commit && (
+            <Text dimColor>{worktree.last_commit.message} ({worktree.last_commit.relative_time})</Text>
+          )}
+          {worktree.git_status && (
+            <Text>
+              <Text color="green">↑{worktree.git_status.ahead}</Text>{" "}
+              <Text color="red">↓{worktree.git_status.behind}</Text>
+              {worktree.git_status.dirty > 0 && (
+                <Text color="yellow">
+                  {"  "}✎ {worktree.git_status.dirty} dirty
+                </Text>
+              )}
+            </Text>
+          )}
+        </Box>
       </Box>
     </Box>
   );
