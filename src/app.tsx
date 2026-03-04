@@ -39,9 +39,10 @@ import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
+  watch?: boolean;
 }
 
-export function App({ onRunScript }: AppProps) {
+export function App({ onRunScript, watch }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -50,6 +51,7 @@ export function App({ onRunScript }: AppProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
   const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string } | null>(null);
   const [creatingBranch, setCreatingBranch] = useState("");
@@ -485,6 +487,7 @@ export function App({ onRunScript }: AppProps) {
         });
       }
     },
+    onToggleLogs: () => setShowLogs((v) => !v),
     onQuit: () => exit(),
     onEscHint: setEscHint,
   });
@@ -612,6 +615,8 @@ export function App({ onRunScript }: AppProps) {
           escHint={escHint}
           unseenIds={unseenIds}
           compactView={settings.compactView}
+          showLogs={showLogs}
+          terminalRows={stdout?.rows ?? 24}
         />
       )}
     </Box>

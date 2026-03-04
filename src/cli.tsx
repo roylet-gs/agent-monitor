@@ -17,6 +17,7 @@ const cli = meow(
 
   Usage
     $ am                            Launch the dashboard
+    $ am --watch                    Launch with log panel open
     $ am status -w <path>           Print agent status for a worktree
     $ am install-hooks <path>       Install Claude hooks into a worktree
     $ am hook-event -w <path>       Receive hook event from stdin (used by hooks)
@@ -34,13 +35,15 @@ const cli = meow(
     --level         Filter logs by level (debug, info, warn, error)
     --module        Filter logs by module
     --clear         Clear the log file
+    --watch         Launch with log panel open
     --help          Show this help
     --version       Show version
 
   Dashboard Keys
     j/k ↑/↓  Navigate        n  New worktree     d  Delete
     Enter    Open in IDE      s  Settings         r  Refresh
-    g        Open PR          l  Open Linear      q  Quit
+    g        Open PR          l  Open Linear      w  Watch logs
+    q        Quit
 `,
   {
     description: false,
@@ -53,6 +56,7 @@ const cli = meow(
       level: { type: "string" },
       module: { type: "string" },
       clear: { type: "boolean", default: false },
+      watch: { type: "boolean", default: false },
     },
   }
 );
@@ -70,7 +74,7 @@ async function launchTui(): Promise<void> {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const instance = render(<App onRunScript={onRunScript} />, { patchConsole: true });
+    const instance = render(<App onRunScript={onRunScript} watch={cli.flags.watch} />, { patchConsole: true });
 
     try {
       await instance.waitUntilExit();
