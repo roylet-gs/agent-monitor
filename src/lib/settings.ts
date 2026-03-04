@@ -8,6 +8,7 @@ import type { Settings } from "./types.js";
 export const DEFAULT_SETTINGS: Settings = {
   ide: "cursor",
   defaultBranchPrefix: "feature/",
+  defaultBaseBranch: "main",
   pollingIntervalMs: 2000,
   autoInstallHooks: true,
   autoSyncOnStartup: true,
