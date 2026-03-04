@@ -64,19 +64,32 @@ function extractLastResponse(event: HookEvent): string | null {
 function mapEventToStatus(event: HookEvent): AgentStatusType | null {
   // Stop/Notification waiting cases take priority
   if (event.event === "Stop") {
+    // stop_hook_active is a loop-prevention flag (true = a Stop hook already
+    // blocked once). Since our hook never blocks, this is always false,
+    // so Stop always maps to "idle", which is correct: the turn is finished.
     return event.stop_hook_active ? "waiting" : "idle";
   }
   if (event.event === "Notification") {
     // Permission prompts → waiting; other notifications are informational,
     // don't change status
-    return event.notification_type === "permission_prompt" ? "waiting" : null;
+    if (
+      event.notification_type === "permission_prompt" ||
+      event.notification_type === "elicitation_dialog"
+    ) {
+      return "waiting";
+    }
+    return null;
   }
   if (event.event === "SessionStart") {
     return "idle";
   }
 
   // Tools that block on user input → waiting
-  if (event.tool_name === "AskUserQuestion" || event.tool_name === "EnterPlanMode") {
+  if (
+    event.tool_name === "AskUserQuestion" ||
+    event.tool_name === "EnterPlanMode" ||
+    event.tool_name === "ExitPlanMode"
+  ) {
     return "waiting";
   }
 
