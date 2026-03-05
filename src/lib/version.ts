@@ -42,7 +42,7 @@ export interface PackageManagerInfo {
 }
 
 export function detectPackageManager(): PackageManagerInfo {
-  const registry = "--registry=https://npm.pkg.github.com";
+  const registry = "--@roylet-gs:registry=https://npm.pkg.github.com";
   const pkg = "@roylet-gs/agent-monitor@latest";
 
   try {
