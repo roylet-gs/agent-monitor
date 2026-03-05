@@ -467,7 +467,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     saveSettings(DEFAULT_SETTINGS);
     setSettings(DEFAULT_SETTINGS);
     setRepositories([]);
-    setMode("folder-browse");
+    setMode("setup");
   }, []);
 
   // Handle remove repo from settings
