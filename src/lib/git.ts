@@ -1,4 +1,5 @@
 import { simpleGit, type SimpleGit } from "simple-git";
+import { execSync } from "child_process";
 import { existsSync } from "fs";
 import { basename, join, resolve } from "path";
 import { log } from "./logger.js";
@@ -10,6 +11,19 @@ export function getGit(cwd: string): SimpleGit {
 
 export function isGitRepo(path: string): boolean {
   return existsSync(join(path, ".git"));
+}
+
+export function getWorktreeRoot(cwd: string): string | undefined {
+  try {
+    const result = execSync("git rev-parse --show-toplevel", {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return result.trim();
+  } catch {
+    return undefined;
+  }
 }
 
 export interface GitWorktreeInfo {

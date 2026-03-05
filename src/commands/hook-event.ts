@@ -1,4 +1,5 @@
 import { getWorktreeByPath, getAgentStatus, upsertAgentStatus } from "../lib/db.js";
+import { getWorktreeRoot } from "../lib/git.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
 import type { AgentStatusType, HookEvent } from "../lib/types.js";
@@ -28,10 +29,11 @@ export async function handleHookEvent(
   log("info", "hook-event", `event=${payload.event} tool=${payload.tool_name ?? "none"} stop_hook_active=${payload.stop_hook_active ?? "N/A"} permission_prompt=${payload.permission_prompt ?? "N/A"} permission_mode=${payload.permission_mode ?? "N/A"} for ${worktreePath}`);
   log("debug", "hook-event", `Full payload: ${JSON.stringify(payload).slice(0, 500)}`);
 
-  // Find worktree in DB
-  const worktree = getWorktreeByPath(worktreePath);
+  // Resolve to git worktree root so subdirectory paths match the DB
+  const resolvedPath = getWorktreeRoot(worktreePath) ?? worktreePath;
+  const worktree = getWorktreeByPath(resolvedPath);
   if (!worktree) {
-    log("debug", "hook-event", `Worktree not found in DB for path: ${worktreePath}`);
+    log("debug", "hook-event", `Worktree not found in DB for path: ${worktreePath} (resolved: ${resolvedPath})`);
     return;
   }
 
