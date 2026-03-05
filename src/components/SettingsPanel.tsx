@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { verifyLinearApiKey } from "../lib/linear.js";
+import type { UpdateInfo } from "../hooks/useUpdateCheck.js";
 import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
@@ -18,11 +19,14 @@ type SettingsField =
   | "logLevel"
   | "ghPrStatus"
   | "ghPolling"
+  | "ghRefreshOnManual"
   | "linearEnabled"
   | "linearDesktopApp"
   | "linearApiKey"
   | "linearPolling"
+  | "linearRefreshOnManual"
   | "repos"
+  | "checkForUpdates"
   | "resetSettings"
   | "factoryReset";
 
@@ -37,11 +41,14 @@ const FIELDS: SettingsField[] = [
   "logLevel",
   "ghPrStatus",
   "ghPolling",
+  "ghRefreshOnManual",
   "linearEnabled",
   "linearDesktopApp",
   "linearApiKey",
   "linearPolling",
+  "linearRefreshOnManual",
   "repos",
+  "checkForUpdates",
   "resetSettings",
   "factoryReset",
 ];
@@ -57,11 +64,14 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   logLevel: "Verbosity of debug log file at ~/.agent-monitor/debug.log",
   ghPrStatus: "Show GitHub PR and CI status for each worktree",
   ghPolling: "How often to fetch GitHub PR status (minimum 10s)",
+  ghRefreshOnManual: "Include GitHub status when manually refreshing",
   linearEnabled: "Show linked Linear tickets for worktrees",
   linearDesktopApp: "Open Linear links in the desktop app instead of browser",
   linearApiKey: "Personal API key for Linear integration (from Linear Settings > API)",
   linearPolling: "How often to fetch Linear ticket status (minimum 10s)",
+  linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   repos: "Monitored repositories and their startup scripts",
+  checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
   factoryReset: "Delete all data including repositories, worktrees, and settings",
 };
@@ -77,6 +87,7 @@ interface SettingsPanelProps {
   onAddRepo: () => void;
   onRemoveRepo: (repoId: string) => void;
   onFactoryReset: () => void;
+  onCheckForUpdates: () => Promise<UpdateInfo | null>;
 }
 
 export function SettingsPanel({
@@ -87,6 +98,7 @@ export function SettingsPanel({
   onAddRepo,
   onRemoveRepo,
   onFactoryReset,
+  onCheckForUpdates,
 }: SettingsPanelProps) {
   const [current, setCurrent] = useState({ ...settings });
   const [fieldIndex, setFieldIndex] = useState(0);
@@ -96,19 +108,18 @@ export function SettingsPanel({
   const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
   const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
   const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | null>(null);
+  const [updateCheckStatus, setUpdateCheckStatus] = useState<"idle" | "checking" | "ok" | "update" | "error">("idle");
+  const [updateCheckMsg, setUpdateCheckMsg] = useState("");
 
-  // Verify Linear API key whenever it changes
-  useEffect(() => {
-    if (!current.linearApiKey) {
+  const verifyLinearKey = (key: string) => {
+    if (!key) {
       setLinearVerify("idle");
       setLinearVerifyMsg("");
       return;
     }
-    let cancelled = false;
     setLinearVerify("checking");
     setLinearVerifyMsg("");
-    verifyLinearApiKey(current.linearApiKey).then((result) => {
-      if (cancelled) return;
+    verifyLinearApiKey(key).then((result) => {
       if (result.ok) {
         setLinearVerify("ok");
         setLinearVerifyMsg(result.name ?? "Connected");
@@ -117,8 +128,7 @@ export function SettingsPanel({
         setLinearVerifyMsg(result.error ?? "Invalid key");
       }
     });
-    return () => { cancelled = true; };
-  }, [current.linearApiKey]);
+  };
 
   const activeField = FIELDS[fieldIndex];
 
@@ -161,6 +171,7 @@ export function SettingsPanel({
       }
     } else if (activeField === "linearApiKey") {
       setCurrent((s) => ({ ...s, linearApiKey: editValue }));
+      verifyLinearKey(editValue);
     } else if (activeField === "linearPolling") {
       const seconds = parseFloat(editValue);
       if (!isNaN(seconds) && seconds >= 10) {
@@ -257,6 +268,11 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "ghRefreshOnManual" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, ghRefreshOnManual: !s.ghRefreshOnManual }));
+      return;
+    }
+
     if (activeField === "linearEnabled" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearEnabled: !s.linearEnabled }));
       return;
@@ -264,6 +280,11 @@ export function SettingsPanel({
 
     if (activeField === "linearDesktopApp" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearUseDesktopApp: !s.linearUseDesktopApp }));
+      return;
+    }
+
+    if (activeField === "linearRefreshOnManual" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, linearRefreshOnManual: !s.linearRefreshOnManual }));
       return;
     }
 
@@ -301,6 +322,30 @@ export function SettingsPanel({
       }
     }
 
+    if (activeField === "checkForUpdates" && key.return) {
+      if (updateCheckStatus === "checking") return;
+      setUpdateCheckStatus("checking");
+      setUpdateCheckMsg("");
+      onCheckForUpdates()
+        .then((info) => {
+          if (!info) {
+            setUpdateCheckStatus("error");
+            setUpdateCheckMsg("Check failed");
+          } else if (info.updateAvailable) {
+            setUpdateCheckStatus("update");
+            setUpdateCheckMsg(`v${info.latest} available!`);
+          } else {
+            setUpdateCheckStatus("ok");
+            setUpdateCheckMsg(`Up to date (v${info.current})`);
+          }
+        })
+        .catch(() => {
+          setUpdateCheckStatus("error");
+          setUpdateCheckMsg("Check failed");
+        });
+      return;
+    }
+
     if (activeField === "resetSettings" && key.return) {
       setConfirming("resetSettings");
       return;
@@ -314,7 +359,7 @@ export function SettingsPanel({
 
   const renderSectionHeader = (title: string) => (
     <Box flexDirection="column" key={`section-${title}`} marginTop={1} marginBottom={1}>
-      <Text dimColor bold>
+      <Text bold color="gray">
         {"  "}{title}
       </Text>
       <Text dimColor>{"  "}{"─".repeat(title.length + 2)}</Text>
@@ -404,8 +449,6 @@ export function SettingsPanel({
             [{current.hideMainBranch ? "✓" : " "}]
           </Text>
         </Box>
-        {/* === Agent Section === */}
-        {renderSectionHeader("Agent")}
         <Box>
           <Text bold={activeField === "polling"}>
             {activeField === "polling" ? "▸" : " "} Status Poll Interval (s):{" "}
@@ -463,6 +506,15 @@ export function SettingsPanel({
               {activeField === "ghPolling" && <Text dimColor> (Enter to edit, min 10s)</Text>}
             </Text>
           )}
+        </Box>
+
+        <Box>
+          <Text bold={activeField === "ghRefreshOnManual"}>
+            {activeField === "ghRefreshOnManual" ? "▸" : " "} Include in Refresh:{" "}
+          </Text>
+          <Text color={current.ghRefreshOnManual ? "green" : "gray"}>
+            [{current.ghRefreshOnManual ? "✓" : " "}]
+          </Text>
         </Box>
 
         {/* === Linear Section === */}
@@ -523,6 +575,15 @@ export function SettingsPanel({
           )}
         </Box>
 
+        <Box>
+          <Text bold={activeField === "linearRefreshOnManual"}>
+            {activeField === "linearRefreshOnManual" ? "▸" : " "} Include in Refresh:{" "}
+          </Text>
+          <Text color={current.linearRefreshOnManual ? "green" : "gray"}>
+            [{current.linearRefreshOnManual ? "✓" : " "}]
+          </Text>
+        </Box>
+
         {/* === Repositories Section === */}
         {renderSectionHeader("Repositories")}
         <Box flexDirection="column">
@@ -551,6 +612,21 @@ export function SettingsPanel({
             <Text dimColor>
               {"    [←→] Select  [a] Add  [r] Remove  [s] Script  [x] Remove script"}
             </Text>
+          )}
+        </Box>
+
+        {/* === Updates Section === */}
+        {renderSectionHeader("Updates")}
+        <Box>
+          <Text bold={activeField === "checkForUpdates"}>
+            {activeField === "checkForUpdates" ? "▸" : " "} Check for Updates
+          </Text>
+          {updateCheckStatus === "checking" && <Text color="cyan"> ◌ Checking...</Text>}
+          {updateCheckStatus === "ok" && <Text color="green"> ✓ {updateCheckMsg}</Text>}
+          {updateCheckStatus === "update" && <Text color="green"> ✓ {updateCheckMsg}</Text>}
+          {updateCheckStatus === "error" && <Text color="red"> ✗ {updateCheckMsg}</Text>}
+          {updateCheckStatus === "idle" && activeField === "checkForUpdates" && (
+            <Text dimColor> (Enter to check)</Text>
           )}
         </Box>
 
