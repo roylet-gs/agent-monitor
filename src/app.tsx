@@ -461,6 +461,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // Check for updates
   const { updateInfo, recheck } = useUpdateCheck(settings, handleSaveSettings);
 
+  // Handle settings reset (back to defaults + setup wizard)
+  const handleSettingsReset = useCallback(() => {
+    saveSettings(DEFAULT_SETTINGS);
+    setSettings(DEFAULT_SETTINGS);
+    setMode("setup");
+  }, []);
+
   // Handle factory reset
   const handleFactoryReset = useCallback(() => {
     resetAll();
@@ -673,6 +680,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           onClose={() => setMode("dashboard")}
           onAddRepo={() => setMode("folder-browse")}
           onRemoveRepo={handleRemoveRepo}
+          onSettingsReset={handleSettingsReset}
           onFactoryReset={handleFactoryReset}
           onCheckForUpdates={recheck}
         />
