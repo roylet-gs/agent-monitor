@@ -59,6 +59,23 @@ export async function handleHookEvent(
     transcriptSummary,
     updatedAt: new Date().toISOString(),
   }).catch(() => {});
+
+  // Detect git push / gh pr create and publish a git-activity message
+  // so the TUI can trigger a targeted PR/CI refresh
+  if (payload.event === "PostToolUse") {
+    const command = String(payload.tool_input?.command ?? "");
+    const activity = detectGitActivity(command);
+    if (activity) {
+      log("info", "hook-event", `Detected git activity: ${activity} in command for ${worktreePath}`);
+      await publishMessage({
+        type: "git-activity",
+        worktreeId: worktree.id,
+        repoId: worktree.repo_id,
+        branch: worktree.branch,
+        activity,
+      }).catch(() => {});
+    }
+  }
 }
 
 function extractLastResponse(event: HookEvent): string | null {
@@ -132,6 +149,13 @@ function mapEventToStatus(event: HookEvent): AgentStatusType | null {
   }
 
   return "idle";
+}
+
+function detectGitActivity(command: string): "push" | "pr-create" | null {
+  if (!command) return null;
+  if (/\bgit\s+push\b/.test(command)) return "push";
+  if (/\bgh\s+pr\s+create\b/.test(command)) return "pr-create";
+  return null;
 }
 
 function readStdin(): Promise<string> {

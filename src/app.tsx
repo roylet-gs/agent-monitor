@@ -123,7 +123,13 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
   // Pub/sub: instant refresh on agent status updates
   usePubSub((msg) => {
     if (msg.type === "agent-status-update") {
-      refreshRef.current();
+      // Light refresh only: re-read DB + git status without triggering GitHub/Linear API calls
+      lightRefreshRef.current();
+    } else if (msg.type === "git-activity") {
+      // Git push or PR creation detected — force full refresh (with integrations) after a short
+      // delay to give GitHub time to process the push/PR.
+      log("info", "app", `Git activity detected: ${msg.activity} on ${msg.branch}`);
+      setTimeout(() => refreshRef.current(), 3000);
     }
   });
 

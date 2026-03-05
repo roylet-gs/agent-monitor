@@ -358,11 +358,10 @@ export function SettingsPanel({
   });
 
   const renderSectionHeader = (title: string) => (
-    <Box flexDirection="column" key={`section-${title}`} marginTop={1} marginBottom={1}>
-      <Text bold color="gray">
-        {"  "}{title}
-      </Text>
-      <Text dimColor>{"  "}{"─".repeat(title.length + 2)}</Text>
+    <Box key={`section-${title}`} marginTop={1}>
+      <Text dimColor>{"  "}{"─".repeat(2)} </Text>
+      <Text bold color="gray">{title}</Text>
+      <Text dimColor> {"─".repeat(2)}</Text>
     </Box>
   );
 
