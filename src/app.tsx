@@ -77,6 +77,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const repos = getRepositories();
     setRepositories(repos);
 
+    // Check first-run BEFORE version check writes settings.json
+    const firstRun = isFirstRun() || forceSetup;
+
     if (settings.lastSeenVersion === undefined || isNewVersion(settings.lastSeenVersion, currentVersion)) {
       // Silently record current version
       const updated = { ...settings, lastSeenVersion: currentVersion };
@@ -84,7 +87,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       saveSettings(updated);
     }
 
-    if (isFirstRun() || forceSetup) {
+    if (firstRun) {
       setMode("setup");
     } else if (repos.length === 0) {
       setMode("folder-browse");
@@ -557,7 +560,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         <SetupWizard
           initialSettings={settings}
           onComplete={(newSettings, repoPath) => {
-            handleSaveSettings(newSettings);
+            handleSaveSettings({ ...newSettings, setupCompleted: true });
             if (repoPath) {
               handleSelectFolder(repoPath);
             } else {
@@ -565,7 +568,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
             }
           }}
           onSkip={() => {
-            handleSaveSettings(settings);
+            handleSaveSettings({ ...settings, setupCompleted: true });
             if (repositories.length === 0) {
               setMode("folder-browse");
             } else {

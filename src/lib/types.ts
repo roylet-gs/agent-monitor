@@ -93,6 +93,7 @@ export interface Settings {
   linearPollingIntervalMs: number;
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
+  setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
   latestKnownVersion?: string;
