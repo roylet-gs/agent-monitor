@@ -97,7 +97,7 @@ function extractLastResponse(event: HookEvent): string | null {
   return null;
 }
 
-function mapEventToStatus(event: HookEvent): AgentStatusType | null {
+export function mapEventToStatus(event: HookEvent): AgentStatusType | null {
   // Stop/Notification waiting cases take priority
   if (event.event === "Stop") {
     // stop_hook_active is a loop-prevention flag (true = a Stop hook already
@@ -158,7 +158,7 @@ function mapEventToStatus(event: HookEvent): AgentStatusType | null {
   return "idle";
 }
 
-function detectGitActivity(command: string): "push" | "pr-create" | null {
+export function detectGitActivity(command: string): "push" | "pr-create" | null {
   if (!command) return null;
   if (/\bgit\s+push\b/.test(command)) return "push";
   if (/\bgh\s+pr\s+create\b/.test(command)) return "pr-create";
