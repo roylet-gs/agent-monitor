@@ -335,7 +335,12 @@ export function SetupWizard({ initialSettings, onComplete, onSkip }: SetupWizard
               </Text>
             </Box>
             {linearEnabled && (
-              <Box marginTop={1}>
+              <Box marginTop={1} flexDirection="column">
+                <Text dimColor>
+                  Get your API key from Linear: Settings {">"} API {">"} Personal API keys{"\n"}
+                  https://linear.app/settings/api
+                </Text>
+                <Box marginTop={1}>
                 <Text>  API Key: </Text>
                 {editingLinearKey ? (
                   <TextInput
@@ -352,6 +357,7 @@ export function SetupWizard({ initialSettings, onComplete, onSkip }: SetupWizard
                     {linearVerify === "error" && <Text color="red"> {"\u2717"} {linearVerifyMsg}</Text>}
                   </Text>
                 )}
+              </Box>
               </Box>
             )}
           </Box>
