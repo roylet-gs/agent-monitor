@@ -39,20 +39,38 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 export interface PackageManagerInfo {
   command: string;
   args: string[];
+  /** Commands to run before the install (e.g. configure scoped registry) */
+  setup?: { command: string; args: string[] }[];
 }
 
 export function detectPackageManager(): PackageManagerInfo {
-  const registry = "--@roylet-gs:registry=https://npm.pkg.github.com";
   const pkg = "@roylet-gs/agent-monitor@latest";
 
   try {
     const binPath = process.argv[1] ?? "";
     if (binPath.includes("/pnpm/") || binPath.includes("\\pnpm\\")) {
-      return { command: "pnpm", args: ["add", "-g", pkg, registry] };
+      return {
+        command: "pnpm",
+        args: ["add", "-g", pkg],
+        setup: [
+          {
+            command: "pnpm",
+            args: [
+              "config",
+              "set",
+              "@roylet-gs:registry=https://npm.pkg.github.com",
+              "--global",
+            ],
+          },
+        ],
+      };
     }
   } catch {}
 
-  return { command: "npm", args: ["install", "-g", pkg, registry] };
+  return {
+    command: "npm",
+    args: ["install", "-g", pkg, "--@roylet-gs:registry=https://npm.pkg.github.com"],
+  };
 }
 
 export async function checkForUpdate(
