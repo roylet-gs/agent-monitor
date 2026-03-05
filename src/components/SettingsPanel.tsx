@@ -53,6 +53,29 @@ const FIELDS: SettingsField[] = [
   "factoryReset",
 ];
 
+const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
+  ide: "Which editor/IDE to open worktrees in",
+  prefix: "Branch name prefix when creating new worktrees (e.g. feature/, fix/)",
+  baseBranch: "Default base branch for new worktrees",
+  autoSync: "Automatically sync worktree status from git on startup",
+  compactView: "Show worktrees in a compact single-line format",
+  hideMainBranch: "Hide the main/master branch from the worktree list",
+  polling: "How often to check agent status (minimum 0.5s)",
+  logLevel: "Verbosity of debug log file at ~/.agent-monitor/debug.log",
+  ghPrStatus: "Show GitHub PR and CI status for each worktree",
+  ghPolling: "How often to fetch GitHub PR status (minimum 10s)",
+  ghRefreshOnManual: "Include GitHub status when manually refreshing",
+  linearEnabled: "Show linked Linear tickets for worktrees",
+  linearDesktopApp: "Open Linear links in the desktop app instead of browser",
+  linearApiKey: "Personal API key for Linear integration (from Linear Settings > API)",
+  linearPolling: "How often to fetch Linear ticket status (minimum 10s)",
+  linearRefreshOnManual: "Include Linear tickets when manually refreshing",
+  repos: "Monitored repositories and their startup scripts",
+  checkForUpdates: "Check if a newer version of agent-monitor is available",
+  resetSettings: "Reset all settings to their default values",
+  factoryReset: "Delete all data including repositories, worktrees, and settings",
+};
+
 const IDE_OPTIONS: Settings["ide"][] = ["cursor", "vscode", "terminal"];
 const LOG_LEVELS: Settings["logLevel"][] = ["debug", "info", "warn", "error"];
 
@@ -335,7 +358,7 @@ export function SettingsPanel({
   });
 
   const renderSectionHeader = (title: string) => (
-    <Box flexDirection="column" key={`section-${title}`} marginTop={1}>
+    <Box flexDirection="column" key={`section-${title}`} marginTop={1} marginBottom={1}>
       <Text bold color="gray">
         {"  "}{title}
       </Text>
@@ -345,12 +368,14 @@ export function SettingsPanel({
 
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1}>
-      <Text bold color="cyan">
-        Settings
-      </Text>
+      <Box>
+        <Box flexDirection="column" flexGrow={1}>
+          <Text bold color="cyan">
+            Settings
+          </Text>
 
-      <Box flexDirection="column" marginTop={1}>
-        {/* === Worktree Section === */}
+          <Box flexDirection="column" marginTop={1}>
+            {/* === Worktree Section === */}
         {renderSectionHeader("Worktree")}
         <Box>
           <Text bold={activeField === "ide"}>
@@ -628,6 +653,13 @@ export function SettingsPanel({
           {activeField === "factoryReset" && !confirming && (
             <Text dimColor> (Enter to reset)</Text>
           )}
+        </Box>
+          </Box>
+        </Box>
+
+        <Box flexDirection="column" borderStyle="round" paddingX={1} width={40} alignSelf="flex-start" marginLeft={1}>
+          <Text bold dimColor>Description</Text>
+          <Text dimColor wrap="wrap">{FIELD_DESCRIPTIONS[activeField]}</Text>
         </Box>
       </Box>
 
