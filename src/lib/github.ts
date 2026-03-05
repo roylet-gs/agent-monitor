@@ -9,12 +9,10 @@ interface GhPrResult {
   state: string;
   isDraft: boolean;
   reviewDecision: string;
-  latestReviews: Array<{ state: string }>;
   statusCheckRollup: Array<{ status: string; conclusion: string }>;
-  comments: Array<unknown>;
 }
 
-const GH_PR_FIELDS = "number,title,url,state,isDraft,reviewDecision,latestReviews,statusCheckRollup,comments";
+const GH_PR_FIELDS = "number,title,url,state,isDraft,reviewDecision,statusCheckRollup";
 
 function execGh(args: string[], cwd: string, timeout = 5000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -82,12 +80,6 @@ function deriveChecksStatus(
 }
 
 function ghResultToPrInfo(pr: GhPrResult): PrInfo {
-  const hasReviewFeedback = (pr.latestReviews ?? []).some(
-    (r) => r.state === "COMMENTED" || r.state === "CHANGES_REQUESTED"
-  );
-  const hasDraftComments = pr.isDraft && (pr.comments ?? []).length > 0;
-  const hasFeedback = hasReviewFeedback || hasDraftComments;
-
   return {
     number: pr.number,
     title: pr.title,
@@ -95,7 +87,7 @@ function ghResultToPrInfo(pr: GhPrResult): PrInfo {
     state: pr.state,
     isDraft: pr.isDraft,
     reviewDecision: pr.reviewDecision ?? "",
-    hasFeedback,
+    hasFeedback: false,
     checksStatus: deriveChecksStatus(pr.statusCheckRollup ?? []),
   };
 }

@@ -44,6 +44,11 @@ export interface LinearInfo {
   state: { name: string; color: string; type: string };
   priorityLabel: string;
   assignee: string | null;
+  prAttachment?: {
+    url: string;
+    title: string;
+    metadata: Record<string, unknown>;
+  } | null;
 }
 
 export interface WorktreeGroup {

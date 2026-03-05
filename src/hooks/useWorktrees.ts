@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getWorktrees, getAgentStatuses } from "../lib/db.js";
 import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
-import { fetchLinearInfo } from "../lib/linear.js";
+import { fetchLinearInfo, linearAttachmentToPrInfo } from "../lib/linear.js";
 import { log } from "../lib/logger.js";
 import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
 
@@ -132,12 +132,15 @@ export function useWorktrees(config: WorktreeHookConfig): {
         const allBranchNames: string[] = [];
         for (const repo of repos) {
           const dbWorktrees = getWorktrees(repo.id);
-          const branches: string[] = [];
+          const ghBranches: string[] = [];
           for (const wt of dbWorktrees) {
-            branches.push(wt.branch);
             allBranchNames.push(wt.branch);
+            // Only fetch gh for branches without Linear PR data
+            if (!linearCacheRef.current.get(wt.branch)?.prAttachment) {
+              ghBranches.push(wt.branch);
+            }
           }
-          repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
+          repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches: ghBranches });
         }
         const shouldRefreshPr = shouldFetchPr && ghRefreshOnManualRef.current;
         const shouldRefreshLinear = shouldFetchLinear && linearRefreshOnManualRef.current;
@@ -174,7 +177,11 @@ export function useWorktrees(config: WorktreeHookConfig): {
               agent_status: statuses.get(wt.id) ?? null,
               git_status,
               last_commit,
-              pr_info: prCacheRef.current.get(`${repo.id}:${wt.branch}`) ?? null,
+              pr_info: (() => {
+                const linearInfo = linearCacheRef.current.get(wt.branch);
+                if (linearInfo?.prAttachment) return linearAttachmentToPrInfo(linearInfo.prAttachment);
+                return prCacheRef.current.get(`${repo.id}:${wt.branch}`) ?? null;
+              })(),
               linear_info: linearCacheRef.current.get(wt.branch) ?? null,
             };
           })
@@ -208,6 +215,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         commit_msg: wt.last_commit?.message, commit_time: wt.last_commit?.relative_time,
         pr: wt.pr_info?.number, pr_state: wt.pr_info?.state, checks: wt.pr_info?.checksStatus,
         linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,
+        linear_pr_url: wt.linear_info?.prAttachment?.url,
       })));
       if (fingerprint !== prevFingerprintRef.current) {
         prevFingerprintRef.current = fingerprint;
@@ -238,7 +246,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
       const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
       for (const repo of reposRef.current) {
         const dbWorktrees = getWorktrees(repo.id);
-        const branches = dbWorktrees.map((wt) => wt.branch);
+        // Skip branches where Linear already provides PR data
+        const branches = dbWorktrees
+          .map((wt) => wt.branch)
+          .filter((b) => !linearCacheRef.current.get(b)?.prAttachment);
         repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
       }
       await refreshPrInfo(repoGroups);
