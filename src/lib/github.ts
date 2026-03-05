@@ -64,7 +64,7 @@ function onGhFailure(repoPath: string, err: unknown): void {
   log("warn", "github", `GitHub API error for ${repoPath}, backing off for ${newMs / 1000}s: ${err}`);
 }
 
-function deriveChecksStatus(
+export function deriveChecksStatus(
   checks: Array<{ status: string; conclusion: string }>
 ): PrInfo["checksStatus"] {
   if (!checks || checks.length === 0) return "none";
