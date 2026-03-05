@@ -36,6 +36,25 @@ export interface UpdateCheckResult {
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
+export interface PackageManagerInfo {
+  command: string;
+  args: string[];
+}
+
+export function detectPackageManager(): PackageManagerInfo {
+  const registry = "--registry=https://npm.pkg.github.com";
+  const pkg = "@roylet-gs/agent-monitor@latest";
+
+  try {
+    const binPath = process.argv[1] ?? "";
+    if (binPath.includes("/pnpm/") || binPath.includes("\\pnpm\\")) {
+      return { command: "pnpm", args: ["add", "-g", pkg, registry] };
+    }
+  } catch {}
+
+  return { command: "npm", args: ["install", "-g", pkg, registry] };
+}
+
 export async function checkForUpdate(
   settings: Pick<Settings, "lastUpdateCheck" | "latestKnownVersion">,
   options?: { forceCheck?: boolean }

@@ -4,8 +4,8 @@ import { render } from "ink";
 import React from "react";
 import { execFileSync } from "child_process";
 import { initLogger, log } from "./lib/logger.js";
-import { loadSettings } from "./lib/settings.js";
-import { getVersion } from "./lib/version.js";
+import { loadSettings, saveSettings } from "./lib/settings.js";
+import { getVersion, detectPackageManager } from "./lib/version.js";
 import { App } from "./app.js";
 import { runScript, waitForEnter } from "./lib/run-script.js";
 
@@ -414,30 +414,28 @@ async function launchTui(): Promise<void> {
 
     if (pendingUpdate) {
       pendingUpdate = false;
-      console.log("Updating Agent Monitor...\n");
+      const pmInfo = detectPackageManager();
+      console.log(`Updating Agent Monitor via ${pmInfo.command}...\n`);
+
       try {
-        execFileSync(
-          "npm",
-          [
-            "install",
-            "-g",
-            "@roylet-gs/agent-monitor@latest",
-            "--registry=https://npm.pkg.github.com",
-          ],
-          { stdio: "inherit" }
-        );
-        console.log("\nUpdate complete! Restarting...\n");
-        // Run the updated binary, then exit so we don't fall back
-        // into the old code's while loop.
-        execFileSync("am", [], { stdio: "inherit" });
-        process.exit(0);
+        execFileSync(pmInfo.command, pmInfo.args, { stdio: "inherit" });
       } catch (err) {
         console.error(`\nUpdate failed: ${err}\n`);
-        console.log("Restarting current version...\n");
+        waitForEnter();
+        process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+        continue;
       }
-      // Clear screen before re-launching TUI (only reached on failure)
-      process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
-      continue;
+
+      // Clear update cache so next launch does a fresh check
+      const freshSettings = loadSettings();
+      saveSettings({
+        ...freshSettings,
+        lastUpdateCheck: undefined,
+        latestKnownVersion: undefined,
+      });
+
+      console.log("\nUpdate complete! Please restart am.\n");
+      process.exit(0);
     }
 
     if (!pendingScript) {
