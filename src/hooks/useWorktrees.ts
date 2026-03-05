@@ -41,6 +41,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
   const [groups, setGroups] = useState<WorktreeGroup[]>([]);
   const [flatWorktrees, setFlatWorktrees] = useState<WorktreeWithStatus[]>([]);
   const prCacheRef = useRef<Map<string, PrInfo | null>>(new Map());
+  const prNumberCacheRef = useRef<Map<string, number>>(new Map());
   const linearCacheRef = useRef<Map<string, LinearInfo | null>>(new Map());
   const prevFingerprintRef = useRef("");
 
@@ -67,10 +68,24 @@ export function useWorktrees(config: WorktreeHookConfig): {
     await Promise.all(
       repoGroups.map(async ({ repoPath, repoId, branches }) => {
         if (branches.length === 0) return;
+        // Build per-repo PR number cache from the shared ref
+        const repoPrNumbers = new Map<string, number>();
+        for (const branch of branches) {
+          const num = prNumberCacheRef.current.get(`${repoId}:${branch}`);
+          if (num != null) repoPrNumbers.set(branch, num);
+        }
         try {
-          const prMap = await fetchAllPrInfo(repoPath, branches);
+          const prMap = await fetchAllPrInfo(repoPath, branches, repoPrNumbers);
           for (const [branch, info] of prMap) {
-            prCacheRef.current.set(`${repoId}:${branch}`, info);
+            const cacheKey = `${repoId}:${branch}`;
+            // Preserve stale cache when backoff returns null
+            if (info !== null || !prCacheRef.current.has(cacheKey)) {
+              prCacheRef.current.set(cacheKey, info);
+            }
+            // Cache PR number for cheaper subsequent fetches
+            if (info?.number != null) {
+              prNumberCacheRef.current.set(cacheKey, info.number);
+            }
           }
         } catch (err) {
           log("warn", "useWorktrees", `Batch PR fetch failed for repo ${repoId}, keeping stale cache: ${err}`);

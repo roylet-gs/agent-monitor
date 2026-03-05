@@ -12,12 +12,13 @@ interface GhPrResult {
   latestReviews: Array<{ state: string }>;
   statusCheckRollup: Array<{ status: string; conclusion: string }>;
   comments: Array<unknown>;
-  headRefName: string;
 }
 
-function execGh(args: string[], cwd: string): Promise<string> {
+const GH_PR_FIELDS = "number,title,url,state,isDraft,reviewDecision,latestReviews,statusCheckRollup,comments";
+
+function execGh(args: string[], cwd: string, timeout = 5000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { cwd, timeout: 5000 }, (err, stdout) => {
+    execFile("gh", args, { cwd, timeout }, (err, stdout) => {
       if (err) {
         reject(err);
       } else {
@@ -25,6 +26,35 @@ function execGh(args: string[], cwd: string): Promise<string> {
       }
     });
   });
+}
+
+// --- Exponential backoff state ---
+let backoffUntil = 0;
+let backoffMs = 0;
+const BACKOFF_INITIAL_MS = 5_000;
+const BACKOFF_MAX_MS = 300_000; // 5 minutes
+
+function isInBackoff(): boolean {
+  if (backoffUntil === 0) return false;
+  if (Date.now() >= backoffUntil) {
+    // Backoff period expired, allow retry
+    return false;
+  }
+  return true;
+}
+
+function onGhSuccess(): void {
+  if (backoffMs > 0) {
+    log("info", "github", "GitHub API recovered, resetting backoff");
+  }
+  backoffUntil = 0;
+  backoffMs = 0;
+}
+
+function onGhFailure(err: unknown): void {
+  backoffMs = backoffMs === 0 ? BACKOFF_INITIAL_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
+  backoffUntil = Date.now() + backoffMs;
+  log("warn", "github", `GitHub API error, backing off for ${backoffMs / 1000}s: ${err}`);
 }
 
 function deriveChecksStatus(
@@ -40,37 +70,6 @@ function deriveChecksStatus(
   );
   if (hasPending) return "pending";
   return "passing";
-}
-
-export async function fetchPrInfo(
-  repoPath: string,
-  branch: string
-): Promise<PrInfo | null> {
-  try {
-    const stdout = await execGh(
-      [
-        "pr",
-        "list",
-        "--head",
-        branch,
-        "--state",
-        "all",
-        "--json",
-        "number,title,url,state,isDraft,reviewDecision,latestReviews,statusCheckRollup,comments",
-        "--limit",
-        "1",
-      ],
-      repoPath
-    );
-
-    const results: GhPrResult[] = JSON.parse(stdout);
-    if (!results || results.length === 0) return null;
-
-    return ghResultToPrInfo(results[0]!);
-  } catch (err) {
-    log("debug", "github", `Failed to fetch PR info for ${branch}: ${err}`);
-    return null;
-  }
 }
 
 function ghResultToPrInfo(pr: GhPrResult): PrInfo {
@@ -92,47 +91,86 @@ function ghResultToPrInfo(pr: GhPrResult): PrInfo {
   };
 }
 
+/**
+ * Fetch PR info for a single branch using `gh pr view <branch>`.
+ * If prNumber is provided, uses `gh pr view <number>` for a cheaper lookup.
+ */
+export async function fetchPrInfo(
+  repoPath: string,
+  branch: string,
+  prNumber?: number
+): Promise<PrInfo | null> {
+  if (isInBackoff()) {
+    log("debug", "github", `Skipping PR fetch for ${branch} (in backoff)`);
+    return null;
+  }
+
+  try {
+    const target = prNumber != null ? String(prNumber) : branch;
+    const stdout = await execGh(
+      ["pr", "view", target, "--json", GH_PR_FIELDS],
+      repoPath
+    );
+
+    const pr: GhPrResult = JSON.parse(stdout);
+    onGhSuccess();
+    return ghResultToPrInfo(pr);
+  } catch (err) {
+    const msg = String(err);
+    // "no pull requests found" is not an API error, just means no PR exists
+    if (msg.includes("no pull requests found") || msg.includes("Could not resolve")) {
+      onGhSuccess();
+      return null;
+    }
+    onGhFailure(err);
+    return null;
+  }
+}
+
+/**
+ * Fetch PR info for multiple branches with per-branch `gh pr view` calls.
+ * Concurrency-limited to avoid overwhelming the API.
+ * prNumberCache maps branch -> known PR number for cheaper lookups.
+ */
 export async function fetchAllPrInfo(
   repoPath: string,
-  branches: string[]
+  branches: string[],
+  prNumberCache?: Map<string, number>
 ): Promise<Map<string, PrInfo | null>> {
   const result = new Map<string, PrInfo | null>();
   if (branches.length === 0) return result;
 
-  // Initialize all branches to null
-  for (const b of branches) {
-    result.set(b, null);
+  if (isInBackoff()) {
+    log("debug", "github", `Skipping all PR fetches for ${repoPath} (in backoff)`);
+    for (const b of branches) result.set(b, null);
+    return result;
   }
 
-  try {
-    const stdout = await new Promise<string>((resolve, reject) => {
-      execFile(
-        "gh",
-        [
-          "pr", "list",
-          "--state", "all",
-          "--json", "number,title,url,state,isDraft,reviewDecision,latestReviews,statusCheckRollup,comments,headRefName",
-          "--limit", "100",
-        ],
-        { cwd: repoPath, timeout: 10000 },
-        (err, out) => {
-          if (err) reject(err);
-          else resolve(out);
+  const CONCURRENCY = 3;
+  let i = 0;
+
+  async function next(): Promise<void> {
+    while (i < branches.length) {
+      const branch = branches[i++]!;
+      const knownNumber = prNumberCache?.get(branch);
+      const info = await fetchPrInfo(repoPath, branch, knownNumber);
+      result.set(branch, info);
+      // If we entered backoff during this batch, fill remaining with null
+      if (isInBackoff()) {
+        while (i < branches.length) {
+          result.set(branches[i++]!, null);
         }
-      );
-    });
-
-    const prs: GhPrResult[] = JSON.parse(stdout);
-    const branchSet = new Set(branches);
-
-    for (const pr of prs) {
-      if (branchSet.has(pr.headRefName) && result.get(pr.headRefName) === null) {
-        result.set(pr.headRefName, ghResultToPrInfo(pr));
+        return;
       }
     }
-  } catch (err) {
-    log("debug", "github", `Failed to batch-fetch PR info for ${repoPath}: ${err}`);
   }
+
+  // Launch up to CONCURRENCY workers
+  const workers: Promise<void>[] = [];
+  for (let w = 0; w < Math.min(CONCURRENCY, branches.length); w++) {
+    workers.push(next());
+  }
+  await Promise.all(workers);
 
   return result;
 }
