@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/roylet-gs/agent-monitor/releases"><img src="https://img.shields.io/github/v/release/roylet-gs/agent-monitor?style=flat-square" alt="Version"></a>
+  <img src="https://img.shields.io/badge/version-0.1.33-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" alt="Node >= 18">
-  <a href="https://github.com/roylet-gs/agent-monitor/stargazers"><img src="https://img.shields.io/github/stars/roylet-gs/agent-monitor?style=flat-square" alt="GitHub Stars"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
 </p>
 
 <p align="center">
