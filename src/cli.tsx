@@ -418,6 +418,11 @@ async function launchTui(): Promise<void> {
       console.log(`Updating Agent Monitor via ${pmInfo.command}...\n`);
 
       try {
+        if (pmInfo.setup) {
+          for (const step of pmInfo.setup) {
+            execFileSync(step.command, step.args, { stdio: "inherit" });
+          }
+        }
         execFileSync(pmInfo.command, pmInfo.args, { stdio: "inherit" });
       } catch (err) {
         console.error(`\nUpdate failed: ${err}\n`);
