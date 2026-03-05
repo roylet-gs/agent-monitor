@@ -17,7 +17,7 @@ export function getDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   initSchema(db);
-  log("info", "db", `Database opened at ${DB_PATH}`);
+  log("debug", "db", `Database opened at ${DB_PATH}`);
   return db;
 }
 
