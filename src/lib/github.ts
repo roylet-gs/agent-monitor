@@ -28,33 +28,42 @@ function execGh(args: string[], cwd: string, timeout = 5000): Promise<string> {
   });
 }
 
-// --- Exponential backoff state ---
-let backoffUntil = 0;
-let backoffMs = 0;
+// --- Per-repo exponential backoff state ---
+interface BackoffState {
+  backoffUntil: number;
+  backoffMs: number;
+}
+const repoBackoff = new Map<string, BackoffState>();
+const skipLoggedForRepo = new Set<string>();
 const BACKOFF_INITIAL_MS = 5_000;
 const BACKOFF_MAX_MS = 300_000; // 5 minutes
 
-function isInBackoff(): boolean {
-  if (backoffUntil === 0) return false;
-  if (Date.now() >= backoffUntil) {
+function isInBackoff(repoPath: string): boolean {
+  const state = repoBackoff.get(repoPath);
+  if (!state || state.backoffUntil === 0) return false;
+  if (Date.now() >= state.backoffUntil) {
     // Backoff period expired, allow retry
+    skipLoggedForRepo.delete(repoPath);
     return false;
   }
   return true;
 }
 
-function onGhSuccess(): void {
-  if (backoffMs > 0) {
-    log("info", "github", "GitHub API recovered, resetting backoff");
+function onGhSuccess(repoPath: string): void {
+  const state = repoBackoff.get(repoPath);
+  if (state && state.backoffMs > 0) {
+    log("info", "github", `GitHub API recovered for ${repoPath}, resetting backoff`);
   }
-  backoffUntil = 0;
-  backoffMs = 0;
+  repoBackoff.delete(repoPath);
+  skipLoggedForRepo.delete(repoPath);
 }
 
-function onGhFailure(err: unknown): void {
-  backoffMs = backoffMs === 0 ? BACKOFF_INITIAL_MS : Math.min(backoffMs * 2, BACKOFF_MAX_MS);
-  backoffUntil = Date.now() + backoffMs;
-  log("warn", "github", `GitHub API error, backing off for ${backoffMs / 1000}s: ${err}`);
+function onGhFailure(repoPath: string, err: unknown): void {
+  const state = repoBackoff.get(repoPath);
+  const prevMs = state?.backoffMs ?? 0;
+  const newMs = prevMs === 0 ? BACKOFF_INITIAL_MS : Math.min(prevMs * 2, BACKOFF_MAX_MS);
+  repoBackoff.set(repoPath, { backoffUntil: Date.now() + newMs, backoffMs: newMs });
+  log("warn", "github", `GitHub API error for ${repoPath}, backing off for ${newMs / 1000}s: ${err}`);
 }
 
 function deriveChecksStatus(
@@ -100,8 +109,11 @@ export async function fetchPrInfo(
   branch: string,
   prNumber?: number
 ): Promise<PrInfo | null> {
-  if (isInBackoff()) {
-    log("debug", "github", `Skipping PR fetch for ${branch} (in backoff)`);
+  if (isInBackoff(repoPath)) {
+    if (!skipLoggedForRepo.has(repoPath + ":" + branch)) {
+      log("debug", "github", `Skipping PR fetch for ${branch} (in backoff)`);
+      skipLoggedForRepo.add(repoPath + ":" + branch);
+    }
     return null;
   }
 
@@ -113,16 +125,16 @@ export async function fetchPrInfo(
     );
 
     const pr: GhPrResult = JSON.parse(stdout);
-    onGhSuccess();
+    onGhSuccess(repoPath);
     return ghResultToPrInfo(pr);
   } catch (err) {
     const msg = String(err);
     // "no pull requests found" is not an API error, just means no PR exists
     if (msg.includes("no pull requests found") || msg.includes("Could not resolve")) {
-      onGhSuccess();
+      onGhSuccess(repoPath);
       return null;
     }
-    onGhFailure(err);
+    onGhFailure(repoPath, err);
     return null;
   }
 }
@@ -140,8 +152,11 @@ export async function fetchAllPrInfo(
   const result = new Map<string, PrInfo | null>();
   if (branches.length === 0) return result;
 
-  if (isInBackoff()) {
-    log("debug", "github", `Skipping all PR fetches for ${repoPath} (in backoff)`);
+  if (isInBackoff(repoPath)) {
+    if (!skipLoggedForRepo.has(repoPath)) {
+      log("debug", "github", `Skipping all PR fetches for ${repoPath} (in backoff)`);
+      skipLoggedForRepo.add(repoPath);
+    }
     for (const b of branches) result.set(b, null);
     return result;
   }
@@ -156,7 +171,7 @@ export async function fetchAllPrInfo(
       const info = await fetchPrInfo(repoPath, branch, knownNumber);
       result.set(branch, info);
       // If we entered backoff during this batch, fill remaining with null
-      if (isInBackoff()) {
+      if (isInBackoff(repoPath)) {
         while (i < branches.length) {
           result.set(branches[i++]!, null);
         }

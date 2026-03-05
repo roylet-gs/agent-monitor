@@ -1,4 +1,4 @@
-import { getWorktreeByPath, upsertAgentStatus } from "../lib/db.js";
+import { getWorktreeByPath, getAgentStatus, upsertAgentStatus } from "../lib/db.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
 import type { AgentStatusType, HookEvent } from "../lib/types.js";
@@ -43,6 +43,13 @@ export async function handleHookEvent(
 
   if (status === null) {
     log("debug", "hook-event", `Skipped status update for ${worktreePath} (informational ${payload.event})`);
+    return;
+  }
+
+  // Skip redundant DB write + pub/sub if status hasn't changed and there's no new content
+  const current = getAgentStatus(worktree.id);
+  if (current && current.status === status && !lastResponse && !transcriptSummary) {
+    log("debug", "hook-event", `Skipped redundant status update for ${worktreePath}: ${status}`);
     return;
   }
 

@@ -52,9 +52,9 @@ export function log(level: LogLevel, module: string, message: string): void {
   }
 }
 
-export function initLogger(level: LogLevel): void {
+export function initLogger(level: LogLevel, version?: string): void {
   setLogLevel(level);
   ensureLogDir();
   rotateIfNeeded();
-  log("info", "logger", "Logger initialized");
+  log("debug", "logger", `Logger initialized (v${version ?? "unknown"})`);
 }
