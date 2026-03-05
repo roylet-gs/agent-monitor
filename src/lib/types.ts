@@ -107,7 +107,8 @@ export type AppMode =
   | "repo-select"
   | "folder-browse"
   | "creating-worktree"
-  | "deleting-worktree";
+  | "deleting-worktree"
+  | "setup";
 
 export interface HookEvent {
   event: string;

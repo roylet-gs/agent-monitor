@@ -35,19 +35,21 @@ import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
-import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
+import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
+import { SetupWizard } from "./components/SetupWizard.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
   watch?: boolean;
   onUpdate?: () => void;
+  forceSetup?: boolean;
 }
 
-export function App({ onRunScript, watch, onUpdate }: AppProps) {
+export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -82,7 +84,9 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
       saveSettings(updated);
     }
 
-    if (repos.length === 0) {
+    if (isFirstRun() || forceSetup) {
+      setMode("setup");
+    } else if (repos.length === 0) {
       setMode("folder-browse");
     }
   }, []);
@@ -181,9 +185,9 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
     }
   }, [selectedIndex, flatWorktrees, unseenIds]);
 
-  // Auto-install global hooks on startup if not present
+  // Auto-install global hooks on startup if not present (skip during setup wizard)
   useEffect(() => {
-    if (!isGlobalHooksInstalled()) {
+    if (mode !== "setup" && !isGlobalHooksInstalled()) {
       installGlobalHooks();
     }
   }, []);
@@ -547,6 +551,28 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
         <Box paddingX={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
+      )}
+
+      {mode === "setup" && (
+        <SetupWizard
+          initialSettings={settings}
+          onComplete={(newSettings, repoPath) => {
+            handleSaveSettings(newSettings);
+            if (repoPath) {
+              handleSelectFolder(repoPath);
+            } else {
+              setMode("folder-browse");
+            }
+          }}
+          onSkip={() => {
+            handleSaveSettings(settings);
+            if (repositories.length === 0) {
+              setMode("folder-browse");
+            } else {
+              setMode("dashboard");
+            }
+          }}
+        />
       )}
 
       {mode === "folder-browse" && (
