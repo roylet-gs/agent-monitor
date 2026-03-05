@@ -5,6 +5,17 @@ import { isGhAvailable } from "./github.js";
 import { log } from "./logger.js";
 import type { Settings } from "./types.js";
 
+export function isFirstRun(): boolean {
+  if (!existsSync(SETTINGS_PATH)) return true;
+  try {
+    const raw = readFileSync(SETTINGS_PATH, "utf-8");
+    const parsed = JSON.parse(raw);
+    return !parsed.setupCompleted;
+  } catch {
+    return true;
+  }
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   ide: "cursor",
   defaultBranchPrefix: "feature/",

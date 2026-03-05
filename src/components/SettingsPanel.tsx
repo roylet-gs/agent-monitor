@@ -86,6 +86,7 @@ interface SettingsPanelProps {
   onClose: () => void;
   onAddRepo: () => void;
   onRemoveRepo: (repoId: string) => void;
+  onSettingsReset: () => void;
   onFactoryReset: () => void;
   onCheckForUpdates: () => Promise<UpdateInfo | null>;
 }
@@ -97,6 +98,7 @@ export function SettingsPanel({
   onClose,
   onAddRepo,
   onRemoveRepo,
+  onSettingsReset,
   onFactoryReset,
   onCheckForUpdates,
 }: SettingsPanelProps) {
@@ -190,9 +192,7 @@ export function SettingsPanel({
     if (confirming) {
       if (input === "y" || input === "Y") {
         if (confirming === "resetSettings") {
-          const defaults = { ...DEFAULT_SETTINGS };
-          setCurrent(defaults);
-          onSave(defaults);
+          onSettingsReset();
         } else if (confirming === "factoryReset") {
           onFactoryReset();
         }

@@ -35,19 +35,21 @@ import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
-import { loadSettings, saveSettings, DEFAULT_SETTINGS } from "./lib/settings.js";
+import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
+import { SetupWizard } from "./components/SetupWizard.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
   watch?: boolean;
   onUpdate?: () => void;
+  forceSetup?: boolean;
 }
 
-export function App({ onRunScript, watch, onUpdate }: AppProps) {
+export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [settings, setSettings] = useState<Settings>(loadSettings);
@@ -75,6 +77,9 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
     const repos = getRepositories();
     setRepositories(repos);
 
+    // Check first-run BEFORE version check writes settings.json
+    const firstRun = isFirstRun() || forceSetup;
+
     if (settings.lastSeenVersion === undefined || isNewVersion(settings.lastSeenVersion, currentVersion)) {
       // Silently record current version
       const updated = { ...settings, lastSeenVersion: currentVersion };
@@ -82,7 +87,9 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
       saveSettings(updated);
     }
 
-    if (repos.length === 0) {
+    if (firstRun) {
+      setMode("setup");
+    } else if (repos.length === 0) {
       setMode("folder-browse");
     }
   }, []);
@@ -181,9 +188,9 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
     }
   }, [selectedIndex, flatWorktrees, unseenIds]);
 
-  // Auto-install global hooks on startup if not present
+  // Auto-install global hooks on startup if not present (skip during setup wizard)
   useEffect(() => {
-    if (!isGlobalHooksInstalled()) {
+    if (mode !== "setup" && !isGlobalHooksInstalled()) {
       installGlobalHooks();
     }
   }, []);
@@ -454,13 +461,20 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
   // Check for updates
   const { updateInfo, recheck } = useUpdateCheck(settings, handleSaveSettings);
 
+  // Handle settings reset (back to defaults + setup wizard)
+  const handleSettingsReset = useCallback(() => {
+    saveSettings(DEFAULT_SETTINGS);
+    setSettings(DEFAULT_SETTINGS);
+    setMode("setup");
+  }, []);
+
   // Handle factory reset
   const handleFactoryReset = useCallback(() => {
     resetAll();
     saveSettings(DEFAULT_SETTINGS);
     setSettings(DEFAULT_SETTINGS);
     setRepositories([]);
-    setMode("folder-browse");
+    setMode("setup");
   }, []);
 
   // Handle remove repo from settings
@@ -547,6 +561,28 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
         <Box paddingX={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
+      )}
+
+      {mode === "setup" && (
+        <SetupWizard
+          initialSettings={settings}
+          onComplete={(newSettings, repoPath) => {
+            handleSaveSettings({ ...newSettings, setupCompleted: true });
+            if (repoPath) {
+              handleSelectFolder(repoPath);
+            } else {
+              setMode("folder-browse");
+            }
+          }}
+          onSkip={() => {
+            handleSaveSettings({ ...settings, setupCompleted: true });
+            if (repositories.length === 0) {
+              setMode("folder-browse");
+            } else {
+              setMode("dashboard");
+            }
+          }}
+        />
       )}
 
       {mode === "folder-browse" && (
@@ -644,6 +680,7 @@ export function App({ onRunScript, watch, onUpdate }: AppProps) {
           onClose={() => setMode("dashboard")}
           onAddRepo={() => setMode("folder-browse")}
           onRemoveRepo={handleRemoveRepo}
+          onSettingsReset={handleSettingsReset}
           onFactoryReset={handleFactoryReset}
           onCheckForUpdates={recheck}
         />

@@ -93,6 +93,7 @@ export interface Settings {
   linearPollingIntervalMs: number;
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
+  setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
   latestKnownVersion?: string;
@@ -107,7 +108,8 @@ export type AppMode =
   | "repo-select"
   | "folder-browse"
   | "creating-worktree"
-  | "deleting-worktree";
+  | "deleting-worktree"
+  | "setup";
 
 export interface HookEvent {
   event: string;

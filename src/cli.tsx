@@ -327,6 +327,16 @@ program
     });
   });
 
+// --- Setup wizard ---
+
+program
+  .command("setup")
+  .description("Run the setup wizard")
+  .action(() => {
+    process.stdout.write("\x1B[2J\x1B[3J\x1B[H");
+    launchTui(true);
+  });
+
 // --- Existing commands (backward compat) ---
 
 program
@@ -384,7 +394,7 @@ program
 
 // --- TUI launcher ---
 
-async function launchTui(): Promise<void> {
+async function launchTui(forceSetup = false): Promise<void> {
   let pendingScript: { scriptPath: string; cwd: string } | null = null;
   let pendingUpdate = false;
 
@@ -399,7 +409,7 @@ async function launchTui(): Promise<void> {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const instance = render(
-      <App onRunScript={onRunScript} watch={watchFlag} onUpdate={onUpdate} />,
+      <App onRunScript={onRunScript} watch={watchFlag} onUpdate={onUpdate} forceSetup={forceSetup} />,
       { patchConsole: true }
     );
 
