@@ -36,7 +36,7 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
           <Text color="yellow">[Enter]</Text> Open
           <Text color="yellow"> [n]</Text>ew
           <Text color="yellow"> [d]</Text>elete
-          {ghPrStatus && <><Text color="yellow"> [g]</Text>ithub</>}
+          {(ghPrStatus || linearEnabled) && <><Text color="yellow"> [g]</Text>ithub</>}
           {linearEnabled && <><Text color="yellow"> [l]</Text>inear</>}
           <Text color="yellow"> [r]</Text>efresh
           <Text color="yellow"> [w]</Text>atch

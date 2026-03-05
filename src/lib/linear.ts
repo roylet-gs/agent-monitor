@@ -1,6 +1,6 @@
 import https from "node:https";
 import { log } from "./logger.js";
-import type { LinearInfo } from "./types.js";
+import type { LinearInfo, PrInfo } from "./types.js";
 
 function httpsPost(
   url: string,
@@ -37,6 +37,8 @@ function httpsPost(
   });
 }
 
+const seenPrAttachments = new Set<string>();
+
 export async function fetchLinearInfo(
   branch: string,
   apiKey: string
@@ -50,6 +52,14 @@ export async function fetchLinearInfo(
         state { name color type }
         priorityLabel
         assignee { name }
+        attachments {
+          nodes {
+            url
+            title
+            sourceType
+            metadata
+          }
+        }
       }
     }
   `;
@@ -65,6 +75,17 @@ export async function fetchLinearInfo(
     const issue = json?.data?.issueVcsBranchSearch;
     if (!issue) return null;
 
+    // Find first GitHub PR attachment for metadata inspection
+    const attachments: Array<{ url: string; title: string; sourceType: string; metadata: Record<string, unknown> }> =
+      issue.attachments?.nodes ?? [];
+    const prAttachment = attachments.find(
+      (a) => a.sourceType?.toLowerCase().includes("github") || a.url?.includes("/pull/")
+    );
+    if (prAttachment && !seenPrAttachments.has(prAttachment.url)) {
+      seenPrAttachments.add(prAttachment.url);
+      log("debug", "linear", `GitHub PR attachment for ${branch}: ${JSON.stringify(prAttachment)}`);
+    }
+
     return {
       identifier: issue.identifier,
       title: issue.title,
@@ -72,6 +93,9 @@ export async function fetchLinearInfo(
       state: issue.state,
       priorityLabel: issue.priorityLabel,
       assignee: issue.assignee?.name ?? null,
+      prAttachment: prAttachment
+        ? { url: prAttachment.url, title: prAttachment.title, metadata: prAttachment.metadata }
+        : null,
     };
   } catch (err) {
     log("debug", "linear", `Failed to fetch Linear info for ${branch}: ${err}`);
@@ -95,6 +119,29 @@ export async function verifyLinearApiKey(apiKey: string): Promise<{ ok: boolean;
   } catch (err) {
     return { ok: false, error: String(err) };
   }
+}
+
+export function linearAttachmentToPrInfo(
+  attachment: NonNullable<LinearInfo["prAttachment"]>
+): PrInfo {
+  const meta = attachment.metadata;
+  const mergedAt = meta.mergedAt as string | null;
+  const closedAt = meta.closedAt as string | null;
+
+  let state = "OPEN";
+  if (mergedAt) state = "MERGED";
+  else if (closedAt) state = "CLOSED";
+
+  return {
+    number: (meta.number as number) ?? 0,
+    title: attachment.title,
+    url: attachment.url,
+    state,
+    isDraft: (meta.draft as boolean) ?? false,
+    reviewDecision: "",
+    hasFeedback: false,
+    checksStatus: "none",
+  };
 }
 
 export function getLinearStatusColor(stateType: string): string {
