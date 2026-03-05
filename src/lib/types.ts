@@ -94,7 +94,6 @@ export interface Settings {
 }
 
 export type AppMode =
-  | "welcome"
   | "dashboard"
   | "new-worktree"
   | "branch-exists"
