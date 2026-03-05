@@ -10,4 +10,12 @@ export interface AgentStatusUpdateMessage {
   updatedAt: string;
 }
 
-export type PubSubMessage = AgentStatusUpdateMessage;
+export interface GitActivityMessage {
+  type: "git-activity";
+  worktreeId: string;
+  repoId: string;
+  branch: string;
+  activity: "push" | "pr-create";
+}
+
+export type PubSubMessage = AgentStatusUpdateMessage | GitActivityMessage;
