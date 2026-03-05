@@ -337,7 +337,8 @@ export function SetupWizard({ initialSettings, onComplete, onSkip }: SetupWizard
             {linearEnabled && (
               <Box marginTop={1} flexDirection="column">
                 <Text dimColor>
-                  Get your API key from Linear: Settings {">"} Account {">"} Security {">"} Personal API keys{"\n"}
+                  Only a read-only key is needed. Create one at:{"\n"}
+                  Linear {">"} Settings {">"} Account {">"} Security {">"} Personal API keys{"\n"}
                   https://linear.app/settings/account/security
                 </Text>
                 <Box marginTop={1}>
