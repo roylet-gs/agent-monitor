@@ -63,7 +63,8 @@ jobs:
           npm version patch --no-git-tag-version
           NEW_VERSION=$(node -p "require('./package.json').version")
           # If the bumped version is still <= published, set version to published and bump again
-          if npx semver "$NEW_VERSION" -r "<=$PUBLISHED" > /dev/null 2>&1; then
+          NEEDS_EXTRA_BUMP=$(node -e "const [a,b]=['$NEW_VERSION','$PUBLISHED'].map(v=>v.split('.').map(Number));process.exit(a[0]<b[0]||(a[0]===b[0]&&a[1]<b[1])||(a[0]===b[0]&&a[1]===b[1]&&a[2]<=b[2])?0:1)" && echo yes || echo no)
+          if [ "$NEEDS_EXTRA_BUMP" = "yes" ]; then
             echo "Bumped version $NEW_VERSION already exists, bumping past $PUBLISHED"
             npm version "$PUBLISHED" --no-git-tag-version --allow-same-version
             npm version patch --no-git-tag-version
