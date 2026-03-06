@@ -209,16 +209,16 @@ export function upsertAgentStatus(
   getDb()
     .prepare(
       `INSERT INTO agent_status (worktree_id, status, session_id, last_response, transcript_summary, is_open, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       VALUES (?, ?, ?, ?, ?, COALESCE(?, 0), datetime('now'))
        ON CONFLICT(worktree_id) DO UPDATE SET
          status = excluded.status,
          session_id = COALESCE(excluded.session_id, agent_status.session_id),
          last_response = COALESCE(excluded.last_response, agent_status.last_response),
          transcript_summary = COALESCE(excluded.transcript_summary, agent_status.transcript_summary),
-         is_open = COALESCE(excluded.is_open, agent_status.is_open),
+         is_open = COALESCE(?, agent_status.is_open),
          updated_at = datetime('now')`
     )
-    .run(worktreeId, status, sessionId ?? null, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null);
+    .run(worktreeId, status, sessionId ?? null, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null, isOpen != null ? (isOpen ? 1 : 0) : null);
 }
 
 export function getAgentStatus(worktreeId: string): AgentStatus | undefined {
