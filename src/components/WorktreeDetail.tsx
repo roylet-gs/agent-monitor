@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
+import { isEffectivelyOpen } from "../lib/agent-utils.js";
 import type { WorktreeWithStatus } from "../lib/types.js";
 
 interface WorktreeDetailProps {
@@ -54,6 +55,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
   }
 
   const status = worktree.agent_status?.status;
+  const open = isEffectivelyOpen(worktree.agent_status);
   const isActive = status === "executing" || status === "planning";
 
   // Contextual response: show transcript_summary as "Task" when active, last_response as "Last Response" when idle
@@ -75,8 +77,14 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
         {/* Claude Agent Status — first section */}
         <Box>
           <Text bold>Claude </Text>
-          <Text color={statusColor(status)}>● </Text>
-          <Text>{statusLabel(status)}</Text>
+          {open ? (
+            <>
+              <Text color={statusColor(status)}>● </Text>
+              <Text>{statusLabel(status)}</Text>
+            </>
+          ) : (
+            <Text dimColor>○ No active session</Text>
+          )}
         </Box>
 
         {/* Contextual Response */}

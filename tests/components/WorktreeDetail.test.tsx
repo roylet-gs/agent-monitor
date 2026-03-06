@@ -49,14 +49,15 @@ describe("WorktreeDetail", () => {
         last_response: null,
         transcript_summary: null,
         session_id: null,
-        updated_at: "2024-01-01",
+        is_open: 1,
+        updated_at: new Date().toISOString(),
       },
     });
     const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
     expect(lastFrame()!).toContain("Executing");
   });
 
-  it("shows idle status", () => {
+  it("shows no active session when not open", () => {
     const wt = makeWorktree({
       agent_status: {
         worktree_id: "wt-1",
@@ -64,11 +65,12 @@ describe("WorktreeDetail", () => {
         last_response: "Done with task",
         transcript_summary: null,
         session_id: null,
+        is_open: 0,
         updated_at: "2024-01-01",
       },
     });
     const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
-    expect(lastFrame()!).toContain("Idle");
+    expect(lastFrame()!).toContain("No active session");
     expect(lastFrame()!).toContain("Done with task");
   });
 
@@ -80,7 +82,8 @@ describe("WorktreeDetail", () => {
         last_response: "old response",
         transcript_summary: "Working on feature X",
         session_id: null,
-        updated_at: "2024-01-01",
+        is_open: 1,
+        updated_at: new Date().toISOString(),
       },
     });
     const { lastFrame } = render(<WorktreeDetail worktree={wt} />);

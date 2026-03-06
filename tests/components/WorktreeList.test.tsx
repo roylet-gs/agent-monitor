@@ -112,6 +112,48 @@ describe("WorktreeList", () => {
     expect(frame).toContain("repo-two");
   });
 
+  it("shows filled dot for open session", () => {
+    const wt = makeWorktree({
+      agent_status: {
+        worktree_id: "wt-1",
+        status: "executing",
+        last_response: null,
+        transcript_summary: null,
+        session_id: null,
+        is_open: 1,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).toContain("●");
+  });
+
+  it("shows outlined dot when no active session", () => {
+    const wt = makeWorktree({ agent_status: null });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).toContain("○");
+  });
+
   it("shows custom name with branch underneath", () => {
     const wt = makeWorktree({ custom_name: "My Feature", branch: "feature/custom" });
     const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };

@@ -228,6 +228,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
       const fingerprint = JSON.stringify(allFlat.map(wt => ({
         id: wt.id, branch: wt.branch, custom_name: wt.custom_name,
         status: wt.agent_status?.status,
+        is_open: wt.agent_status?.is_open,
         summary: wt.agent_status?.transcript_summary,
         response: wt.agent_status?.last_response,
         ahead: wt.git_status?.ahead, behind: wt.git_status?.behind,
