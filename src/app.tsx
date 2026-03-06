@@ -119,6 +119,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     hideMainBranch: settings.hideMainBranch,
     ghRefreshOnManual: settings.ghRefreshOnManual,
     linearRefreshOnManual: settings.linearRefreshOnManual,
+    linearAutoNickname: settings.linearAutoNickname,
   });
 
   // Keep refs to always call the latest refresh (avoids stale closures in async handlers)
