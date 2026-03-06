@@ -18,7 +18,6 @@ export interface WorktreeHookConfig {
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
-  applyGlobalRulesEnabled: boolean;
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
@@ -39,7 +38,6 @@ export function useWorktrees(config: WorktreeHookConfig): {
     ghRefreshOnManual,
     linearRefreshOnManual,
     linearAutoNickname,
-    applyGlobalRulesEnabled,
   } = config;
 
   const [groups, setGroups] = useState<WorktreeGroup[]>([]);
@@ -312,39 +310,6 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const timer = setInterval(doFetch, linearPollingIntervalMs);
     return () => clearInterval(timer);
   }, [repositories, linearEnabled, linearPollingIntervalMs, refreshLinearInfo, refresh]);
-
-  // Clear learned rules when the feature is turned off
-  useEffect(() => {
-    if (!applyGlobalRulesEnabled) {
-      import("../lib/rules.js").then(({ clearLearnedRules }) => {
-        clearLearnedRules();
-      });
-    }
-  }, [applyGlobalRulesEnabled]);
-
-  // Rule sync polling (reuses main polling interval)
-  useEffect(() => {
-    if (!applyGlobalRulesEnabled || repositories.length === 0) return;
-
-    const doSync = async () => {
-      const { syncRulesFromWorktrees } = await import("../lib/rules.js");
-      const allPaths: string[] = [];
-      for (const repo of reposRef.current) {
-        const dbWorktrees = getWorktrees(repo.id);
-        for (const wt of dbWorktrees) {
-          allPaths.push(wt.path);
-        }
-      }
-      const result = syncRulesFromWorktrees(allPaths);
-      if (result.added > 0) {
-        log("info", "useWorktrees", `Rule sync: added ${result.added} new rule(s)`);
-      }
-    };
-
-    doSync();
-    const timer = setInterval(doSync, pollingIntervalMs);
-    return () => clearInterval(timer);
-  }, [repositories, applyGlobalRulesEnabled, pollingIntervalMs]);
 
   // Exposed refresh always forces integrations fetch
   const forceRefresh = useCallback(() => refresh(true), [refresh]);

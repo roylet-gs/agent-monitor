@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
-import { loadRules, removeRule, clearLearnedRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings } from "../lib/rules.js";
+import { loadRules, removeRule, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings } from "../lib/rules.js";
 import type { Rule } from "../lib/types.js";
 
 type SettingsField =
@@ -31,7 +31,6 @@ type SettingsField =
   | "linearAutoNickname"
   | "applyGlobalRules"
   | "manageRules"
-  | "clearLearnedRules"
   | "repos"
   | "checkForUpdates"
   | "resetSettings"
@@ -58,7 +57,6 @@ const FIELDS: SettingsField[] = [
   "linearAutoNickname",
   "applyGlobalRules",
   "manageRules",
-  "clearLearnedRules",
   "repos",
   "checkForUpdates",
   "resetSettings",
@@ -86,7 +84,6 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
   applyGlobalRules: "Write am rules to ~/.claude/settings.json permissions (persists without TUI)",
   manageRules: "View and remove auto-approval rules",
-  clearLearnedRules: "Remove all learned rules (synced from worktrees). Manual rules are preserved.",
   repos: "Monitored repositories and their startup scripts",
   checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
@@ -127,7 +124,6 @@ export function SettingsPanel({
   const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
   const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
   const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | null>(null);
-  const [clearRulesMsg, setClearRulesMsg] = useState("");
   const [updateCheckStatus, setUpdateCheckStatus] = useState<"idle" | "checking" | "ok" | "update" | "error">("idle");
   const [updateCheckMsg, setUpdateCheckMsg] = useState("");
   const [showRulesList, setShowRulesList] = useState(false);
@@ -220,13 +216,14 @@ export function SettingsPanel({
     // Rules sub-view input handling
     if (showRulesList) {
       if (key.escape) { setShowRulesList(false); return; }
+      if (rules.length === 0) return;
       if (key.upArrow) { setRuleIndex((i) => Math.max(0, i - 1)); return; }
       if (key.downArrow) { setRuleIndex((i) => Math.min(rules.length - 1, i + 1)); return; }
       if ((input === "d" || input === "x") && rules[ruleIndex]) {
         removeRule(rules[ruleIndex].id);
         const updated = loadRules();
         setRules(updated);
-        setRuleIndex((i) => Math.min(i, updated.length - 1));
+        setRuleIndex((i) => updated.length === 0 ? 0 : Math.min(i, updated.length - 1));
         if (current.applyGlobalRulesEnabled) applyRulesToClaudeSettings();
       }
       return;
@@ -356,16 +353,6 @@ export function SettingsPanel({
       return;
     }
 
-    if (activeField === "clearLearnedRules" && key.return) {
-      const result = clearLearnedRules();
-      if (result.removed === 0) {
-        setClearRulesMsg("No learned rules to clear");
-      } else {
-        setClearRulesMsg(`Cleared ${result.removed} learned rule${result.removed === 1 ? "" : "s"}`);
-      }
-      return;
-    }
-
     if (activeField === "logLevel" && (key.return || input === " ")) {
       const idx = LOG_LEVELS.indexOf(current.logLevel);
       const next = LOG_LEVELS[(idx + 1) % LOG_LEVELS.length]!;
@@ -449,14 +436,13 @@ export function SettingsPanel({
         <Text bold color="cyan">Manage Rules</Text>
         <Box marginTop={1} flexDirection="column">
           {rules.length === 0 ? (
-            <Text dimColor>No rules. Use `am rule add &lt;tool&gt;` or `am rule sync`.</Text>
+            <Text dimColor>No rules. Use `am rule add &lt;tool&gt;` to add one.</Text>
           ) : (
             rules.map((r, i) => (
               <Text key={r.id}>
                 {i === ruleIndex ? "▸ " : "  "}
                 <Text color={r.decision === "deny" ? "red" : "green"}>{r.decision}</Text>
                 {"  "}{r.tool}{r.input_pattern ? `(${r.input_pattern})` : ""}
-                <Text dimColor>  [{r.source}]</Text>
               </Text>
             ))
           )}
@@ -733,18 +719,6 @@ export function SettingsPanel({
           </Text>
           {activeField === "manageRules" && (
             <Text dimColor> (Enter to open)</Text>
-          )}
-        </Box>
-
-        <Box>
-          <Text bold={activeField === "clearLearnedRules"}>
-            {activeField === "clearLearnedRules" ? "▸" : " "} Clear Learned Rules
-          </Text>
-          {activeField === "clearLearnedRules" && !clearRulesMsg && (
-            <Text dimColor> (Enter to clear)</Text>
-          )}
-          {clearRulesMsg && (
-            <Text color="green"> {clearRulesMsg}</Text>
           )}
         </Box>
 

@@ -139,6 +139,6 @@ export interface Rule {
   tool: string;
   input_pattern?: string;
   decision: "allow" | "deny";
-  source: "manual" | "learned";
+  source: "manual";
   created_at: string;
 }
