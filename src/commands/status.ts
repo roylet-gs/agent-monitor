@@ -23,7 +23,7 @@ export async function printStatus(worktreePath?: string, setStatus?: string): Pr
       process.exit(1);
     }
     const status = setStatus as AgentStatusType;
-    upsertAgentStatus(worktree.id, status, null, null, null);
+    upsertAgentStatus(worktree.id, status, null, null, null, true);
 
     await publishMessage({
       type: "agent-status-update",
@@ -32,6 +32,7 @@ export async function printStatus(worktreePath?: string, setStatus?: string): Pr
       sessionId: null,
       lastResponse: null,
       transcriptSummary: null,
+      isOpen: true,
       updatedAt: new Date().toISOString(),
     }).catch(() => {});
 
@@ -45,6 +46,7 @@ export async function printStatus(worktreePath?: string, setStatus?: string): Pr
   console.log(`Branch:   ${worktree.branch}`);
   console.log(`Status:   ${status?.status ?? "unknown"}`);
   console.log(`Session:  ${status?.session_id ?? "none"}`);
+  console.log(`Open:     ${status?.is_open ? "yes" : "no"}`);
   console.log(`Updated:  ${status?.updated_at ?? "never"}`);
   if (status?.last_response) {
     const truncated =

@@ -7,6 +7,7 @@ export interface AgentStatusUpdateMessage {
   sessionId: string | null;
   lastResponse: string | null;
   transcriptSummary: string | null;
+  isOpen: boolean;
   updatedAt: string;
 }
 

@@ -6,10 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  test:
     # Skip runs triggered by the version bump commit
     if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
@@ -30,7 +34,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm test
 
       - name: Generate release notes
         run: |
@@ -50,8 +53,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump patch version
-        run: npm version patch --no-git-tag-version
+      - name: Bump patch version past any published version
+        run: |
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          # Get the latest version from the registry (returns empty if none published)
+          PUBLISHED=$(npm view @roylet-gs/agent-monitor version 2>/dev/null || echo "0.0.0")
+          echo "Local: $LOCAL_VERSION, Published: $PUBLISHED"
+          # Bump once from local
+          npm version patch --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          # If the bumped version is still <= published, set version to published and bump again
+          if npx semver "$NEW_VERSION" -r "<=$PUBLISHED" > /dev/null 2>&1; then
+            echo "Bumped version $NEW_VERSION already exists, bumping past $PUBLISHED"
+            npm version "$PUBLISHED" --no-git-tag-version --allow-same-version
+            npm version patch --no-git-tag-version
+            NEW_VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "Will publish: $NEW_VERSION"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to GitHub Packages
         run: pnpm publish --no-git-checks

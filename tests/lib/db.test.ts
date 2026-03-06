@@ -149,26 +149,45 @@ describe("db", () => {
     it("upserts agent status", () => {
       const repo = db.addRepository("/tmp/repo", "repo");
       const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
-      db.upsertAgentStatus(wt.id, "executing", "session-1", "hello", "summary");
+      db.upsertAgentStatus(wt.id, "executing", "session-1", "hello", "summary", true);
       const status = db.getAgentStatus(wt.id);
       expect(status).toBeDefined();
       expect(status!.status).toBe("executing");
       expect(status!.session_id).toBe("session-1");
       expect(status!.last_response).toBe("hello");
       expect(status!.transcript_summary).toBe("summary");
+      expect(status!.is_open).toBe(1);
     });
 
     it("COALESCE: null fields preserve existing values", () => {
       const repo = db.addRepository("/tmp/repo", "repo");
       const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
-      db.upsertAgentStatus(wt.id, "executing", "session-1", "hello", "summary");
-      // Update status without overwriting session/response/summary
+      db.upsertAgentStatus(wt.id, "executing", "session-1", "hello", "summary", true);
+      // Update status without overwriting session/response/summary/is_open
       db.upsertAgentStatus(wt.id, "idle");
       const status = db.getAgentStatus(wt.id);
       expect(status!.status).toBe("idle");
       expect(status!.session_id).toBe("session-1");
       expect(status!.last_response).toBe("hello");
       expect(status!.transcript_summary).toBe("summary");
+      expect(status!.is_open).toBe(1);
+    });
+
+    it("is_open defaults to 0 on first insert without explicit value", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      db.upsertAgentStatus(wt.id, "idle");
+      const status = db.getAgentStatus(wt.id);
+      expect(status!.is_open).toBe(0);
+    });
+
+    it("is_open can be set to false explicitly", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      db.upsertAgentStatus(wt.id, "executing", null, null, null, true);
+      expect(db.getAgentStatus(wt.id)!.is_open).toBe(1);
+      db.upsertAgentStatus(wt.id, "idle", null, null, null, false);
+      expect(db.getAgentStatus(wt.id)!.is_open).toBe(0);
     });
 
     it("gets agent statuses for a repo", () => {
