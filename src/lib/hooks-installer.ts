@@ -37,7 +37,7 @@ function getGlobalSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");
 }
 
-function readGlobalSettings(): Record<string, unknown> {
+export function readGlobalSettings(): Record<string, unknown> {
   const settingsPath = getGlobalSettingsPath();
   if (!existsSync(settingsPath)) return {};
   try {
@@ -47,7 +47,7 @@ function readGlobalSettings(): Record<string, unknown> {
   }
 }
 
-function writeGlobalSettings(settings: Record<string, unknown>): void {
+export function writeGlobalSettings(settings: Record<string, unknown>): void {
   const claudeDir = join(homedir(), ".claude");
   if (!existsSync(claudeDir)) {
     mkdirSync(claudeDir, { recursive: true });

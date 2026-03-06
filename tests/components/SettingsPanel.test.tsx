@@ -22,6 +22,14 @@ vi.mock("../../src/lib/scripts.js", () => ({
   removeStartupScript: vi.fn(),
 }));
 
+vi.mock("../../src/lib/rules.js", () => ({
+  loadRules: vi.fn(() => []),
+  removeRule: vi.fn(),
+  clearLearnedRules: vi.fn(() => ({ removed: 0 })),
+  applyRulesToClaudeSettings: vi.fn(() => ({ added: 0, total: 0 })),
+  removeAmPermissionsFromClaudeSettings: vi.fn(),
+}));
+
 const ESCAPE = "\u001B";
 
 function waitForFrame(ms = 50): Promise<void> {

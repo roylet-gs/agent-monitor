@@ -53,30 +53,51 @@ export function removeStartupScript(repoId: string): void {
   }
 }
 
-export function openScriptInEditor(repoId: string, ide: Settings["ide"]): void {
-  const scriptPath = createStartupScript(repoId);
+export function openFileInEditor(filePath: string, ide: Settings["ide"]): void {
   try {
     switch (ide) {
       case "cursor":
-        execSync(`cursor "${scriptPath}"`, { stdio: "ignore" });
+        execSync(`cursor "${filePath}"`, { stdio: "ignore" });
         break;
       case "vscode":
-        execSync(`code "${scriptPath}"`, { stdio: "ignore" });
+        execSync(`code "${filePath}"`, { stdio: "ignore" });
         break;
       case "terminal":
         if (process.platform === "darwin") {
-          execSync(
-            `open -a Terminal "${scriptPath}"`,
-            { stdio: "ignore" }
-          );
+          execSync(`open -a Terminal "${filePath}"`, { stdio: "ignore" });
         } else {
-          execSync(`xdg-open "${scriptPath}"`, { stdio: "ignore" });
+          execSync(`xdg-open "${filePath}"`, { stdio: "ignore" });
         }
         break;
     }
-    log("info", "scripts", `Opened script in ${ide}: ${scriptPath}`);
+    log("info", "scripts", `Opened file in ${ide}: ${filePath}`);
   } catch (err) {
-    log("error", "scripts", `Failed to open script in ${ide}: ${err}`);
-    throw new Error(`Failed to open script in ${ide}. Is it installed and in PATH?`);
+    log("error", "scripts", `Failed to open file in ${ide}: ${err}`);
+    throw new Error(`Failed to open file in ${ide}. Is it installed and in PATH?`);
+  }
+}
+
+export function openScriptInEditor(repoId: string, ide: Settings["ide"]): void {
+  const scriptPath = createStartupScript(repoId);
+  openFileInEditor(scriptPath, ide);
+}
+
+export function openDiffInEditor(leftPath: string, rightPath: string, ide: Settings["ide"]): void {
+  try {
+    switch (ide) {
+      case "cursor":
+        execSync(`cursor --diff "${leftPath}" "${rightPath}"`, { stdio: "ignore" });
+        break;
+      case "vscode":
+        execSync(`code --diff "${leftPath}" "${rightPath}"`, { stdio: "ignore" });
+        break;
+      case "terminal":
+        execSync(`diff "${leftPath}" "${rightPath}" | less`, { stdio: "ignore" });
+        break;
+    }
+    log("info", "scripts", `Opened diff in ${ide}: ${leftPath} vs ${rightPath}`);
+  } catch (err) {
+    log("error", "scripts", `Failed to open diff in ${ide}: ${err}`);
+    throw new Error(`Failed to open diff in ${ide}. Is it installed and in PATH?`);
   }
 }

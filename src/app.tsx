@@ -120,6 +120,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     ghRefreshOnManual: settings.ghRefreshOnManual,
     linearRefreshOnManual: settings.linearRefreshOnManual,
     linearAutoNickname: settings.linearAutoNickname,
+    applyGlobalRulesEnabled: settings.applyGlobalRulesEnabled,
   });
 
   // Keep refs to always call the latest refresh (avoids stale closures in async handlers)
