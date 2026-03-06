@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   linearPollingIntervalMs: 180000,
   ghRefreshOnManual: true,
   linearRefreshOnManual: true,
+  linearAutoNickname: true,
 };
 
 export function loadSettings(): Settings {

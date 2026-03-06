@@ -12,6 +12,7 @@ export interface Worktree {
   branch: string;
   name: string;
   custom_name: string | null;
+  nickname_source: string | null;
   created_at: string;
 }
 
@@ -93,6 +94,7 @@ export interface Settings {
   linearPollingIntervalMs: number;
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
+  linearAutoNickname: boolean;
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;

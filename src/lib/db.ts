@@ -80,6 +80,14 @@ function initSchema(db: Database.Database): void {
     db.exec("ALTER TABLE agent_status ADD COLUMN transcript_summary TEXT");
     log("info", "db", "Migrated agent_status: added transcript_summary column");
   }
+
+  // Migration: add nickname_source column if missing
+  try {
+    db.prepare("SELECT nickname_source FROM worktrees LIMIT 0").run();
+  } catch {
+    db.exec("ALTER TABLE worktrees ADD COLUMN nickname_source TEXT");
+    log("info", "db", "Migrated worktrees: added nickname_source column");
+  }
 }
 
 // --- Repositories ---
@@ -165,10 +173,19 @@ export function removeWorktreesForRepo(repoId: string): void {
   getDb().prepare("DELETE FROM worktrees WHERE repo_id = ?").run(repoId);
 }
 
-export function updateWorktreeCustomName(id: string, customName: string | null): void {
+export function updateWorktreeCustomName(id: string, customName: string | null, source: string | null = null): void {
   getDb()
-    .prepare("UPDATE worktrees SET custom_name = ? WHERE id = ?")
-    .run(customName, id);
+    .prepare("UPDATE worktrees SET custom_name = ?, nickname_source = ? WHERE id = ?")
+    .run(customName, source, id);
+}
+
+export function clearLinearNicknames(): void {
+  const result = getDb()
+    .prepare("UPDATE worktrees SET custom_name = NULL, nickname_source = NULL WHERE nickname_source = 'linear'")
+    .run();
+  if (result.changes > 0) {
+    log("info", "db", `Cleared ${result.changes} Linear auto-set nickname(s)`);
+  }
 }
 
 // --- Agent Status ---

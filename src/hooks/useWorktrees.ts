@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { getWorktrees, getAgentStatuses } from "../lib/db.js";
+import { getWorktrees, getAgentStatuses, updateWorktreeCustomName, clearLinearNicknames } from "../lib/db.js";
 import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo, linearAttachmentToPrInfo } from "../lib/linear.js";
@@ -17,6 +17,7 @@ export interface WorktreeHookConfig {
   hideMainBranch: boolean;
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
+  linearAutoNickname: boolean;
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
@@ -36,6 +37,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     hideMainBranch,
     ghRefreshOnManual,
     linearRefreshOnManual,
+    linearAutoNickname,
   } = config;
 
   const [groups, setGroups] = useState<WorktreeGroup[]>([]);
@@ -58,6 +60,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
   ghRefreshOnManualRef.current = ghRefreshOnManual;
   const linearRefreshOnManualRef = useRef(linearRefreshOnManual);
   linearRefreshOnManualRef.current = linearRefreshOnManual;
+  const linearAutoNicknameRef = useRef(linearAutoNickname);
+  linearAutoNicknameRef.current = linearAutoNickname;
 
   // Generation counter: stale refresh calls check this before setting state
   const genRef = useRef(0);
@@ -111,6 +115,21 @@ export function useWorktrees(config: WorktreeHookConfig): {
     }
   }, [linearApiKey]);
 
+  // Auto-set worktree nicknames from Linear ticket titles
+  const autoSetLinearNicknames = useCallback(() => {
+    if (!linearAutoNicknameRef.current || !linearEnabledRef.current) return;
+    for (const repo of reposRef.current) {
+      const dbWorktrees = getWorktrees(repo.id);
+      for (const wt of dbWorktrees) {
+        if (wt.custom_name) continue;
+        const linearInfo = linearCacheRef.current.get(wt.branch);
+        if (!linearInfo) continue;
+        log("info", "useWorktrees", `Auto-setting nickname for ${wt.branch} from Linear: "${linearInfo.title}"`);
+        updateWorktreeCustomName(wt.id, linearInfo.title, "linear");
+      }
+    }
+  }, []);
+
   // Single stable refresh function that reads latest values from refs
   const refresh = useCallback(async (forceIntegrations = false) => {
     const myGen = ++genRef.current;
@@ -148,6 +167,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
           shouldRefreshPr ? refreshPrInfo(repoGroups) : Promise.resolve(),
           shouldRefreshLinear ? refreshLinearInfo(allBranchNames) : Promise.resolve(),
         ]);
+        autoSetLinearNicknames();
         // Bail if a newer refresh started while we were fetching
         if (myGen !== genRef.current) return;
       }
@@ -225,7 +245,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     } catch (err) {
       log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);
     }
-  }, [refreshPrInfo, refreshLinearInfo]);
+  }, [refreshPrInfo, refreshLinearInfo, autoSetLinearNicknames]);
 
   // Re-fetch immediately when repositories change
   useEffect(() => {
@@ -261,6 +281,13 @@ export function useWorktrees(config: WorktreeHookConfig): {
     return () => clearInterval(timer);
   }, [repositories, ghPrStatus, ghPollingIntervalMs, refreshPrInfo, refresh]);
 
+  // Clear Linear-sourced nicknames when the feature is turned off
+  useEffect(() => {
+    if (!linearEnabled || !linearAutoNickname) {
+      clearLinearNicknames();
+    }
+  }, [linearEnabled, linearAutoNickname]);
+
   // Linear polling loop
   useEffect(() => {
     if (!linearEnabled || repositories.length === 0) return;
@@ -274,6 +301,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         }
       }
       await refreshLinearInfo(allBranches);
+      autoSetLinearNicknames();
       refresh(false);
     };
 
