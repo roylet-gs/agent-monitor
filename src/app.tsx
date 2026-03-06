@@ -33,7 +33,7 @@ import {
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
-import { openInIde } from "./lib/ide-launcher.js";
+import { openInIde, openClaudeInTerminal } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -207,6 +207,19 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       setError(`${err}`);
     }
   }, [flatWorktrees, selectedIndex, settings]);
+
+  // Handle open Claude in a new terminal window
+  const handleOpenClaude = useCallback(() => {
+    const wt = flatWorktrees[selectedIndex];
+    if (!wt) return;
+
+    const continueSession = !!wt.agent_status?.session_id;
+    try {
+      openClaudeInTerminal(wt.path, continueSession);
+    } catch (err) {
+      setError(`${err}`);
+    }
+  }, [flatWorktrees, selectedIndex]);
 
   // Handle create worktree
   const handleCreate = useCallback(
@@ -544,6 +557,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           exit();
         }
       : undefined,
+    onClaude: handleOpenClaude,
     onQuit: () => exit(),
     onEscHint: setEscHint,
   });

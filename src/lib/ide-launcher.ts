@@ -2,6 +2,29 @@ import { execSync } from "child_process";
 import { log } from "./logger.js";
 import type { Settings } from "./types.js";
 
+export function openClaudeInTerminal(worktreePath: string, continueSession: boolean): void {
+  const escapedPath = worktreePath.replace(/"/g, '\\"');
+  const claudeCmd = continueSession ? "claude -c" : "claude";
+
+  try {
+    if (process.platform === "darwin") {
+      execSync(
+        `osascript -e 'tell app "Terminal" to do script "cd \\"${escapedPath}\\" && ${claudeCmd}"'`,
+        { stdio: "ignore" }
+      );
+    } else {
+      execSync(
+        `x-terminal-emulator --working-directory="${escapedPath}" -e "${claudeCmd}"`,
+        { stdio: "ignore" }
+      );
+    }
+    log("info", "ide", `Opened claude in terminal at ${worktreePath} (continue=${continueSession})`);
+  } catch (err) {
+    log("error", "ide", `Failed to open claude in terminal: ${err}`);
+    throw new Error("Failed to open terminal. Is Terminal.app available?");
+  }
+}
+
 export function openInIde(worktreePath: string, ide: Settings["ide"]): void {
   try {
     switch (ide) {
