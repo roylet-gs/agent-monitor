@@ -61,5 +61,6 @@ jobs:
       - name: Push version bump
         run: |
           git add package.json
-          git commit -m "chore: bump version to $(node -p 'require(\"./package.json\").version')"
+          VERSION=$(node -p "require('./package.json').version")
+          git commit -m "chore: bump version to $VERSION"
           git push
