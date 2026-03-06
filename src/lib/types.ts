@@ -97,6 +97,7 @@ export interface Settings {
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
   maxLogSizeMb: number;
+  applyGlobalRulesEnabled: boolean;
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
@@ -131,4 +132,13 @@ export interface HookEvent {
   title?: string;
   notification_type?: string;
   permission_prompt?: boolean;
+}
+
+export interface Rule {
+  id: string;
+  tool: string;
+  input_pattern?: string;
+  decision: "allow" | "deny";
+  source: "manual" | "learned";
+  created_at: string;
 }

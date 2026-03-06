@@ -201,6 +201,77 @@ hooksCmd
     hooksStatus(opts);
   });
 
+// --- Rule commands ---
+
+const ruleCmd = program
+  .command("rule")
+  .description("Manage auto-approval rules");
+
+ruleCmd
+  .command("list")
+  .description("List all rules")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { ruleList } = await import("./commands/rule.js");
+    ruleList(opts);
+  });
+
+ruleCmd
+  .command("add <tool>")
+  .description("Add a manual rule")
+  .option("--input <pattern>", "Input pattern (glob)")
+  .option("--deny", "Create a deny rule instead of allow")
+  .option("--json", "Output as JSON")
+  .action(async (tool, opts) => {
+    const { ruleAdd } = await import("./commands/rule.js");
+    ruleAdd(tool, opts);
+  });
+
+ruleCmd
+  .command("remove <id-or-tool>")
+  .description("Remove a rule by ID prefix or tool name")
+  .option("--json", "Output as JSON")
+  .action(async (idOrTool, opts) => {
+    const { ruleRemove } = await import("./commands/rule.js");
+    ruleRemove(idOrTool, opts);
+  });
+
+ruleCmd
+  .command("sync")
+  .description("Sync learned rules from worktree settings")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { ruleSync } = await import("./commands/rule.js");
+    ruleSync(opts);
+  });
+
+ruleCmd
+  .command("clear")
+  .description("Remove all learned rules (keeps manual rules)")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { ruleClear } = await import("./commands/rule.js");
+    ruleClear(opts);
+  });
+
+ruleCmd
+  .command("apply")
+  .description("Push current rules to ~/.claude/settings.json permissions")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { ruleApply } = await import("./commands/rule.js");
+    ruleApply(opts);
+  });
+
+ruleCmd
+  .command("restore")
+  .description("Remove all am-managed permissions from ~/.claude/settings.json")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { ruleRestore } = await import("./commands/rule.js");
+    ruleRestore(opts);
+  });
+
 // --- Backward compat aliases for hooks ---
 
 program
