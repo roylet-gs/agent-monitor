@@ -57,7 +57,9 @@
 ## Quick Start
 
 ```sh
-# 1. Point npm to GitHub Packages for the @roylet-gs scope (one-time)
+# 1. Authenticate with GitHub Packages (one-time)
+# Create a PAT at https://github.com/settings/tokens with read:packages scope
+echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
 echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
 
 # 2. Install globally
@@ -85,9 +87,13 @@ The setup wizard walks you through everything on first launch — IDE preference
 
 ### From GitHub Packages
 
-Configure npm to use GitHub Packages for the `@roylet-gs` scope (one-time):
+GitHub Packages requires authentication even for public packages. You'll need a free GitHub account and a [Personal Access Token (classic)](https://github.com/settings/tokens) with the `read:packages` scope.
+
+Configure npm (one-time):
 
 ```sh
+# Authenticate and point npm to GitHub Packages for the @roylet-gs scope
+echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
 echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
 ```
 
@@ -96,8 +102,6 @@ Then install globally:
 ```sh
 npm install -g @roylet-gs/agent-monitor
 ```
-
-No authentication or access token required — the package is public.
 
 ### From Source
 
