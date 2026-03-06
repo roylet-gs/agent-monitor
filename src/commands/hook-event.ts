@@ -27,7 +27,14 @@ export async function handleHookEvent(
   }
 
   log("info", "hook-event", `event=${payload.event} tool=${payload.tool_name ?? "none"} stop_hook_active=${payload.stop_hook_active ?? "N/A"} permission_prompt=${payload.permission_prompt ?? "N/A"} permission_mode=${payload.permission_mode ?? "N/A"} for ${worktreePath}`);
-  log("debug", "hook-event", `Full payload: ${JSON.stringify(payload).slice(0, 500)}`);
+  const p = payload as unknown as Record<string, unknown>;
+  const debugFields: Record<string, unknown> = {};
+  if (p.session_id) debugFields.session_id = p.session_id;
+  if (p.reason) debugFields.reason = p.reason;
+  if (p.notification_type) debugFields.notification_type = p.notification_type;
+  if (p.message) debugFields.message = String(p.message).slice(0, 100);
+  if (p.tool_input) debugFields.tool_input = JSON.stringify(p.tool_input).slice(0, 200);
+  log("debug", "hook-event", `Payload details: ${JSON.stringify(debugFields)}`);
 
   // Resolve to git worktree root so subdirectory paths match the DB
   const resolvedPath = getWorktreeRoot(worktreePath) ?? worktreePath;
@@ -53,7 +60,6 @@ export async function handleHookEvent(
   const current = getAgentStatus(worktree.id);
   const currentIsOpen = current ? !!current.is_open : false;
   if (current && current.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
-    log("debug", "hook-event", `Skipped redundant status update for ${worktreePath}: ${status}`);
     return;
   }
 
@@ -122,15 +128,12 @@ export function mapEventToStatus(event: HookEvent): AgentStatusType | null {
     return null;
   }
   if (event.event === "SessionStart" || event.event === "SessionEnd") {
-    log("debug", "hook-event", `${event.event} → idle`);
     return "idle";
   }
 
   // Prompt submit → immediately show executing (or planning if in plan mode)
   if (event.event === "UserPromptSubmit") {
-    const status = event.permission_mode === "plan" ? "planning" : "executing";
-    log("debug", "hook-event", `UserPromptSubmit → ${status} (permission_mode=${event.permission_mode ?? "default"})`);
-    return status;
+    return event.permission_mode === "plan" ? "planning" : "executing";
   }
 
   // Tools that block on user input → waiting
@@ -139,13 +142,11 @@ export function mapEventToStatus(event: HookEvent): AgentStatusType | null {
     event.tool_name === "EnterPlanMode" ||
     event.tool_name === "ExitPlanMode"
   ) {
-    log("debug", "hook-event", `Tool ${event.tool_name} → waiting`);
     return "waiting";
   }
 
   // Plan mode folds into the planning status
   if (event.permission_mode === "plan") {
-    log("debug", "hook-event", `Plan mode (event=${event.event}) → planning`);
     return "planning";
   }
 
@@ -156,7 +157,6 @@ export function mapEventToStatus(event: HookEvent): AgentStatusType | null {
     event.event === "SubagentStart" ||
     event.event === "SubagentStop"
   ) {
-    log("debug", "hook-event", `${event.event} → executing`);
     return "executing";
   }
 

@@ -70,5 +70,4 @@ export function initLogger(level: LogLevel, version?: string, maxLogSizeMb?: num
   }
   ensureLogDir();
   rotateIfNeeded();
-  log("debug", "logger", `Logger initialized (v${version ?? "unknown"})`);
 }
