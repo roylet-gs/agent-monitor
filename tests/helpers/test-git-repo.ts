@@ -22,7 +22,7 @@ export function createTempGitRepoWithWorktrees(
   const repoPath = createTempGitRepo(name);
   const worktreePaths = new Map<string, string>();
 
-  const worktreeDir = join(repoPath, ".worktrees");
+  const worktreeDir = join(repoPath, ".claude", "worktrees");
   mkdirSync(worktreeDir, { recursive: true });
 
   for (const branch of branches) {

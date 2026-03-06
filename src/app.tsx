@@ -223,7 +223,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
       const { existsSync } = await import("fs");
       const { join } = await import("path");
-      const wtDir = join(repo.path, ".worktrees", branchName.replace(/\//g, "-"));
+      const wtDir = join(repo.path, ".claude", "worktrees", branchName.replace(/\//g, "-"));
       if (existsSync(wtDir)) {
         setPendingBranch({ branch: branchName, customName, baseBranch });
         setMode("branch-exists");
