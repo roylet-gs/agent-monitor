@@ -237,17 +237,8 @@ ruleCmd
   });
 
 ruleCmd
-  .command("sync")
-  .description("Sync learned rules from worktree settings")
-  .option("--json", "Output as JSON")
-  .action(async (opts) => {
-    const { ruleSync } = await import("./commands/rule.js");
-    ruleSync(opts);
-  });
-
-ruleCmd
   .command("clear")
-  .description("Remove all learned rules (keeps manual rules)")
+  .description("Remove all rules")
   .option("--json", "Output as JSON")
   .action(async (opts) => {
     const { ruleClear } = await import("./commands/rule.js");
