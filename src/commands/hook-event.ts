@@ -42,6 +42,7 @@ export async function handleHookEvent(
   const sessionId = payload.session_id ?? null;
   const lastResponse = extractLastResponse(payload);
   const transcriptSummary = payload.transcript_summary ?? null;
+  const isOpen = payload.event === "SessionEnd" ? false : true;
 
   if (status === null) {
     log("debug", "hook-event", `Skipped status update for ${worktreePath} (informational ${payload.event})`);
@@ -55,7 +56,7 @@ export async function handleHookEvent(
     return;
   }
 
-  upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary);
+  upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary, isOpen);
   log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`);
 
   // Fire-and-forget publish for instant TUI update
@@ -66,6 +67,7 @@ export async function handleHookEvent(
     sessionId,
     lastResponse,
     transcriptSummary,
+    isOpen,
     updatedAt: new Date().toISOString(),
   }).catch(() => {});
 

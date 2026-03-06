@@ -81,6 +81,14 @@ function initSchema(db: Database.Database): void {
     log("info", "db", "Migrated agent_status: added transcript_summary column");
   }
 
+  // Migration: add is_open column if missing
+  try {
+    db.prepare("SELECT is_open FROM agent_status LIMIT 0").run();
+  } catch {
+    db.exec("ALTER TABLE agent_status ADD COLUMN is_open INTEGER NOT NULL DEFAULT 0");
+    log("info", "db", "Migrated agent_status: added is_open column");
+  }
+
   // Migration: add nickname_source column if missing
   try {
     db.prepare("SELECT nickname_source FROM worktrees LIMIT 0").run();
@@ -195,20 +203,22 @@ export function upsertAgentStatus(
   status: AgentStatusType,
   sessionId?: string | null,
   lastResponse?: string | null,
-  transcriptSummary?: string | null
+  transcriptSummary?: string | null,
+  isOpen?: boolean | null
 ): void {
   getDb()
     .prepare(
-      `INSERT INTO agent_status (worktree_id, status, session_id, last_response, transcript_summary, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))
+      `INSERT INTO agent_status (worktree_id, status, session_id, last_response, transcript_summary, is_open, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(worktree_id) DO UPDATE SET
          status = excluded.status,
          session_id = COALESCE(excluded.session_id, agent_status.session_id),
          last_response = COALESCE(excluded.last_response, agent_status.last_response),
          transcript_summary = COALESCE(excluded.transcript_summary, agent_status.transcript_summary),
+         is_open = COALESCE(excluded.is_open, agent_status.is_open),
          updated_at = datetime('now')`
     )
-    .run(worktreeId, status, sessionId ?? null, lastResponse ?? null, transcriptSummary ?? null);
+    .run(worktreeId, status, sessionId ?? null, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null);
 }
 
 export function getAgentStatus(worktreeId: string): AgentStatus | undefined {

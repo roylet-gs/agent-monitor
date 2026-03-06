@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
+import { isEffectivelyOpen } from "../lib/agent-utils.js";
 import type { WorktreeWithStatus, WorktreeGroup } from "../lib/types.js";
 
 interface WorktreeListProps {
@@ -65,6 +66,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
             const isSelected = currentFlatIdx === selectedIndex;
             const displayName = wt.custom_name ?? wt.branch;
             const unseen = unseenIds.has(wt.id);
+            const open = isEffectivelyOpen(wt.agent_status);
 
             const inlineMeta: React.ReactNode[] = [];
 
@@ -85,7 +87,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               <Box key={wt.id} flexDirection="column" marginBottom={!compactView && wt.custom_name && i < groupWorktrees.length - 1 ? 1 : 0}>
                 <Box gap={1}>
                   <Text>{isSelected ? "▸" : " "}</Text>
-                  <Text color={statusColor(wt.agent_status?.status)}>●</Text>
+                  {open ? <Text color={statusColor(wt.agent_status?.status)}>●</Text> : <Text dimColor>○</Text>}
                   <Text
                     bold={isSelected}
                     color={isSelected ? "cyan" : undefined}

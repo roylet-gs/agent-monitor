@@ -22,6 +22,7 @@ export interface AgentStatus {
   last_response: string | null;
   transcript_summary: string | null;
   session_id: string | null;
+  is_open: number;
   updated_at: string;
 }
 
