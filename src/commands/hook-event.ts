@@ -51,13 +51,14 @@ export async function handleHookEvent(
 
   // Skip redundant DB write + pub/sub if status hasn't changed and there's no new content
   const current = getAgentStatus(worktree.id);
-  if (current && current.status === status && !lastResponse && !transcriptSummary) {
+  const currentIsOpen = current ? !!current.is_open : false;
+  if (current && current.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
     log("debug", "hook-event", `Skipped redundant status update for ${worktreePath}: ${status}`);
     return;
   }
 
   upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary, isOpen);
-  log("info", "hook-event", `Updated status for ${worktreePath}: ${status}`);
+  log("info", "hook-event", `Updated status for ${worktreePath}: ${status} (is_open=${isOpen})`);
 
   // Fire-and-forget publish for instant TUI update
   await publishMessage({
