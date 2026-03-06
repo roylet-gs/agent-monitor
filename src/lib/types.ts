@@ -95,6 +95,7 @@ export interface Settings {
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
+  maxLogSizeMb: number;
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;

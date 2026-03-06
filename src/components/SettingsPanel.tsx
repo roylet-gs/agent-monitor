@@ -17,6 +17,7 @@ type SettingsField =
   | "compactView"
   | "hideMainBranch"
   | "logLevel"
+  | "maxLogSize"
   | "ghPrStatus"
   | "ghPolling"
   | "ghRefreshOnManual"
@@ -40,6 +41,7 @@ const FIELDS: SettingsField[] = [
   "hideMainBranch",
   "polling",
   "logLevel",
+  "maxLogSize",
   "ghPrStatus",
   "ghPolling",
   "ghRefreshOnManual",
@@ -64,6 +66,7 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   hideMainBranch: "Hide the main/master branch from the worktree list",
   polling: "How often to check agent status (minimum 0.5s)",
   logLevel: "Verbosity of debug log file at ~/.agent-monitor/debug.log",
+  maxLogSize: "Maximum debug log file size before rotation (minimum 1 MB)",
   ghPrStatus: "Show GitHub PR and CI status for each worktree",
   ghPolling: "How often to fetch GitHub PR status (minimum 10s)",
   ghRefreshOnManual: "Include GitHub status when manually refreshing",
@@ -156,6 +159,9 @@ export function SettingsPanel({
     } else if (activeField === "linearPolling") {
       setEditValue(String(current.linearPollingIntervalMs / 1000));
       setEditing(true);
+    } else if (activeField === "maxLogSize") {
+      setEditValue(String(current.maxLogSizeMb));
+      setEditing(true);
     }
   };
 
@@ -181,6 +187,11 @@ export function SettingsPanel({
       const seconds = parseFloat(editValue);
       if (!isNaN(seconds) && seconds >= 10) {
         setCurrent((s) => ({ ...s, linearPollingIntervalMs: Math.round(seconds * 1000) }));
+      }
+    } else if (activeField === "maxLogSize") {
+      const mb = parseFloat(editValue);
+      if (!isNaN(mb) && mb >= 1) {
+        setCurrent((s) => ({ ...s, maxLogSizeMb: Math.round(mb) }));
       }
     }
     setEditing(false);
@@ -237,7 +248,8 @@ export function SettingsPanel({
         activeField === "polling" ||
         activeField === "ghPolling" ||
         activeField === "linearApiKey" ||
-        activeField === "linearPolling") &&
+        activeField === "linearPolling" ||
+        activeField === "maxLogSize") &&
       key.return
     ) {
       startEditing();
@@ -485,6 +497,23 @@ export function SettingsPanel({
               </Text>
             </Text>
           ))}
+        </Box>
+        <Box>
+          <Text bold={activeField === "maxLogSize"}>
+            {activeField === "maxLogSize" ? "▸" : " "} Max Log Size (MB):{" "}
+          </Text>
+          {editing && activeField === "maxLogSize" ? (
+            <TextInput
+              value={editValue}
+              onChange={setEditValue}
+              onSubmit={commitEdit}
+            />
+          ) : (
+            <Text>
+              {current.maxLogSizeMb}
+              {activeField === "maxLogSize" && <Text dimColor> (Enter to edit, min 1 MB)</Text>}
+            </Text>
+          )}
         </Box>
 
         {/* === GitHub Section === */}

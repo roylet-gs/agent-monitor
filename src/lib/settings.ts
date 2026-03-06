@@ -34,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ghRefreshOnManual: true,
   linearRefreshOnManual: true,
   linearAutoNickname: true,
+  maxLogSizeMb: 2,
 };
 
 export function loadSettings(): Settings {

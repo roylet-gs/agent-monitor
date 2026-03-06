@@ -12,7 +12,7 @@ import { runScript, waitForEnter } from "./lib/run-script.js";
 // --- CLI setup ---
 
 const settings = loadSettings();
-initLogger(settings.logLevel, getVersion());
+initLogger(settings.logLevel, getVersion(), settings.maxLogSizeMb);
 
 let watchFlag = false;
 
