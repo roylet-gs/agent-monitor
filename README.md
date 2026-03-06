@@ -5,7 +5,6 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" alt="Node >= 18">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
 </p>
@@ -37,6 +36,7 @@
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Requirements](#requirements)
 - [Installation](#installation)
 - [Features](#features)
     - [Dashboard](#dashboard)
@@ -51,21 +51,33 @@
 - [Configuration](#configuration)
 - [How It Works](#how-it-works)
 - [Troubleshooting](#troubleshooting)
-- [Requirements](#requirements)
 
 ---
 
 ## Quick Start
 
 ```sh
+# 1. Point npm to GitHub Packages for the @roylet-gs scope (one-time)
+echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
+
+# 2. Install globally
 npm install -g @roylet-gs/agent-monitor
+
+# 3. Launch
 am
 ```
 
-That's it. The setup wizard walks you through adding repositories, configuring integrations, and installing Claude Code hooks on first launch.
+The setup wizard walks you through everything on first launch — IDE preference, repositories, Claude Code hooks, and optional integrations.
 
-> [!TIP]
-> The setup wizard auto-configures everything — IDE preference, GitHub PR status, Linear integration, and Claude Code hooks. You can re-run it anytime with `am setup`.
+---
+
+## Requirements
+
+- **Node.js** >= 18
+- **git** — for worktree operations
+- **gh CLI** — optional, for GitHub PR status ([install](https://cli.github.com))
+- **Claude Code** — for agent monitoring features
+- **Linear** — optional, for ticket tracking and GitHub PR status
 
 ---
 
@@ -73,28 +85,19 @@ That's it. The setup wizard walks you through adding repositories, configuring i
 
 ### From GitHub Packages
 
-<details>
-<summary>Authentication setup (one-time)</summary>
-
-Since this is a private package on GitHub Packages, you need to authenticate first:
+Configure npm to use GitHub Packages for the `@roylet-gs` scope (one-time):
 
 ```sh
-npm login --registry=https://npm.pkg.github.com
+echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
 ```
 
-Use your GitHub username and a [personal access token (classic)](https://github.com/settings/tokens) with `read:packages` scope as the password.
-
-Then add to your `~/.npmrc`:
-
-```
-@roylet-gs:registry=https://npm.pkg.github.com
-```
-
-</details>
+Then install globally:
 
 ```sh
 npm install -g @roylet-gs/agent-monitor
 ```
+
+No authentication or access token required — the package is public.
 
 ### From Source
 
@@ -105,6 +108,18 @@ pnpm install
 pnpm build
 pnpm link --global
 ```
+
+### First Run
+
+On first launch, the setup wizard configures:
+
+- **IDE preference** — Cursor, VS Code, or Terminal
+- **Repositories** — which repos to track
+- **Claude Code hooks** — for real-time agent status monitoring
+- **GitHub PR integration** — inline PR and CI status (requires `gh` CLI)
+- **Linear integration** — automatic ticket linking (optional)
+
+You can re-run the wizard anytime with `am setup`, or verify your setup with `am doctor`.
 
 ---
 
@@ -421,13 +436,3 @@ am logs --module hooks          # Filter by module
 - The database auto-migrates on startup — if corrupted, delete `~/.agent-monitor/agent-monitor.db` and re-add your repos
 
 </details>
-
----
-
-## Requirements
-
-- **Node.js** >= 18
-- **git** — for worktree operations
-- **gh CLI** — optional, for GitHub PR status ([install](https://cli.github.com))
-- **Claude Code** — for agent monitoring features
-- **Linear** - optional but highly recommend, for Ticket & Github PR status
