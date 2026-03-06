@@ -80,8 +80,8 @@ export async function createWorktree(
   reuseExisting = false
 ): Promise<string> {
   const git = getGit(repoPath);
-  // worktrees go into .worktrees/ directory next to .git
-  const worktreePath = join(repoPath, ".worktrees", branch.replace(/\//g, "-"));
+  // worktrees go into .claude/worktrees/ directory next to .git
+  const worktreePath = join(repoPath, ".claude", "worktrees", branch.replace(/\//g, "-"));
 
   const args = ["worktree", "add", worktreePath];
   if (reuseExisting) {
