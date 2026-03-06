@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
-import { loadRules, removeRule, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings } from "../lib/rules.js";
+import { loadRules, removeRule, clearRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings } from "../lib/rules.js";
 import type { Rule } from "../lib/types.js";
 
 type SettingsField =
@@ -31,6 +31,7 @@ type SettingsField =
   | "linearAutoNickname"
   | "applyGlobalRules"
   | "manageRules"
+  | "removeAllRules"
   | "repos"
   | "checkForUpdates"
   | "resetSettings"
@@ -57,6 +58,7 @@ const FIELDS: SettingsField[] = [
   "linearAutoNickname",
   "applyGlobalRules",
   "manageRules",
+  "removeAllRules",
   "repos",
   "checkForUpdates",
   "resetSettings",
@@ -84,6 +86,7 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
   applyGlobalRules: "Write am rules to ~/.claude/settings.json permissions (persists without TUI)",
   manageRules: "View and remove auto-approval rules",
+  removeAllRules: "Remove all auto-approval rules and clean up Claude settings.",
   repos: "Monitored repositories and their startup scripts",
   checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
@@ -124,6 +127,7 @@ export function SettingsPanel({
   const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
   const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
   const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | null>(null);
+  const [clearRulesMsg, setClearRulesMsg] = useState("");
   const [updateCheckStatus, setUpdateCheckStatus] = useState<"idle" | "checking" | "ok" | "update" | "error">("idle");
   const [updateCheckMsg, setUpdateCheckMsg] = useState("");
   const [showRulesList, setShowRulesList] = useState(false);
@@ -352,6 +356,20 @@ export function SettingsPanel({
       setShowRulesList(true);
       return;
     }
+
+    if (activeField === "removeAllRules" && key.return) {
+      const result = clearRules();
+      if (result.removed === 0) {
+        setClearRulesMsg("No rules to remove");
+      } else {
+        setClearRulesMsg(`Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}`);
+        if (current.applyGlobalRulesEnabled) {
+          removeAmPermissionsFromClaudeSettings();
+        }
+      }
+      return;
+    }
+
 
     if (activeField === "logLevel" && (key.return || input === " ")) {
       const idx = LOG_LEVELS.indexOf(current.logLevel);
@@ -721,6 +739,19 @@ export function SettingsPanel({
             <Text dimColor> (Enter to open)</Text>
           )}
         </Box>
+
+        <Box>
+          <Text bold={activeField === "removeAllRules"}>
+            {activeField === "removeAllRules" ? "▸" : " "} Remove All Rules
+          </Text>
+          {activeField === "removeAllRules" && !clearRulesMsg && (
+            <Text dimColor> (Enter to remove)</Text>
+          )}
+          {clearRulesMsg && (
+            <Text color="green"> {clearRulesMsg}</Text>
+          )}
+        </Box>
+
 
         {/* === Repositories Section === */}
         {renderSectionHeader("Repositories")}

@@ -28,7 +28,8 @@ export function saveRules(rules: Rule[]): void {
 export function addRule(
   tool: string,
   inputPattern?: string,
-  decision: "allow" | "deny" = "allow"
+  decision: "allow" | "deny" = "allow",
+  source: "manual" | "learned" = "manual"
 ): Rule {
   const rules = loadRules();
   const rule: Rule = {
@@ -36,7 +37,7 @@ export function addRule(
     tool,
     ...(inputPattern ? { input_pattern: inputPattern } : {}),
     decision,
-    source: "manual",
+    source,
     created_at: new Date().toISOString(),
   };
   rules.push(rule);
@@ -84,6 +85,14 @@ export function ruleToClaudePermission(rule: Rule): string | null {
     return `${rule.tool}(${rule.input_pattern})`;
   }
   return rule.tool;
+}
+
+export function parseClaudePermissionRule(entry: string): { tool: string; input_pattern?: string } {
+  const match = entry.match(/^(\w+)\((.+)\)$/);
+  if (match) {
+    return { tool: match[1]!, input_pattern: match[2]! };
+  }
+  return { tool: entry };
 }
 
 // --- Am-managed permissions tracking ---
@@ -178,4 +187,3 @@ export function removeAmPermissionsFromClaudeSettings(): void {
 
   log("info", "rules", `Removed ${previousManaged.length} am-managed permission(s) from Claude settings`);
 }
-
