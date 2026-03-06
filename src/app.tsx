@@ -33,7 +33,7 @@ import {
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
-import { openInIde, openClaudeInTerminal } from "./lib/ide-launcher.js";
+import { openInIde, openTerminal, openClaudeInTerminal } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -208,6 +208,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       setError(`${err}`);
     }
   }, [flatWorktrees, selectedIndex, settings]);
+
+  // Handle open terminal at worktree path
+  const handleOpenTerminal = useCallback(() => {
+    const wt = flatWorktrees[selectedIndex];
+    if (!wt) return;
+    try {
+      openTerminal(wt.path);
+    } catch (err) {
+      setError(`${err}`);
+    }
+  }, [flatWorktrees, selectedIndex]);
 
   // Handle open Claude in a new terminal window
   const handleOpenClaude = useCallback(() => {
@@ -551,6 +562,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
+    onOpenTerminal: handleOpenTerminal,
     onToggleLogs: () => setShowLogs((v) => !v),
     onUpdate: updateInfo?.updateAvailable
       ? () => {
