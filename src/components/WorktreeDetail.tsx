@@ -17,6 +17,8 @@ function statusColor(status: string | undefined): string {
       return "cyan";
     case "waiting":
       return "yellow";
+    case "done":
+      return "blueBright";
     default:
       return "gray";
   }
@@ -32,6 +34,8 @@ function statusLabel(status: string | undefined): string {
       return "Waiting";
     case "idle":
       return "Idle";
+    case "done":
+      return "Done";
     default:
       return "Unknown";
   }

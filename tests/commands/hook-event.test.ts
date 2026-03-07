@@ -27,6 +27,31 @@ describe("mapEventToStatus", () => {
     expect(mapEventToStatus({ event: "Stop", stop_hook_active: false })).toBe("idle");
   });
 
+  // Stop → done when agent was actively working
+  it("Stop while executing -> done", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "executing")).toBe("done");
+  });
+
+  it("Stop while planning -> done", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "planning")).toBe("done");
+  });
+
+  it("Stop while waiting -> idle (not done)", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "waiting")).toBe("idle");
+  });
+
+  it("Stop while idle -> idle (not done)", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "idle")).toBe("idle");
+  });
+
+  it("Stop while done -> idle (not done)", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "done")).toBe("idle");
+  });
+
+  it("Stop with stop_hook_active still returns waiting regardless of currentStatus", () => {
+    expect(mapEventToStatus({ event: "Stop", stop_hook_active: true }, "executing")).toBe("waiting");
+  });
+
   // Notification events
   it("Notification with permission_prompt -> waiting", () => {
     expect(

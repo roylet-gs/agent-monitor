@@ -48,8 +48,11 @@ export async function handleHookEvent(
     return;
   }
 
+  // Fetch current status before mapping so Stop can check if agent was active
+  const current = getAgentStatus(worktree.id);
+
   // Map event to status
-  const status = mapEventToStatus(payload);
+  const status = mapEventToStatus(payload, current?.status);
   const sessionId = payload.session_id ?? null;
   const lastResponse = extractLastResponse(payload);
   const transcriptSummary = payload.transcript_summary ?? null;
@@ -61,7 +64,6 @@ export async function handleHookEvent(
   }
 
   // Skip redundant DB write + pub/sub if status hasn't changed and there's no new content
-  const current = getAgentStatus(worktree.id);
   const currentIsOpen = current ? !!current.is_open : false;
   if (current && current.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
     return;
@@ -115,13 +117,17 @@ function extractLastResponse(event: HookEvent): string | null {
   return null;
 }
 
-export function mapEventToStatus(event: HookEvent): AgentStatusType | null {
+export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusType | null): AgentStatusType | null {
   // Stop/Notification waiting cases take priority
   if (event.event === "Stop") {
-    // stop_hook_active is a loop-prevention flag (true = a Stop hook already
-    // blocked once). Since our hook never blocks, this is always false,
-    // so Stop always maps to "idle", which is correct: the turn is finished.
-    return event.stop_hook_active ? "waiting" : "idle";
+    if (event.stop_hook_active) return "waiting";
+    // If agent was actively working (executing/planning), mark as "done"
+    // so the user can see the task completed. Otherwise go to "idle".
+    if (currentStatus === "executing" || currentStatus === "planning") {
+      log("debug", "hook-event", `Stop while ${currentStatus} → done`);
+      return "done";
+    }
+    return "idle";
   }
   if (event.event === "Notification") {
     // Permission prompts → waiting; other notifications are informational,
