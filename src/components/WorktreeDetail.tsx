@@ -117,11 +117,15 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
                 <Text color={color}>{label}</Text>
               </Text>
               <Text dimColor>{pr.title}</Text>
-              {checks && (
+              {pr.state === "MERGED" && pr.activeCheckName ? (
+                <Text color={checks?.checkColor ?? "cyan"}>
+                  {checks?.icon ?? "◌"} {pr.activeCheckName}  {pr.checksWaiting ? "awaiting approval" : checks?.statusText ?? "running"}
+                </Text>
+              ) : checks ? (
                 <Text color={checks.checkColor}>
                   {checks.icon} Checks {checks.statusText}
                 </Text>
-              )}
+              ) : null}
             </Box>
           );
         })()}

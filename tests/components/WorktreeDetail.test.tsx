@@ -139,11 +139,59 @@ describe("WorktreeDetail", () => {
         reviewDecision: "",
         hasFeedback: false,
         checksStatus: "passing",
+        activeCheckUrl: null,
+        activeCheckName: null,
+        checksWaiting: false,
       },
     });
     const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
     const frame = lastFrame()!;
     expect(frame).toContain("PR #42");
     expect(frame).toContain("My PR");
+  });
+
+  it("shows active check name for merged PR with running deployment", () => {
+    const wt = makeWorktree({
+      pr_info: {
+        number: 99,
+        title: "Deploy feature",
+        url: "https://github.com/test/test/pull/99",
+        state: "MERGED",
+        isDraft: false,
+        reviewDecision: "",
+        hasFeedback: false,
+        checksStatus: "pending",
+        activeCheckUrl: "https://github.com/test/test/actions/runs/123",
+        activeCheckName: "Deploy to Production",
+        checksWaiting: false,
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("PR #99");
+    expect(frame).toContain("Deploy to Production");
+    expect(frame).toContain("running");
+  });
+
+  it("shows awaiting approval for merged PR with waiting check", () => {
+    const wt = makeWorktree({
+      pr_info: {
+        number: 100,
+        title: "Deploy with approval",
+        url: "https://github.com/test/test/pull/100",
+        state: "MERGED",
+        isDraft: false,
+        reviewDecision: "",
+        hasFeedback: false,
+        checksStatus: "pending",
+        activeCheckUrl: "https://github.com/test/test/actions/runs/456",
+        activeCheckName: "Deploy to Staging",
+        checksWaiting: true,
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Deploy to Staging");
+    expect(frame).toContain("awaiting approval");
   });
 });

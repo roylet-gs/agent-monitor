@@ -37,6 +37,9 @@ export interface PrInfo {
   reviewDecision: string;
   hasFeedback: boolean;
   checksStatus: "pending" | "passing" | "failing" | "none";
+  activeCheckUrl: string | null;
+  activeCheckName: string | null;
+  checksWaiting: boolean;
 }
 
 export interface LinearInfo {
