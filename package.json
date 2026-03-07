@@ -19,6 +19,7 @@
     "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
+    "postinstall": "find node_modules -path '*/node-pty/prebuilds/*/spawn-helper' -exec chmod +x {} + 2>/dev/null || true",
     "build": "tsc",
     "start": "tsx src/cli.tsx",
     "dev": "tsx --watch src/cli.tsx",

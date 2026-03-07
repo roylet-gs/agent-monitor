@@ -1,3 +1,6 @@
+import { chmodSync, existsSync, readdirSync } from "fs";
+import { dirname, join } from "path";
+import { createRequire } from "module";
 import * as pty from "node-pty";
 import { log } from "./logger.js";
 
@@ -38,6 +41,28 @@ export function parsePtyOutput(raw: string): string[] {
 }
 
 let idCounter = 0;
+let spawnHelperFixed = false;
+
+function ensureSpawnHelperPerms(): void {
+  if (spawnHelperFixed) return;
+  spawnHelperFixed = true;
+  try {
+    const require = createRequire(import.meta.url);
+    const ptyMain = require.resolve("node-pty");
+    // require.resolve returns .../lib/index.js, prebuilds is at package root
+    const prebuildsDir = join(dirname(ptyMain), "..", "prebuilds");
+    if (existsSync(prebuildsDir)) {
+      for (const platform of readdirSync(prebuildsDir)) {
+        const helper = join(prebuildsDir, platform, "spawn-helper");
+        if (existsSync(helper)) {
+          chmodSync(helper, 0o755);
+        }
+      }
+    }
+  } catch {
+    // Best effort
+  }
+}
 
 export function spawnPty(
   cwd: string,
@@ -54,13 +79,24 @@ export function spawnPty(
     ? ["claude", "--prompt", initialPrompt]
     : ["claude"];
 
-  const ptyProcess = pty.spawn(shell, ["-c", claudeArgs.join(" ")], {
-    name: "xterm-256color",
-    cols,
-    rows,
-    cwd,
-    env: { ...process.env } as Record<string, string>,
-  });
+  // Ensure spawn-helper has execute permission (pnpm prebuilds may lose it)
+  ensureSpawnHelperPerms();
+
+  let ptyProcess: pty.IPty;
+  try {
+    ptyProcess = pty.spawn(shell, ["-c", claudeArgs.join(" ")], {
+      name: "xterm-256color",
+      cols,
+      rows,
+      cwd,
+      env: { ...process.env } as Record<string, string>,
+    });
+  } catch (err) {
+    log("error", "pty", `Failed to spawn PTY: ${err}. Try running: find node_modules -path '*/node-pty/prebuilds/*/spawn-helper' -exec chmod +x {} +`);
+    throw new Error(
+      `Failed to spawn terminal. Run: find node_modules -path '*/node-pty/prebuilds/*/spawn-helper' -exec chmod +x {} +`,
+    );
+  }
 
   const instance: PtyInstance = {
     id,
