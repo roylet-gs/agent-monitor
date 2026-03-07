@@ -141,6 +141,9 @@ export function linearAttachmentToPrInfo(
     reviewDecision: "",
     hasFeedback: false,
     checksStatus: "none",
+    activeCheckUrl: null,
+    activeCheckName: null,
+    checksWaiting: false,
   };
 }
 

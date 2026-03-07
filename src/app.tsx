@@ -545,11 +545,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     },
     onOpenPr: () => {
       const wt = flatWorktrees[selectedIndex];
-      if (wt?.pr_info?.url) {
-        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch((err) => {
-          log("warn", "app", `Failed to open PR URL: ${err}`);
-        });
-      }
+      if (!wt?.pr_info?.url) return;
+      const pr = wt.pr_info;
+      const url = (pr.state === "MERGED" && pr.activeCheckUrl)
+        ? pr.activeCheckUrl
+        : pr.url;
+      import("open").then((mod) => mod.default(url)).catch((err) => {
+        log("warn", "app", `Failed to open URL: ${err}`);
+      });
     },
     onOpenLinear: () => {
       const wt = flatWorktrees[selectedIndex];

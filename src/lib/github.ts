@@ -9,7 +9,12 @@ interface GhPrResult {
   state: string;
   isDraft: boolean;
   reviewDecision: string;
-  statusCheckRollup: Array<{ status: string; conclusion: string }>;
+  statusCheckRollup: Array<{
+    status: string;
+    conclusion: string;
+    detailsUrl?: string;
+    name?: string;
+  }>;
 }
 
 const GH_PR_FIELDS = "number,title,url,state,isDraft,reviewDecision,statusCheckRollup";
@@ -80,6 +85,22 @@ export function deriveChecksStatus(
 }
 
 function ghResultToPrInfo(pr: GhPrResult): PrInfo {
+  const checks = pr.statusCheckRollup ?? [];
+  const checksStatus = deriveChecksStatus(checks);
+
+  // Find the most relevant active check (failing first, then pending/waiting)
+  const failingCheck = checks.find(
+    (c) => c.conclusion === "FAILURE" || c.conclusion === "ERROR" || c.conclusion === "CANCELLED"
+  );
+  const pendingCheck = checks.find(
+    (c) => c.status !== "COMPLETED"
+  );
+  const activeCheck = failingCheck ?? pendingCheck;
+
+  const checksWaiting = checks.some(
+    (c) => c.status === "WAITING" || c.conclusion === "ACTION_REQUIRED"
+  );
+
   return {
     number: pr.number,
     title: pr.title,
@@ -88,8 +109,23 @@ function ghResultToPrInfo(pr: GhPrResult): PrInfo {
     isDraft: pr.isDraft,
     reviewDecision: pr.reviewDecision ?? "",
     hasFeedback: false,
-    checksStatus: deriveChecksStatus(pr.statusCheckRollup ?? []),
+    checksStatus,
+    activeCheckUrl: activeCheck?.detailsUrl ?? null,
+    activeCheckName: activeCheck?.name ?? null,
+    checksWaiting,
   };
+}
+
+/**
+ * Returns true if a cached PR is in a terminal state that doesn't need re-fetching.
+ */
+export function shouldSkipPrFetch(cached: PrInfo | null): boolean {
+  if (!cached) return false;
+  if (cached.state === "CLOSED") return true;
+  if (cached.state === "MERGED") {
+    return cached.checksStatus === "passing" || cached.checksStatus === "none";
+  }
+  return false;
 }
 
 /**
@@ -139,7 +175,8 @@ export async function fetchPrInfo(
 export async function fetchAllPrInfo(
   repoPath: string,
   branches: string[],
-  prNumberCache?: Map<string, number>
+  prNumberCache?: Map<string, number>,
+  prCache?: Map<string, PrInfo | null>
 ): Promise<Map<string, PrInfo | null>> {
   const result = new Map<string, PrInfo | null>();
   if (branches.length === 0) return result;
@@ -153,19 +190,31 @@ export async function fetchAllPrInfo(
     return result;
   }
 
+  // Filter out branches with terminal-state PRs (no need to re-fetch)
+  const branchesToFetch: string[] = [];
+  for (const branch of branches) {
+    const cached = prCache?.get(branch) ?? null;
+    if (shouldSkipPrFetch(cached)) {
+      log("debug", "github", `Skipping PR fetch for ${branch} (terminal state: ${cached!.state}/${cached!.checksStatus})`);
+      result.set(branch, cached);
+    } else {
+      branchesToFetch.push(branch);
+    }
+  }
+
   const CONCURRENCY = 3;
   let i = 0;
 
   async function next(): Promise<void> {
-    while (i < branches.length) {
-      const branch = branches[i++]!;
+    while (i < branchesToFetch.length) {
+      const branch = branchesToFetch[i++]!;
       const knownNumber = prNumberCache?.get(branch);
       const info = await fetchPrInfo(repoPath, branch, knownNumber);
       result.set(branch, info);
       // If we entered backoff during this batch, fill remaining with null
       if (isInBackoff(repoPath)) {
-        while (i < branches.length) {
-          result.set(branches[i++]!, null);
+        while (i < branchesToFetch.length) {
+          result.set(branchesToFetch[i++]!, null);
         }
         return;
       }
@@ -174,7 +223,7 @@ export async function fetchAllPrInfo(
 
   // Launch up to CONCURRENCY workers
   const workers: Promise<void>[] = [];
-  for (let w = 0; w < Math.min(CONCURRENCY, branches.length); w++) {
+  for (let w = 0; w < Math.min(CONCURRENCY, branchesToFetch.length); w++) {
     workers.push(next());
   }
   await Promise.all(workers);
@@ -183,11 +232,14 @@ export async function fetchAllPrInfo(
 }
 
 export function getPrStatusLabel(pr: PrInfo): { label: string; color: string } {
-  const { state, reviewDecision, hasFeedback, isDraft, checksStatus } = pr;
+  const { state, reviewDecision, hasFeedback, isDraft, checksStatus, checksWaiting } = pr;
 
   if (state === "MERGED") {
     if (checksStatus === "failing") {
-      return { label: "Merged - Actions Failing", color: "magenta" };
+      return { label: "Merged - Actions Failing", color: "red" };
+    }
+    if (checksWaiting) {
+      return { label: "Merged - Awaiting Approval", color: "yellow" };
     }
     if (checksStatus === "pending") {
       return { label: "Merged - Actions Running", color: "magenta" };

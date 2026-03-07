@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getPrStatusLabel, deriveChecksStatus } from "../../src/lib/github.js";
+import { getPrStatusLabel, deriveChecksStatus, shouldSkipPrFetch } from "../../src/lib/github.js";
 import type { PrInfo } from "../../src/lib/types.js";
 
 function makePr(overrides: Partial<PrInfo> = {}): PrInfo {
@@ -12,6 +12,9 @@ function makePr(overrides: Partial<PrInfo> = {}): PrInfo {
     reviewDecision: "",
     hasFeedback: false,
     checksStatus: "none",
+    activeCheckUrl: null,
+    activeCheckName: null,
+    checksWaiting: false,
     ...overrides,
   };
 }
@@ -80,9 +83,9 @@ describe("getPrStatusLabel", () => {
     expect(result).toEqual({ label: "Merged", color: "magenta" });
   });
 
-  it("MERGED with failing checks", () => {
+  it("MERGED with failing checks (red)", () => {
     const result = getPrStatusLabel(makePr({ state: "MERGED", checksStatus: "failing" }));
-    expect(result.label).toBe("Merged - Actions Failing");
+    expect(result).toEqual({ label: "Merged - Actions Failing", color: "red" });
   });
 
   it("MERGED with pending checks", () => {
@@ -147,5 +150,49 @@ describe("getPrStatusLabel", () => {
   it("In Review with pending checks", () => {
     const result = getPrStatusLabel(makePr({ checksStatus: "pending" }));
     expect(result.label).toBe("In Review - Checks Running");
+  });
+
+  it("MERGED with checksWaiting -> Awaiting Approval (yellow)", () => {
+    const result = getPrStatusLabel(
+      makePr({ state: "MERGED", checksStatus: "pending", checksWaiting: true })
+    );
+    expect(result).toEqual({ label: "Merged - Awaiting Approval", color: "yellow" });
+  });
+
+  it("MERGED failing takes priority over checksWaiting", () => {
+    const result = getPrStatusLabel(
+      makePr({ state: "MERGED", checksStatus: "failing", checksWaiting: true })
+    );
+    expect(result.label).toBe("Merged - Actions Failing");
+  });
+});
+
+describe("shouldSkipPrFetch", () => {
+  it("returns false for null cache", () => {
+    expect(shouldSkipPrFetch(null)).toBe(false);
+  });
+
+  it("returns false for open PRs", () => {
+    expect(shouldSkipPrFetch(makePr({ state: "OPEN" }))).toBe(false);
+  });
+
+  it("returns true for closed PRs", () => {
+    expect(shouldSkipPrFetch(makePr({ state: "CLOSED" }))).toBe(true);
+  });
+
+  it("returns true for merged PR with passing checks", () => {
+    expect(shouldSkipPrFetch(makePr({ state: "MERGED", checksStatus: "passing" }))).toBe(true);
+  });
+
+  it("returns true for merged PR with no checks", () => {
+    expect(shouldSkipPrFetch(makePr({ state: "MERGED", checksStatus: "none" }))).toBe(true);
+  });
+
+  it("returns false for merged PR with pending checks (deployment active)", () => {
+    expect(shouldSkipPrFetch(makePr({ state: "MERGED", checksStatus: "pending" }))).toBe(false);
+  });
+
+  it("returns false for merged PR with failing checks", () => {
+    expect(shouldSkipPrFetch(makePr({ state: "MERGED", checksStatus: "failing" }))).toBe(false);
   });
 });

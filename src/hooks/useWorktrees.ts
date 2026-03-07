@@ -79,7 +79,15 @@ export function useWorktrees(config: WorktreeHookConfig): {
           if (num != null) repoPrNumbers.set(branch, num);
         }
         try {
-          const prMap = await fetchAllPrInfo(repoPath, branches, repoPrNumbers);
+          // Build per-repo PR cache for smart skip logic
+          const repoPrCache = new Map<string, PrInfo | null>();
+          for (const branch of branches) {
+            const cacheKey = `${repoId}:${branch}`;
+            if (prCacheRef.current.has(cacheKey)) {
+              repoPrCache.set(branch, prCacheRef.current.get(cacheKey)!);
+            }
+          }
+          const prMap = await fetchAllPrInfo(repoPath, branches, repoPrNumbers, repoPrCache);
           for (const [branch, info] of prMap) {
             const cacheKey = `${repoId}:${branch}`;
             // Preserve stale cache when backoff returns null
@@ -235,6 +243,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         dirty: wt.git_status?.dirty,
         commit_msg: wt.last_commit?.message, commit_time: wt.last_commit?.relative_time,
         pr: wt.pr_info?.number, pr_state: wt.pr_info?.state, checks: wt.pr_info?.checksStatus,
+        active_check: wt.pr_info?.activeCheckUrl, checks_waiting: wt.pr_info?.checksWaiting,
         linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,
         linear_pr_url: wt.linear_info?.prAttachment?.url,
       })));
