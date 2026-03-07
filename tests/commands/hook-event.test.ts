@@ -83,9 +83,15 @@ describe("mapEventToStatus", () => {
     );
   });
 
-  it("EnterPlanMode tool -> waiting", () => {
+  it("PreToolUse EnterPlanMode -> waiting", () => {
     expect(mapEventToStatus({ event: "PreToolUse", tool_name: "EnterPlanMode" })).toBe(
       "waiting"
+    );
+  });
+
+  it("PostToolUse EnterPlanMode -> planning", () => {
+    expect(mapEventToStatus({ event: "PostToolUse", tool_name: "EnterPlanMode" })).toBe(
+      "planning"
     );
   });
 
