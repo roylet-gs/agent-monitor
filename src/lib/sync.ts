@@ -10,8 +10,7 @@ export async function syncWorktrees(repoId: string): Promise<void> {
     return;
   }
 
-  // Filter out the main working tree — it's the repo itself and should never be managed as a worktree
-  const gitWorktrees = (await listWorktrees(repo.path)).filter(w => !w.isMain);
+  const gitWorktrees = await listWorktrees(repo.path);
   const dbWorktrees = getWorktrees(repoId);
 
   // Build set of git worktree branches for quick lookup
@@ -22,8 +21,8 @@ export async function syncWorktrees(repoId: string): Promise<void> {
   for (const gw of gitWorktrees) {
     if (!dbBranches.has(gw.branch)) {
       const shortName = gw.branch.split("/").pop() ?? gw.branch;
-      upsertWorktree(repoId, gw.path, gw.branch, shortName);
-      log("info", "sync", `Added worktree ${gw.branch} to DB`);
+      upsertWorktree(repoId, gw.path, gw.branch, shortName, gw.isMain);
+      log("info", "sync", `Added worktree ${gw.branch} to DB${gw.isMain ? " (main)" : ""}`);
     }
   }
 
@@ -38,7 +37,7 @@ export async function syncWorktrees(repoId: string): Promise<void> {
   // Update paths for existing worktrees (in case they moved)
   for (const gw of gitWorktrees) {
     if (dbBranches.has(gw.branch)) {
-      upsertWorktree(repoId, gw.path, gw.branch, gw.branch.split("/").pop() ?? gw.branch);
+      upsertWorktree(repoId, gw.path, gw.branch, gw.branch.split("/").pop() ?? gw.branch, gw.isMain);
     }
   }
 

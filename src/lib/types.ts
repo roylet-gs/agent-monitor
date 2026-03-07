@@ -13,6 +13,7 @@ export interface Worktree {
   name: string;
   custom_name: string | null;
   nickname_source: string | null;
+  is_main: number;
   created_at: string;
 }
 

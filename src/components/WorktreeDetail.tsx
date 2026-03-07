@@ -155,7 +155,13 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
         {/* Git Info */}
         <Box flexDirection="column">
           <Text bold>Git</Text>
-          <Text dimColor>{worktree.branch}</Text>
+          {worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master" ? (
+            <Text dimColor>{worktree.branch} <Text color="cyan">(branch in main working tree)</Text></Text>
+          ) : worktree.is_main === 1 ? (
+            <Text dimColor>{worktree.branch} <Text color="cyan">(main working tree)</Text></Text>
+          ) : (
+            <Text dimColor>{worktree.branch}</Text>
+          )}
           {worktree.last_commit && (
             <Text dimColor>{worktree.last_commit.message} ({worktree.last_commit.relative_time})</Text>
           )}

@@ -5,6 +5,7 @@ import type { WorktreeWithStatus } from "../lib/types.js";
 export interface DeleteOptions {
   deleteLocalBranch: boolean;
   deleteRemoteBranch: boolean;
+  isBranchOnly?: boolean;
 }
 
 interface DeleteConfirmProps {
@@ -21,6 +22,7 @@ export function DeleteConfirm({
   onConfirm,
   onCancel,
 }: DeleteConfirmProps) {
+  const isBranchOnly = worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master";
   const [step, setStep] = useState<Step>("confirm");
 
   useInput((input, key) => {
@@ -33,7 +35,11 @@ export function DeleteConfirm({
       if (input === "n") {
         onCancel();
       } else if (key.return || input === "y") {
-        setStep("local-branch");
+        if (isBranchOnly) {
+          onConfirm({ deleteLocalBranch: true, deleteRemoteBranch: false, isBranchOnly: true });
+        } else {
+          setStep("local-branch");
+        }
       }
       return;
     }
@@ -61,7 +67,7 @@ export function DeleteConfirm({
       borderColor={hasWarnings ? "yellow" : undefined}
     >
       <Text bold color="yellow">
-        Delete worktree "{name}"
+        {isBranchOnly ? `Delete branch "${name}"` : `Delete worktree "${name}"`}
       </Text>
 
       {hasWarnings && (
@@ -81,7 +87,11 @@ export function DeleteConfirm({
 
       {step === "confirm" && (
         <Box flexDirection="column" marginTop={1}>
-          <Text>Remove this worktree from disk?</Text>
+          {isBranchOnly ? (
+            <Text>Delete branch <Text bold>{worktree.branch}</Text> and switch back to the default branch?</Text>
+          ) : (
+            <Text>Remove this worktree from disk?</Text>
+          )}
           <Box marginTop={1}>
             <Text>
               <Text color="yellow">[Enter/y]</Text> Yes{" "}

@@ -18,6 +18,7 @@ function makeWorktree(overrides: Partial<WorktreeWithStatus> = {}): WorktreeWith
     branch: "feature/test",
     name: "test",
     custom_name: null,
+    is_main: 0,
     created_at: "2024-01-01",
     agent_status: null,
     git_status: null,
@@ -126,6 +127,19 @@ describe("WorktreeDetail", () => {
     const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
     expect(lastFrame()!).toContain("fix bug");
     expect(lastFrame()!).toContain("5m ago");
+  });
+
+  it("shows branch-only label for main worktree on feature branch", () => {
+    const wt = makeWorktree({ is_main: 1, branch: "feature/test" });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("branch in main working tree");
+  });
+
+  it("shows main working tree label for main worktree on main branch", () => {
+    const wt = makeWorktree({ is_main: 1, branch: "main" });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("main working tree");
+    expect(lastFrame()!).not.toContain("branch in");
   });
 
   it("shows PR info", () => {

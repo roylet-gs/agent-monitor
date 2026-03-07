@@ -70,7 +70,14 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
             const unseen = unseenIds.has(wt.id);
             const open = isEffectivelyOpen(wt.agent_status);
 
+            const isBranchOnly = wt.is_main === 1 && wt.branch !== "main" && wt.branch !== "master";
             const inlineMeta: React.ReactNode[] = [];
+
+            if (isBranchOnly) {
+              inlineMeta.push(
+                <Text key="branch-only" dimColor>[branch]</Text>
+              );
+            }
 
             if (wt.linear_info) {
               inlineMeta.push(

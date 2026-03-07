@@ -221,7 +221,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         enriched.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
         const filtered = shouldHideMain
-          ? enriched.filter((wt) => wt.branch !== "main" && wt.branch !== "master")
+          ? enriched.filter((wt) => !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")))
           : enriched;
 
         if (filtered.length > 0 || repos.length === 1) {
@@ -234,7 +234,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
       if (myGen !== genRef.current) return;
 
       const fingerprint = JSON.stringify(allFlat.map(wt => ({
-        id: wt.id, branch: wt.branch, custom_name: wt.custom_name,
+        id: wt.id, branch: wt.branch, custom_name: wt.custom_name, is_main: wt.is_main,
         status: wt.agent_status?.status,
         is_open: wt.agent_status?.is_open,
         summary: wt.agent_status?.transcript_summary,

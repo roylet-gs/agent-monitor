@@ -25,7 +25,7 @@ describe("syncWorktrees", () => {
     sync = await import("../../src/lib/sync.js");
   });
 
-  it("adds new worktrees from git to DB", async () => {
+  it("adds new worktrees from git to DB including main", async () => {
     const repo = db.addRepository("/tmp/repo", "repo");
     mockListWorktrees.mockResolvedValue([
       { path: "/tmp/repo", branch: "main", isMain: true },
@@ -35,11 +35,14 @@ describe("syncWorktrees", () => {
 
     await sync.syncWorktrees(repo.id);
     const worktrees = db.getWorktrees(repo.id);
-    expect(worktrees).toHaveLength(2);
-    expect(worktrees.map(w => w.branch).sort()).toEqual(["feature/a", "feature/b"]);
+    expect(worktrees).toHaveLength(3);
+    expect(worktrees.map(w => w.branch).sort()).toEqual(["feature/a", "feature/b", "main"]);
+    const mainWt = worktrees.find(w => w.branch === "main");
+    expect(mainWt!.is_main).toBe(1);
+    expect(worktrees.find(w => w.branch === "feature/a")!.is_main).toBe(0);
   });
 
-  it("filters out main working tree during sync", async () => {
+  it("includes main working tree in sync", async () => {
     const repo = db.addRepository("/tmp/repo", "repo");
     mockListWorktrees.mockResolvedValue([
       { path: "/tmp/repo", branch: "main", isMain: true },
@@ -47,7 +50,9 @@ describe("syncWorktrees", () => {
 
     await sync.syncWorktrees(repo.id);
     const worktrees = db.getWorktrees(repo.id);
-    expect(worktrees).toHaveLength(0);
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0]!.branch).toBe("main");
+    expect(worktrees[0]!.is_main).toBe(1);
   });
 
   it("removes DB entries for deleted git worktrees", async () => {
@@ -62,8 +67,8 @@ describe("syncWorktrees", () => {
 
     await sync.syncWorktrees(repo.id);
     const worktrees = db.getWorktrees(repo.id);
-    expect(worktrees).toHaveLength(1);
-    expect(worktrees[0]!.branch).toBe("feature/a");
+    expect(worktrees).toHaveLength(2);
+    expect(worktrees.map(w => w.branch).sort()).toEqual(["feature/a", "main"]);
   });
 
   it("updates paths for existing worktrees", async () => {
