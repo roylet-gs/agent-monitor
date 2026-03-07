@@ -21,9 +21,10 @@ function resetTerminal(): void {
   process.stdin.removeAllListeners("keypress");
   process.stdin.removeAllListeners("end");
 
-  // Ensure stdin is flowing
-  if (process.stdin.isPaused()) {
-    process.stdin.resume();
+  // Pause stdin so Node releases its read on fd 0.
+  // The child process needs exclusive access via stdio: "inherit".
+  if (!process.stdin.isPaused()) {
+    process.stdin.pause();
   }
 
   // Unref so it doesn't keep the process alive on its own
