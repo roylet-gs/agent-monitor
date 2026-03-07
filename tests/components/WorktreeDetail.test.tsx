@@ -18,6 +18,7 @@ function makeWorktree(overrides: Partial<WorktreeWithStatus> = {}): WorktreeWith
     branch: "feature/test",
     name: "test",
     custom_name: null,
+    is_main: 0,
     created_at: "2024-01-01",
     agent_status: null,
     git_status: null,
@@ -91,6 +92,23 @@ describe("WorktreeDetail", () => {
     expect(lastFrame()!).toContain("Working on feature X");
   });
 
+  it("shows Done status label when done", () => {
+    const wt = makeWorktree({
+      agent_status: {
+        worktree_id: "wt-1",
+        status: "done",
+        last_response: "Finished implementing feature",
+        transcript_summary: null,
+        session_id: null,
+        is_open: 1,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("Done");
+    expect(lastFrame()!).toContain("Finished implementing feature");
+  });
+
   it("shows git status", () => {
     const wt = makeWorktree({
       git_status: { ahead: 2, behind: 1, dirty: 3 },
@@ -111,6 +129,19 @@ describe("WorktreeDetail", () => {
     expect(lastFrame()!).toContain("5m ago");
   });
 
+  it("shows branch-only label for main worktree on feature branch", () => {
+    const wt = makeWorktree({ is_main: 1, branch: "feature/test" });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("branch in main working tree");
+  });
+
+  it("shows main working tree label for main worktree on main branch", () => {
+    const wt = makeWorktree({ is_main: 1, branch: "main" });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("main working tree");
+    expect(lastFrame()!).not.toContain("branch in");
+  });
+
   it("shows PR info", () => {
     const wt = makeWorktree({
       pr_info: {
@@ -122,11 +153,59 @@ describe("WorktreeDetail", () => {
         reviewDecision: "",
         hasFeedback: false,
         checksStatus: "passing",
+        activeCheckUrl: null,
+        activeCheckName: null,
+        checksWaiting: false,
       },
     });
     const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
     const frame = lastFrame()!;
     expect(frame).toContain("PR #42");
     expect(frame).toContain("My PR");
+  });
+
+  it("shows active check name for merged PR with running deployment", () => {
+    const wt = makeWorktree({
+      pr_info: {
+        number: 99,
+        title: "Deploy feature",
+        url: "https://github.com/test/test/pull/99",
+        state: "MERGED",
+        isDraft: false,
+        reviewDecision: "",
+        hasFeedback: false,
+        checksStatus: "pending",
+        activeCheckUrl: "https://github.com/test/test/actions/runs/123",
+        activeCheckName: "Deploy to Production",
+        checksWaiting: false,
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("PR #99");
+    expect(frame).toContain("Deploy to Production");
+    expect(frame).toContain("running");
+  });
+
+  it("shows awaiting approval for merged PR with waiting check", () => {
+    const wt = makeWorktree({
+      pr_info: {
+        number: 100,
+        title: "Deploy with approval",
+        url: "https://github.com/test/test/pull/100",
+        state: "MERGED",
+        isDraft: false,
+        reviewDecision: "",
+        hasFeedback: false,
+        checksStatus: "pending",
+        activeCheckUrl: "https://github.com/test/test/actions/runs/456",
+        activeCheckName: "Deploy to Staging",
+        checksWaiting: true,
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Deploy to Staging");
+    expect(frame).toContain("awaiting approval");
   });
 });

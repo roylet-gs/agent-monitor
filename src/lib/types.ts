@@ -13,6 +13,7 @@ export interface Worktree {
   name: string;
   custom_name: string | null;
   nickname_source: string | null;
+  is_main: number;
   created_at: string;
 }
 
@@ -26,7 +27,7 @@ export interface AgentStatus {
   updated_at: string;
 }
 
-export type AgentStatusType = "idle" | "executing" | "planning" | "waiting";
+export type AgentStatusType = "idle" | "executing" | "planning" | "waiting" | "done";
 
 export interface PrInfo {
   number: number;
@@ -37,6 +38,9 @@ export interface PrInfo {
   reviewDecision: string;
   hasFeedback: boolean;
   checksStatus: "pending" | "passing" | "failing" | "none";
+  activeCheckUrl: string | null;
+  activeCheckName: string | null;
+  checksWaiting: boolean;
 }
 
 export interface LinearInfo {

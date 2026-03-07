@@ -25,23 +25,25 @@ describe("syncWorktrees", () => {
     sync = await import("../../src/lib/sync.js");
   });
 
-  it("adds new worktrees from git to DB", async () => {
+  it("adds new worktrees from git to DB including main", async () => {
     const repo = db.addRepository("/tmp/repo", "repo");
     mockListWorktrees.mockResolvedValue([
       { path: "/tmp/repo", branch: "main", isMain: true },
       { path: "/tmp/repo/.worktrees/feature-a", branch: "feature/a", isMain: false },
+      { path: "/tmp/repo/.worktrees/feature-b", branch: "feature/b", isMain: false },
     ]);
 
     await sync.syncWorktrees(repo.id);
     const worktrees = db.getWorktrees(repo.id);
-    expect(worktrees).toHaveLength(2);
+    expect(worktrees).toHaveLength(3);
+    expect(worktrees.map(w => w.branch).sort()).toEqual(["feature/a", "feature/b", "main"]);
+    const mainWt = worktrees.find(w => w.branch === "main");
+    expect(mainWt!.is_main).toBe(1);
+    expect(worktrees.find(w => w.branch === "feature/a")!.is_main).toBe(0);
   });
 
-  it("removes DB entries for deleted git worktrees", async () => {
+  it("includes main working tree in sync", async () => {
     const repo = db.addRepository("/tmp/repo", "repo");
-    db.upsertWorktree(repo.id, "/tmp/repo", "main", "main");
-    db.upsertWorktree(repo.id, "/tmp/repo/.worktrees/old", "feature/old", "old");
-
     mockListWorktrees.mockResolvedValue([
       { path: "/tmp/repo", branch: "main", isMain: true },
     ]);
@@ -50,14 +52,32 @@ describe("syncWorktrees", () => {
     const worktrees = db.getWorktrees(repo.id);
     expect(worktrees).toHaveLength(1);
     expect(worktrees[0]!.branch).toBe("main");
+    expect(worktrees[0]!.is_main).toBe(1);
+  });
+
+  it("removes DB entries for deleted git worktrees", async () => {
+    const repo = db.addRepository("/tmp/repo", "repo");
+    db.upsertWorktree(repo.id, "/tmp/repo/.worktrees/feature-a", "feature/a", "a");
+    db.upsertWorktree(repo.id, "/tmp/repo/.worktrees/old", "feature/old", "old");
+
+    mockListWorktrees.mockResolvedValue([
+      { path: "/tmp/repo", branch: "main", isMain: true },
+      { path: "/tmp/repo/.worktrees/feature-a", branch: "feature/a", isMain: false },
+    ]);
+
+    await sync.syncWorktrees(repo.id);
+    const worktrees = db.getWorktrees(repo.id);
+    expect(worktrees).toHaveLength(2);
+    expect(worktrees.map(w => w.branch).sort()).toEqual(["feature/a", "main"]);
   });
 
   it("updates paths for existing worktrees", async () => {
     const repo = db.addRepository("/tmp/repo", "repo");
-    db.upsertWorktree(repo.id, "/tmp/old-path", "main", "main");
+    db.upsertWorktree(repo.id, "/tmp/old-path", "feature/a", "a");
 
     mockListWorktrees.mockResolvedValue([
-      { path: "/tmp/new-path", branch: "main", isMain: true },
+      { path: "/tmp/repo", branch: "main", isMain: true },
+      { path: "/tmp/new-path", branch: "feature/a", isMain: false },
     ]);
 
     await sync.syncWorktrees(repo.id);

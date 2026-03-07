@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Box, Text, useApp, useStdout } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { Dashboard } from "./components/Dashboard.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
 import { RepoSelector } from "./components/RepoSelector.js";
@@ -30,6 +30,8 @@ import {
   branchExists,
   getRepoName,
   fetchBranch,
+  checkoutBranch,
+  ensureBranchForOpen,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
@@ -70,6 +72,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [deletingBranch, setDeletingBranch] = useState("");
   const [deleteSteps, setDeleteSteps] = useState<StepInfo[]>([]);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteRecovery, setDeleteRecovery] = useState<{
+    worktreeId: string;
+    repoPath: string;
+    branch: string;
+    originalOptions: DeleteOptions;
+    errorMessage: string;
+  } | null>(null);
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [currentVersion] = useState(() => getVersion());
@@ -223,6 +232,11 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
 
     try {
+      const result = await ensureBranchForOpen(wt.path, wt.branch, wt.is_main === 1);
+      if (!result.ready) {
+        setError(result.error ?? "Cannot open worktree");
+        return;
+      }
       openInIde(wt.path, settings.ide);
     } catch (err) {
       setError(`${err}`);
@@ -402,6 +416,64 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     // Find the repo for this worktree
     const wtRepo = repositories.find((r) => r.id === wt.repo_id) ?? activeRepo;
 
+    const isBranchOnly = options.isBranchOnly || (wt.is_main === 1 && wt.branch !== "main" && wt.branch !== "master");
+
+    // Safety guard: never allow deleting the main working tree on the default branch
+    if (wt.path === wtRepo.path && !isBranchOnly) {
+      setError("Cannot delete the main working tree");
+      return;
+    }
+
+    // Branch-only delete: checkout default branch → delete the feature branch → sync
+    if (isBranchOnly) {
+      const steps: StepInfo[] = [
+        { label: "Switching to default branch", status: "active" },
+        { label: `Deleting local branch ${wt.branch}`, status: "pending" },
+        { label: "Syncing database", status: "pending" },
+      ];
+
+      setDeletingBranch(wt.custom_name ?? wt.branch);
+      setDeleteSteps(steps);
+      setDeleteError(null);
+      setDeleteRecovery(null);
+      setMode("deleting-worktree");
+
+      let stepIdx = 0;
+
+      try {
+        const mainBranch = await getMainBranch(wtRepo.path);
+        await checkoutBranch(wtRepo.path, mainBranch);
+        updateDeleteStep(stepIdx, "done");
+        stepIdx++;
+
+        updateDeleteStep(stepIdx, "active");
+        await deleteBranch(wtRepo.path, wt.branch, true);
+        updateDeleteStep(stepIdx, "done");
+        stepIdx++;
+
+        updateDeleteStep(stepIdx, "active");
+        await syncWorktrees(wtRepo.id);
+        await refreshRef.current();
+        updateDeleteStep(stepIdx, "done");
+
+        setSelectedIndex((i) => Math.max(0, i - 1));
+        log("info", "app", `Deleted branch-only entry ${wt.branch}`);
+
+        await new Promise((r) => setTimeout(r, 500));
+        setMode("dashboard");
+      } catch (err) {
+        updateDeleteStep(stepIdx, "error");
+        const errorMessage = `${err}`;
+        setDeleteError(errorMessage);
+        log("warn", "app", `Branch-only delete failed: ${errorMessage}`);
+        setTimeout(() => {
+          setMode("dashboard");
+          setError(`Failed to delete branch: ${errorMessage}`);
+        }, 3000);
+      }
+      return;
+    }
+
     const steps: StepInfo[] = [
       { label: "Removing worktree", status: "active" },
       ...(options.deleteLocalBranch
@@ -413,6 +485,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     setDeletingBranch(wt.custom_name ?? wt.branch);
     setDeleteSteps(steps);
     setDeleteError(null);
+    setDeleteRecovery(null);
     setMode("deleting-worktree");
 
     let stepIdx = 0;
@@ -447,13 +520,102 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       setMode("dashboard");
     } catch (err) {
       updateDeleteStep(stepIdx, "error");
-      setDeleteError(`${err}`);
-      setTimeout(() => {
-        setMode("dashboard");
-        setError(`Failed to delete worktree: ${err}`);
-      }, 3000);
+      const errorMessage = `${err}`;
+      setDeleteError(errorMessage);
+
+      // Build recovery steps to show what will happen
+      const recoverySteps: StepInfo[] = [
+        { label: "Removing worktree", status: "error" as const },
+        { label: "Remove from database", status: "pending" as const },
+        ...(options.deleteLocalBranch
+          ? [{ label: `Delete local branch ${wt.branch}`, status: "pending" as const }]
+          : []),
+        { label: "Syncing database", status: "pending" as const },
+      ];
+      setDeleteSteps(recoverySteps);
+
+      setDeleteRecovery({
+        worktreeId: wt.id,
+        repoPath: wtRepo.path,
+        branch: wt.branch,
+        originalOptions: options,
+        errorMessage,
+      });
+      log("warn", "app", `Worktree removal failed, offering recovery: ${errorMessage}`);
     }
   }, [flatWorktrees, selectedIndex, activeRepo, repositories, updateDeleteStep]);
+
+  // Handle delete recovery (clean up DB + optionally delete branch)
+  const handleDeleteRecovery = useCallback(async (shouldDeleteBranch: boolean) => {
+    if (!deleteRecovery) return;
+
+    const { worktreeId, repoPath, branch } = deleteRecovery;
+    let stepIdx = 1; // Start after the failed "Removing worktree" step
+
+    try {
+      // Step: Remove from database
+      updateDeleteStep(stepIdx, "active");
+      removeWorktreeDb(worktreeId);
+      updateDeleteStep(stepIdx, "done");
+      stepIdx++;
+
+      // Step: Delete branch (if requested)
+      if (shouldDeleteBranch) {
+        updateDeleteStep(stepIdx, "active");
+        try {
+          await deleteBranch(repoPath, branch, true);
+          updateDeleteStep(stepIdx, "done");
+        } catch (err) {
+          updateDeleteStep(stepIdx, "error");
+          log("warn", "app", `Failed to delete local branch during recovery: ${err}`);
+        }
+        stepIdx++;
+      }
+
+      // Step: Sync database
+      updateDeleteStep(stepIdx, "active");
+      await refreshRef.current();
+      updateDeleteStep(stepIdx, "done");
+
+      setSelectedIndex((i) => Math.max(0, i - 1));
+      log("info", "app", `Recovery cleanup completed for ${branch}`);
+
+      setDeleteRecovery(null);
+      setDeleteError(null);
+      await new Promise((r) => setTimeout(r, 500));
+      setMode("dashboard");
+    } catch (err) {
+      updateDeleteStep(stepIdx, "error");
+      setDeleteError(`Recovery failed: ${err}`);
+      setTimeout(() => {
+        setDeleteRecovery(null);
+        setMode("dashboard");
+        setError(`Recovery failed: ${err}`);
+      }, 3000);
+    }
+  }, [deleteRecovery, updateDeleteStep]);
+
+  // Input handler for delete recovery prompt
+  useInput((input, key) => {
+    if (mode !== "deleting-worktree" || !deleteRecovery) return;
+
+    if (key.escape) {
+      setDeleteRecovery(null);
+      setDeleteError(null);
+      setMode("dashboard");
+      return;
+    }
+
+    if (key.return || input === "y") {
+      handleDeleteRecovery(deleteRecovery.originalOptions.deleteLocalBranch);
+      return;
+    }
+
+    if (input === "n") {
+      handleDeleteRecovery(false);
+      return;
+    }
+  }, { isActive: mode === "deleting-worktree" && deleteRecovery !== null });
 
   // Handle repo selection from folder browser
   const handleSelectFolder = useCallback(
@@ -566,11 +728,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     },
     onOpenPr: () => {
       const wt = flatWorktrees[selectedIndex];
-      if (wt?.pr_info?.url) {
-        import("open").then((mod) => mod.default(wt.pr_info!.url)).catch((err) => {
-          log("warn", "app", `Failed to open PR URL: ${err}`);
-        });
-      }
+      if (!wt?.pr_info?.url) return;
+      const pr = wt.pr_info;
+      const url = (pr.state === "MERGED" && pr.activeCheckUrl)
+        ? pr.activeCheckUrl
+        : pr.url;
+      import("open").then((mod) => mod.default(url)).catch((err) => {
+        log("warn", "app", `Failed to open URL: ${err}`);
+      });
     },
     onOpenLinear: () => {
       const wt = flatWorktrees[selectedIndex];
@@ -708,6 +873,18 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           subtitle={`Deleting ${deletingBranch}...`}
           steps={deleteSteps}
           error={deleteError}
+          prompt={deleteRecovery ? (
+            <Box flexDirection="column">
+              <Text>Clean up database entry{deleteRecovery.originalOptions.deleteLocalBranch ? ` and delete local branch ${deleteRecovery.branch}` : ""}?</Text>
+              <Box marginTop={1}>
+                <Text>
+                  <Text color="yellow">[Enter/y]</Text> Yes{deleteRecovery.originalOptions.deleteLocalBranch ? " (remove DB + delete branch)" : " (remove from DB)"}{" "}
+                  <Text color="yellow">[n]</Text> Remove from DB only{" "}
+                  <Text color="yellow">[Esc]</Text> Cancel
+                </Text>
+              </Box>
+            </Box>
+          ) : undefined}
         />
       )}
 

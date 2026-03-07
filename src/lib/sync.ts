@@ -21,8 +21,8 @@ export async function syncWorktrees(repoId: string): Promise<void> {
   for (const gw of gitWorktrees) {
     if (!dbBranches.has(gw.branch)) {
       const shortName = gw.branch.split("/").pop() ?? gw.branch;
-      upsertWorktree(repoId, gw.path, gw.branch, shortName);
-      log("info", "sync", `Added worktree ${gw.branch} to DB`);
+      upsertWorktree(repoId, gw.path, gw.branch, shortName, gw.isMain);
+      log("info", "sync", `Added worktree ${gw.branch} to DB${gw.isMain ? " (main)" : ""}`);
     }
   }
 
@@ -37,7 +37,7 @@ export async function syncWorktrees(repoId: string): Promise<void> {
   // Update paths for existing worktrees (in case they moved)
   for (const gw of gitWorktrees) {
     if (dbBranches.has(gw.branch)) {
-      upsertWorktree(repoId, gw.path, gw.branch, gw.branch.split("/").pop() ?? gw.branch);
+      upsertWorktree(repoId, gw.path, gw.branch, gw.branch.split("/").pop() ?? gw.branch, gw.isMain);
     }
   }
 

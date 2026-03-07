@@ -11,6 +11,8 @@ const mockDeleteWorktree = vi.fn();
 const mockDeleteBranch = vi.fn();
 const mockDeleteRemoteBranch = vi.fn();
 const mockRemoteBranchExists = vi.fn();
+const mockCheckoutBranch = vi.fn();
+const mockGetMainBranch = vi.fn();
 
 vi.mock("../../src/lib/git.js", () => ({
   isGitRepo: vi.fn(() => false),
@@ -18,6 +20,12 @@ vi.mock("../../src/lib/git.js", () => ({
   deleteBranch: (...args: unknown[]) => mockDeleteBranch(...args),
   deleteRemoteBranch: (...args: unknown[]) => mockDeleteRemoteBranch(...args),
   remoteBranchExists: (...args: unknown[]) => mockRemoteBranchExists(...args),
+  checkoutBranch: (...args: unknown[]) => mockCheckoutBranch(...args),
+  getMainBranch: (...args: unknown[]) => mockGetMainBranch(...args),
+}));
+
+vi.mock("../../src/lib/sync.js", () => ({
+  syncWorktrees: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("worktree delete", () => {
@@ -31,6 +39,8 @@ describe("worktree delete", () => {
     mockDeleteBranch.mockReset().mockResolvedValue(undefined);
     mockDeleteRemoteBranch.mockReset().mockResolvedValue(undefined);
     mockRemoteBranchExists.mockReset().mockResolvedValue(false);
+    mockCheckoutBranch.mockReset().mockResolvedValue(undefined);
+    mockGetMainBranch.mockReset().mockResolvedValue("main");
     db = await import("../../src/lib/db.js");
     ({ worktreeDelete } = await import("../../src/commands/worktree/delete.js"));
   });
@@ -64,5 +74,15 @@ describe("worktree delete", () => {
     mockRemoteBranchExists.mockResolvedValue(true);
     await worktreeDelete("feature/test", { repo: "/tmp/repo", deleteRemote: true });
     expect(mockDeleteRemoteBranch).toHaveBeenCalledWith("/tmp/repo", "feature/test");
+  });
+
+  it("uses branch-only delete for is_main worktree on feature branch", async () => {
+    const repo = db.addRepository("/tmp/repo", "repo");
+    db.upsertWorktree(repo.id, "/tmp/repo", "feature/test", "test", true);
+    await worktreeDelete("feature/test", { repo: "/tmp/repo" });
+    expect(mockCheckoutBranch).toHaveBeenCalledWith("/tmp/repo", "main");
+    expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/repo", "feature/test", undefined);
+    expect(mockDeleteWorktree).not.toHaveBeenCalled();
+    expect(spy.getLog()).toContain("branch-only");
   });
 });

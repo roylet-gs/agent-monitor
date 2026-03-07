@@ -152,6 +152,12 @@ export async function getLastCommit(worktreePath: string): Promise<CommitInfo | 
   }
 }
 
+export async function checkoutBranch(repoPath: string, branch: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(["checkout", branch]);
+  log("info", "git", `Checked out branch ${branch} in ${repoPath}`);
+}
+
 export async function getMainBranch(repoPath: string): Promise<string> {
   const git = getGit(repoPath);
   try {
@@ -218,6 +224,48 @@ export async function fetchBranch(repoPath: string, branch: string): Promise<voi
   } catch (err) {
     log("warn", "git", `Failed to fetch origin/${branch}: ${err}`);
   }
+}
+
+export async function getCurrentBranch(repoPath: string): Promise<string> {
+  const git = getGit(repoPath);
+  const branch = await git.raw(["rev-parse", "--abbrev-ref", "HEAD"]);
+  return branch.trim();
+}
+
+export interface EnsureBranchResult {
+  ready: boolean;
+  switched?: boolean;
+  error?: string;
+}
+
+export async function ensureBranchForOpen(
+  worktreePath: string,
+  expectedBranch: string,
+  isMain: boolean
+): Promise<EnsureBranchResult> {
+  if (!isMain) return { ready: true };
+
+  const defaultBranch = await getMainBranch(worktreePath);
+  if (expectedBranch === defaultBranch) return { ready: true };
+
+  const current = await getCurrentBranch(worktreePath);
+  if (current === expectedBranch) return { ready: true };
+
+  const exists = await branchExists(worktreePath, expectedBranch);
+  if (!exists) {
+    return { ready: false, error: `Branch "${expectedBranch}" does not exist.` };
+  }
+
+  const status = await getGitStatus(worktreePath);
+  if (status.dirty > 0) {
+    return {
+      ready: false,
+      error: `Cannot switch to branch ${expectedBranch}: ${status.dirty} uncommitted change${status.dirty === 1 ? "" : "s"}. Stash or commit first.`,
+    };
+  }
+
+  await checkoutBranch(worktreePath, expectedBranch);
+  return { ready: true, switched: true };
 }
 
 export function getRepoName(repoPath: string): string {

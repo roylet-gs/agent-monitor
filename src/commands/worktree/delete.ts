@@ -1,5 +1,6 @@
-import { deleteWorktree, deleteBranch, deleteRemoteBranch, remoteBranchExists } from "../../lib/git.js";
+import { deleteWorktree, deleteBranch, deleteRemoteBranch, remoteBranchExists, checkoutBranch, getMainBranch } from "../../lib/git.js";
 import { removeWorktree, getRepositoryById } from "../../lib/db.js";
+import { syncWorktrees } from "../../lib/sync.js";
 import { resolveWorktree, resolveRepo } from "../../lib/resolve.js";
 
 export async function worktreeDelete(
@@ -13,6 +14,45 @@ export async function worktreeDelete(
   if (!repoObj) {
     console.error("Repository not found in DB.");
     process.exit(1);
+  }
+
+  const isBranchOnly = worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master";
+
+  if (isBranchOnly) {
+    // Branch-only: checkout default branch → delete the feature branch → sync
+    const mainBranch = await getMainBranch(repoObj.path);
+    try {
+      await checkoutBranch(repoObj.path, mainBranch);
+      console.log(`Switched to ${mainBranch}`);
+    } catch (err) {
+      console.error(`Failed to switch to ${mainBranch}. Commit or stash changes first.\n${err}`);
+      process.exit(1);
+    }
+
+    try {
+      await deleteBranch(repoObj.path, worktree.branch, opts.force);
+      console.log(`Deleted local branch: ${worktree.branch}`);
+    } catch (err) {
+      console.error(`Failed to delete local branch: ${err}`);
+      process.exit(1);
+    }
+
+    // Delete remote branch if requested
+    if (opts.deleteRemote) {
+      const hasRemote = await remoteBranchExists(repoObj.path, worktree.branch);
+      if (hasRemote) {
+        try {
+          await deleteRemoteBranch(repoObj.path, worktree.branch);
+          console.log(`Deleted remote branch: origin/${worktree.branch}`);
+        } catch (err) {
+          console.error(`Failed to delete remote branch: ${err}`);
+        }
+      }
+    }
+
+    await syncWorktrees(repoObj.id);
+    console.log(`Deleted branch-only entry: ${worktree.branch}`);
+    return;
   }
 
   // Delete the git worktree

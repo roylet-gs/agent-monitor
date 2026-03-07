@@ -78,7 +78,7 @@ vi.mock("../../src/lib/scripts.js", () => ({
 
 const ESCAPE = "\u001B";
 
-function waitForFrame(ms = 50): Promise<void> {
+function waitForFrame(ms = 100): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -155,5 +155,68 @@ describe("TUI State Machine", () => {
     stdin.write(ESCAPE);
     await waitForFrame();
     expect(lastFrame()!).not.toContain("Welcome");
+  });
+
+  it("delete failure -> shows recovery prompt -> Esc cancels", async () => {
+    const git = await import("../../src/lib/git.js");
+    vi.mocked(git.deleteWorktree).mockRejectedValueOnce(new Error("is a main working tree"));
+
+    await setupDashboard();
+    const { stdin, lastFrame } = render(<App />);
+    await waitForFrame();
+
+    // Enter delete confirm
+    stdin.write("d");
+    await waitForFrame();
+    expect(lastFrame()!).toContain("Delete worktree");
+
+    // Confirm delete (Enter), then skip branch deletion (n)
+    const ENTER = "\r";
+    stdin.write(ENTER);
+    await waitForFrame();
+    stdin.write("n");
+
+    // Wait for async delete to fail and recovery prompt to appear
+    await waitForFrame(200);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Delete Worktree");
+    expect(frame).toContain("is a main working tree");
+    expect(frame).toContain("Clean up");
+
+    // Press Esc to cancel recovery
+    stdin.write(ESCAPE);
+    await waitForFrame();
+    expect(lastFrame()!).toContain("Agent Monitor");
+  });
+
+  it("delete failure -> recovery prompt -> y cleans up DB", async () => {
+    const git = await import("../../src/lib/git.js");
+    vi.mocked(git.deleteWorktree).mockRejectedValueOnce(new Error("path does not exist"));
+
+    await setupDashboard();
+    const { stdin, lastFrame } = render(<App />);
+    await waitForFrame();
+
+    // Enter delete confirm
+    stdin.write("d");
+    await waitForFrame();
+
+    // Confirm delete (Enter), then skip branch deletion (n)
+    const ENTER = "\r";
+    stdin.write(ENTER);
+    await waitForFrame();
+    stdin.write("n");
+
+    // Wait for recovery prompt
+    await waitForFrame(200);
+    expect(lastFrame()!).toContain("path does not exist");
+    expect(lastFrame()!).toContain("Clean up");
+
+    // Press n to clean up DB only (no branch delete)
+    stdin.write("n");
+    await waitForFrame(800);
+
+    // Should return to dashboard after recovery
+    expect(lastFrame()!).toContain("Agent Monitor");
   });
 });

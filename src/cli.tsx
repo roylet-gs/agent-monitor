@@ -76,7 +76,7 @@ worktreeCmd
   .option("--repo <path>", "Repository path")
   .action(async (target, opts) => {
     const { worktreeOpen } = await import("./commands/worktree/open.js");
-    worktreeOpen(target, opts);
+    await worktreeOpen(target, opts);
   });
 
 worktreeCmd
@@ -491,7 +491,7 @@ program
   .option("--repo <path>", "Repository path")
   .action(async (target, opts) => {
     const { worktreeOpen } = await import("./commands/worktree/open.js");
-    worktreeOpen(target, opts);
+    await worktreeOpen(target, opts);
   });
 
 // --- TUI launcher ---

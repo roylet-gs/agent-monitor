@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { execFile } from "child_process";
 import type { Settings } from "./types.js";
+import { log } from "./logger.js";
 
 const require = createRequire(import.meta.url);
 
@@ -86,6 +87,7 @@ export async function checkForUpdate(
     settings.latestKnownVersion &&
     Date.now() - settings.lastUpdateCheck < CHECK_INTERVAL_MS
   ) {
+    log("debug", "version", `returning cached version check: current=${current} latest=${settings.latestKnownVersion} age=${Date.now() - settings.lastUpdateCheck!}ms`);
     return {
       current,
       latest: settings.latestKnownVersion,
@@ -107,6 +109,7 @@ export async function checkForUpdate(
           "@roylet-gs/agent-monitor",
           "version",
           "--registry=https://npm.pkg.github.com",
+          "--prefer-online",
         ],
         { timeout: 5000 },
         (err, stdout) => {
@@ -118,6 +121,7 @@ export async function checkForUpdate(
       );
     });
 
+    log("info", "version", `registry version check complete: current=${current} latest=${latest} updateAvailable=${compareSemver(latest, current) > 0}`);
     return {
       current,
       latest,
@@ -128,7 +132,7 @@ export async function checkForUpdate(
       },
     };
   } catch (err) {
-    console.error("Update check failed:", err);
+    log("warn", "version", `update check failed: ${String(err)}`);
     return null;
   }
 }

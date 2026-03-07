@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
 import { isEffectivelyOpen } from "../lib/agent-utils.js";
+import { PulsingDot } from "./PulsingDot.js";
 import type { WorktreeWithStatus } from "../lib/types.js";
 
 interface WorktreeDetailProps {
@@ -17,6 +18,8 @@ function statusColor(status: string | undefined): string {
       return "cyan";
     case "waiting":
       return "yellow";
+    case "done":
+      return "blueBright";
     default:
       return "gray";
   }
@@ -32,6 +35,8 @@ function statusLabel(status: string | undefined): string {
       return "Waiting";
     case "idle":
       return "Idle";
+    case "done":
+      return "Done";
     default:
       return "Unknown";
   }
@@ -79,8 +84,8 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
           <Text bold>Claude </Text>
           {open ? (
             <>
-              <Text color={statusColor(status)}>● </Text>
-              <Text>{statusLabel(status)}</Text>
+              {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : <Text color={statusColor(status)}>●</Text>}
+              <Text> {statusLabel(status)}</Text>
             </>
           ) : (
             <Text dimColor>○ No active session</Text>
@@ -113,11 +118,15 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
                 <Text color={color}>{label}</Text>
               </Text>
               <Text dimColor>{pr.title}</Text>
-              {checks && (
+              {pr.state === "MERGED" && pr.activeCheckName ? (
+                <Text color={checks?.checkColor ?? "cyan"}>
+                  {checks?.icon ?? "◌"} {pr.activeCheckName}  {pr.checksWaiting ? "awaiting approval" : checks?.statusText ?? "running"}
+                </Text>
+              ) : checks ? (
                 <Text color={checks.checkColor}>
                   {checks.icon} Checks {checks.statusText}
                 </Text>
-              )}
+              ) : null}
             </Box>
           );
         })()}
@@ -147,7 +156,13 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
         {/* Git Info */}
         <Box flexDirection="column">
           <Text bold>Git</Text>
-          <Text dimColor>{worktree.branch}</Text>
+          {worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master" ? (
+            <Text dimColor>{worktree.branch} <Text color="cyan">(branch in main working tree)</Text></Text>
+          ) : worktree.is_main === 1 ? (
+            <Text dimColor>{worktree.branch} <Text color="cyan">(main working tree)</Text></Text>
+          ) : (
+            <Text dimColor>{worktree.branch}</Text>
+          )}
           {worktree.last_commit && (
             <Text dimColor>{worktree.last_commit.message} ({worktree.last_commit.relative_time})</Text>
           )}
