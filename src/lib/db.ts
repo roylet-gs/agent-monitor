@@ -95,6 +95,14 @@ function initSchema(db: Database.Database): void {
     db.exec("ALTER TABLE worktrees ADD COLUMN nickname_source TEXT");
     log("info", "db", "Migrated worktrees: added nickname_source column");
   }
+
+  // Migration: add is_main column if missing
+  try {
+    db.prepare("SELECT is_main FROM worktrees LIMIT 0").run();
+  } catch {
+    db.exec("ALTER TABLE worktrees ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0");
+    log("info", "db", "Migrated worktrees: added is_main column");
+  }
 }
 
 // --- Repositories ---
@@ -143,14 +151,15 @@ export function upsertWorktree(
   repoId: string,
   path: string,
   branch: string,
-  name: string
+  name: string,
+  isMain = false
 ): Worktree {
   const db = getDb();
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO worktrees (id, repo_id, path, branch, name) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(repo_id, branch) DO UPDATE SET path = excluded.path, name = excluded.name`
-  ).run(id, repoId, path, branch, name);
+    `INSERT INTO worktrees (id, repo_id, path, branch, name, is_main) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(repo_id, branch) DO UPDATE SET path = excluded.path, name = excluded.name, is_main = excluded.is_main`
+  ).run(id, repoId, path, branch, name, isMain ? 1 : 0);
   return getWorktreeByBranch(repoId, branch)!;
 }
 

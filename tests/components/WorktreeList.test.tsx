@@ -18,6 +18,7 @@ function makeWorktree(overrides: Partial<WorktreeWithStatus> = {}): WorktreeWith
     branch: "feature/test",
     name: "test",
     custom_name: null,
+    is_main: 0,
     created_at: "2024-01-01",
     agent_status: null,
     git_status: null,
@@ -152,6 +153,54 @@ describe("WorktreeList", () => {
       />
     );
     expect(lastFrame()!).toContain("○");
+  });
+
+  it("shows [branch] tag for branch-only entries", () => {
+    const wt = makeWorktree({ is_main: 1, branch: "feature/test" });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).toContain("[branch]");
+  });
+
+  it("does not show [branch] tag for regular worktrees", () => {
+    const wt = makeWorktree({ is_main: 0, branch: "feature/test" });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).not.toContain("[branch]");
+  });
+
+  it("does not show [branch] tag for main worktree on main branch", () => {
+    const wt = makeWorktree({ is_main: 1, branch: "main" });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).not.toContain("[branch]");
   });
 
   it("shows custom name with branch underneath", () => {

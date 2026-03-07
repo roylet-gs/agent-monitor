@@ -18,6 +18,7 @@ function makeWorktree(overrides: Partial<WorktreeWithStatus> = {}): WorktreeWith
     branch: "feature/test",
     name: "test",
     custom_name: null,
+    is_main: 0,
     created_at: "2024-01-01",
     agent_status: null,
     git_status: null,
@@ -123,6 +124,53 @@ describe("DeleteConfirm", () => {
       deleteLocalBranch: true,
       deleteRemoteBranch: false,
     });
+  });
+
+  it("shows branch-only confirmation for is_main worktree on feature branch", () => {
+    const { lastFrame } = render(
+      <DeleteConfirm
+        worktree={makeWorktree({ is_main: 1, branch: "feature/test" })}
+        repoPath="/tmp/repo"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain('Delete branch');
+    expect(frame).toContain("switch back to the default branch");
+    expect(frame).not.toContain("Remove this worktree");
+  });
+
+  it("branch-only confirms with isBranchOnly on Enter", async () => {
+    const onConfirm = vi.fn();
+    const { stdin } = render(
+      <DeleteConfirm
+        worktree={makeWorktree({ is_main: 1, branch: "feature/test" })}
+        repoPath="/tmp/repo"
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />
+    );
+    await waitForFrame();
+    stdin.write(ENTER);
+    expect(onConfirm).toHaveBeenCalledWith({
+      deleteLocalBranch: true,
+      deleteRemoteBranch: false,
+      isBranchOnly: true,
+    });
+  });
+
+  it("does not show branch-only for is_main on main branch", () => {
+    const { lastFrame } = render(
+      <DeleteConfirm
+        worktree={makeWorktree({ is_main: 1, branch: "main" })}
+        repoPath="/tmp/repo"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("Remove this worktree");
   });
 
   it("confirms with deleteLocalBranch false on Enter+n", async () => {

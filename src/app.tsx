@@ -30,6 +30,7 @@ import {
   branchExists,
   getRepoName,
   fetchBranch,
+  checkoutBranch,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
@@ -388,9 +389,61 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     // Find the repo for this worktree
     const wtRepo = repositories.find((r) => r.id === wt.repo_id) ?? activeRepo;
 
-    // Safety guard: never allow deleting the main working tree
-    if (wt.path === wtRepo.path) {
+    const isBranchOnly = options.isBranchOnly || (wt.is_main === 1 && wt.branch !== "main" && wt.branch !== "master");
+
+    // Safety guard: never allow deleting the main working tree on the default branch
+    if (wt.path === wtRepo.path && !isBranchOnly) {
       setError("Cannot delete the main working tree");
+      return;
+    }
+
+    // Branch-only delete: checkout default branch → delete the feature branch → sync
+    if (isBranchOnly) {
+      const steps: StepInfo[] = [
+        { label: "Switching to default branch", status: "active" },
+        { label: `Deleting local branch ${wt.branch}`, status: "pending" },
+        { label: "Syncing database", status: "pending" },
+      ];
+
+      setDeletingBranch(wt.custom_name ?? wt.branch);
+      setDeleteSteps(steps);
+      setDeleteError(null);
+      setDeleteRecovery(null);
+      setMode("deleting-worktree");
+
+      let stepIdx = 0;
+
+      try {
+        const mainBranch = await getMainBranch(wtRepo.path);
+        await checkoutBranch(wtRepo.path, mainBranch);
+        updateDeleteStep(stepIdx, "done");
+        stepIdx++;
+
+        updateDeleteStep(stepIdx, "active");
+        await deleteBranch(wtRepo.path, wt.branch, true);
+        updateDeleteStep(stepIdx, "done");
+        stepIdx++;
+
+        updateDeleteStep(stepIdx, "active");
+        await syncWorktrees(wtRepo.id);
+        await refreshRef.current();
+        updateDeleteStep(stepIdx, "done");
+
+        setSelectedIndex((i) => Math.max(0, i - 1));
+        log("info", "app", `Deleted branch-only entry ${wt.branch}`);
+
+        await new Promise((r) => setTimeout(r, 500));
+        setMode("dashboard");
+      } catch (err) {
+        updateDeleteStep(stepIdx, "error");
+        const errorMessage = `${err}`;
+        setDeleteError(errorMessage);
+        log("warn", "app", `Branch-only delete failed: ${errorMessage}`);
+        setTimeout(() => {
+          setMode("dashboard");
+          setError(`Failed to delete branch: ${errorMessage}`);
+        }, 3000);
+      }
       return;
     }
 

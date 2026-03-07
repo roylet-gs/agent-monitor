@@ -152,6 +152,12 @@ export async function getLastCommit(worktreePath: string): Promise<CommitInfo | 
   }
 }
 
+export async function checkoutBranch(repoPath: string, branch: string): Promise<void> {
+  const git = getGit(repoPath);
+  await git.raw(["checkout", branch]);
+  log("info", "git", `Checked out branch ${branch} in ${repoPath}`);
+}
+
 export async function getMainBranch(repoPath: string): Promise<string> {
   const git = getGit(repoPath);
   try {
