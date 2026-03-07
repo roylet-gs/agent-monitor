@@ -218,7 +218,11 @@ export function useWorktrees(config: WorktreeHookConfig): {
         // Bail if a newer refresh started while we were enriching
         if (myGen !== genRef.current) return;
 
-        enriched.sort((a, b) => b.created_at.localeCompare(a.created_at));
+        enriched.sort((a, b) => {
+          // Dedicated worktrees first, main worktree branches last
+          if (a.is_main !== b.is_main) return a.is_main - b.is_main;
+          return b.created_at.localeCompare(a.created_at);
+        });
 
         const filtered = shouldHideMain
           ? enriched.filter((wt) => !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")))
