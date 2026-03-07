@@ -77,23 +77,42 @@ export function openTerminal(worktreePath: string): void {
 export function openClaudeInTerminal(worktreePath: string, continueSession: boolean): void {
   const escapedPath = worktreePath.replace(/"/g, '\\"');
   const claudeCmd = continueSession ? "claude -c" : "claude";
+  const app = detectTerminalApp();
 
   try {
     if (process.platform === "darwin") {
-      execSync(
-        `osascript -e 'tell app "Terminal" to do script "cd \\"${escapedPath}\\" && ${claudeCmd}"'`,
-        { stdio: "ignore" }
-      );
+      switch (app) {
+        case "Terminal":
+          execSync(
+            `osascript -e 'tell app "Terminal" to do script "cd \\"${escapedPath}\\" && ${claudeCmd}"'`,
+            { stdio: "ignore" }
+          );
+          break;
+        case "iTerm2":
+          execSync(
+            `osascript -e 'tell app "iTerm2" to create window with default profile command "cd \\"${escapedPath}\\" && ${claudeCmd}"'`,
+            { stdio: "ignore" }
+          );
+          break;
+        default:
+          execSync(`open -a "${app}" "${worktreePath}"`, { stdio: "ignore" });
+          // Small delay to let the terminal window open before sending the command
+          execSync(
+            `sleep 0.5 && osascript -e 'tell application "System Events" to keystroke "cd \\"${escapedPath}\\" && ${claudeCmd}\n"'`,
+            { stdio: "ignore" }
+          );
+          break;
+      }
     } else {
       execSync(
         `x-terminal-emulator --working-directory="${escapedPath}" -e "${claudeCmd}"`,
         { stdio: "ignore" }
       );
     }
-    log("info", "ide", `Opened claude in terminal at ${worktreePath} (continue=${continueSession})`);
+    log("info", "ide", `Opened claude in ${app} at ${worktreePath} (continue=${continueSession})`);
   } catch (err) {
-    log("error", "ide", `Failed to open claude in terminal: ${err}`);
-    throw new Error("Failed to open terminal. Is Terminal.app available?");
+    log("error", "ide", `Failed to open claude in ${app}: ${err}`);
+    throw new Error(`Failed to open terminal. Is ${app} available?`);
   }
 }
 
@@ -107,17 +126,7 @@ export function openInIde(worktreePath: string, ide: Settings["ide"]): void {
         execSync(`code "${worktreePath}"`, { stdio: "ignore" });
         break;
       case "terminal":
-        // Open a new terminal tab/window in the worktree directory
-        if (process.platform === "darwin") {
-          execSync(
-            `osascript -e 'tell app "Terminal" to do script "cd ${worktreePath.replace(/"/g, '\\"')}"'`,
-            { stdio: "ignore" }
-          );
-        } else {
-          execSync(`x-terminal-emulator --working-directory="${worktreePath}"`, {
-            stdio: "ignore",
-          });
-        }
+        openTerminal(worktreePath);
         break;
     }
     log("info", "ide", `Opened ${worktreePath} in ${ide}`);
