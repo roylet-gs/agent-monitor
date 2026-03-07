@@ -2,7 +2,7 @@ import { getWorktreeByPath, getAgentStatus, upsertAgentStatus } from "../lib/db.
 import { publishMessage } from "../lib/pubsub-client.js";
 import type { AgentStatusType } from "../lib/types.js";
 
-const VALID_STATUSES: AgentStatusType[] = ["idle", "executing", "planning", "waiting"];
+const VALID_STATUSES: AgentStatusType[] = ["idle", "executing", "planning", "waiting", "done"];
 
 export async function printStatus(worktreePath?: string, setStatus?: string): Promise<void> {
   if (!worktreePath) {

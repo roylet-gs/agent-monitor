@@ -91,6 +91,23 @@ describe("WorktreeDetail", () => {
     expect(lastFrame()!).toContain("Working on feature X");
   });
 
+  it("shows Done status label when done", () => {
+    const wt = makeWorktree({
+      agent_status: {
+        worktree_id: "wt-1",
+        status: "done",
+        last_response: "Finished implementing feature",
+        transcript_summary: null,
+        session_id: null,
+        is_open: 1,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("Done");
+    expect(lastFrame()!).toContain("Finished implementing feature");
+  });
+
   it("shows git status", () => {
     const wt = makeWorktree({
       git_status: { ahead: 2, behind: 1, dirty: 3 },

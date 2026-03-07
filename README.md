@@ -173,6 +173,7 @@ Track Claude Code agent status across all your worktrees in real time. Status in
 | Executing | `●` green  | Agent is running tools or writing code  |
 | Planning  | `●` cyan   | Agent is thinking / planning next steps |
 | Waiting   | `●` yellow | Agent is waiting for user input         |
+| Done      | `●` blue   | Agent finished its task                 |
 | Idle      | `◌` gray   | No active agent session                 |
 
 > [!IMPORTANT]

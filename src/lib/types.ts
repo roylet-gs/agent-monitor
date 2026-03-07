@@ -26,7 +26,7 @@ export interface AgentStatus {
   updated_at: string;
 }
 
-export type AgentStatusType = "idle" | "executing" | "planning" | "waiting";
+export type AgentStatusType = "idle" | "executing" | "planning" | "waiting" | "done";
 
 export interface PrInfo {
   number: number;

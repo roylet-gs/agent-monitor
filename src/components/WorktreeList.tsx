@@ -21,6 +21,8 @@ function statusColor(status: string | undefined): string {
       return "cyan";
     case "waiting":
       return "yellow";
+    case "done":
+      return "blueBright";
     default:
       return "gray";
   }
