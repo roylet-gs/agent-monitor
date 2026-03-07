@@ -187,7 +187,7 @@ describe("WorktreeList", () => {
     expect(lastFrame()!).not.toContain("[branch]");
   });
 
-  it("does not show [branch] tag for main worktree on main branch", () => {
+  it("shows [branch] tag for main worktree on main branch", () => {
     const wt = makeWorktree({ is_main: 1, branch: "main" });
     const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
 
@@ -200,7 +200,7 @@ describe("WorktreeList", () => {
         compactView={false}
       />
     );
-    expect(lastFrame()!).not.toContain("[branch]");
+    expect(lastFrame()!).toContain("[branch]");
   });
 
   it("shows custom name with branch underneath", () => {
