@@ -146,10 +146,14 @@ export function mapEventToStatus(event: HookEvent): AgentStatusType | null {
   // Tools that block on user input → waiting
   if (
     event.tool_name === "AskUserQuestion" ||
-    event.tool_name === "EnterPlanMode" ||
     event.tool_name === "ExitPlanMode"
   ) {
     return "waiting";
+  }
+
+  // EnterPlanMode: PreToolUse → waiting (about to enter), PostToolUse → planning (now active)
+  if (event.tool_name === "EnterPlanMode") {
+    return event.event === "PostToolUse" ? "planning" : "waiting";
   }
 
   // Plan mode folds into the planning status
