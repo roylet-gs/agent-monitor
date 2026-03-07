@@ -34,6 +34,9 @@ import {
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde, openTerminal, openClaudeInTerminal } from "./lib/ide-launcher.js";
+import { useTerminalPanes } from "./hooks/useTerminalPanes.js";
+import { TerminalView } from "./components/TerminalView.js";
+import { getRoleContent } from "./lib/roles.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -70,6 +73,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [currentVersion] = useState(() => getVersion());
+  // Terminal view: track the worktree we're opening in internal mode
+  const [terminalWorktreeId, setTerminalWorktreeId] = useState<string | null>(null);
+  const terminalPanes = useTerminalPanes(stdout?.columns ?? 80, stdout?.rows ?? 24);
 
   // Initialize DB and check for repos
   useEffect(() => {
@@ -201,12 +207,27 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
+    if (settings.ide === "internal") {
+      // Switch to terminal view and spawn initial pane
+      setTerminalWorktreeId(wt.id);
+      // Only add a pane if there isn't already one for this worktree
+      const existing = terminalPanes.panes.find((p) => p.worktreeId === wt.id);
+      if (!existing) {
+        const title = wt.custom_name ?? wt.branch;
+        terminalPanes.addPane(wt.path, wt.id, title);
+      } else {
+        terminalPanes.focusPane(existing.id);
+      }
+      setMode("terminal-view");
+      return;
+    }
+
     try {
       openInIde(wt.path, settings.ide);
     } catch (err) {
       setError(`${err}`);
     }
-  }, [flatWorktrees, selectedIndex, settings]);
+  }, [flatWorktrees, selectedIndex, settings, terminalPanes]);
 
   // Handle open terminal at worktree path
   const handleOpenTerminal = useCallback(() => {
@@ -710,6 +731,28 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           onSettingsReset={handleSettingsReset}
           onFactoryReset={handleFactoryReset}
           onCheckForUpdates={recheck}
+        />
+      )}
+
+      {mode === "terminal-view" && (
+        <TerminalView
+          panes={terminalPanes.panes}
+          onAddPane={(role, roleContent) => {
+            const wt = flatWorktrees[selectedIndex];
+            if (!wt) return;
+            const title = wt.custom_name ?? wt.branch;
+            terminalPanes.addPane(wt.path, wt.id, title, role ?? undefined, roleContent ?? undefined);
+          }}
+          onRemovePane={(id) => {
+            terminalPanes.removePane(id);
+            if (terminalPanes.panes.length <= 1) {
+              setMode("dashboard");
+            }
+          }}
+          onFocusNext={terminalPanes.focusNext}
+          onFocusPrev={terminalPanes.focusPrev}
+          onDetach={() => setMode("dashboard")}
+          getFocusedPane={terminalPanes.getFocusedPane}
         />
       )}
 

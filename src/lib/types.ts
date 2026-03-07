@@ -79,7 +79,7 @@ export interface CommitInfo {
 }
 
 export interface Settings {
-  ide: "cursor" | "vscode" | "terminal";
+  ide: "cursor" | "vscode" | "terminal" | "internal";
   defaultBranchPrefix: string;
   defaultBaseBranch: string;
   pollingIntervalMs: number;
@@ -114,7 +114,9 @@ export type AppMode =
   | "folder-browse"
   | "creating-worktree"
   | "deleting-worktree"
-  | "setup";
+  | "setup"
+  | "terminal-view"
+  | "role-select";
 
 export interface HookEvent {
   event: string;

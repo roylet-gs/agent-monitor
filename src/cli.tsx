@@ -263,6 +263,46 @@ ruleCmd
     ruleRestore(opts);
   });
 
+// --- Role commands ---
+
+const roleCmd = program
+  .command("role")
+  .description("Manage agent roles (prompt templates)");
+
+roleCmd
+  .command("list")
+  .description("List all roles")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { roleList } = await import("./commands/role.js");
+    roleList(opts);
+  });
+
+roleCmd
+  .command("edit <name>")
+  .description("Create or edit a role .md file in $EDITOR")
+  .action(async (name) => {
+    const { roleEdit } = await import("./commands/role.js");
+    roleEdit(name);
+  });
+
+roleCmd
+  .command("remove <name>")
+  .description("Delete a role file")
+  .action(async (name) => {
+    const { roleRemove } = await import("./commands/role.js");
+    roleRemove(name);
+  });
+
+roleCmd
+  .command("show <name>")
+  .description("Print role content")
+  .option("--json", "Output as JSON")
+  .action(async (name, opts) => {
+    const { roleShow } = await import("./commands/role.js");
+    roleShow(name, opts);
+  });
+
 // --- Backward compat aliases for hooks ---
 
 program

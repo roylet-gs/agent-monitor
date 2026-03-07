@@ -119,6 +119,9 @@ export function openInIde(worktreePath: string, ide: Settings["ide"]): void {
           });
         }
         break;
+      case "internal":
+        // No-op: TUI handles this via mode transition to terminal-view
+        break;
     }
     log("info", "ide", `Opened ${worktreePath} in ${ide}`);
   } catch (err) {

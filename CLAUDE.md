@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `agent-monitor` (`am`) is a terminal UI (TUI) dashboard for monitoring multiple Claude Code agent sessions across git worktrees. Built with Ink (React for CLIs) and SQLite.
 
-Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket integration, worktree lifecycle management (create/delete), IDE launching, per-repo startup scripts.
+Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket integration, worktree lifecycle management (create/delete), IDE launching (including embedded terminal mode with node-pty), per-repo startup scripts, role-based agent prompts.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 
 ### State Machine
 `src/app.tsx` is the root component managing an `AppMode` string union that controls rendering:
-`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings`
+`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings` → `terminal-view` → `role-select`
 
 ### Data Flow
 1. **Agent status in:** Claude Code fires hook events → `am hook-event --worktree $CLAUDE_PROJECT_DIR` receives JSON on stdin → writes to SQLite via `src/commands/hook-event.ts` → publishes to Unix domain socket for instant TUI update
@@ -39,6 +39,8 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 - `src/lib/settings.ts` — Loads/saves `~/.agent-monitor/settings.json`
 - `src/lib/output.ts` — CLI output formatting (table, key-value, JSON) for non-TUI commands
 - `src/lib/resolve.ts` — Resolves CLI targets (branch names, paths) to DB entities; CWD-based repo detection
+- `src/lib/pty-manager.ts` — PTY lifecycle (spawn/destroy/write/resize) via node-pty, ANSI parsing, ring buffer, structured message capture
+- `src/lib/roles.ts` — Role file CRUD (`.md` files in `~/.agent-monitor/roles/`)
 
 ### CLI Commands
 Commands in `src/commands/` are organized by domain:
@@ -52,9 +54,10 @@ Commands in `src/commands/` are organized by domain:
 - `src/commands/doctor.ts` — system health check
 - `src/commands/status.ts` — get/set agent status (unchanged)
 - `src/commands/hook-event.ts` — receive hook events from stdin (unchanged)
+- `src/commands/role.ts` — list, edit, remove, show
 
 ### Persistence
-All data at `~/.agent-monitor/`: SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`.
+All data at `~/.agent-monitor/`: SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`, `roles/<name>.md`.
 
 ## Documentation
 

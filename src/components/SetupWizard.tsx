@@ -12,11 +12,12 @@ type WizardStep = "welcome" | "ide" | "branches" | "github" | "linear" | "repo" 
 const STEPS: WizardStep[] = ["welcome", "ide", "branches", "github", "linear", "repo", "hooks", "done"];
 const TOTAL_STEPS = STEPS.length - 2; // exclude welcome and done from numbering
 
-const IDE_OPTIONS: Settings["ide"][] = ["cursor", "vscode", "terminal"];
+const IDE_OPTIONS: Settings["ide"][] = ["cursor", "vscode", "terminal", "internal"];
 const IDE_LABELS: Record<Settings["ide"], string> = {
   cursor: "Cursor",
   vscode: "VS Code",
   terminal: "Terminal (vim, etc.)",
+  internal: "Internal (embedded terminal)",
 };
 
 interface SetupWizardProps {

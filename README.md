@@ -117,7 +117,7 @@ pnpm link --global
 
 On first launch, the setup wizard configures:
 
-- **IDE preference** — Cursor, VS Code, or Terminal
+- **IDE preference** — Cursor, VS Code, Terminal, or Internal (embedded terminal)
 - **Repositories** — which repos to track
 - **Claude Code hooks** — for real-time agent status monitoring
 - **GitHub PR integration** — inline PR and CI status (requires `gh` CLI)
@@ -335,6 +335,18 @@ All read commands support `--json` for machine-readable output. `<target>` resol
 </details>
 
 <details>
+<summary><strong>Role</strong> — <code>am role</code></summary>
+
+| Command              | Description                         | Flags    |
+| -------------------- | ----------------------------------- | -------- |
+| `am role list`       | List all roles                      | `--json` |
+| `am role edit <name>`  | Create/edit a role .md file in $EDITOR | —    |
+| `am role show <name>`  | Print role content                  | `--json` |
+| `am role remove <name>` | Delete a role file                | —        |
+
+</details>
+
+<details>
 <summary><strong>Doctor & Logs</strong></summary>
 
 | Command     | Description                                     | Flags                                                         |
@@ -364,7 +376,7 @@ All data is stored in `~/.agent-monitor/`:
 
 | Key                       | Default      | Description                                               |
 | ------------------------- | ------------ | --------------------------------------------------------- |
-| `ide`                     | `"cursor"`   | IDE to open worktrees in (`cursor`, `vscode`, `terminal`) |
+| `ide`                     | `"cursor"`   | IDE to open worktrees in (`cursor`, `vscode`, `terminal`, `internal`) |
 | `defaultBranchPrefix`     | `"feature/"` | Prefix for new branch names                               |
 | `defaultBaseBranch`       | `"main"`     | Default base branch for new worktrees                     |
 | `pollingIntervalMs`       | `30000`      | Dashboard polling interval (ms)                           |
