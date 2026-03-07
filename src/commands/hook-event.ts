@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { getWorktreeByPath, getAgentStatus, upsertAgentStatus } from "../lib/db.js";
+import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, upsertAgentSession } from "../lib/db.js";
 import { getWorktreeRoot } from "../lib/git.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
@@ -72,6 +72,9 @@ export async function handleHookEvent(
   upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary, isOpen);
   log("info", "hook-event", `Updated status for ${worktreePath}: ${status} (is_open=${isOpen})`);
 
+  // Route to agent_sessions table for multi-session tracking
+  const agentSessionId = upsertAgentSession(worktree.id, sessionId, status, lastResponse, transcriptSummary, isOpen);
+
   // Fire-and-forget publish for instant TUI update
   await publishMessage({
     type: "agent-status-update",
@@ -82,6 +85,7 @@ export async function handleHookEvent(
     transcriptSummary,
     isOpen,
     updatedAt: new Date().toISOString(),
+    agentSessionId: agentSessionId ?? undefined,
   }).catch(() => {});
 
   // Detect git push / gh pr create and publish a git-activity message
@@ -105,7 +109,7 @@ export async function handleHookEvent(
   }
 }
 
-function extractLastResponse(event: HookEvent): string | null {
+export function extractLastResponse(event: HookEvent): string | null {
   // Stop event has last_assistant_message — the main response text
   if (event.last_assistant_message) {
     return event.last_assistant_message;
@@ -113,6 +117,20 @@ function extractLastResponse(event: HookEvent): string | null {
   // Notification has a message field
   if (event.event === "Notification" && event.message) {
     return event.message;
+  }
+  // Tool use events — show what tool is being used
+  if (event.tool_name) {
+    const toolInput = event.tool_input;
+    if (event.tool_name === "Bash" && toolInput?.command) {
+      return `$ ${String(toolInput.command).slice(0, 200)}`;
+    }
+    if ((event.tool_name === "Read" || event.tool_name === "Write" || event.tool_name === "Edit") && toolInput?.file_path) {
+      return `${event.tool_name}: ${String(toolInput.file_path)}`;
+    }
+    if (event.tool_name === "Grep" && toolInput?.pattern) {
+      return `Grep: ${String(toolInput.pattern)}`;
+    }
+    return `Tool: ${event.tool_name}`;
   }
   return null;
 }

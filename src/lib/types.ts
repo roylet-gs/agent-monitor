@@ -29,6 +29,20 @@ export interface AgentStatus {
 
 export type AgentStatusType = "idle" | "executing" | "planning" | "waiting" | "done";
 
+export interface AgentSession {
+  id: string;
+  worktree_id: string;
+  session_id: string | null;
+  role_name: string | null;
+  status: AgentStatusType;
+  last_response: string | null;
+  transcript_summary: string | null;
+  pid: number | null;
+  is_open: number;
+  launched_at: string;
+  updated_at: string;
+}
+
 export interface PrInfo {
   number: number;
   title: string;
@@ -68,6 +82,7 @@ export interface WorktreeWithStatus extends Worktree {
   last_commit: CommitInfo | null;
   pr_info: PrInfo | null;
   linear_info: LinearInfo | null;
+  terminal_open?: boolean;
 }
 
 export interface GitStatus {
@@ -83,7 +98,7 @@ export interface CommitInfo {
 }
 
 export interface Settings {
-  ide: "cursor" | "vscode" | "terminal";
+  ide: "cursor" | "vscode" | "terminal" | "managed";
   defaultBranchPrefix: string;
   defaultBaseBranch: string;
   pollingIntervalMs: number;
@@ -118,7 +133,9 @@ export type AppMode =
   | "folder-browse"
   | "creating-worktree"
   | "deleting-worktree"
-  | "setup";
+  | "setup"
+  | "role-select"
+  | "managed-view";
 
 export interface HookEvent {
   event: string;

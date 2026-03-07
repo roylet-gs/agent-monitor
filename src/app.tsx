@@ -21,6 +21,7 @@ import {
   removeWorktree as removeWorktreeDb,
   updateWorktreeCustomName,
   resetAll,
+  clearStalePids,
 } from "./lib/db.js";
 import {
   createWorktree as gitCreateWorktree,
@@ -36,13 +37,15 @@ import {
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde, openTerminal, openClaudeInTerminal } from "./lib/ide-launcher.js";
+import { RoleSelector } from "./components/RoleSelector.js";
+import { ManagedView } from "./components/ManagedView.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
 import { SetupWizard } from "./components/SetupWizard.js";
-import type { AppMode, Repository, Settings } from "./lib/types.js";
+import type { AppMode, Repository, Settings, WorktreeWithStatus } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
@@ -79,10 +82,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [currentVersion] = useState(() => getVersion());
+  // Managed mode: stash selected worktree while showing role selector
+  const [pendingManagedOpen, setPendingManagedOpen] = useState<{ path: string; continueSession: boolean } | null>(null);
+  // Managed view: persistent per-worktree agent orchestration
+  const [managedWorktree, setManagedWorktree] = useState<WorktreeWithStatus | null>(null);
+  // Bump this counter to trigger managed view refresh from pub/sub
+  const [managedRefreshTick, setManagedRefreshTick] = useState(0);
 
   // Initialize DB and check for repos
   useEffect(() => {
     getDb();
+    clearStalePids();
     const repos = getRepositories();
     setRepositories(repos);
 
@@ -142,6 +152,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     if (msg.type === "agent-status-update") {
       // Light refresh only: re-read DB + git status without triggering GitHub/Linear API calls
       lightRefreshRef.current();
+      // Bump tick to trigger ManagedView refresh if active
+      setManagedRefreshTick((t) => t + 1);
     } else if (msg.type === "git-activity") {
       // Git push or PR creation detected — force full refresh (with integrations) after a short
       // delay to give GitHub time to process the push/PR.
@@ -216,6 +228,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setError(result.error ?? "Cannot open worktree");
         return;
       }
+
+      if (settings.ide === "managed") {
+        // Enter persistent managed view for this worktree
+        setManagedWorktree(wt);
+        setMode("managed-view");
+        return;
+      }
+
       openInIde(wt.path, settings.ide);
     } catch (err) {
       setError(`${err}`);
@@ -240,7 +260,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
     const continueSession = !!wt.agent_status?.session_id;
     try {
-      openClaudeInTerminal(wt.path, continueSession);
+      openClaudeInTerminal(wt.path, { continueSession });
     } catch (err) {
       setError(`${err}`);
     }
@@ -887,6 +907,39 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           onSettingsReset={handleSettingsReset}
           onFactoryReset={handleFactoryReset}
           onCheckForUpdates={recheck}
+        />
+      )}
+
+      {mode === "managed-view" && managedWorktree && (
+        <ManagedView
+          worktree={managedWorktree}
+          onBack={() => {
+            setManagedWorktree(null);
+            setMode("dashboard");
+          }}
+          onError={setError}
+          refreshTick={managedRefreshTick}
+        />
+      )}
+
+      {mode === "role-select" && pendingManagedOpen && (
+        <RoleSelector
+          onSelect={(_roleName, roleContent) => {
+            try {
+              openClaudeInTerminal(pendingManagedOpen.path, {
+                continueSession: pendingManagedOpen.continueSession,
+                prompt: roleContent ?? undefined,
+              });
+            } catch (err) {
+              setError(`${err}`);
+            }
+            setPendingManagedOpen(null);
+            setMode("dashboard");
+          }}
+          onCancel={() => {
+            setPendingManagedOpen(null);
+            setMode("dashboard");
+          }}
         />
       )}
 

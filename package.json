@@ -37,6 +37,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^25.3.5",
     "@types/react": "^18.3.12",
     "@vitest/coverage-v8": "^4.0.18",
     "ink-testing-library": "^4.0.0",

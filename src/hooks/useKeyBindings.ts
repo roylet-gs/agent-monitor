@@ -100,7 +100,7 @@ export function useKeyBindings(actions: KeyBindingActions): void {
       actions.onUpdate?.();
       return;
     }
-    if (input === "t") {
+    if (input === "c") {
       actions.onClaude();
       return;
     }

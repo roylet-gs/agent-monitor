@@ -8,13 +8,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm build` — TypeScript compile (`tsc`) to `dist/`
 - `pnpm start` — Run directly via `tsx src/cli.tsx` (no build needed)
 - `pnpm dev` — Watch mode via `tsx --watch src/cli.tsx`
-- No test framework or linter is configured
+- `pnpm test` — Run tests via vitest
 
 ## What This Is
 
 `agent-monitor` (`am`) is a terminal UI (TUI) dashboard for monitoring multiple Claude Code agent sessions across git worktrees. Built with Ink (React for CLIs) and SQLite.
 
-Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket integration, worktree lifecycle management (create/delete), IDE launching, per-repo startup scripts.
+Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket integration, worktree lifecycle management (create/delete), IDE launching (including managed terminal mode with multi-agent orchestration via ManagedView), per-repo startup scripts, role-based agent prompts.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 
 ### State Machine
 `src/app.tsx` is the root component managing an `AppMode` string union that controls rendering:
-`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings`
+`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings` → `role-select` → `managed-view`
 
 ### Data Flow
 1. **Agent status in:** Claude Code fires hook events → `am hook-event --worktree $CLAUDE_PROJECT_DIR` receives JSON on stdin → writes to SQLite via `src/commands/hook-event.ts` → publishes to Unix domain socket for instant TUI update
@@ -31,7 +31,7 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 3. **TUI polling:** `src/hooks/useWorktrees.ts` still polls SQLite + git status (2s default), GitHub PRs (60s), and Linear tickets (60s) as a fallback. Uses JSON fingerprinting to skip re-renders when data hasn't changed.
 
 ### Key Modules
-- `src/lib/db.ts` — SQLite with WAL mode. Tables: `repositories`, `worktrees`, `agent_status`. Handles schema migrations.
+- `src/lib/db.ts` — SQLite with WAL mode. Tables: `repositories`, `worktrees`, `agent_status`, `agent_sessions`. Handles schema migrations.
 - `src/lib/git.ts` — Git ops via `simple-git`. Worktree creation uses raw `git worktree` commands for `--force`/`-b` flag control.
 - `src/lib/github.ts` — Shells out to `gh` CLI for PR info
 - `src/lib/linear.ts` — Raw HTTPS POST to Linear GraphQL API (no SDK)
@@ -39,6 +39,8 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 - `src/lib/settings.ts` — Loads/saves `~/.agent-monitor/settings.json`
 - `src/lib/output.ts` — CLI output formatting (table, key-value, JSON) for non-TUI commands
 - `src/lib/resolve.ts` — Resolves CLI targets (branch names, paths) to DB entities; CWD-based repo detection
+- `src/lib/ide-launcher.ts` — Terminal/IDE launching, terminal-open detection via lsof, managed mode with re-focus, `launchClaudeSession` with PID discovery
+- `src/lib/roles.ts` — Role file CRUD (`.md` files in `~/.agent-monitor/roles/`)
 
 ### CLI Commands
 Commands in `src/commands/` are organized by domain:
@@ -51,10 +53,11 @@ Commands in `src/commands/` are organized by domain:
 - `src/commands/script.ts` — edit, remove, show
 - `src/commands/doctor.ts` — system health check
 - `src/commands/status.ts` — get/set agent status (unchanged)
-- `src/commands/hook-event.ts` — receive hook events from stdin (unchanged)
+- `src/commands/hook-event.ts` — receive hook events from stdin, routes to both `agent_status` (dashboard compat) and `agent_sessions` (multi-session tracking)
+- `src/commands/role.ts` — list, edit, remove, show
 
 ### Persistence
-All data at `~/.agent-monitor/`: SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`.
+All data at `~/.agent-monitor/`: SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`, `roles/<name>.md`.
 
 ## Documentation
 

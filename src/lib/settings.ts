@@ -50,7 +50,14 @@ export function loadSettings(): Settings {
   try {
     const raw = readFileSync(SETTINGS_PATH, "utf-8");
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    const settings = { ...DEFAULT_SETTINGS, ...parsed };
+    // Auto-migrate removed "internal" IDE mode to "managed"
+    if ((settings.ide as string) === "internal") {
+      settings.ide = "managed";
+      saveSettings(settings);
+      log("info", "settings", 'Migrated IDE setting from "internal" to "managed"');
+    }
+    return settings;
   } catch (err) {
     log("warn", "settings", `Failed to parse settings file: ${err}`);
     return { ...DEFAULT_SETTINGS };

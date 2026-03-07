@@ -33,23 +33,25 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
     <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
       {hasWorktrees ? (
         <Text>
-          <Text color="yellow">[Enter]</Text> Open
-          <Text color="yellow"> [t]</Text>erminal
-          <Text color="yellow"> [n]</Text>ew
-          <Text color="yellow"> [d]</Text>elete
-          {(ghPrStatus || linearEnabled) && <><Text color="yellow"> [g]</Text>ithub</>}
-          {linearEnabled && <><Text color="yellow"> [l]</Text>inear</>}
-          <Text color="yellow"> [r]</Text>efresh
-          <Text color="yellow"> [w]</Text>atch
-          <Text color="yellow"> [s]</Text>ettings
-          <Text color="yellow"> [q]</Text>uit
+          <Text color="yellow">[Enter]</Text><Text dimColor>Open </Text>
+          <Text color="yellow">[n]</Text><Text dimColor>ew </Text>
+          <Text color="yellow">[d]</Text><Text dimColor>elete </Text>
+          <Text color="yellow">[t]</Text><Text dimColor>erminal </Text>
+          <Text color="yellow">[c]</Text><Text dimColor>laude </Text>
+          {ghPrStatus && <><Text color="yellow">[g]</Text><Text dimColor>ithub </Text></>}
+          {linearEnabled && <><Text color="yellow">[l]</Text><Text dimColor>inear </Text></>}
+          <Text color="yellow">[r]</Text><Text dimColor>efresh </Text>
+          <Text color="yellow">[w]</Text><Text dimColor>atch </Text>
+          <Text color="yellow">[s]</Text><Text dimColor>ettings </Text>
+          <Text color="yellow">[q]</Text><Text dimColor>uit </Text>
+          <Text color="yellow">[j/k]</Text><Text dimColor>nav</Text>
         </Text>
       ) : (
         <Text>
-          <Text color="yellow">[n]</Text>ew
-          <Text color="yellow"> [r]</Text>efresh
-          <Text color="yellow"> [s]</Text>ettings
-          <Text color="yellow"> [q]</Text>uit
+          <Text color="yellow">[n]</Text><Text dimColor>ew </Text>
+          <Text color="yellow">[r]</Text><Text dimColor>efresh </Text>
+          <Text color="yellow">[s]</Text><Text dimColor>ettings </Text>
+          <Text color="yellow">[q]</Text><Text dimColor>uit</Text>
         </Text>
       )}
     </Box>

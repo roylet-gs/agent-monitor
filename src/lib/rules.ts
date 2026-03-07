@@ -67,6 +67,16 @@ export function removeRule(idOrTool: string): Rule | null {
   return removed!;
 }
 
+export function clearRules(): { removed: number } {
+  const rules = loadRules();
+  const removed = rules.length;
+  if (removed > 0) {
+    saveRules([]);
+    log("info", "rules", `Cleared all ${removed} rule(s)`);
+  }
+  return { removed };
+}
+
 // --- Claude permission format conversion ---
 
 export function ruleToClaudePermission(rule: Rule): string | null {

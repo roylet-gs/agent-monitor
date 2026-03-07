@@ -3,6 +3,7 @@ import { getWorktrees, getAgentStatuses, updateWorktreeCustomName, clearLinearNi
 import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo, linearAttachmentToPrInfo } from "../lib/linear.js";
+import { isTerminalOpenAt } from "../lib/ide-launcher.js";
 import { log } from "../lib/logger.js";
 import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
 
@@ -62,6 +63,9 @@ export function useWorktrees(config: WorktreeHookConfig): {
   linearRefreshOnManualRef.current = linearRefreshOnManual;
   const linearAutoNicknameRef = useRef(linearAutoNickname);
   linearAutoNicknameRef.current = linearAutoNickname;
+
+  // Terminal open status (updated separately to avoid blocking refresh)
+  const terminalOpenRef = useRef<Map<string, boolean>>(new Map());
 
   // Generation counter: stale refresh calls check this before setting state
   const genRef = useRef(0);
@@ -211,6 +215,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
                 return prCacheRef.current.get(`${repo.id}:${wt.branch}`) ?? null;
               })(),
               linear_info: linearCacheRef.current.get(wt.branch) ?? null,
+              terminal_open: terminalOpenRef.current.get(wt.path) ?? false,
             };
           })
         );
@@ -250,6 +255,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         active_check: wt.pr_info?.activeCheckUrl, checks_waiting: wt.pr_info?.checksWaiting,
         linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,
         linear_pr_url: wt.linear_info?.prAttachment?.url,
+        terminal_open: wt.terminal_open,
       })));
       if (fingerprint !== prevFingerprintRef.current) {
         prevFingerprintRef.current = fingerprint;
@@ -323,6 +329,31 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const timer = setInterval(doFetch, linearPollingIntervalMs);
     return () => clearInterval(timer);
   }, [repositories, linearEnabled, linearPollingIntervalMs, refreshLinearInfo, refresh]);
+
+  // Terminal-open polling: check which worktrees have open terminals
+  useEffect(() => {
+    if (repositories.length === 0) return;
+
+    const checkTerminals = () => {
+      const newMap = new Map<string, boolean>();
+      for (const repo of reposRef.current) {
+        const dbWorktrees = getWorktrees(repo.id);
+        for (const wt of dbWorktrees) {
+          newMap.set(wt.path, isTerminalOpenAt(wt.path));
+        }
+      }
+      const changed = newMap.size !== terminalOpenRef.current.size ||
+        [...newMap].some(([k, v]) => terminalOpenRef.current.get(k) !== v);
+      if (changed) {
+        terminalOpenRef.current = newMap;
+        refresh(false);
+      }
+    };
+
+    checkTerminals();
+    const timer = setInterval(checkTerminals, pollingIntervalMs * 2);
+    return () => clearInterval(timer);
+  }, [repositories, pollingIntervalMs, refresh]);
 
   // Exposed refresh always forces integrations fetch
   const forceRefresh = useCallback(() => refresh(true), [refresh]);
