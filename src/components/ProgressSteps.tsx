@@ -12,9 +12,10 @@ interface ProgressStepsProps {
   subtitle: string;
   steps: StepInfo[];
   error?: string | null;
+  prompt?: React.ReactNode;
 }
 
-export function ProgressSteps({ title, subtitle, steps, error }: ProgressStepsProps) {
+export function ProgressSteps({ title, subtitle, steps, error, prompt }: ProgressStepsProps) {
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1}>
       <Text bold color="cyan">
@@ -42,6 +43,12 @@ export function ProgressSteps({ title, subtitle, steps, error }: ProgressStepsPr
       {error && (
         <Box marginTop={1}>
           <Text color="red">Error: {error}</Text>
+        </Box>
+      )}
+
+      {prompt && (
+        <Box marginTop={1} flexDirection="column">
+          {prompt}
         </Box>
       )}
     </Box>
