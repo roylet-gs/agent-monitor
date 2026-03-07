@@ -78,7 +78,7 @@ vi.mock("../../src/lib/scripts.js", () => ({
 
 const ESCAPE = "\u001B";
 
-function waitForFrame(ms = 50): Promise<void> {
+function waitForFrame(ms = 100): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
