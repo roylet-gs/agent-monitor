@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import {
   spawnPty,
   destroyPty,
-  appendToBuffer,
+  writeToTerminal,
+  getScreenLines,
   type PtyInstance,
 } from "../lib/pty-manager.js";
 import { log } from "../lib/logger.js";
@@ -24,6 +25,7 @@ interface UseTerminalPanesReturn {
   addPane: (cwd: string, worktreeId: string, title: string, role?: string, roleContent?: string) => void;
   removePane: (id: string) => void;
   focusPane: (id: string) => void;
+  focusPaneByIndex: (index: number) => void;
   focusNext: () => void;
   focusPrev: () => void;
   getFocusedPane: () => PaneState | undefined;
@@ -83,10 +85,10 @@ export function useTerminalPanes(cols: number, rows: number): UseTerminalPanesRe
 
       // Subscribe to PTY output
       instance.pty.onData((data: string) => {
-        appendToBuffer(instance, data);
+        writeToTerminal(instance, data);
         const pane = panesRef.current.find((p) => p.id === instance.id);
         if (pane) {
-          pane.lines = [...instance.buffer];
+          pane.lines = getScreenLines(instance);
           scheduleUpdate();
         }
       });
@@ -132,6 +134,15 @@ export function useTerminalPanes(cols: number, rows: number): UseTerminalPanesRe
       p.focused = p.id === id;
     }
     setPanes([...panesRef.current]);
+  }, []);
+
+  const focusPaneByIndex = useCallback((index: number) => {
+    if (index >= 0 && index < panesRef.current.length) {
+      for (let i = 0; i < panesRef.current.length; i++) {
+        panesRef.current[i].focused = i === index;
+      }
+      setPanes([...panesRef.current]);
+    }
   }, []);
 
   const focusNext = useCallback(() => {
@@ -180,6 +191,7 @@ export function useTerminalPanes(cols: number, rows: number): UseTerminalPanesRe
     addPane,
     removePane,
     focusPane,
+    focusPaneByIndex,
     focusNext,
     focusPrev,
     getFocusedPane,

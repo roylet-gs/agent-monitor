@@ -10,14 +10,17 @@ export function TerminalActionBar({ commandMode, showHelp }: TerminalActionBarPr
   if (showHelp) {
     return (
       <Box flexDirection="column" borderStyle="single" borderColor="cyan" paddingX={1}>
-        <Text bold color="cyan">Terminal Commands (after Ctrl+A)</Text>
-        <Text>  <Text color="yellow">c</Text>  Create new pane</Text>
-        <Text>  <Text color="yellow">x</Text>  Close focused pane</Text>
-        <Text>  <Text color="yellow">h/l</Text>  Focus prev/next pane</Text>
-        <Text>  <Text color="yellow">d</Text>  Detach (return to dashboard)</Text>
-        <Text>  <Text color="yellow">z</Text>  Zoom/fullscreen toggle</Text>
-        <Text>  <Text color="yellow">?</Text>  Toggle this help</Text>
-        <Text dimColor>  Press any key to dismiss</Text>
+        <Text bold color="cyan">Terminal Commands (press Esc to enter command mode)</Text>
+        <Text>  <Text color="yellow">C</Text>         Create new pane</Text>
+        <Text>  <Text color="yellow">W</Text>         Close focused pane</Text>
+        <Text>  <Text color="yellow">H / Left</Text>  Focus prev pane</Text>
+        <Text>  <Text color="yellow">L / Right</Text> Focus next pane</Text>
+        <Text>  <Text color="yellow">1-4</Text>       Focus pane by number</Text>
+        <Text>  <Text color="yellow">D</Text>         Detach (back to dashboard)</Text>
+        <Text>  <Text color="yellow">Z</Text>         Zoom/fullscreen toggle</Text>
+        <Text>  <Text color="yellow">?</Text>         Toggle this help</Text>
+        <Text>  <Text color="yellow">Esc</Text>       Detach (back to dashboard)</Text>
+        <Text dimColor>  Mouse: click a pane to focus it</Text>
       </Box>
     );
   }
@@ -26,17 +29,19 @@ export function TerminalActionBar({ commandMode, showHelp }: TerminalActionBarPr
     <Box>
       {commandMode ? (
         <Text>
-          <Text color="cyan" bold> CMD </Text>{" "}
-          <Text color="yellow">[c]</Text>reate{" "}
-          <Text color="yellow">[x]</Text>close{" "}
-          <Text color="yellow">[h/l]</Text>focus{" "}
-          <Text color="yellow">[d]</Text>etach{" "}
-          <Text color="yellow">[z]</Text>oom{" "}
-          <Text color="yellow">[?]</Text>help
+          <Text color="cyan" bold> [CMD] </Text>{" "}
+          <Text color="yellow">[C]</Text>reate{" "}
+          <Text color="yellow">[W]</Text>close{" "}
+          <Text color="yellow">[H/L]</Text>focus{" "}
+          <Text color="yellow">[1-4]</Text>pane{" "}
+          <Text color="yellow">[D]</Text>etach{" "}
+          <Text color="yellow">[Z]</Text>oom{" "}
+          <Text color="yellow">[?]</Text>help{" "}
+          <Text color="yellow">[Esc]</Text>detach
         </Text>
       ) : (
-        <Text dimColor>
-          {" "}^A: command mode | Type to interact with agent
+        <Text>
+          <Text dimColor> Esc: command mode | Click pane to focus</Text>
         </Text>
       )}
     </Box>

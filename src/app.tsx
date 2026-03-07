@@ -751,6 +751,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           }}
           onFocusNext={terminalPanes.focusNext}
           onFocusPrev={terminalPanes.focusPrev}
+          onFocusPane={terminalPanes.focusPane}
+          onFocusPaneByIndex={terminalPanes.focusPaneByIndex}
           onDetach={() => setMode("dashboard")}
           getFocusedPane={terminalPanes.getFocusedPane}
         />

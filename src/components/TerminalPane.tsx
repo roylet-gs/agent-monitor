@@ -4,32 +4,24 @@ import type { PaneState } from "../hooks/useTerminalPanes.js";
 
 interface TerminalPaneProps {
   pane: PaneState;
-  width: number;
   height: number;
 }
 
-export function TerminalPane({ pane, width, height }: TerminalPaneProps) {
+export function TerminalPane({ pane, height }: TerminalPaneProps) {
   const borderColor = pane.focused ? "cyan" : "gray";
-  const contentHeight = Math.max(height - 2, 1); // account for borders
 
-  // Get the last N lines that fit in the pane
-  const visibleLines = pane.lines.slice(-contentHeight);
+  // Lines are a full screen snapshot from xterm-headless (rows match pane height)
+  const visibleLines = pane.lines;
 
   // Build title
   let title = pane.title;
   if (pane.role) title += ` [${pane.role}]`;
   if (pane.exited) title += " [exited]";
 
-  // Truncate title to fit width
-  const maxTitleLen = Math.max(width - 4, 5);
-  if (title.length > maxTitleLen) {
-    title = title.slice(0, maxTitleLen - 1) + "\u2026";
-  }
-
   return (
     <Box
       flexDirection="column"
-      width={width}
+      flexGrow={1}
       height={height}
       borderStyle="single"
       borderColor={borderColor}

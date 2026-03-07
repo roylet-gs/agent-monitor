@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { Box, useStdout } from "ink";
 import { TerminalPane } from "./TerminalPane.js";
 import { TerminalTabBar } from "./TerminalTabBar.js";
@@ -13,6 +13,8 @@ interface TerminalViewProps {
   onRemovePane: (id: string) => void;
   onFocusNext: () => void;
   onFocusPrev: () => void;
+  onFocusPane: (id: string) => void;
+  onFocusPaneByIndex: (index: number) => void;
   onDetach: () => void;
   getFocusedPane: () => PaneState | undefined;
 }
@@ -23,6 +25,8 @@ export function TerminalView({
   onRemovePane,
   onFocusNext,
   onFocusPrev,
+  onFocusPane,
+  onFocusPaneByIndex,
   onDetach,
   getFocusedPane,
 }: TerminalViewProps) {
@@ -52,13 +56,32 @@ export function TerminalView({
     setShowHelp((h) => !h);
   }, []);
 
+  // Calculate layout dimensions
+  const actionBarHeight = showHelp ? 13 : 1;
+  const tabBarHeight = 1;
+  const paneAreaHeight = totalRows - tabBarHeight - actionBarHeight;
+
+  const visiblePanes = zoomed
+    ? panes.filter((p) => p.focused)
+    : panes;
+
+  const visiblePaneIds = useMemo(
+    () => visiblePanes.map((p) => p.id),
+    [visiblePanes],
+  );
+
   const { mode: inputMode } = useTerminalInput({
     active: !showRoleSelector,
     panes,
+    visiblePaneIds,
+    totalCols,
+    tabBarHeight,
     onNewPane: handleNewPane,
     onClosePane: handleClosePane,
     onFocusNext,
     onFocusPrev,
+    onFocusPane,
+    onFocusPaneByIndex,
     onDetach,
     onToggleZoom: handleToggleZoom,
     onToggleHelp: handleToggleHelp,
@@ -78,29 +101,14 @@ export function TerminalView({
     );
   }
 
-  // Calculate pane dimensions
-  const actionBarHeight = showHelp ? 9 : 1;
-  const tabBarHeight = 1;
-  const paneAreaHeight = totalRows - tabBarHeight - actionBarHeight;
-
-  // In zoomed mode, only show focused pane
-  const visiblePanes = zoomed
-    ? panes.filter((p) => p.focused)
-    : panes;
-
-  const paneWidth = visiblePanes.length > 0
-    ? Math.floor(totalCols / visiblePanes.length)
-    : totalCols;
-
   return (
     <Box flexDirection="column" height={totalRows}>
       <TerminalTabBar panes={panes} />
-      <Box flexDirection="row" height={paneAreaHeight}>
+      <Box flexDirection="row" flexGrow={1}>
         {visiblePanes.map((pane) => (
           <TerminalPane
             key={pane.id}
             pane={pane}
-            width={paneWidth}
             height={paneAreaHeight}
           />
         ))}
