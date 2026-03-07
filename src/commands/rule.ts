@@ -2,7 +2,7 @@ import {
   loadRules,
   addRule,
   removeRule,
-  clearRules,
+  clearAllRules,
   applyRulesToClaudeSettings,
   removeAmPermissionsFromClaudeSettings,
 } from "../lib/rules.js";
@@ -82,7 +82,7 @@ export function ruleRemove(
 }
 
 export function ruleClear(opts: { json?: boolean }): void {
-  const result = clearRules();
+  const result = clearAllRules();
 
   if (opts.json) {
     outputJson(result);
