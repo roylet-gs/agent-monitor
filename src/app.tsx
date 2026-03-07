@@ -381,6 +381,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     // Find the repo for this worktree
     const wtRepo = repositories.find((r) => r.id === wt.repo_id) ?? activeRepo;
 
+    // Safety guard: never allow deleting the main working tree
+    if (wt.path === wtRepo.path) {
+      setError("Cannot delete the main working tree");
+      return;
+    }
+
     const steps: StepInfo[] = [
       { label: "Removing worktree", status: "active" },
       ...(options.deleteLocalBranch
