@@ -1,7 +1,10 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { randomUUID } from "crypto";
 import { RULES_PATH, AM_MANAGED_PERMISSIONS_PATH, APP_DIR } from "./paths.js";
 import { readGlobalSettings, writeGlobalSettings } from "./hooks-installer.js";
+import { getRepositories, getWorktrees } from "./db.js";
 import { log } from "./logger.js";
 import type { Rule } from "./types.js";
 
@@ -62,16 +65,6 @@ export function removeRule(idOrTool: string): Rule | null {
   saveRules(rules);
   log("info", "rules", `Removed rule: ${removed!.tool} (${removed!.id.slice(0, 8)})`);
   return removed!;
-}
-
-export function clearRules(): { removed: number } {
-  const rules = loadRules();
-  const removed = rules.length;
-  if (removed > 0) {
-    saveRules([]);
-    log("info", "rules", `Cleared all ${removed} rule(s)`);
-  }
-  return { removed };
 }
 
 // --- Claude permission format conversion ---
@@ -186,4 +179,134 @@ export function removeAmPermissionsFromClaudeSettings(): void {
   saveAmManagedPermissions([]);
 
   log("info", "rules", `Removed ${previousManaged.length} am-managed permission(s) from Claude settings`);
+}
+
+// --- Learning ---
+
+export function clearLearnedRules(): { removed: number } {
+  const rules = loadRules();
+  const manual = rules.filter((r) => r.source !== "learned");
+  const removed = rules.length - manual.length;
+  if (removed > 0) {
+    saveRules(manual);
+    log("info", "rules", `Cleared ${removed} learned rule(s)`);
+  }
+  return { removed };
+}
+
+export function clearAllRules(): { removed: number } {
+  const rules = loadRules();
+  const removed = rules.length;
+  if (removed > 0) {
+    saveRules([]);
+    log("info", "rules", "Cleared all " + removed + " rule(s)");
+  }
+  return { removed };
+}
+
+export function syncRulesFromWorktrees(worktreePaths: string[]): { added: number } {
+  const existingRules = loadRules();
+  let added = 0;
+
+  for (const wtPath of worktreePaths) {
+    const settingsPath = join(wtPath, ".claude", "settings.local.json");
+    if (!existsSync(settingsPath)) continue;
+
+    try {
+      const raw = readFileSync(settingsPath, "utf-8");
+      const parsed = JSON.parse(raw);
+      const allowEntries: string[] = parsed?.permissions?.allow ?? [];
+
+      for (const entry of allowEntries) {
+        const { tool, input_pattern } = parseClaudePermissionRule(entry);
+
+        // Deduplicate: skip if same tool + input_pattern exists
+        const exists = existingRules.some(
+          (r) => r.tool === tool && (r.input_pattern ?? "") === (input_pattern ?? "")
+        );
+        if (exists) continue;
+
+        const rule: Rule = {
+          id: randomUUID(),
+          tool,
+          ...(input_pattern ? { input_pattern } : {}),
+          decision: "allow",
+          source: "learned",
+          created_at: new Date().toISOString(),
+        };
+        existingRules.push(rule);
+        added++;
+        log("info", "rules", `Learned rule from ${wtPath}: ${tool}${input_pattern ? ` (${input_pattern})` : ""}`);
+      }
+    } catch (err) {
+      log("debug", "rules", `Failed to read ${settingsPath}: ${err}`);
+    }
+  }
+
+  if (added > 0) {
+    saveRules(existingRules);
+  }
+
+  return { added };
+}
+
+// --- Diff generation ---
+
+function formatRuleEntry(rule: Rule): string {
+  const toolPart = rule.input_pattern ? `${rule.tool}(${rule.input_pattern})` : rule.tool;
+  const pad = Math.max(1, 30 - toolPart.length);
+  return `${toolPart}${" ".repeat(pad)}[${rule.source}]`;
+}
+
+export function generateRulesDiffFiles(): { leftPath: string; rightPath: string } {
+  // Left side: aggregated worktree permissions
+  const permissionSet = new Set<string>();
+  const repos = getRepositories();
+  for (const repo of repos) {
+    const worktrees = getWorktrees(repo.id);
+    for (const wt of worktrees) {
+      const settingsPath = join(wt.path, ".claude", "settings.local.json");
+      if (!existsSync(settingsPath)) continue;
+      try {
+        const raw = readFileSync(settingsPath, "utf-8");
+        const parsed = JSON.parse(raw);
+        const allowEntries: string[] = parsed?.permissions?.allow ?? [];
+        for (const entry of allowEntries) permissionSet.add(entry);
+      } catch {
+        // Skip unreadable files
+      }
+    }
+  }
+
+  const sortedPermissions = [...permissionSet].sort();
+  const leftContent = [
+    "# Permissions from .claude/settings.local.json across tracked worktrees",
+    "# (What Claude Code already allows per-worktree)",
+    "",
+    ...sortedPermissions,
+    "",
+  ].join("\n");
+
+  // Right side: am rules
+  const rules = loadRules();
+  const sortedRules = [...rules].sort((a, b) => {
+    const aKey = a.input_pattern ? `${a.tool}(${a.input_pattern})` : a.tool;
+    const bKey = b.input_pattern ? `${b.tool}(${b.input_pattern})` : b.tool;
+    return aKey.localeCompare(bKey);
+  });
+  const rightContent = [
+    "# Auto-approval rules from ~/.agent-monitor/rules.json",
+    "# (What am will write to ~/.claude/settings.json permissions)",
+    "",
+    ...sortedRules.map(formatRuleEntry),
+    "",
+  ].join("\n");
+
+  const leftPath = join(tmpdir(), "am-worktree-permissions.txt");
+  const rightPath = join(tmpdir(), "am-rules.txt");
+  writeFileSync(leftPath, leftContent);
+  writeFileSync(rightPath, rightContent);
+
+  log("info", "rules", `Generated diff files: ${leftPath}, ${rightPath}`);
+  return { leftPath, rightPath };
 }

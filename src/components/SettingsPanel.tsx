@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
-import { loadRules, removeRule, clearRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings } from "../lib/rules.js";
+import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings } from "../lib/rules.js";
 import type { Rule } from "../lib/types.js";
 
 type SettingsField =
@@ -358,7 +358,7 @@ export function SettingsPanel({
     }
 
     if (activeField === "removeAllRules" && key.return) {
-      const result = clearRules();
+      const result = clearAllRules();
       if (result.removed === 0) {
         setClearRulesMsg("No rules to remove");
       } else {
