@@ -10,7 +10,8 @@ export async function syncWorktrees(repoId: string): Promise<void> {
     return;
   }
 
-  const gitWorktrees = await listWorktrees(repo.path);
+  // Filter out the main working tree — it's the repo itself and should never be managed as a worktree
+  const gitWorktrees = (await listWorktrees(repo.path)).filter(w => !w.isMain);
   const dbWorktrees = getWorktrees(repoId);
 
   // Build set of git worktree branches for quick lookup
