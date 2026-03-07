@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
 import { isEffectivelyOpen } from "../lib/agent-utils.js";
+import { PulsingDot } from "./PulsingDot.js";
 import type { WorktreeWithStatus, WorktreeGroup } from "../lib/types.js";
 
 interface WorktreeListProps {
@@ -96,7 +97,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               <Box key={wt.id} flexDirection="column" marginBottom={!compactView && wt.custom_name && i < groupWorktrees.length - 1 ? 1 : 0}>
                 <Box gap={1}>
                   <Text>{isSelected ? "▸" : " "}</Text>
-                  {open ? <Text color={statusColor(wt.agent_status?.status)}>●</Text> : <Text dimColor>○</Text>}
+                  {open ? (wt.agent_status?.status === "executing" || wt.agent_status?.status === "planning" ? <PulsingDot color={statusColor(wt.agent_status.status)} /> : <Text color={statusColor(wt.agent_status?.status)}>●</Text>) : <Text dimColor>○</Text>}
                   <Text
                     bold={isSelected}
                     color={isSelected ? "cyan" : undefined}

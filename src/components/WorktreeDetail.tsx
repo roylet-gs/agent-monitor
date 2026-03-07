@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
 import { isEffectivelyOpen } from "../lib/agent-utils.js";
+import { PulsingDot } from "./PulsingDot.js";
 import type { WorktreeWithStatus } from "../lib/types.js";
 
 interface WorktreeDetailProps {
@@ -83,8 +84,8 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
           <Text bold>Claude </Text>
           {open ? (
             <>
-              <Text color={statusColor(status)}>● </Text>
-              <Text>{statusLabel(status)}</Text>
+              {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : <Text color={statusColor(status)}>●</Text>}
+              <Text> {statusLabel(status)}</Text>
             </>
           ) : (
             <Text dimColor>○ No active session</Text>
