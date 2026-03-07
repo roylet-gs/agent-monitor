@@ -10,7 +10,7 @@ interface HookEntry {
 }
 
 interface HookMatcher {
-  matcher: string;
+  matcher?: string;
   hooks: HookEntry[];
 }
 
@@ -22,7 +22,6 @@ const HOOK_MARKER = "am hook-event";
 
 function buildHookEntry(event: string): HookMatcher {
   return {
-    matcher: "",
     hooks: [
       {
         type: "command",
