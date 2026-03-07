@@ -31,6 +31,7 @@ import {
   getRepoName,
   fetchBranch,
   checkoutBranch,
+  ensureBranchForOpen,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
@@ -210,6 +211,11 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     if (!wt) return;
 
     try {
+      const result = await ensureBranchForOpen(wt.path, wt.branch, wt.is_main === 1);
+      if (!result.ready) {
+        setError(result.error ?? "Cannot open worktree");
+        return;
+      }
       openInIde(wt.path, settings.ide);
     } catch (err) {
       setError(`${err}`);
