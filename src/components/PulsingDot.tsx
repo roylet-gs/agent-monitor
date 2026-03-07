@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Text } from "ink";
 
 const BASE_RGB: Record<string, [number, number, number]> = {
-  green: [0xB4, 0xBD, 0x68],
+  green: [0x8B, 0xBD, 0x58],
   cyan: [0, 255, 255],
   yellow: [255, 255, 0],
   red: [255, 0, 0],
