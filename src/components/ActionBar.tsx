@@ -37,6 +37,7 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
           <Text color="yellow">[n]</Text><Text dimColor>ew </Text>
           <Text color="yellow">[d]</Text><Text dimColor>elete </Text>
           <Text color="yellow">[t]</Text><Text dimColor>erminal </Text>
+          <Text color="yellow">[c]</Text><Text dimColor>laude </Text>
           {ghPrStatus && <><Text color="yellow">[g]</Text><Text dimColor>ithub </Text></>}
           {linearEnabled && <><Text color="yellow">[l]</Text><Text dimColor>inear </Text></>}
           <Text color="yellow">[r]</Text><Text dimColor>efresh </Text>

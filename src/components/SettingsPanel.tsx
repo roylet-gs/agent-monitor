@@ -93,7 +93,7 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   factoryReset: "Delete all data including repositories, worktrees, and settings",
 };
 
-const IDE_OPTIONS: Settings["ide"][] = ["cursor", "vscode", "terminal", "internal"];
+const IDE_OPTIONS: Settings["ide"][] = ["cursor", "vscode", "terminal", "managed"];
 const LOG_LEVELS: Settings["logLevel"][] = ["debug", "info", "warn", "error"];
 
 interface SettingsPanelProps {

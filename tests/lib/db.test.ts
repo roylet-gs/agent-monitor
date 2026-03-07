@@ -215,6 +215,114 @@ describe("db", () => {
     });
   });
 
+  describe("agent_sessions", () => {
+    it("creates a session and retrieves it", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      const session = db.createAgentSession(wt.id, "architect");
+      expect(session.id).toBeDefined();
+      expect(session.worktree_id).toBe(wt.id);
+      expect(session.role_name).toBe("architect");
+      expect(session.status).toBe("idle");
+      expect(session.is_open).toBe(1);
+
+      const sessions = db.getAgentSessions(wt.id);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].id).toBe(session.id);
+    });
+
+    it("upsert matches by worktree_id + session_id", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      const session = db.createAgentSession(wt.id, "coder");
+
+      // First upsert claims the placeholder (session_id NULL)
+      const id1 = db.upsertAgentSession(wt.id, "sess-123", "executing", "working...");
+      expect(id1).toBe(session.id);
+
+      // Second upsert matches by session_id
+      const id2 = db.upsertAgentSession(wt.id, "sess-123", "done", "finished");
+      expect(id2).toBe(session.id);
+
+      const sessions = db.getAgentSessions(wt.id);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].status).toBe("done");
+      expect(sessions[0].session_id).toBe("sess-123");
+      expect(sessions[0].last_response).toBe("finished");
+    });
+
+    it("upsert creates new row for unknown session_id", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+
+      // No placeholder exists — should insert new row
+      const id = db.upsertAgentSession(wt.id, "external-sess", "executing", "from outside");
+      expect(id).toBeDefined();
+
+      const sessions = db.getAgentSessions(wt.id);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].session_id).toBe("external-sess");
+    });
+
+    it("upsert with null session_id updates most recent session", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      db.createAgentSession(wt.id, "first");
+
+      const id = db.upsertAgentSession(wt.id, null, "executing", "busy");
+      expect(id).toBeDefined();
+
+      const sessions = db.getAgentSessions(wt.id);
+      expect(sessions[0].status).toBe("executing");
+    });
+
+    it("upsert with null session_id returns null when no sessions exist", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+
+      const id = db.upsertAgentSession(wt.id, null, "executing");
+      expect(id).toBeNull();
+    });
+
+    it("removes a session", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      const session = db.createAgentSession(wt.id);
+      db.removeAgentSession(session.id);
+      expect(db.getAgentSessions(wt.id)).toHaveLength(0);
+    });
+
+    it("updates PID", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      const session = db.createAgentSession(wt.id);
+      db.updateAgentSessionPid(session.id, 12345);
+      const sessions = db.getAgentSessions(wt.id);
+      expect(sessions[0].pid).toBe(12345);
+    });
+
+    it("clearStalePids nulls out all PIDs", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      const session = db.createAgentSession(wt.id);
+      db.updateAgentSessionPid(session.id, 99999);
+      db.clearStalePids();
+      const sessions = db.getAgentSessions(wt.id);
+      expect(sessions[0].pid).toBeNull();
+    });
+
+    it("cascades on worktree delete", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      db.createAgentSession(wt.id, "role1");
+      db.createAgentSession(wt.id, "role2");
+      expect(db.getAgentSessions(wt.id)).toHaveLength(2);
+
+      db.removeWorktree(wt.id);
+      expect(db.getAgentSessions(wt.id)).toHaveLength(0);
+    });
+  });
+
   describe("cascades", () => {
     it("removing repo cascades to worktrees", () => {
       const repo = db.addRepository("/tmp/repo", "repo");

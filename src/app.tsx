@@ -21,6 +21,7 @@ import {
   removeWorktree as removeWorktreeDb,
   updateWorktreeCustomName,
   resetAll,
+  clearStalePids,
 } from "./lib/db.js";
 import {
   createWorktree as gitCreateWorktree,
@@ -36,16 +37,15 @@ import {
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde, openTerminal, openClaudeInTerminal } from "./lib/ide-launcher.js";
-import { useTerminalPanes } from "./hooks/useTerminalPanes.js";
-import { TerminalView } from "./components/TerminalView.js";
-import { getRoleContent } from "./lib/roles.js";
+import { RoleSelector } from "./components/RoleSelector.js";
+import { ManagedView } from "./components/ManagedView.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
 import { SetupWizard } from "./components/SetupWizard.js";
-import type { AppMode, Repository, Settings } from "./lib/types.js";
+import type { AppMode, Repository, Settings, WorktreeWithStatus } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
@@ -82,13 +82,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [currentVersion] = useState(() => getVersion());
-  // Terminal view: track the worktree we're opening in internal mode
-  const [terminalWorktreeId, setTerminalWorktreeId] = useState<string | null>(null);
-  const terminalPanes = useTerminalPanes(stdout?.columns ?? 80, stdout?.rows ?? 24);
+  // Managed mode: stash selected worktree while showing role selector
+  const [pendingManagedOpen, setPendingManagedOpen] = useState<{ path: string; continueSession: boolean } | null>(null);
+  // Managed view: persistent per-worktree agent orchestration
+  const [managedWorktree, setManagedWorktree] = useState<WorktreeWithStatus | null>(null);
+  // Bump this counter to trigger managed view refresh from pub/sub
+  const [managedRefreshTick, setManagedRefreshTick] = useState(0);
 
   // Initialize DB and check for repos
   useEffect(() => {
     getDb();
+    clearStalePids();
     const repos = getRepositories();
     setRepositories(repos);
 
@@ -148,6 +152,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     if (msg.type === "agent-status-update") {
       // Light refresh only: re-read DB + git status without triggering GitHub/Linear API calls
       lightRefreshRef.current();
+      // Bump tick to trigger ManagedView refresh if active
+      setManagedRefreshTick((t) => t + 1);
     } else if (msg.type === "git-activity") {
       // Git push or PR creation detected — force full refresh (with integrations) after a short
       // delay to give GitHub time to process the push/PR.
@@ -216,32 +222,25 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
-    if (settings.ide === "internal") {
-      // Switch to terminal view and spawn initial pane
-      setTerminalWorktreeId(wt.id);
-      // Only add a pane if there isn't already one for this worktree
-      const existing = terminalPanes.panes.find((p) => p.worktreeId === wt.id);
-      if (!existing) {
-        const title = wt.custom_name ?? wt.branch;
-        terminalPanes.addPane(wt.path, wt.id, title);
-      } else {
-        terminalPanes.focusPane(existing.id);
-      }
-      setMode("terminal-view");
-      return;
-    }
-
     try {
       const result = await ensureBranchForOpen(wt.path, wt.branch, wt.is_main === 1);
       if (!result.ready) {
         setError(result.error ?? "Cannot open worktree");
         return;
       }
+
+      if (settings.ide === "managed") {
+        // Enter persistent managed view for this worktree
+        setManagedWorktree(wt);
+        setMode("managed-view");
+        return;
+      }
+
       openInIde(wt.path, settings.ide);
     } catch (err) {
       setError(`${err}`);
     }
-  }, [flatWorktrees, selectedIndex, settings, terminalPanes]);
+  }, [flatWorktrees, selectedIndex, settings]);
 
   // Handle open terminal at worktree path
   const handleOpenTerminal = useCallback(() => {
@@ -261,7 +260,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
     const continueSession = !!wt.agent_status?.session_id;
     try {
-      openClaudeInTerminal(wt.path, continueSession);
+      openClaudeInTerminal(wt.path, { continueSession });
     } catch (err) {
       setError(`${err}`);
     }
@@ -911,27 +910,36 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         />
       )}
 
-      {mode === "terminal-view" && (
-        <TerminalView
-          panes={terminalPanes.panes}
-          onAddPane={(role, roleContent) => {
-            const wt = flatWorktrees[selectedIndex];
-            if (!wt) return;
-            const title = wt.custom_name ?? wt.branch;
-            terminalPanes.addPane(wt.path, wt.id, title, role ?? undefined, roleContent ?? undefined);
+      {mode === "managed-view" && managedWorktree && (
+        <ManagedView
+          worktree={managedWorktree}
+          onBack={() => {
+            setManagedWorktree(null);
+            setMode("dashboard");
           }}
-          onRemovePane={(id) => {
-            terminalPanes.removePane(id);
-            if (terminalPanes.panes.length <= 1) {
-              setMode("dashboard");
+          onError={setError}
+          refreshTick={managedRefreshTick}
+        />
+      )}
+
+      {mode === "role-select" && pendingManagedOpen && (
+        <RoleSelector
+          onSelect={(_roleName, roleContent) => {
+            try {
+              openClaudeInTerminal(pendingManagedOpen.path, {
+                continueSession: pendingManagedOpen.continueSession,
+                prompt: roleContent ?? undefined,
+              });
+            } catch (err) {
+              setError(`${err}`);
             }
+            setPendingManagedOpen(null);
+            setMode("dashboard");
           }}
-          onFocusNext={terminalPanes.focusNext}
-          onFocusPrev={terminalPanes.focusPrev}
-          onFocusPane={terminalPanes.focusPane}
-          onFocusPaneByIndex={terminalPanes.focusPaneByIndex}
-          onDetach={() => setMode("dashboard")}
-          getFocusedPane={terminalPanes.getFocusedPane}
+          onCancel={() => {
+            setPendingManagedOpen(null);
+            setMode("dashboard");
+          }}
         />
       )}
 

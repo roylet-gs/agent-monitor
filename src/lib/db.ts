@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { dirname } from "path";
 import { APP_DIR, DB_PATH } from "./paths.js";
 import { log } from "./logger.js";
-import type { Repository, Worktree, AgentStatus, AgentStatusType } from "./types.js";
+import type { Repository, Worktree, AgentStatus, AgentStatusType, AgentSession } from "./types.js";
 import { randomUUID } from "crypto";
 
 let db: Database.Database | null = null;
@@ -102,6 +102,30 @@ function initSchema(db: Database.Database): void {
   } catch {
     db.exec("ALTER TABLE worktrees ADD COLUMN is_main INTEGER NOT NULL DEFAULT 0");
     log("info", "db", "Migrated worktrees: added is_main column");
+  }
+
+  // Migration: create agent_sessions table
+  try {
+    db.prepare("SELECT id FROM agent_sessions LIMIT 0").run();
+  } catch {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+        id TEXT PRIMARY KEY,
+        worktree_id TEXT NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+        session_id TEXT,
+        role_name TEXT,
+        status TEXT NOT NULL DEFAULT 'idle',
+        last_response TEXT,
+        transcript_summary TEXT,
+        pid INTEGER,
+        is_open INTEGER NOT NULL DEFAULT 0,
+        launched_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_worktree ON agent_sessions(worktree_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_session ON agent_sessions(worktree_id, session_id);
+    `);
+    log("info", "db", "Created agent_sessions table");
   }
 }
 
@@ -265,6 +289,121 @@ export function getAllAgentStatuses(): Map<string, AgentStatus> {
     map.set(row.worktree_id, row);
   }
   return map;
+}
+
+// --- Agent Sessions ---
+
+export function createAgentSession(worktreeId: string, roleName?: string | null): AgentSession {
+  const db = getDb();
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO agent_sessions (id, worktree_id, role_name, status, is_open, launched_at, updated_at)
+     VALUES (?, ?, ?, 'idle', 1, datetime('now'), datetime('now'))`
+  ).run(id, worktreeId, roleName ?? null);
+  return db.prepare("SELECT * FROM agent_sessions WHERE id = ?").get(id) as AgentSession;
+}
+
+export function getAgentSessions(worktreeId: string): AgentSession[] {
+  return getDb()
+    .prepare("SELECT * FROM agent_sessions WHERE worktree_id = ? ORDER BY launched_at DESC")
+    .all(worktreeId) as AgentSession[];
+}
+
+export function upsertAgentSession(
+  worktreeId: string,
+  sessionId: string | null,
+  status: AgentStatusType,
+  lastResponse?: string | null,
+  transcriptSummary?: string | null,
+  isOpen?: boolean | null
+): string | null {
+  const db = getDb();
+
+  // 1. Try matching by (worktree_id, session_id) if session_id is present
+  if (sessionId) {
+    const exact = db.prepare(
+      "SELECT id FROM agent_sessions WHERE worktree_id = ? AND session_id = ?"
+    ).get(worktreeId, sessionId) as { id: string } | undefined;
+
+    if (exact) {
+      db.prepare(
+        `UPDATE agent_sessions SET
+          status = ?,
+          last_response = COALESCE(?, last_response),
+          transcript_summary = COALESCE(?, transcript_summary),
+          is_open = COALESCE(?, is_open),
+          updated_at = datetime('now')
+        WHERE id = ?`
+      ).run(status, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null, exact.id);
+      return exact.id;
+    }
+
+    // 2. Try claiming a NULL-session_id placeholder for this worktree
+    const placeholder = db.prepare(
+      "SELECT id FROM agent_sessions WHERE worktree_id = ? AND session_id IS NULL ORDER BY launched_at DESC LIMIT 1"
+    ).get(worktreeId) as { id: string } | undefined;
+
+    if (placeholder) {
+      db.prepare(
+        `UPDATE agent_sessions SET
+          session_id = ?,
+          status = ?,
+          last_response = COALESCE(?, last_response),
+          transcript_summary = COALESCE(?, transcript_summary),
+          is_open = COALESCE(?, is_open),
+          updated_at = datetime('now')
+        WHERE id = ?`
+      ).run(sessionId, status, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null, placeholder.id);
+      return placeholder.id;
+    }
+
+    // 3. Insert new row (session started outside am)
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO agent_sessions (id, worktree_id, session_id, status, last_response, transcript_summary, is_open, launched_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 0), datetime('now'), datetime('now'))`
+    ).run(id, worktreeId, sessionId, status, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null);
+    return id;
+  }
+
+  // session_id is NULL: update the most recent session for this worktree
+  const recent = db.prepare(
+    "SELECT id FROM agent_sessions WHERE worktree_id = ? ORDER BY launched_at DESC LIMIT 1"
+  ).get(worktreeId) as { id: string } | undefined;
+
+  if (recent) {
+    db.prepare(
+      `UPDATE agent_sessions SET
+        status = ?,
+        last_response = COALESCE(?, last_response),
+        transcript_summary = COALESCE(?, transcript_summary),
+        is_open = COALESCE(?, is_open),
+        updated_at = datetime('now')
+      WHERE id = ?`
+    ).run(status, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null, recent.id);
+    return recent.id;
+  }
+
+  return null;
+}
+
+export function updateAgentSessionPid(id: string, pid: number | null): void {
+  getDb()
+    .prepare("UPDATE agent_sessions SET pid = ? WHERE id = ?")
+    .run(pid, id);
+}
+
+export function removeAgentSession(id: string): void {
+  getDb().prepare("DELETE FROM agent_sessions WHERE id = ?").run(id);
+}
+
+export function clearStalePids(): void {
+  const result = getDb()
+    .prepare("UPDATE agent_sessions SET pid = NULL WHERE pid IS NOT NULL")
+    .run();
+  if (result.changes > 0) {
+    log("info", "db", `Cleared ${result.changes} stale PID(s) from agent_sessions`);
+  }
 }
 
 export function closeDb(): void {

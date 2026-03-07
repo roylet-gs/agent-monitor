@@ -9,6 +9,7 @@ export interface AgentStatusUpdateMessage {
   transcriptSummary: string | null;
   isOpen: boolean;
   updatedAt: string;
+  agentSessionId?: string;
 }
 
 export interface GitActivityMessage {

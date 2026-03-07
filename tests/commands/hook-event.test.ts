@@ -162,6 +162,46 @@ describe("mapEventToStatus", () => {
   });
 });
 
+describe("extractLastResponse", () => {
+  let extractLastResponse: typeof import("../../src/commands/hook-event.js").extractLastResponse;
+
+  beforeEach(async () => {
+    ({ extractLastResponse } = await import("../../src/commands/hook-event.js"));
+  });
+
+  it("returns last_assistant_message from Stop event", () => {
+    expect(extractLastResponse({ event: "Stop", last_assistant_message: "Done!" })).toBe("Done!");
+  });
+
+  it("returns message from Notification event", () => {
+    expect(extractLastResponse({ event: "Notification", message: "Permission needed" })).toBe("Permission needed");
+  });
+
+  it("returns bash command for Bash tool", () => {
+    expect(extractLastResponse({ event: "PostToolUse", tool_name: "Bash", tool_input: { command: "git status" } })).toBe("$ git status");
+  });
+
+  it("returns file path for Read tool", () => {
+    expect(extractLastResponse({ event: "PostToolUse", tool_name: "Read", tool_input: { file_path: "/src/app.ts" } })).toBe("Read: /src/app.ts");
+  });
+
+  it("returns file path for Edit tool", () => {
+    expect(extractLastResponse({ event: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "/src/lib.ts" } })).toBe("Edit: /src/lib.ts");
+  });
+
+  it("returns pattern for Grep tool", () => {
+    expect(extractLastResponse({ event: "PostToolUse", tool_name: "Grep", tool_input: { pattern: "TODO" } })).toBe("Grep: TODO");
+  });
+
+  it("returns generic tool label for other tools", () => {
+    expect(extractLastResponse({ event: "PostToolUse", tool_name: "Glob" })).toBe("Tool: Glob");
+  });
+
+  it("returns null for events with no tool or message", () => {
+    expect(extractLastResponse({ event: "SessionStart" })).toBe(null);
+  });
+});
+
 describe("detectGitActivity", () => {
   let detectGitActivity: typeof import("../../src/commands/hook-event.js").detectGitActivity;
 

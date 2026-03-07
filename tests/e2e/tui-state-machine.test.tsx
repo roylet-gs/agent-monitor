@@ -23,6 +23,8 @@ vi.mock("../../src/lib/git.js", () => ({
   getRepoName: vi.fn((p: string) => p.split("/").pop()),
   listWorktrees: vi.fn().mockResolvedValue([]),
   fetchBranch: vi.fn().mockResolvedValue(undefined),
+  checkoutBranch: vi.fn().mockResolvedValue(undefined),
+  ensureBranchForOpen: vi.fn().mockResolvedValue({ ready: true }),
 }));
 
 vi.mock("../../src/lib/github.js", () => ({
@@ -46,6 +48,10 @@ vi.mock("../../src/lib/hooks-installer.js", () => ({
 
 vi.mock("../../src/lib/ide-launcher.js", () => ({
   openInIde: vi.fn(),
+  openTerminal: vi.fn(),
+  openClaudeInTerminal: vi.fn(),
+  launchClaudeSession: vi.fn().mockResolvedValue(null),
+  isTerminalOpenAt: vi.fn(() => false),
 }));
 
 vi.mock("../../src/lib/sync.js", () => ({

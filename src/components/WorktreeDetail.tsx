@@ -82,6 +82,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
         {/* Claude Agent Status — first section */}
         <Box>
           <Text bold>Claude </Text>
+          {worktree.terminal_open && <Text color="cyan">[T] </Text>}
           {open ? (
             <>
               {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : <Text color={statusColor(status)}>●</Text>}
