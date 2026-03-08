@@ -16,4 +16,7 @@ npx tsx src/cli.tsx repo add . 2>&1 || {
   echo "WARNING: repo add failed, TUI may have no data" >&2
 }
 
+# Write settings so TUI skips setup wizard (loadSettings merges with defaults)
+echo '{"setupCompleted":true}' > "$AM_DATA_DIR/settings.json"
+
 echo "Seeded with current repo. AM_DATA_DIR=$AM_DATA_DIR"
