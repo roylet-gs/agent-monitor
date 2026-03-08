@@ -7,6 +7,7 @@ import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
 import { DeleteConfirm, type DeleteOptions } from "./components/DeleteConfirm.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
+import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
@@ -78,6 +79,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   } | null>(null);
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
+  const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
   const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
@@ -363,12 +365,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
         log("info", "app", `Created worktree ${branchName}`);
 
-        // Step: Run startup script
+        // Step: Run startup script — prompt user first
         if (hasScript && onRunScript) {
-          updateStep(stepIdx, "active");
-          await new Promise((r) => setTimeout(r, 300));
-          onRunScript(getScriptPath(targetRepo.id), wtPath);
-          exit();
+          updateStep(stepIdx, "done");
+          setPendingScript({ scriptPath: getScriptPath(targetRepo.id), wtPath });
+          setCreateTargetRepo(null);
+          setMode("run-script-prompt");
           return;
         }
 
@@ -834,6 +836,20 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           onCancel={() => {
             setPendingBranch(null);
             setMode("new-worktree");
+          }}
+        />
+      )}
+
+      {mode === "run-script-prompt" && pendingScript && (
+        <RunScriptPrompt
+          scriptPath={pendingScript.scriptPath}
+          onRun={() => {
+            onRunScript?.(pendingScript.scriptPath, pendingScript.wtPath);
+            exit();
+          }}
+          onSkip={() => {
+            setPendingScript(null);
+            setMode("dashboard");
           }}
         />
       )}
