@@ -216,7 +216,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setError(result.error ?? "Cannot open worktree");
         return;
       }
-      openInIde(wt.path, settings.ide);
+      openInIde(wt.path, settings.ide, wt.custom_name ?? wt.branch);
     } catch (err) {
       setError(`${err}`);
     }
@@ -227,7 +227,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
     try {
-      openTerminal(wt.path);
+      openTerminal(wt.path, wt.custom_name ?? wt.branch);
     } catch (err) {
       setError(`${err}`);
     }
@@ -240,7 +240,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
     const continueSession = !!wt.agent_status?.session_id;
     try {
-      openClaudeInTerminal(wt.path, continueSession);
+      openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch);
     } catch (err) {
       setError(`${err}`);
     }

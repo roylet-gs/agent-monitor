@@ -17,6 +17,6 @@ export async function worktreeOpen(target: string, opts: { repo?: string }): Pro
     console.log(`Switched to branch ${worktree.branch}`);
   }
 
-  openInIde(worktree.path, settings.ide);
+  openInIde(worktree.path, settings.ide, worktree.custom_name ?? worktree.branch);
   console.log(`Opened ${worktree.branch} in ${settings.ide}`);
 }
