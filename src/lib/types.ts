@@ -120,6 +120,7 @@ export type AppMode =
   | "folder-browse"
   | "creating-worktree"
   | "deleting-worktree"
+  | "run-script-prompt"
   | "setup";
 
 export interface HookEvent {
