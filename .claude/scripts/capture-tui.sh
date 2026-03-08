@@ -20,8 +20,12 @@ mkdir -p "$SCREENSHOT_DIR"
 kill "$(cat /tmp/ttyd-evidence.pid 2>/dev/null)" 2>/dev/null || true
 rm -f /tmp/ttyd-evidence.pid
 
-# Start ttyd in background
-ttyd -p "$PORT" --writable $COMMAND &
+# Start ttyd in background, propagating AM_DATA_DIR if set
+if [ -n "${AM_DATA_DIR:-}" ]; then
+  ttyd -p "$PORT" --writable env AM_DATA_DIR="$AM_DATA_DIR" $COMMAND &
+else
+  ttyd -p "$PORT" --writable $COMMAND &
+fi
 TTYD_PID=$!
 echo "$TTYD_PID" > /tmp/ttyd-evidence.pid
 
