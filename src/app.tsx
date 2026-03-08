@@ -33,10 +33,11 @@ import {
   fetchBranch,
   checkoutBranch,
   ensureBranchForOpen,
+  remoteBranchExists,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
-import { openInIde, openTerminal, openClaudeInTerminal } from "./lib/ide-launcher.js";
+import { openInIde, openClaudeInTerminal } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -218,22 +219,11 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setError(result.error ?? "Cannot open worktree");
         return;
       }
-      openInIde(wt.path, settings.ide);
+      openInIde(wt.path, settings.ide, wt.custom_name ?? wt.branch);
     } catch (err) {
       setError(`${err}`);
     }
   }, [flatWorktrees, selectedIndex, settings]);
-
-  // Handle open terminal at worktree path
-  const handleOpenTerminal = useCallback(() => {
-    const wt = flatWorktrees[selectedIndex];
-    if (!wt) return;
-    try {
-      openTerminal(wt.path);
-    } catch (err) {
-      setError(`${err}`);
-    }
-  }, [flatWorktrees, selectedIndex]);
 
   // Handle open Claude in a new terminal window
   const handleOpenClaude = useCallback(() => {
@@ -242,7 +232,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
     const continueSession = !!wt.agent_status?.session_id;
     try {
-      openClaudeInTerminal(wt.path, continueSession);
+      openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch);
     } catch (err) {
       setError(`${err}`);
     }
@@ -322,7 +312,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
         // Step: Create worktree
         updateStep(stepIdx, "active");
-        const baseRef = `origin/${effectiveBase}`;
+        const hasRemote = await remoteBranchExists(targetRepo.path, effectiveBase);
+        const baseRef = hasRemote ? `origin/${effectiveBase}` : effectiveBase;
         let wtPath: string;
         try {
           wtPath = await gitCreateWorktree(
@@ -378,6 +369,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setCreateTargetRepo(null);
         setMode("dashboard");
       } catch (err) {
+        log("error", "app", `Failed to create worktree "${branchName}": ${err}`);
         updateStep(stepIdx, "error");
         setCreationError(`${err}`);
         setTimeout(() => {
@@ -728,7 +720,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
-    onOpenTerminal: handleOpenTerminal,
     onToggleLogs: () => setShowLogs((v) => !v),
     onUpdate: updateInfo?.updateAvailable
       ? () => {
