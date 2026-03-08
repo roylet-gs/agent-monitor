@@ -19,12 +19,12 @@ trap 'git worktree remove --force "$TMPDIR" 2>/dev/null || true; rm -rf "$TMPDIR
 
 # Check if orphan branch exists on remote
 if git ls-remote --heads origin evidence-images | grep -q evidence-images; then
-  git fetch origin evidence-images 2>/dev/null
-  git worktree add "$TMPDIR" evidence-images 2>/dev/null
+  git fetch origin evidence-images
+  git worktree add --force "$TMPDIR" evidence-images
 else
-  git worktree add --orphan -b evidence-images "$TMPDIR" 2>/dev/null
+  git worktree add --force --orphan -b evidence-images "$TMPDIR"
   git -C "$TMPDIR" rm -rf . 2>/dev/null || true
-  git -C "$TMPDIR" commit --allow-empty -m "init evidence-images branch" 2>/dev/null
+  git -C "$TMPDIR" commit --allow-empty -m "init evidence-images branch"
 fi
 
 # Copy screenshots into branch-named folder
@@ -36,8 +36,11 @@ git -C "$TMPDIR" add .
 if git -C "$TMPDIR" diff --cached --quiet; then
   echo "No new images to upload" >&2
 else
-  git -C "$TMPDIR" commit -m "evidence: $BRANCH" 2>/dev/null
-  git -C "$TMPDIR" push origin evidence-images 2>/dev/null
+  git -C "$TMPDIR" commit -m "evidence: $BRANCH"
+  if ! git -C "$TMPDIR" push origin evidence-images; then
+    echo "ERROR: Failed to push evidence-images branch" >&2
+    exit 1
+  fi
 fi
 
 # Output URLs
