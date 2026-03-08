@@ -226,17 +226,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [flatWorktrees, selectedIndex, settings]);
 
-  // Handle open terminal at worktree path
-  const handleOpenTerminal = useCallback(() => {
-    const wt = flatWorktrees[selectedIndex];
-    if (!wt) return;
-    try {
-      openTerminal(wt.path, wt.custom_name ?? wt.branch);
-    } catch (err) {
-      setError(`${err}`);
-    }
-  }, [flatWorktrees, selectedIndex]);
-
   // Handle Ctrl/Cmd+Enter: open in terminal (override)
   const handleOpenInTerminalOverride = useCallback(async () => {
     const wt = flatWorktrees[selectedIndex];
@@ -257,7 +246,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       setError(`${err}`);
     }
   }, [flatWorktrees, selectedIndex]);
-
   // Handle open Claude in a new terminal window
   const handleOpenClaude = useCallback(() => {
     const wt = flatWorktrees[selectedIndex];
@@ -754,7 +742,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
-    onOpenTerminal: handleOpenTerminal,
     onToggleLogs: () => setShowLogs((v) => !v),
     onUpdate: updateInfo?.updateAvailable
       ? () => {
