@@ -37,7 +37,7 @@ import {
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
-import { openInIde, openTerminal, openClaudeInTerminal } from "./lib/ide-launcher.js";
+import { openInIde, openClaudeInTerminal } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -82,7 +82,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
   const [currentVersion] = useState(() => getVersion());
-  const [terminalOpenIds, setTerminalOpenIds] = useState<Set<string>>(new Set());
 
   // Initialize DB and check for repos
   useEffect(() => {
@@ -226,26 +225,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [flatWorktrees, selectedIndex, settings]);
 
-  // Handle Ctrl/Cmd+Enter: open in terminal (override)
-  const handleOpenInTerminalOverride = useCallback(async () => {
-    const wt = flatWorktrees[selectedIndex];
-    if (!wt) return;
-    try {
-      const result = await ensureBranchForOpen(wt.path, wt.branch, wt.is_main === 1);
-      if (!result.ready) {
-        setError(result.error ?? "Cannot open worktree");
-        return;
-      }
-      openTerminal(wt.path);
-      setTerminalOpenIds((prev) => {
-        const next = new Set(prev);
-        next.add(wt.id);
-        return next;
-      });
-    } catch (err) {
-      setError(`${err}`);
-    }
-  }, [flatWorktrees, selectedIndex]);
   // Handle open Claude in a new terminal window
   const handleOpenClaude = useCallback(() => {
     const wt = flatWorktrees[selectedIndex];
@@ -693,14 +672,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   );
 
   // Key bindings for dashboard mode
-  const { modifierHeld } = useKeyBindings({
+  useKeyBindings({
     selectedIndex,
     worktreeCount: flatWorktrees.length,
     mode,
     busy,
     onSelect: setSelectedIndex,
     onEnter: handleOpen,
-    onEnterTerminal: handleOpenInTerminalOverride,
     onNew: () => {
       if (repositories.length > 1) {
         // Show repo picker first, then chain into new-worktree
@@ -935,9 +913,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           updateInfo={updateInfo}
           ghPrStatus={settings.ghPrStatus}
           linearEnabled={settings.linearEnabled}
-          terminalOpenIds={terminalOpenIds}
-          ide={settings.ide}
-          modifierHeld={modifierHeld}
         />
       )}
     </Box>
