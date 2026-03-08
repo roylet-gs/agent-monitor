@@ -80,7 +80,7 @@ describe("rules", () => {
     });
   });
 
-  describe("clearRules", () => {
+  describe("clearAllRules", () => {
     it("clears all rules regardless of source", () => {
       rules.addRule("Bash", undefined, "allow", "manual");
       rules.addRule("Read", undefined, "allow", "learned");
@@ -88,13 +88,13 @@ describe("rules", () => {
 
       expect(rules.loadRules()).toHaveLength(3);
 
-      const result = rules.clearRules();
+      const result = rules.clearAllRules();
       expect(result.removed).toBe(3);
       expect(rules.loadRules()).toHaveLength(0);
     });
 
     it("returns 0 when no rules exist", () => {
-      const result = rules.clearRules();
+      const result = rules.clearAllRules();
       expect(result.removed).toBe(0);
     });
   });
