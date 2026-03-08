@@ -75,6 +75,34 @@ describe("WorktreeDetail", () => {
     expect(lastFrame()!).toContain("Done with task");
   });
 
+  it("shows Cursor open when open_ide is cursor", () => {
+    const wt = makeWorktree({ open_ide: "cursor" });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("Cursor open");
+  });
+
+  it("shows VS Code open when open_ide is vscode", () => {
+    const wt = makeWorktree({ open_ide: "vscode" });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("VS Code open");
+  });
+
+  it("shows both IDE and Shell when both are active", () => {
+    const wt = makeWorktree({ open_ide: "cursor", has_terminal: true });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Cursor open");
+    expect(frame).toContain("Shell open");
+  });
+
+  it("shows Shell open when only terminal is active", () => {
+    const wt = makeWorktree({ has_terminal: true });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).toContain("Shell open");
+    expect(lastFrame()!).not.toContain("Cursor");
+    expect(lastFrame()!).not.toContain("VS Code");
+  });
+
   it("shows transcript_summary as Task when executing", () => {
     const wt = makeWorktree({
       agent_status: {

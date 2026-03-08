@@ -203,6 +203,23 @@ describe("WorktreeList", () => {
     expect(lastFrame()!).toContain("[branch]");
   });
 
+  it("shows white dot when open_ide is set", () => {
+    const wt = makeWorktree({ open_ide: "cursor" });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    // Should show white ○ (not dim) when IDE is open
+    expect(lastFrame()!).toContain("○");
+  });
+
   it("shows custom name with branch underneath", () => {
     const wt = makeWorktree({ custom_name: "My Feature", branch: "feature/custom" });
     const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
