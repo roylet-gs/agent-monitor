@@ -32,6 +32,7 @@ import {
   fetchBranch,
   checkoutBranch,
   ensureBranchForOpen,
+  remoteBranchExists,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
@@ -320,7 +321,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
         // Step: Create worktree
         updateStep(stepIdx, "active");
-        const baseRef = `origin/${effectiveBase}`;
+        const hasRemote = await remoteBranchExists(targetRepo.path, effectiveBase);
+        const baseRef = hasRemote ? `origin/${effectiveBase}` : effectiveBase;
         let wtPath: string;
         try {
           wtPath = await gitCreateWorktree(
@@ -376,6 +378,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setCreateTargetRepo(null);
         setMode("dashboard");
       } catch (err) {
+        log("error", "app", `Failed to create worktree "${branchName}": ${err}`);
         updateStep(stepIdx, "error");
         setCreationError(`${err}`);
         setTimeout(() => {
