@@ -1,6 +1,6 @@
 {
   "name": "@roylet-gs/agent-monitor",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "description": "CLI TUI tool for monitoring git worktrees and Claude Code agent status",
   "type": "module",
   "main": "dist/cli.js",
