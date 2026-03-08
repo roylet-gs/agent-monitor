@@ -4,6 +4,8 @@ import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo, linearAttachmentToPrInfo } from "../lib/linear.js";
 import { log } from "../lib/logger.js";
+import { getTerminalPaths, getIdePaths } from "../lib/process.js";
+import { realpathSync } from "fs";
 import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
 
 export interface WorktreeHookConfig {
@@ -183,6 +185,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
       const newGroups: WorktreeGroup[] = [];
       const allFlat: WorktreeWithStatus[] = [];
 
+      // Single lsof/ps call for all worktrees
+      const terminalPaths = getTerminalPaths();
+      const idePaths = getIdePaths();
+
       for (const repo of repos) {
         const dbWorktrees = getWorktrees(repo.id);
         const statuses = getAgentStatuses(repo.id);
@@ -200,11 +206,23 @@ export function useWorktrees(config: WorktreeHookConfig): {
               log("warn", "useWorktrees", `Failed to get git info for ${wt.path}: ${err}`);
             }
 
+            let has_terminal = false;
+            let open_ide: "cursor" | "vscode" | null = null;
+            try {
+              const realPath = realpathSync(wt.path);
+              has_terminal = terminalPaths.has(realPath);
+              open_ide = idePaths.get(realPath) ?? null;
+            } catch {
+              // path doesn't exist or can't be resolved
+            }
+
             return {
               ...wt,
               agent_status: statuses.get(wt.id) ?? null,
               git_status,
               last_commit,
+              has_terminal,
+              open_ide,
               pr_info: (() => {
                 const linearInfo = linearCacheRef.current.get(wt.branch);
                 if (linearInfo?.prAttachment) return linearAttachmentToPrInfo(linearInfo.prAttachment);
@@ -246,6 +264,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         ahead: wt.git_status?.ahead, behind: wt.git_status?.behind,
         dirty: wt.git_status?.dirty,
         commit_msg: wt.last_commit?.message, commit_time: wt.last_commit?.relative_time,
+        has_terminal: wt.has_terminal, open_ide: wt.open_ide,
         pr: wt.pr_info?.number, pr_state: wt.pr_info?.state, checks: wt.pr_info?.checksStatus,
         active_check: wt.pr_info?.activeCheckUrl, checks_waiting: wt.pr_info?.checksWaiting,
         linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,

@@ -68,6 +68,8 @@ export interface WorktreeWithStatus extends Worktree {
   last_commit: CommitInfo | null;
   pr_info: PrInfo | null;
   linear_info: LinearInfo | null;
+  has_terminal: boolean;
+  open_ide: "cursor" | "vscode" | null;
 }
 
 export interface GitStatus {

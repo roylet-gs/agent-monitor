@@ -54,8 +54,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
     <Box
       flexDirection="column"
       borderStyle="single"
-      width="40%"
-      minWidth="40%"
+      flexShrink={0}
       paddingX={1}
     >
       <Text bold> Worktrees</Text>
@@ -97,7 +96,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               <Box key={wt.id} flexDirection="column" marginBottom={!compactView && wt.custom_name && i < groupWorktrees.length - 1 ? 1 : 0}>
                 <Box gap={1}>
                   <Text>{isSelected ? "▸" : " "}</Text>
-                  {open ? (wt.agent_status?.status === "executing" || wt.agent_status?.status === "planning" ? <PulsingDot color={statusColor(wt.agent_status.status)} /> : <Text color={statusColor(wt.agent_status?.status)}>●</Text>) : <Text dimColor>○</Text>}
+                  {open ? (wt.agent_status?.status === "executing" || wt.agent_status?.status === "planning" ? <PulsingDot color={statusColor(wt.agent_status.status)} /> : wt.agent_status?.status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(wt.agent_status?.status)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
                   <Text
                     bold={isSelected}
                     color={isSelected ? "cyan" : undefined}
