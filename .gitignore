@@ -3,3 +3,7 @@ dist/
 *.tsbuildinfo
 .claude/*
 !.claude/commands/
+!.claude/scripts/
+
+# Evidence screenshots (only on feature branches)
+.github/evidence/

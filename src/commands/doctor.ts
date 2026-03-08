@@ -1,4 +1,5 @@
 import { existsSync } from "fs";
+import { execSync } from "child_process";
 import { isGlobalHooksInstalled } from "../lib/hooks-installer.js";
 import { isGhAvailable } from "../lib/github.js";
 import { getDb, getRepositories, getAllWorktrees } from "../lib/db.js";
@@ -62,6 +63,18 @@ export function doctor(opts: { json?: boolean }): void {
     name: "gh CLI",
     status: ghOk ? "ok" : settings.ghPrStatus ? "warn" : "ok",
     message: ghOk ? "Available" : "Not found (PR status disabled)",
+  });
+
+  // ttyd (for TUI screenshots)
+  let ttydOk = false;
+  try {
+    execSync("which ttyd", { stdio: "ignore" });
+    ttydOk = true;
+  } catch {}
+  checks.push({
+    name: "ttyd",
+    status: ttydOk ? "ok" : "warn",
+    message: ttydOk ? "Available (TUI screenshots enabled)" : "Not found. Install with: brew install ttyd",
   });
 
   // Linear
