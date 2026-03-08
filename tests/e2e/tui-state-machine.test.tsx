@@ -23,6 +23,7 @@ vi.mock("../../src/lib/git.js", () => ({
   getRepoName: vi.fn((p: string) => p.split("/").pop()),
   listWorktrees: vi.fn().mockResolvedValue([]),
   fetchBranch: vi.fn().mockResolvedValue(undefined),
+  ensureBranchForOpen: vi.fn().mockResolvedValue(undefined),
   remoteBranchExists: vi.fn().mockResolvedValue(true),
 }));
 
@@ -60,6 +61,12 @@ vi.mock("../../src/lib/pubsub-server.js", () => ({
 
 vi.mock("../../src/lib/pubsub-client.js", () => ({
   publishMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../src/lib/process.js", () => ({
+  getTerminalPaths: vi.fn(() => new Set()),
+  getIdePaths: vi.fn(() => new Map()),
+  isTerminalOpenAt: vi.fn(() => false),
 }));
 
 vi.mock("../../src/lib/version.js", () => ({

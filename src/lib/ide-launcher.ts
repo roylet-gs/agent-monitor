@@ -1,8 +1,8 @@
 import { execSync } from "child_process";
 import { randomBytes } from "crypto";
 import path from "path";
-import { realpathSync } from "fs";
 import { log } from "./logger.js";
+import { isTerminalOpenAt } from "./process.js";
 import type { Settings } from "./types.js";
 
 function detectTerminalApp(): string {
@@ -18,24 +18,6 @@ function detectTerminalApp(): string {
       return "Ghostty";
     default:
       return "Terminal";
-  }
-}
-
-function isTerminalOpenAt(worktreePath: string): boolean {
-  try {
-    const realPath = realpathSync(worktreePath);
-    const output = execSync("lsof -d cwd -c zsh -c bash -c fish -c nu -Fn 2>/dev/null", {
-      timeout: 2000,
-      encoding: "utf-8",
-    });
-    for (const line of output.split("\n")) {
-      if (line.startsWith("n") && line.substring(1) === realPath) {
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
   }
 }
 

@@ -84,9 +84,14 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
           <Text bold>Claude </Text>
           {open ? (
             <>
-              {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : <Text color={statusColor(status)}>●</Text>}
+              {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(status)}>●</Text>}
               <Text> {statusLabel(status)}</Text>
             </>
+          ) : (worktree.has_terminal || worktree.open_ide) ? (
+            <Text color="white">○ {[
+              worktree.open_ide === "cursor" ? "Cursor open" : worktree.open_ide === "vscode" ? "VS Code open" : null,
+              worktree.has_terminal ? "Shell open" : null,
+            ].filter(Boolean).join(" · ")}</Text>
           ) : (
             <Text dimColor>○ No active session</Text>
           )}
