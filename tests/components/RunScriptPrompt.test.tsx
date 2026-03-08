@@ -6,7 +6,7 @@ import { RunScriptPrompt } from "../../src/components/RunScriptPrompt.js";
 const ESCAPE = "\u001B";
 const ENTER = "\r";
 
-function waitForFrame(ms = 80): Promise<void> {
+function waitForFrame(ms = 150): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
