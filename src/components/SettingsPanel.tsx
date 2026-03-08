@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
-import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings } from "../lib/rules.js";
+import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings, enablePreset, disablePreset, isPresetEnabled } from "../lib/rules.js";
 import type { Rule } from "../lib/types.js";
 
 type SettingsField =
@@ -30,6 +30,7 @@ type SettingsField =
   | "linearRefreshOnManual"
   | "linearAutoNickname"
   | "applyGlobalRules"
+  | "safeCommandsPreset"
   | "manageRules"
   | "removeAllRules"
   | "repos"
@@ -57,6 +58,7 @@ const FIELDS: SettingsField[] = [
   "linearRefreshOnManual",
   "linearAutoNickname",
   "applyGlobalRules",
+  "safeCommandsPreset",
   "manageRules",
   "removeAllRules",
   "repos",
@@ -85,6 +87,7 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
   applyGlobalRules: "Write am rules to ~/.claude/settings.json permissions (persists without TUI)",
+  safeCommandsPreset: "Auto-approve harmless read-only Bash commands (find, ls, cat, git log, grep, etc.)",
   manageRules: "View and remove auto-approval rules",
   removeAllRules: "Remove all auto-approval rules and clean up Claude settings.",
   repos: "Monitored repositories and their startup scripts",
@@ -126,7 +129,7 @@ export function SettingsPanel({
   const [editValue, setEditValue] = useState("");
   const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
   const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
-  const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | null>(null);
+  const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | "removeAllRules" | null>(null);
   const [clearRulesMsg, setClearRulesMsg] = useState("");
   const [updateCheckStatus, setUpdateCheckStatus] = useState<"idle" | "checking" | "ok" | "update" | "error">("idle");
   const [updateCheckMsg, setUpdateCheckMsg] = useState("");
@@ -223,7 +226,7 @@ export function SettingsPanel({
       if (rules.length === 0) return;
       if (key.upArrow) { setRuleIndex((i) => Math.max(0, i - 1)); return; }
       if (key.downArrow) { setRuleIndex((i) => Math.min(rules.length - 1, i + 1)); return; }
-      if ((input === "d" || input === "x") && rules[ruleIndex]) {
+      if ((input === "d" || input === "x") && rules[ruleIndex] && rules[ruleIndex].source !== "preset") {
         removeRule(rules[ruleIndex].id);
         const updated = loadRules();
         setRules(updated);
@@ -236,7 +239,20 @@ export function SettingsPanel({
     // When awaiting confirmation on a danger zone action
     if (confirming) {
       if (input === "y" || input === "Y") {
-        if (confirming === "resetSettings") {
+        if (confirming === "removeAllRules") {
+          const result = clearAllRules();
+          if (result.removed === 0) {
+            setClearRulesMsg("No rules to remove");
+          } else {
+            setClearRulesMsg(`Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}`);
+            if (current.safeCommandsPresetEnabled) {
+              setCurrent((s) => ({ ...s, safeCommandsPresetEnabled: false }));
+            }
+            if (current.applyGlobalRulesEnabled) {
+              removeAmPermissionsFromClaudeSettings();
+            }
+          }
+        } else if (confirming === "resetSettings") {
           onSettingsReset();
         } else if (confirming === "factoryReset") {
           onFactoryReset();
@@ -350,6 +366,19 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "safeCommandsPreset" && (key.return || input === " ")) {
+      const newEnabled = !current.safeCommandsPresetEnabled;
+      const updated = { ...current, safeCommandsPresetEnabled: newEnabled };
+      setCurrent(updated);
+      onSave(updated);
+      if (newEnabled) {
+        enablePreset("safe-commands");
+      } else {
+        disablePreset("safe-commands");
+      }
+      return;
+    }
+
     if (activeField === "manageRules" && key.return) {
       setRules(loadRules());
       setRuleIndex(0);
@@ -358,15 +387,7 @@ export function SettingsPanel({
     }
 
     if (activeField === "removeAllRules" && key.return) {
-      const result = clearAllRules();
-      if (result.removed === 0) {
-        setClearRulesMsg("No rules to remove");
-      } else {
-        setClearRulesMsg(`Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}`);
-        if (current.applyGlobalRulesEnabled) {
-          removeAmPermissionsFromClaudeSettings();
-        }
-      }
+      setConfirming("removeAllRules");
       return;
     }
 
@@ -449,6 +470,20 @@ export function SettingsPanel({
   );
 
   if (showRulesList) {
+    const manualRules = rules.filter((r) => r.source !== "preset");
+    const presetRules = rules.filter((r) => r.source === "preset");
+    // ruleIndex navigates the full combined list: manual first, then preset
+    const isPresetSelected = ruleIndex >= manualRules.length;
+
+    const renderRule = (r: Rule, flatIndex: number) => (
+      <Text key={r.id}>
+        {flatIndex === ruleIndex ? "▸ " : "  "}
+        <Text color={r.decision === "deny" ? "red" : "green"}>{r.decision}</Text>
+        {"  "}{r.tool}{r.input_pattern ? `(${r.input_pattern})` : ""}
+        {r.source === "preset" && <Text dimColor> [preset]</Text>}
+      </Text>
+    );
+
     return (
       <Box flexDirection="column" borderStyle="single" paddingX={1}>
         <Text bold color="cyan">Manage Rules</Text>
@@ -456,19 +491,30 @@ export function SettingsPanel({
           {rules.length === 0 ? (
             <Text dimColor>No rules. Use `am rule add &lt;tool&gt;` to add one.</Text>
           ) : (
-            rules.map((r, i) => (
-              <Text key={r.id}>
-                {i === ruleIndex ? "▸ " : "  "}
-                <Text color={r.decision === "deny" ? "red" : "green"}>{r.decision}</Text>
-                {"  "}{r.tool}{r.input_pattern ? `(${r.input_pattern})` : ""}
-              </Text>
-            ))
+            <>
+              <Text bold dimColor>Manual &amp; Learned</Text>
+              {manualRules.length === 0 ? (
+                <Text dimColor>  No manual rules</Text>
+              ) : (
+                manualRules.map((r, i) => renderRule(r, i))
+              )}
+              <Box marginTop={1}>
+                <Text bold dimColor>Preset (safe-commands)</Text>
+              </Box>
+              {presetRules.length === 0 ? (
+                <Text dimColor>  No preset rules</Text>
+              ) : (
+                presetRules.map((r, i) => renderRule(r, manualRules.length + i))
+              )}
+            </>
           )}
         </Box>
         <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
           <Text>
             <Text color="yellow">[↑↓]</Text> Navigate{" "}
-            <Text color="yellow">[d]</Text> Remove{" "}
+            {!isPresetSelected && rules.length > 0 && (
+              <><Text color="yellow">[d]</Text> Remove{" "}</>
+            )}
             <Text color="yellow">[Esc]</Text> Back
           </Text>
         </Box>
@@ -732,6 +778,15 @@ export function SettingsPanel({
         </Box>
 
         <Box>
+          <Text bold={activeField === "safeCommandsPreset"}>
+            {activeField === "safeCommandsPreset" ? "▸" : " "} Safe Commands Preset:{" "}
+          </Text>
+          <Text color={current.safeCommandsPresetEnabled ? "green" : "gray"}>
+            [{current.safeCommandsPresetEnabled ? "✓" : " "}]
+          </Text>
+        </Box>
+
+        <Box>
           <Text bold={activeField === "manageRules"}>
             {activeField === "manageRules" ? "▸" : " "} Manage Rules
           </Text>
@@ -741,13 +796,16 @@ export function SettingsPanel({
         </Box>
 
         <Box>
-          <Text bold={activeField === "removeAllRules"}>
+          <Text bold={activeField === "removeAllRules"} color="red">
             {activeField === "removeAllRules" ? "▸" : " "} Remove All Rules
           </Text>
-          {activeField === "removeAllRules" && !clearRulesMsg && (
+          {activeField === "removeAllRules" && confirming === "removeAllRules" && (
+            <Text color="yellow"> Are you sure? [y/n]</Text>
+          )}
+          {activeField === "removeAllRules" && !confirming && !clearRulesMsg && (
             <Text dimColor> (Enter to remove)</Text>
           )}
-          {clearRulesMsg && (
+          {clearRulesMsg && !confirming && (
             <Text color="green"> {clearRulesMsg}</Text>
           )}
         </Box>

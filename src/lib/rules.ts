@@ -6,6 +6,8 @@ import { RULES_PATH, AM_MANAGED_PERMISSIONS_PATH, APP_DIR } from "./paths.js";
 import { readGlobalSettings, writeGlobalSettings } from "./hooks-installer.js";
 import { getRepositories, getWorktrees } from "./db.js";
 import { log } from "./logger.js";
+import { getPreset } from "./presets.js";
+import { loadSettings, saveSettings } from "./settings.js";
 import type { Rule } from "./types.js";
 
 // --- Storage ---
@@ -32,7 +34,7 @@ export function addRule(
   tool: string,
   inputPattern?: string,
   decision: "allow" | "deny" = "allow",
-  source: "manual" | "learned" = "manual"
+  source: "manual" | "learned" | "preset" = "manual"
 ): Rule {
   const rules = loadRules();
   const rule: Rule = {
@@ -179,6 +181,71 @@ export function removeAmPermissionsFromClaudeSettings(): void {
   saveAmManagedPermissions([]);
 
   log("info", "rules", `Removed ${previousManaged.length} am-managed permission(s) from Claude settings`);
+}
+
+// --- Presets ---
+
+export function enablePreset(presetId: string): { added: number } {
+  const preset = getPreset(presetId);
+  if (!preset) {
+    log("warn", "rules", `Unknown preset: ${presetId}`);
+    return { added: 0 };
+  }
+
+  const rules = loadRules();
+  let added = 0;
+
+  for (const def of preset.rules) {
+    const exists = rules.some(
+      (r) => r.tool === def.tool && (r.input_pattern ?? "") === (def.input_pattern ?? "")
+    );
+    if (exists) continue;
+
+    rules.push({
+      id: randomUUID(),
+      tool: def.tool,
+      input_pattern: def.input_pattern,
+      decision: def.decision,
+      source: "preset",
+      created_at: new Date().toISOString(),
+    });
+    added++;
+  }
+
+  if (added > 0) {
+    saveRules(rules);
+  }
+
+  const settings = loadSettings();
+  if (settings.applyGlobalRulesEnabled) {
+    applyRulesToClaudeSettings();
+  }
+
+  log("info", "rules", `Enabled preset "${presetId}": added ${added} rule(s)`);
+  return { added };
+}
+
+export function disablePreset(presetId: string): { removed: number } {
+  const rules = loadRules();
+  const remaining = rules.filter((r) => r.source !== "preset");
+  const removed = rules.length - remaining.length;
+
+  if (removed > 0) {
+    saveRules(remaining);
+  }
+
+  const settings = loadSettings();
+  if (settings.applyGlobalRulesEnabled) {
+    applyRulesToClaudeSettings();
+  }
+
+  log("info", "rules", `Disabled preset "${presetId}": removed ${removed} rule(s)`);
+  return { removed };
+}
+
+export function isPresetEnabled(presetId: string): boolean {
+  const rules = loadRules();
+  return rules.some((r) => r.source === "preset");
 }
 
 // --- Learning ---
