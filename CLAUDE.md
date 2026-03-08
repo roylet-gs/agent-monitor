@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm build` — TypeScript compile (`tsc`) to `dist/`
 - `pnpm start` — Run directly via `tsx src/cli.tsx` (no build needed)
 - `pnpm dev` — Watch mode via `tsx --watch src/cli.tsx`
-- No test framework or linter is configured
+- `pnpm test` — Run vitest test suite (`tests/` directory)
 
 ## What This Is
 
@@ -54,7 +54,31 @@ Commands in `src/commands/` are organized by domain:
 - `src/commands/hook-event.ts` — receive hook events from stdin (unchanged)
 
 ### Persistence
-All data at `~/.agent-monitor/`: SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`.
+All data at `~/.agent-monitor/` (or `$AM_DATA_DIR` if set): SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`.
+
+### Data Isolation (`AM_DATA_DIR`)
+`src/lib/paths.ts` exports `APP_DIR` which defaults to `~/.agent-monitor/` but can be overridden via the `AM_DATA_DIR` environment variable. All other paths (`DB_PATH`, `SETTINGS_PATH`, `LOG_PATH`, `SOCKET_PATH`, etc.) derive from `APP_DIR` automatically. This enables running the app against isolated temp directories for testing without touching real user data.
+
+## Evidence Capture & PR Workflow
+
+### Slash Commands
+- `/capture-evidence` — Orchestrates parallel sub-agents to collect build, test, and visual evidence. Uses diff analysis (`git diff main...HEAD`) to determine which tests and E2E scenarios are relevant.
+- `/create-pr` — Idempotent PR creation: detects existing PRs via `gh pr view`, runs `/capture-evidence`, then creates or updates the PR with evidence.
+
+### Scripts (`.claude/scripts/`)
+- `seed-evidence-data.sh` — Creates an isolated `AM_DATA_DIR` in `/tmp/am-evidence-*` and seeds it with `repo add .`. Source it (don't execute) to get env vars.
+- `capture-tui.sh <command> [screenshot-dir] [port]` — Starts ttyd serving the TUI. Propagates `AM_DATA_DIR` to the child process if set. Outputs the URL.
+- `cleanup-tui.sh` — Stops ttyd and cleans up the evidence data dir (only removes `/tmp/am-evidence-*` paths for safety).
+- `upload-evidence.sh [evidence-dir]` — Pushes screenshots from `.github/evidence/` to the `evidence-images` orphan branch. Outputs `raw.githubusercontent.com` URLs.
+
+### Headless Browser
+`.mcp.json` configures the Playwright MCP server with `--headless` so TUI screenshots are captured without a visible browser window.
+
+### GitHub API Note
+`gh pr edit --body` triggers a "Projects (classic) is being deprecated" GraphQL error. Use the REST API instead:
+```bash
+gh api "repos/OWNER/REPO/pulls/NUMBER" -X PATCH -f body='...'
+```
 
 ## Documentation
 
