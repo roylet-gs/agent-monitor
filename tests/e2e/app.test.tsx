@@ -19,6 +19,7 @@ vi.mock("../../src/lib/git.js", () => ({
   getRepoName: vi.fn((p: string) => p.split("/").pop()),
   listWorktrees: vi.fn().mockResolvedValue([]),
   fetchBranch: vi.fn().mockResolvedValue(undefined),
+  remoteBranchExists: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("../../src/lib/github.js", () => ({

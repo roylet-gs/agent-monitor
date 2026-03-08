@@ -7,6 +7,7 @@ import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
 import { DeleteConfirm, type DeleteOptions } from "./components/DeleteConfirm.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
+import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
@@ -32,6 +33,7 @@ import {
   fetchBranch,
   checkoutBranch,
   ensureBranchForOpen,
+  remoteBranchExists,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
@@ -78,7 +80,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   } | null>(null);
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
+  const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
   const [currentVersion] = useState(() => getVersion());
+  const [terminalOpenIds, setTerminalOpenIds] = useState<Set<string>>(new Set());
 
   // Initialize DB and check for repos
   useEffect(() => {
@@ -216,23 +220,32 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setError(result.error ?? "Cannot open worktree");
         return;
       }
-      openInIde(wt.path, settings.ide);
+      openInIde(wt.path, settings.ide, wt.custom_name ?? wt.branch);
     } catch (err) {
       setError(`${err}`);
     }
   }, [flatWorktrees, selectedIndex, settings]);
 
-  // Handle open terminal at worktree path
-  const handleOpenTerminal = useCallback(() => {
+  // Handle Ctrl/Cmd+Enter: open in terminal (override)
+  const handleOpenInTerminalOverride = useCallback(async () => {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
     try {
+      const result = await ensureBranchForOpen(wt.path, wt.branch, wt.is_main === 1);
+      if (!result.ready) {
+        setError(result.error ?? "Cannot open worktree");
+        return;
+      }
       openTerminal(wt.path);
+      setTerminalOpenIds((prev) => {
+        const next = new Set(prev);
+        next.add(wt.id);
+        return next;
+      });
     } catch (err) {
       setError(`${err}`);
     }
   }, [flatWorktrees, selectedIndex]);
-
   // Handle open Claude in a new terminal window
   const handleOpenClaude = useCallback(() => {
     const wt = flatWorktrees[selectedIndex];
@@ -240,7 +253,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
     const continueSession = !!wt.agent_status?.session_id;
     try {
-      openClaudeInTerminal(wt.path, continueSession);
+      openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch);
     } catch (err) {
       setError(`${err}`);
     }
@@ -320,7 +333,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
         // Step: Create worktree
         updateStep(stepIdx, "active");
-        const baseRef = `origin/${effectiveBase}`;
+        const hasRemote = await remoteBranchExists(targetRepo.path, effectiveBase);
+        const baseRef = hasRemote ? `origin/${effectiveBase}` : effectiveBase;
         let wtPath: string;
         try {
           wtPath = await gitCreateWorktree(
@@ -363,12 +377,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
         log("info", "app", `Created worktree ${branchName}`);
 
-        // Step: Run startup script
+        // Step: Run startup script — prompt user first
         if (hasScript && onRunScript) {
-          updateStep(stepIdx, "active");
-          await new Promise((r) => setTimeout(r, 300));
-          onRunScript(getScriptPath(targetRepo.id), wtPath);
-          exit();
+          updateStep(stepIdx, "done");
+          setPendingScript({ scriptPath: getScriptPath(targetRepo.id), wtPath });
+          setCreateTargetRepo(null);
+          setMode("run-script-prompt");
           return;
         }
 
@@ -376,6 +390,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setCreateTargetRepo(null);
         setMode("dashboard");
       } catch (err) {
+        log("error", "app", `Failed to create worktree "${branchName}": ${err}`);
         updateStep(stepIdx, "error");
         setCreationError(`${err}`);
         setTimeout(() => {
@@ -678,13 +693,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   );
 
   // Key bindings for dashboard mode
-  useKeyBindings({
+  const { modifierHeld } = useKeyBindings({
     selectedIndex,
     worktreeCount: flatWorktrees.length,
     mode,
     busy,
     onSelect: setSelectedIndex,
     onEnter: handleOpen,
+    onEnterTerminal: handleOpenInTerminalOverride,
     onNew: () => {
       if (repositories.length > 1) {
         // Show repo picker first, then chain into new-worktree
@@ -726,7 +742,6 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
-    onOpenTerminal: handleOpenTerminal,
     onToggleLogs: () => setShowLogs((v) => !v),
     onUpdate: updateInfo?.updateAvailable
       ? () => {
@@ -838,6 +853,20 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         />
       )}
 
+      {mode === "run-script-prompt" && pendingScript && (
+        <RunScriptPrompt
+          scriptPath={pendingScript.scriptPath}
+          onRun={() => {
+            onRunScript?.(pendingScript.scriptPath, pendingScript.wtPath);
+            exit();
+          }}
+          onSkip={() => {
+            setPendingScript(null);
+            setMode("dashboard");
+          }}
+        />
+      )}
+
       {mode === "creating-worktree" && (
         <CreatingWorktree
           branchName={creatingBranch}
@@ -906,6 +935,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           updateInfo={updateInfo}
           ghPrStatus={settings.ghPrStatus}
           linearEnabled={settings.linearEnabled}
+          terminalOpenIds={terminalOpenIds}
+          ide={settings.ide}
+          modifierHeld={modifierHeld}
         />
       )}
     </Box>

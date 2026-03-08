@@ -10,9 +10,10 @@ interface ActionBarProps {
   linearEnabled?: boolean;
   hasPr?: boolean;
   hasLinear?: boolean;
+  modifierHeld?: boolean;
 }
 
-export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear }: ActionBarProps) {
+export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, modifierHeld }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -31,12 +32,21 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
     );
   }
 
+  if (modifierHeld && hasWorktrees) {
+    return (
+      <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
+        <Text>
+          <Text color="cyan">[Enter]</Text> Open in Terminal
+        </Text>
+      </Box>
+    );
+  }
+
   return (
     <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
       {hasWorktrees ? (
         <Text>
           <Text color="yellow">[Enter]</Text> Open
-          <Text color="yellow"> [t]</Text>erminal
           <Text color="yellow"> [n]</Text>ew
           <Text color="yellow"> [d]</Text>elete
           {(ghPrStatus || linearEnabled) && (
@@ -49,6 +59,7 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
           <Text color="yellow"> [w]</Text>atch
           <Text color="yellow"> [s]</Text>ettings
           <Text color="yellow"> [q]</Text>uit
+          <Text dimColor>  z/^=alt</Text>
         </Text>
       ) : (
         <Text>
