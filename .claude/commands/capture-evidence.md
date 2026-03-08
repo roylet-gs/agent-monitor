@@ -1,6 +1,6 @@
 # Capture E2E Evidence
 
-Collect visual and text evidence that the current changes work, for inclusion in a PR.
+Collect visual and text evidence that the current changes work, and upload to the PR.
 
 ## Steps
 
@@ -21,7 +21,13 @@ Collect visual and text evidence that the current changes work, for inclusion in
 
    If ttyd is NOT installed, skip screenshots and note it in the evidence. Build + test output is still valuable.
 
-4. **Compile evidence into markdown** for the PR body:
+4. **Upload screenshots to orphan branch** -- Run `bash .claude/scripts/upload-evidence.sh` to push images to the `evidence-images` orphan branch. This keeps images off `main` while giving them permanent `raw.githubusercontent.com` URLs. The script outputs the URLs for each uploaded image.
+
+5. **Update the PR description** -- If a PR exists for the current branch, update its body to include the evidence section. Use `gh pr view --json body -q .body` to read the current body, then `gh pr edit --body "..."` to append/replace the `## Evidence` section with the URLs from step 4.
+
+   If no PR exists yet, return the markdown so the caller (e.g., `/create-pr`) can embed it in the PR body.
+
+   The evidence section format:
    ```markdown
    ## Evidence
 
@@ -44,10 +50,7 @@ Collect visual and text evidence that the current changes work, for inclusion in
    </details>
 
    ### Screenshots
-   ![Dashboard](/.github/evidence/dashboard.png)
-   ![Detail View](/.github/evidence/detail.png)
+   ![Dashboard dimmed](https://raw.githubusercontent.com/OWNER/REPO/evidence-images/branch-name/dashboard.png)
    ```
 
-5. **Commit evidence** -- Stage and commit `.github/evidence/` files to the current branch.
-
-6. **Return the markdown** so the caller (e.g., `/create-pr`) can embed it in the PR body.
+6. **Return the evidence markdown** for display.
