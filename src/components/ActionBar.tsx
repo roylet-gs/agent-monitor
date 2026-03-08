@@ -10,10 +10,9 @@ interface ActionBarProps {
   linearEnabled?: boolean;
   hasPr?: boolean;
   hasLinear?: boolean;
-  modifierHeld?: boolean;
 }
 
-export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, modifierHeld }: ActionBarProps) {
+export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -28,16 +27,6 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
         <Text dimColor>Press </Text>
         <Text color="yellow">Esc</Text>
         <Text dimColor> again to quit</Text>
-      </Box>
-    );
-  }
-
-  if (modifierHeld && hasWorktrees) {
-    return (
-      <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
-        <Text>
-          <Text color="cyan">[Enter]</Text> Open in Terminal
-        </Text>
       </Box>
     );
   }
@@ -59,7 +48,6 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
           <Text color="yellow"> [w]</Text>atch
           <Text color="yellow"> [s]</Text>ettings
           <Text color="yellow"> [q]</Text>uit
-          <Text dimColor>  z/^=alt</Text>
         </Text>
       ) : (
         <Text>

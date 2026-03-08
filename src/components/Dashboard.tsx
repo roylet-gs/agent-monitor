@@ -22,9 +22,6 @@ interface DashboardProps {
   updateInfo?: UpdateInfo | null;
   ghPrStatus?: boolean;
   linearEnabled?: boolean;
-  terminalOpenIds: Set<string>;
-  ide: string;
-  modifierHeld: boolean;
 }
 
 export const Dashboard = React.memo(function Dashboard({
@@ -42,9 +39,6 @@ export const Dashboard = React.memo(function Dashboard({
   updateInfo,
   ghPrStatus,
   linearEnabled,
-  terminalOpenIds,
-  ide,
-  modifierHeld,
 }: DashboardProps) {
   const selected = flatWorktrees[selectedIndex] ?? null;
 
@@ -52,11 +46,11 @@ export const Dashboard = React.memo(function Dashboard({
     <Box flexDirection="column" flexGrow={1}>
       <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} version={version} updateInfo={updateInfo} />
       <Box flexGrow={1}>
-        <WorktreeList groups={groups} flatWorktrees={flatWorktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} terminalOpenIds={terminalOpenIds} ide={ide} />
+        <WorktreeList groups={groups} flatWorktrees={flatWorktrees} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
         <WorktreeDetail worktree={selected} />
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
-      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selected?.pr_info} hasLinear={!!selected?.linear_info} modifierHeld={modifierHeld} />
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selected?.pr_info} hasLinear={!!selected?.linear_info} />
     </Box>
   );
 });
