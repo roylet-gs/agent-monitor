@@ -12,6 +12,8 @@ interface WorktreeListProps {
   selectedIndex: number;
   unseenIds: Set<string>;
   compactView: boolean;
+  terminalOpenIds: Set<string>;
+  ide: string;
 }
 
 function statusColor(status: string | undefined): string {
@@ -29,7 +31,7 @@ function statusColor(status: string | undefined): string {
   }
 }
 
-export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, compactView }: WorktreeListProps) {
+export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, compactView, terminalOpenIds, ide }: WorktreeListProps) {
   if (flatWorktrees.length === 0) {
     return (
       <Box
@@ -106,6 +108,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
                   </Text>
                   {!wt.custom_name && inlineMeta}
                   {unseen && <Text color="magenta" bold>*</Text>}
+                  {terminalOpenIds.has(wt.id) && ide !== "terminal" && <Text dimColor>[T]</Text>}
                 </Box>
                 {wt.custom_name && (
                   <Box paddingLeft={5} gap={1}>

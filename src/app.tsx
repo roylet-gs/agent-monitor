@@ -81,6 +81,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
   const [currentVersion] = useState(() => getVersion());
+  const [terminalOpenIds, setTerminalOpenIds] = useState<Set<string>>(new Set());
 
   // Initialize DB and check for repos
   useEffect(() => {
@@ -230,6 +231,27 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     if (!wt) return;
     try {
       openTerminal(wt.path);
+    } catch (err) {
+      setError(`${err}`);
+    }
+  }, [flatWorktrees, selectedIndex]);
+
+  // Handle Ctrl/Cmd+Enter: open in terminal (override)
+  const handleOpenInTerminalOverride = useCallback(async () => {
+    const wt = flatWorktrees[selectedIndex];
+    if (!wt) return;
+    try {
+      const result = await ensureBranchForOpen(wt.path, wt.branch, wt.is_main === 1);
+      if (!result.ready) {
+        setError(result.error ?? "Cannot open worktree");
+        return;
+      }
+      openTerminal(wt.path);
+      setTerminalOpenIds((prev) => {
+        const next = new Set(prev);
+        next.add(wt.id);
+        return next;
+      });
     } catch (err) {
       setError(`${err}`);
     }
@@ -680,13 +702,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   );
 
   // Key bindings for dashboard mode
-  useKeyBindings({
+  const { modifierHeld } = useKeyBindings({
     selectedIndex,
     worktreeCount: flatWorktrees.length,
     mode,
     busy,
     onSelect: setSelectedIndex,
     onEnter: handleOpen,
+    onEnterTerminal: handleOpenInTerminalOverride,
     onNew: () => {
       if (repositories.length > 1) {
         // Show repo picker first, then chain into new-worktree
@@ -922,6 +945,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           updateInfo={updateInfo}
           ghPrStatus={settings.ghPrStatus}
           linearEnabled={settings.linearEnabled}
+          terminalOpenIds={terminalOpenIds}
+          ide={settings.ide}
+          modifierHeld={modifierHeld}
         />
       )}
     </Box>
