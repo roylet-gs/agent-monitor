@@ -254,6 +254,39 @@ ruleCmd
     ruleApply(opts);
   });
 
+// --- Rule preset subcommands ---
+
+const rulePresetCmd = ruleCmd
+  .command("preset")
+  .description("Manage rule presets");
+
+rulePresetCmd
+  .command("list")
+  .description("List available presets")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { presetList } = await import("./commands/rule-preset.js");
+    presetList(opts);
+  });
+
+rulePresetCmd
+  .command("enable <name>")
+  .description("Enable a rule preset")
+  .option("--json", "Output as JSON")
+  .action(async (name, opts) => {
+    const { presetEnable } = await import("./commands/rule-preset.js");
+    presetEnable(name, opts);
+  });
+
+rulePresetCmd
+  .command("disable <name>")
+  .description("Disable a rule preset")
+  .option("--json", "Output as JSON")
+  .action(async (name, opts) => {
+    const { presetDisable } = await import("./commands/rule-preset.js");
+    presetDisable(name, opts);
+  });
+
 ruleCmd
   .command("restore")
   .description("Remove all am-managed permissions from ~/.claude/settings.json")
