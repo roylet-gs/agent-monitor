@@ -12,6 +12,12 @@ vi.mock("../../src/lib/hooks-installer.js", () => ({
   writeGlobalSettings: vi.fn(),
 }));
 
+vi.mock("../../src/lib/settings.js", () => ({
+  loadSettings: vi.fn(() => ({ applyGlobalRulesEnabled: false })),
+  saveSettings: vi.fn(),
+  DEFAULT_SETTINGS: {},
+}));
+
 describe("rules", () => {
   let rules: typeof import("../../src/lib/rules.js");
   let paths: typeof import("../../src/lib/paths.js");
@@ -117,6 +123,58 @@ describe("rules", () => {
 
     it("returns null for non-existent rule", () => {
       expect(rules.removeRule("nonexistent")).toBeNull();
+    });
+  });
+
+  describe("enablePreset", () => {
+    it("adds preset rules with source 'preset'", () => {
+      const result = rules.enablePreset("safe-commands");
+      expect(result.added).toBe(21);
+
+      const loaded = rules.loadRules();
+      expect(loaded.length).toBe(21);
+      expect(loaded.every((r) => r.source === "preset")).toBe(true);
+      expect(loaded[0]!.tool).toBe("Bash");
+    });
+
+    it("does not duplicate existing preset rules", () => {
+      rules.enablePreset("safe-commands");
+      const first = rules.loadRules().length;
+
+      const result = rules.enablePreset("safe-commands");
+      expect(result.added).toBe(0);
+      expect(rules.loadRules().length).toBe(first);
+    });
+
+    it("returns 0 for unknown preset", () => {
+      const result = rules.enablePreset("nonexistent");
+      expect(result.added).toBe(0);
+    });
+  });
+
+  describe("disablePreset", () => {
+    it("removes only preset rules", () => {
+      rules.addRule("Bash", undefined, "allow", "manual");
+      rules.enablePreset("safe-commands");
+      expect(rules.loadRules().length).toBeGreaterThan(1);
+
+      const result = rules.disablePreset("safe-commands");
+      expect(result.removed).toBeGreaterThan(0);
+
+      const remaining = rules.loadRules();
+      expect(remaining.length).toBe(1);
+      expect(remaining[0]!.source).toBe("manual");
+    });
+  });
+
+  describe("isPresetEnabled", () => {
+    it("returns false when no preset rules exist", () => {
+      expect(rules.isPresetEnabled("safe-commands")).toBe(false);
+    });
+
+    it("returns true after enabling preset", () => {
+      rules.enablePreset("safe-commands");
+      expect(rules.isPresetEnabled("safe-commands")).toBe(true);
     });
   });
 

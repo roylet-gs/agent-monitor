@@ -6,7 +6,7 @@ import {
   applyRulesToClaudeSettings,
   removeAmPermissionsFromClaudeSettings,
 } from "../lib/rules.js";
-import { loadSettings } from "../lib/settings.js";
+import { loadSettings, saveSettings } from "../lib/settings.js";
 import { outputJson, outputTable } from "../lib/output.js";
 
 function autoApplyIfEnabled(): void {
@@ -93,6 +93,9 @@ export function ruleClear(opts: { json?: boolean }): void {
   }
 
   const settings = loadSettings();
+  if (settings.safeCommandsPresetEnabled) {
+    saveSettings({ ...settings, safeCommandsPresetEnabled: false });
+  }
   if (settings.applyGlobalRulesEnabled) {
     removeAmPermissionsFromClaudeSettings();
     if (!opts.json) {
