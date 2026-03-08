@@ -48,6 +48,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     expect(lastFrame()!).toContain("No worktrees");
@@ -65,6 +67,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     const frame = lastFrame()!;
@@ -84,6 +88,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set(["wt-1"])}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     expect(lastFrame()!).toContain("*");
@@ -106,6 +112,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     const frame = lastFrame()!;
@@ -134,6 +142,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     expect(lastFrame()!).toContain("●");
@@ -150,6 +160,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     expect(lastFrame()!).toContain("○");
@@ -166,6 +178,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     expect(lastFrame()!).toContain("[branch]");
@@ -182,6 +196,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     expect(lastFrame()!).not.toContain("[branch]");
@@ -198,6 +214,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     expect(lastFrame()!).toContain("[branch]");
@@ -214,6 +232,8 @@ describe("WorktreeList", () => {
         selectedIndex={0}
         unseenIds={new Set()}
         compactView={false}
+        terminalOpenIds={new Set()}
+        ide="cursor"
       />
     );
     const frame = lastFrame()!;
