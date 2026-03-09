@@ -6,11 +6,13 @@ import type { UpdateInfo } from "../hooks/useUpdateCheck.js";
 import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
-import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
+import { hasStartupScript, openScriptInEditor, openFileInEditor, removeStartupScript } from "../lib/scripts.js";
+import { SETTINGS_PATH } from "../lib/paths.js";
 import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings, enablePreset, disablePreset, isPresetEnabled } from "../lib/rules.js";
 import type { Rule } from "../lib/types.js";
 
 type SettingsField =
+  | "openSettingsJson"
   | "ide"
   | "prefix"
   | "baseBranch"
@@ -39,6 +41,7 @@ type SettingsField =
   | "factoryReset";
 
 const FIELDS: SettingsField[] = [
+  "openSettingsJson",
   "ide",
   "prefix",
   "baseBranch",
@@ -68,6 +71,7 @@ const FIELDS: SettingsField[] = [
 ];
 
 const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
+  openSettingsJson: "Open settings.json in your editor for manual editing",
   ide: "Which editor/IDE to open worktrees in",
   prefix: "Branch name prefix when creating new worktrees (e.g. feature/, fix/)",
   baseBranch: "Default base branch for new worktrees",
@@ -303,6 +307,11 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "openSettingsJson" && key.return) {
+      openFileInEditor(SETTINGS_PATH, current.ide);
+      return;
+    }
+
     if (activeField === "ide" && (key.return || input === " ")) {
       const idx = IDE_OPTIONS.indexOf(current.ide);
       const next = IDE_OPTIONS[(idx + 1) % IDE_OPTIONS.length]!;
@@ -531,6 +540,16 @@ export function SettingsPanel({
           </Text>
 
           <Box flexDirection="column" marginTop={1}>
+            {/* === Open settings.json === */}
+        <Box>
+          <Text bold={activeField === "openSettingsJson"}>
+            {activeField === "openSettingsJson" ? "▸" : " "} Open settings.json
+          </Text>
+          {activeField === "openSettingsJson" && (
+            <Text dimColor> (Enter to open)</Text>
+          )}
+        </Box>
+
             {/* === Worktree Section === */}
         {renderSectionHeader("Worktree")}
         <Box>
