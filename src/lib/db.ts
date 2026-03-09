@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { dirname } from "path";
 import { APP_DIR, DB_PATH } from "./paths.js";
 import { log } from "./logger.js";
-import type { Repository, Worktree, AgentStatus, AgentStatusType } from "./types.js";
+import type { Repository, Worktree, AgentStatus, AgentStatusType, StandaloneSession } from "./types.js";
 import { randomUUID } from "crypto";
 
 let db: Database.Database | null = null;
@@ -46,6 +46,21 @@ function initSchema(db: Database.Database): void {
       last_response TEXT,
       transcript_summary TEXT,
       session_id TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Standalone sessions table (for non-worktree Claude sessions)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS standalone_sessions (
+      id TEXT PRIMARY KEY,
+      path TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'idle',
+      session_id TEXT,
+      last_response TEXT,
+      transcript_summary TEXT,
+      is_open INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
@@ -160,6 +175,8 @@ export function upsertWorktree(
     `INSERT INTO worktrees (id, repo_id, path, branch, name, is_main) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(repo_id, branch) DO UPDATE SET path = excluded.path, name = excluded.name, is_main = excluded.is_main`
   ).run(id, repoId, path, branch, name, isMain ? 1 : 0);
+  // Promote: if this path was tracked as a standalone session, remove it
+  db.prepare("DELETE FROM standalone_sessions WHERE path = ?").run(path);
   return getWorktreeByBranch(repoId, branch)!;
 }
 
@@ -265,6 +282,60 @@ export function getAllAgentStatuses(): Map<string, AgentStatus> {
     map.set(row.worktree_id, row);
   }
   return map;
+}
+
+// --- Standalone Sessions ---
+
+export function upsertStandaloneSession(
+  path: string,
+  status: AgentStatusType,
+  sessionId?: string | null,
+  lastResponse?: string | null,
+  transcriptSummary?: string | null,
+  isOpen?: boolean | null
+): StandaloneSession {
+  const db = getDb();
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO standalone_sessions (id, path, status, session_id, last_response, transcript_summary, is_open, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 1), datetime('now'))
+     ON CONFLICT(path) DO UPDATE SET
+       status = excluded.status,
+       session_id = COALESCE(excluded.session_id, standalone_sessions.session_id),
+       last_response = COALESCE(excluded.last_response, standalone_sessions.last_response),
+       transcript_summary = COALESCE(excluded.transcript_summary, standalone_sessions.transcript_summary),
+       is_open = COALESCE(?, standalone_sessions.is_open),
+       updated_at = datetime('now')`
+  ).run(id, path, status, sessionId ?? null, lastResponse ?? null, transcriptSummary ?? null, isOpen != null ? (isOpen ? 1 : 0) : null, isOpen != null ? (isOpen ? 1 : 0) : null);
+  return getStandaloneSessionByPath(path)!;
+}
+
+export function getStandaloneSessions(): StandaloneSession[] {
+  return getDb()
+    .prepare("SELECT * FROM standalone_sessions ORDER BY updated_at DESC")
+    .all() as StandaloneSession[];
+}
+
+export function getStandaloneSessionByPath(path: string): StandaloneSession | undefined {
+  return getDb()
+    .prepare("SELECT * FROM standalone_sessions WHERE path = ?")
+    .get(path) as StandaloneSession | undefined;
+}
+
+export function removeStandaloneSession(id: string): void {
+  getDb().prepare("DELETE FROM standalone_sessions WHERE id = ?").run(id);
+}
+
+export function removeStandaloneSessionByPath(path: string): void {
+  getDb().prepare("DELETE FROM standalone_sessions WHERE path = ?").run(path);
+}
+
+export function pruneStaleStandaloneSessions(maxAgeMs: number = 60 * 60 * 1000): number {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString().replace("T", " ").slice(0, 19);
+  const result = getDb()
+    .prepare("DELETE FROM standalone_sessions WHERE is_open = 0 AND updated_at < ?")
+    .run(cutoff);
+  return result.changes;
 }
 
 export function closeDb(): void {

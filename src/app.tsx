@@ -11,6 +11,7 @@ import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useWorktrees } from "./hooks/useWorktrees.js";
+import { useStandaloneSessions } from "./hooks/useStandaloneSessions.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
 import { usePubSub } from "./hooks/usePubSub.js";
 import {
@@ -134,6 +135,10 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     linearAutoNickname: settings.linearAutoNickname,
   });
 
+  const { sessions: standaloneSessions, refresh: refreshStandalone } = useStandaloneSessions(settings.pollingIntervalMs);
+  const refreshStandaloneRef = useRef(refreshStandalone);
+  useEffect(() => { refreshStandaloneRef.current = refreshStandalone; }, [refreshStandalone]);
+
   // Keep refs to always call the latest refresh (avoids stale closures in async handlers)
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
@@ -145,6 +150,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     if (msg.type === "agent-status-update") {
       // Light refresh only: re-read DB + git status without triggering GitHub/Linear API calls
       lightRefreshRef.current();
+    } else if (msg.type === "standalone-status-update") {
+      refreshStandaloneRef.current();
     } else if (msg.type === "git-activity") {
       // Git push or PR creation detected — force full refresh (with integrations) after a short
       // delay to give GitHub time to process the push/PR.
@@ -180,6 +187,18 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       }
     }
 
+    for (const s of standaloneSessions) {
+      const currentStatus = s.status;
+      const prevStatus = seen.get(s.id);
+
+      if (prevStatus === undefined) {
+        seen.set(s.id, currentStatus);
+      } else if (prevStatus !== currentStatus) {
+        newUnseen.add(s.id);
+        seen.set(s.id, currentStatus);
+      }
+    }
+
     if (newUnseen.size > 0) {
       setUnseenIds((prev) => {
         const merged = new Set(prev);
@@ -187,19 +206,24 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         return merged;
       });
     }
-  }, [flatWorktrees]);
+  }, [flatWorktrees, standaloneSessions]);
 
-  // Mark selected worktree as seen
+  // Mark selected worktree/session as seen
   useEffect(() => {
-    const selected = flatWorktrees[selectedIndex];
-    if (selected && unseenIds.has(selected.id)) {
+    let selectedId: string | undefined;
+    if (selectedIndex < flatWorktrees.length) {
+      selectedId = flatWorktrees[selectedIndex]?.id;
+    } else {
+      selectedId = standaloneSessions[selectedIndex - flatWorktrees.length]?.id;
+    }
+    if (selectedId && unseenIds.has(selectedId)) {
       setUnseenIds((prev) => {
         const next = new Set(prev);
-        next.delete(selected.id);
+        next.delete(selectedId);
         return next;
       });
     }
-  }, [selectedIndex, flatWorktrees, unseenIds]);
+  }, [selectedIndex, flatWorktrees, standaloneSessions, unseenIds]);
 
   // Auto-install global hooks on startup if not present (skip during setup wizard)
   useEffect(() => {
@@ -208,8 +232,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, []);
 
-  // Handle open in IDE
+  // Handle open in IDE (only for worktrees, not standalone sessions)
   const handleOpen = useCallback(async () => {
+    if (selectedIndex >= flatWorktrees.length) return; // standalone session
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
@@ -225,8 +250,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [flatWorktrees, selectedIndex, settings]);
 
-  // Handle open Claude in a new terminal window
+  // Handle open Claude in a new terminal window (only for worktrees)
   const handleOpenClaude = useCallback(() => {
+    if (selectedIndex >= flatWorktrees.length) return; // standalone session
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
@@ -674,7 +700,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // Key bindings for dashboard mode
   useKeyBindings({
     selectedIndex,
-    worktreeCount: flatWorktrees.length,
+    worktreeCount: flatWorktrees.length + standaloneSessions.length,
     mode,
     busy,
     onSelect: setSelectedIndex,
@@ -690,7 +716,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       }
     },
     onDelete: () => {
-      if (flatWorktrees[selectedIndex]) setMode("delete-confirm");
+      if (selectedIndex < flatWorktrees.length && flatWorktrees[selectedIndex]) setMode("delete-confirm");
     },
     onSettings: () => setMode("settings"),
     onRefresh: async () => {
@@ -902,6 +928,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           repoName={activeRepo?.name ?? "No repository"}
           groups={groups}
           flatWorktrees={flatWorktrees}
+          standaloneSessions={standaloneSessions}
           selectedIndex={selectedIndex}
           busy={busy}
           escHint={escHint}

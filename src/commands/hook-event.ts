@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { getWorktreeByPath, getAgentStatus, upsertAgentStatus } from "../lib/db.js";
+import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, getStandaloneSessionByPath, upsertStandaloneSession } from "../lib/db.js";
 import { getWorktreeRoot } from "../lib/git.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
@@ -44,7 +44,9 @@ export async function handleHookEvent(
   const resolvedPath = getWorktreeRoot(worktreePath) ?? worktreePath;
   const worktree = getWorktreeByPath(resolvedPath);
   if (!worktree) {
-    log("debug", "hook-event", `Worktree not found in DB for path: ${worktreePath} (resolved: ${resolvedPath})`);
+    // Track as standalone session (non-worktree Claude instance)
+    log("debug", "hook-event", `Worktree not found in DB for path: ${worktreePath} (resolved: ${resolvedPath}), tracking as standalone session`);
+    await handleStandaloneSession(resolvedPath, payload);
     return;
   }
 
@@ -103,6 +105,40 @@ export async function handleHookEvent(
     // Detect new auto-approval permissions from settings.local.json
     detectNewPermissions(resolvedPath);
   }
+}
+
+async function handleStandaloneSession(path: string, payload: HookEvent): Promise<void> {
+  const existing = getStandaloneSessionByPath(path);
+  const status = mapEventToStatus(payload, existing?.status);
+  const sessionId = payload.session_id ?? null;
+  const lastResponse = extractLastResponse(payload);
+  const transcriptSummary = payload.transcript_summary ?? null;
+  const isOpen = payload.event === "SessionEnd" ? false : true;
+
+  if (status === null) {
+    log("debug", "hook-event", `Skipped standalone status update for ${path} (informational ${payload.event})`);
+    return;
+  }
+
+  // Skip redundant write
+  const currentIsOpen = existing ? !!existing.is_open : false;
+  if (existing && existing.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
+    return;
+  }
+
+  upsertStandaloneSession(path, status, sessionId, lastResponse, transcriptSummary, isOpen);
+  log("info", "hook-event", `Updated standalone session for ${path}: ${status} (is_open=${isOpen})`);
+
+  await publishMessage({
+    type: "standalone-status-update",
+    sessionPath: path,
+    status,
+    sessionId: sessionId,
+    lastResponse,
+    transcriptSummary,
+    isOpen,
+    updatedAt: new Date().toISOString(),
+  }).catch(() => {});
 }
 
 function extractLastResponse(event: HookEvent): string | null {

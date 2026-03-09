@@ -4,10 +4,11 @@ import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
 import { isEffectivelyOpen } from "../lib/agent-utils.js";
 import { PulsingDot } from "./PulsingDot.js";
-import type { WorktreeWithStatus } from "../lib/types.js";
+import type { WorktreeWithStatus, StandaloneSession } from "../lib/types.js";
 
 interface WorktreeDetailProps {
   worktree: WorktreeWithStatus | null;
+  standaloneSession?: StandaloneSession | null;
 }
 
 function statusColor(status: string | undefined): string {
@@ -42,7 +43,11 @@ function statusLabel(status: string | undefined): string {
   }
 }
 
-export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: WorktreeDetailProps) {
+export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, standaloneSession }: WorktreeDetailProps) {
+  if (standaloneSession) {
+    return <StandaloneDetail session={standaloneSession} />;
+  }
+
   if (!worktree) {
     return (
       <Box
@@ -187,3 +192,53 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree }: W
     </Box>
   );
 });
+
+function StandaloneDetail({ session }: { session: StandaloneSession }) {
+  const status = session.status;
+  const open = !!session.is_open;
+  const isActive = status === "executing" || status === "planning";
+
+  const responseText = isActive
+    ? (session.transcript_summary ?? session.last_response)
+    : (session.last_response ?? session.transcript_summary);
+  const responseLabel = isActive ? "Task" : "Last Response";
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      flexGrow={1}
+      paddingX={1}
+    >
+      <Text bold> Detail</Text>
+
+      <Box flexDirection="column" marginTop={1} gap={1}>
+        <Box>
+          <Text bold>Claude </Text>
+          {open ? (
+            <>
+              {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(status)}>●</Text>}
+              <Text> {statusLabel(status)}</Text>
+            </>
+          ) : (
+            <Text dimColor>○ No active session</Text>
+          )}
+        </Box>
+
+        {responseText && (
+          <Box flexDirection="column">
+            <Text bold>{responseLabel}</Text>
+            <Text wrap="truncate-end">
+              {responseText.slice(0, 300)}
+            </Text>
+          </Box>
+        )}
+
+        <Box flexDirection="column">
+          <Text bold>Path</Text>
+          <Text dimColor>{session.path}</Text>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
