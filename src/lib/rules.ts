@@ -6,8 +6,7 @@ import { RULES_PATH, AM_MANAGED_PERMISSIONS_PATH, APP_DIR } from "./paths.js";
 import { readGlobalSettings, writeGlobalSettings } from "./hooks-installer.js";
 import { getRepositories, getWorktrees } from "./db.js";
 import { log } from "./logger.js";
-import { getPreset } from "./presets.js";
-import { loadSettings, saveSettings } from "./settings.js";
+import { loadSettings } from "./settings.js";
 import type { Rule } from "./types.js";
 
 // --- Storage ---
@@ -16,7 +15,14 @@ export function loadRules(): Rule[] {
   if (!existsSync(RULES_PATH)) return [];
   try {
     const raw = readFileSync(RULES_PATH, "utf-8");
-    return JSON.parse(raw);
+    const parsed: Rule[] = JSON.parse(raw);
+    // Migration: filter out stale preset rules from previous versions
+    const filtered = parsed.filter((r) => (r as { source: string }).source !== "preset");
+    if (filtered.length !== parsed.length) {
+      saveRules(filtered);
+      log("info", "rules", `Migrated away ${parsed.length - filtered.length} stale preset rule(s)`);
+    }
+    return filtered;
   } catch (err) {
     log("warn", "rules", `Failed to parse rules file: ${err}`);
     return [];
@@ -34,7 +40,7 @@ export function addRule(
   tool: string,
   inputPattern?: string,
   decision: "allow" | "deny" = "allow",
-  source: "manual" | "learned" | "preset" = "manual"
+  source: "manual" | "learned" = "manual"
 ): Rule {
   const rules = loadRules();
   const rule: Rule = {
@@ -183,71 +189,6 @@ export function removeAmPermissionsFromClaudeSettings(): void {
   log("info", "rules", `Removed ${previousManaged.length} am-managed permission(s) from Claude settings`);
 }
 
-// --- Presets ---
-
-export function enablePreset(presetId: string): { added: number } {
-  const preset = getPreset(presetId);
-  if (!preset) {
-    log("warn", "rules", `Unknown preset: ${presetId}`);
-    return { added: 0 };
-  }
-
-  const rules = loadRules();
-  let added = 0;
-
-  for (const def of preset.rules) {
-    const exists = rules.some(
-      (r) => r.tool === def.tool && (r.input_pattern ?? "") === (def.input_pattern ?? "")
-    );
-    if (exists) continue;
-
-    rules.push({
-      id: randomUUID(),
-      tool: def.tool,
-      input_pattern: def.input_pattern,
-      decision: def.decision,
-      source: "preset",
-      created_at: new Date().toISOString(),
-    });
-    added++;
-  }
-
-  if (added > 0) {
-    saveRules(rules);
-  }
-
-  const settings = loadSettings();
-  if (settings.applyGlobalRulesEnabled) {
-    applyRulesToClaudeSettings();
-  }
-
-  log("info", "rules", `Enabled preset "${presetId}": added ${added} rule(s)`);
-  return { added };
-}
-
-export function disablePreset(presetId: string): { removed: number } {
-  const rules = loadRules();
-  const remaining = rules.filter((r) => r.source !== "preset");
-  const removed = rules.length - remaining.length;
-
-  if (removed > 0) {
-    saveRules(remaining);
-  }
-
-  const settings = loadSettings();
-  if (settings.applyGlobalRulesEnabled) {
-    applyRulesToClaudeSettings();
-  }
-
-  log("info", "rules", `Disabled preset "${presetId}": removed ${removed} rule(s)`);
-  return { removed };
-}
-
-export function isPresetEnabled(presetId: string): boolean {
-  const rules = loadRules();
-  return rules.some((r) => r.source === "preset");
-}
-
 // --- Learning ---
 
 export function clearLearnedRules(): { removed: number } {
@@ -257,6 +198,10 @@ export function clearLearnedRules(): { removed: number } {
   if (removed > 0) {
     saveRules(manual);
     log("info", "rules", `Cleared ${removed} learned rule(s)`);
+  }
+  const settings = loadSettings();
+  if (settings.applyGlobalRulesEnabled) {
+    applyRulesToClaudeSettings();
   }
   return { removed };
 }
@@ -283,11 +228,11 @@ export function syncRulesFromWorktrees(worktreePaths: string[]): { added: number
       const raw = readFileSync(settingsPath, "utf-8");
       const parsed = JSON.parse(raw);
       const allowEntries: string[] = parsed?.permissions?.allow ?? [];
+      const denyEntries: string[] = parsed?.permissions?.deny ?? [];
 
       for (const entry of allowEntries) {
         const { tool, input_pattern } = parseClaudePermissionRule(entry);
 
-        // Deduplicate: skip if same tool + input_pattern exists
         const exists = existingRules.some(
           (r) => r.tool === tool && (r.input_pattern ?? "") === (input_pattern ?? "")
         );
@@ -305,6 +250,27 @@ export function syncRulesFromWorktrees(worktreePaths: string[]): { added: number
         added++;
         log("info", "rules", `Learned rule from ${wtPath}: ${tool}${input_pattern ? ` (${input_pattern})` : ""}`);
       }
+
+      for (const entry of denyEntries) {
+        const { tool, input_pattern } = parseClaudePermissionRule(entry);
+
+        const exists = existingRules.some(
+          (r) => r.tool === tool && (r.input_pattern ?? "") === (input_pattern ?? "") && r.decision === "deny"
+        );
+        if (exists) continue;
+
+        const rule: Rule = {
+          id: randomUUID(),
+          tool,
+          ...(input_pattern ? { input_pattern } : {}),
+          decision: "deny",
+          source: "learned",
+          created_at: new Date().toISOString(),
+        };
+        existingRules.push(rule);
+        added++;
+        log("info", "rules", `Learned deny rule from ${wtPath}: ${tool}${input_pattern ? ` (${input_pattern})` : ""}`);
+      }
     } catch (err) {
       log("debug", "rules", `Failed to read ${settingsPath}: ${err}`);
     }
@@ -315,6 +281,32 @@ export function syncRulesFromWorktrees(worktreePaths: string[]): { added: number
   }
 
   return { added };
+}
+
+/**
+ * Sync learned rules from all tracked worktrees.
+ * Gathers worktree paths from all repositories, then reads their
+ * .claude/settings.local.json files to learn approval rules.
+ */
+export function syncLearnedRules(): { added: number } {
+  const repos = getRepositories();
+  const worktreePaths: string[] = [];
+  for (const repo of repos) {
+    const wts = getWorktrees(repo.id);
+    for (const wt of wts) {
+      worktreePaths.push(wt.path);
+    }
+  }
+
+  const result = syncRulesFromWorktrees(worktreePaths);
+
+  const settings = loadSettings();
+  if (settings.applyGlobalRulesEnabled && result.added > 0) {
+    applyRulesToClaudeSettings();
+  }
+
+  log("info", "rules", `syncLearnedRules: scanned ${worktreePaths.length} worktree(s), added ${result.added} rule(s)`);
+  return result;
 }
 
 // --- Diff generation ---

@@ -254,6 +254,24 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, []);
 
+  // Auto-sync learned rules on startup and every 60s when enabled
+  useEffect(() => {
+    if (!settings.learnFromApprovalsEnabled) return;
+
+    // Sync immediately on startup
+    import("./lib/rules.js").then(({ syncLearnedRules }) => {
+      syncLearnedRules();
+    });
+
+    const interval = setInterval(() => {
+      import("./lib/rules.js").then(({ syncLearnedRules }) => {
+        syncLearnedRules();
+      });
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [settings.learnFromApprovalsEnabled]);
+
   // Handle open in IDE (worktrees or standalone sessions; or terminal if opened via [t])
   const handleOpen = useCallback(async () => {
     if (selectedIndex >= flatWorktrees.length) {

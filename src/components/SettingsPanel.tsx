@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import { verifyLinearApiKey } from "../lib/linear.js";
 import type { UpdateInfo } from "../hooks/useUpdateCheck.js";
@@ -8,7 +8,7 @@ import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, openFileInEditor, removeStartupScript } from "../lib/scripts.js";
 import { SETTINGS_PATH } from "../lib/paths.js";
-import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings, enablePreset, disablePreset, isPresetEnabled } from "../lib/rules.js";
+import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings, syncLearnedRules, clearLearnedRules } from "../lib/rules.js";
 import type { Rule } from "../lib/types.js";
 
 type SettingsField =
@@ -32,7 +32,7 @@ type SettingsField =
   | "linearRefreshOnManual"
   | "linearAutoNickname"
   | "applyGlobalRules"
-  | "safeCommandsPreset"
+  | "learnFromApprovals"
   | "manageRules"
   | "removeAllRules"
   | "repos"
@@ -61,7 +61,7 @@ const FIELDS: SettingsField[] = [
   "linearRefreshOnManual",
   "linearAutoNickname",
   "applyGlobalRules",
-  "safeCommandsPreset",
+  "learnFromApprovals",
   "manageRules",
   "removeAllRules",
   "repos",
@@ -91,7 +91,7 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
   applyGlobalRules: "Write am rules to ~/.claude/settings.json permissions (persists without TUI)",
-  safeCommandsPreset: "Auto-approve harmless read-only Bash commands (find, ls, cat, git log, grep, etc.)",
+  learnFromApprovals: "Learn auto-approval rules from worktree .claude/settings.local.json files",
   manageRules: "View and remove auto-approval rules",
   removeAllRules: "Remove all auto-approval rules and clean up Claude settings.",
   repos: "Monitored repositories and their startup scripts",
@@ -126,6 +126,9 @@ export function SettingsPanel({
   onFactoryReset,
   onCheckForUpdates,
 }: SettingsPanelProps) {
+  const { stdout } = useStdout();
+  const termCols = stdout?.columns ?? 80;
+  const termRows = stdout?.rows ?? 24;
   const [current, setCurrent] = useState({ ...settings });
   const [fieldIndex, setFieldIndex] = useState(0);
   const [repoIndex, setRepoIndex] = useState(0);
@@ -230,7 +233,7 @@ export function SettingsPanel({
       if (rules.length === 0) return;
       if (key.upArrow) { setRuleIndex((i) => Math.max(0, i - 1)); return; }
       if (key.downArrow) { setRuleIndex((i) => Math.min(rules.length - 1, i + 1)); return; }
-      if ((input === "d" || input === "x") && rules[ruleIndex] && rules[ruleIndex].source !== "preset") {
+      if ((input === "d" || input === "x") && rules[ruleIndex]) {
         removeRule(rules[ruleIndex].id);
         const updated = loadRules();
         setRules(updated);
@@ -249,8 +252,8 @@ export function SettingsPanel({
             setClearRulesMsg("No rules to remove");
           } else {
             setClearRulesMsg(`Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}`);
-            if (current.safeCommandsPresetEnabled) {
-              setCurrent((s) => ({ ...s, safeCommandsPresetEnabled: false }));
+            if (current.learnFromApprovalsEnabled) {
+              setCurrent((s) => ({ ...s, learnFromApprovalsEnabled: false }));
             }
             if (current.applyGlobalRulesEnabled) {
               removeAmPermissionsFromClaudeSettings();
@@ -375,15 +378,15 @@ export function SettingsPanel({
       return;
     }
 
-    if (activeField === "safeCommandsPreset" && (key.return || input === " ")) {
-      const newEnabled = !current.safeCommandsPresetEnabled;
-      const updated = { ...current, safeCommandsPresetEnabled: newEnabled };
+    if (activeField === "learnFromApprovals" && (key.return || input === " ")) {
+      const newEnabled = !current.learnFromApprovalsEnabled;
+      const updated = { ...current, learnFromApprovalsEnabled: newEnabled };
       setCurrent(updated);
       onSave(updated);
       if (newEnabled) {
-        enablePreset("safe-commands");
+        syncLearnedRules();
       } else {
-        disablePreset("safe-commands");
+        clearLearnedRules();
       }
       return;
     }
@@ -479,49 +482,55 @@ export function SettingsPanel({
   );
 
   if (showRulesList) {
-    const manualRules = rules.filter((r) => r.source !== "preset");
-    const presetRules = rules.filter((r) => r.source === "preset");
-    // ruleIndex navigates the full combined list: manual first, then preset
-    const isPresetSelected = ruleIndex >= manualRules.length;
+    // Scrollable window: reserve lines for header, footer, border
+    const visibleRows = Math.max(3, termRows - 7);
+    const scrollStart = Math.max(0, Math.min(ruleIndex - Math.floor(visibleRows / 2), rules.length - visibleRows));
+    const visibleRules = rules.slice(scrollStart, scrollStart + visibleRows);
 
-    const renderRule = (r: Rule, flatIndex: number) => (
-      <Text key={r.id}>
-        {flatIndex === ruleIndex ? "▸ " : "  "}
-        <Text color={r.decision === "deny" ? "red" : "green"}>{r.decision}</Text>
-        {"  "}{r.tool}{r.input_pattern ? `(${r.input_pattern})` : ""}
-        {r.source === "preset" && <Text dimColor> [preset]</Text>}
-      </Text>
-    );
+    // Max width for rule text: terminal width minus border (2+2), padding (1+1), prefix (2), decision (5), gap (2), tag (10)
+    const maxRuleWidth = Math.max(20, termCols - 25);
+
+    const truncate = (s: string, max: number) => s.length <= max ? s : s.slice(0, max - 1) + "…";
+
+    const renderRule = (r: Rule, displayIndex: number) => {
+      const flatIndex = scrollStart + displayIndex;
+      const ruleText = r.input_pattern ? `${r.tool}(${r.input_pattern})` : r.tool;
+      return (
+        <Box key={r.id}>
+          <Text>
+            {flatIndex === ruleIndex ? "▸ " : "  "}
+            <Text color={r.decision === "deny" ? "red" : "green"}>{r.decision}</Text>
+            {"  "}{truncate(ruleText, maxRuleWidth)}
+            {r.source === "learned" && <Text dimColor> [learned]</Text>}
+          </Text>
+        </Box>
+      );
+    };
+
+    const showScrollUp = scrollStart > 0;
+    const showScrollDown = scrollStart + visibleRows < rules.length;
 
     return (
       <Box flexDirection="column" borderStyle="single" paddingX={1}>
-        <Text bold color="cyan">Manage Rules</Text>
+        <Box>
+          <Text bold color="cyan">Manage Rules</Text>
+          <Text dimColor>  ({rules.length} rule{rules.length === 1 ? "" : "s"})</Text>
+        </Box>
         <Box marginTop={1} flexDirection="column">
           {rules.length === 0 ? (
             <Text dimColor>No rules. Use `am rule add &lt;tool&gt;` to add one.</Text>
           ) : (
             <>
-              <Text bold dimColor>Manual &amp; Learned</Text>
-              {manualRules.length === 0 ? (
-                <Text dimColor>  No manual rules</Text>
-              ) : (
-                manualRules.map((r, i) => renderRule(r, i))
-              )}
-              <Box marginTop={1}>
-                <Text bold dimColor>Preset (safe-commands)</Text>
-              </Box>
-              {presetRules.length === 0 ? (
-                <Text dimColor>  No preset rules</Text>
-              ) : (
-                presetRules.map((r, i) => renderRule(r, manualRules.length + i))
-              )}
+              {showScrollUp && <Text dimColor>  ↑ {scrollStart} more</Text>}
+              {visibleRules.map((r, i) => renderRule(r, i))}
+              {showScrollDown && <Text dimColor>  ↓ {rules.length - scrollStart - visibleRows} more</Text>}
             </>
           )}
         </Box>
         <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
           <Text>
             <Text color="yellow">[↑↓]</Text> Navigate{" "}
-            {!isPresetSelected && rules.length > 0 && (
+            {rules.length > 0 && (
               <><Text color="yellow">[d]</Text> Remove{" "}</>
             )}
             <Text color="yellow">[Esc]</Text> Back
@@ -797,11 +806,11 @@ export function SettingsPanel({
         </Box>
 
         <Box>
-          <Text bold={activeField === "safeCommandsPreset"}>
-            {activeField === "safeCommandsPreset" ? "▸" : " "} Safe Commands Preset:{" "}
+          <Text bold={activeField === "learnFromApprovals"}>
+            {activeField === "learnFromApprovals" ? "▸" : " "} Learn from Approvals:{" "}
           </Text>
-          <Text color={current.safeCommandsPresetEnabled ? "green" : "gray"}>
-            [{current.safeCommandsPresetEnabled ? "✓" : " "}]
+          <Text color={current.learnFromApprovalsEnabled ? "green" : "gray"}>
+            [{current.learnFromApprovalsEnabled ? "✓" : " "}]
           </Text>
         </Box>
 
