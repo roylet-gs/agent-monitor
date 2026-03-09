@@ -142,6 +142,18 @@ export interface HookEvent {
   permission_prompt?: boolean;
 }
 
+export interface StandaloneSession {
+  id: string;
+  path: string;
+  status: AgentStatusType;
+  session_id: string | null;
+  last_response: string | null;
+  transcript_summary: string | null;
+  is_open: number; // 0 or 1
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Rule {
   id: string;
   tool: string;

@@ -2,7 +2,7 @@ import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
 import { WorktreeList } from "../../src/components/WorktreeList.js";
-import type { WorktreeWithStatus, WorktreeGroup, Repository } from "../../src/lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup, Repository, StandaloneSession } from "../../src/lib/types.js";
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
@@ -46,6 +46,8 @@ describe("WorktreeList", () => {
         groups={[]}
         flatWorktrees={[]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -63,6 +65,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt1, wt2]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -82,6 +86,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set(["wt-1"])}
         compactView={false}
       />
@@ -104,6 +110,8 @@ describe("WorktreeList", () => {
         groups={groups}
         flatWorktrees={[wt1, wt2]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -132,6 +140,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -148,6 +158,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -164,6 +176,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -180,6 +194,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -196,6 +212,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -212,6 +230,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -229,6 +249,8 @@ describe("WorktreeList", () => {
         groups={[group]}
         flatWorktrees={[wt]}
         selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
         unseenIds={new Set()}
         compactView={false}
       />
@@ -236,5 +258,88 @@ describe("WorktreeList", () => {
     const frame = lastFrame()!;
     expect(frame).toContain("My Feature");
     expect(frame).toContain("feature/custom");
+  });
+
+  it("renders Other Sessions header and standalone session entries", () => {
+    const session: StandaloneSession = {
+      id: "ss-1",
+      path: "/tmp/standalone-project",
+      status: "executing",
+      session_id: "sess-1",
+      last_response: null,
+      transcript_summary: null,
+      is_open: 1,
+      created_at: "2024-01-01",
+      updated_at: new Date().toISOString(),
+    };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[]}
+        flatWorktrees={[]}
+        selectedIndex={0}
+        standaloneSessions={[session]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("Other Sessions");
+    expect(frame).toContain("standalone-project");
+  });
+
+  it("shows selection indicator on standalone session", () => {
+    const session: StandaloneSession = {
+      id: "ss-1",
+      path: "/tmp/standalone-project",
+      status: "idle",
+      session_id: null,
+      last_response: null,
+      transcript_summary: null,
+      is_open: 1,
+      created_at: "2024-01-01",
+      updated_at: new Date().toISOString(),
+    };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[]}
+        flatWorktrees={[]}
+        selectedIndex={0}
+        standaloneSessions={[session]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).toContain("▸");
+  });
+
+  it("shows closed standalone session with dim dot", () => {
+    const session: StandaloneSession = {
+      id: "ss-1",
+      path: "/tmp/standalone-project",
+      status: "idle",
+      session_id: null,
+      last_response: null,
+      transcript_summary: null,
+      is_open: 0,
+      created_at: "2024-01-01",
+      updated_at: "2024-01-01",
+    };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[]}
+        flatWorktrees={[]}
+        selectedIndex={0}
+        standaloneSessions={[session]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).toContain("○");
   });
 });

@@ -2,7 +2,7 @@ import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
 import { WorktreeDetail } from "../../src/components/WorktreeDetail.js";
-import type { WorktreeWithStatus } from "../../src/lib/types.js";
+import type { WorktreeWithStatus, StandaloneSession } from "../../src/lib/types.js";
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
@@ -235,5 +235,68 @@ describe("WorktreeDetail", () => {
     const frame = lastFrame()!;
     expect(frame).toContain("Deploy to Staging");
     expect(frame).toContain("awaiting approval");
+  });
+
+  it("shows standalone session detail with path and status", () => {
+    const session: StandaloneSession = {
+      id: "ss-1",
+      path: "/tmp/standalone-project",
+      status: "executing",
+      session_id: "sess-1",
+      last_response: null,
+      transcript_summary: "Working on refactor",
+      is_open: 1,
+      created_at: "2024-01-01",
+      updated_at: new Date().toISOString(),
+    };
+    const { lastFrame } = render(
+      <WorktreeDetail worktree={null} standaloneSession={session} />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("/tmp/standalone-project");
+    expect(frame).toContain("Executing");
+    expect(frame).toContain("Working on refactor");
+  });
+
+  it("shows standalone session with no active session when closed", () => {
+    const session: StandaloneSession = {
+      id: "ss-1",
+      path: "/tmp/standalone-project",
+      status: "idle",
+      session_id: null,
+      last_response: "Done with task",
+      transcript_summary: null,
+      is_open: 0,
+      created_at: "2024-01-01",
+      updated_at: "2024-01-01",
+    };
+    const { lastFrame } = render(
+      <WorktreeDetail worktree={null} standaloneSession={session} />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("No active session");
+    expect(frame).toContain("Done with task");
+    expect(frame).toContain("/tmp/standalone-project");
+  });
+
+  it("standalone session takes priority over worktree when both provided", () => {
+    const session: StandaloneSession = {
+      id: "ss-1",
+      path: "/tmp/standalone-project",
+      status: "executing",
+      session_id: null,
+      last_response: null,
+      transcript_summary: null,
+      is_open: 1,
+      created_at: "2024-01-01",
+      updated_at: new Date().toISOString(),
+    };
+    const wt = makeWorktree();
+    const { lastFrame } = render(
+      <WorktreeDetail worktree={wt} standaloneSession={session} />
+    );
+    const frame = lastFrame()!;
+    // Should show standalone path, not worktree branch
+    expect(frame).toContain("/tmp/standalone-project");
   });
 });

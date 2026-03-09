@@ -7,6 +7,101 @@ vi.mock("../../src/lib/logger.js", () => ({
   setLogLevel: vi.fn(),
 }));
 
+// Mock pubsub-client so we can verify published messages
+vi.mock("../../src/lib/pubsub-client.js", () => ({
+  publishMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock git module so getWorktreeRoot returns the path as-is
+vi.mock("../../src/lib/git.js", () => ({
+  getWorktreeRoot: vi.fn((p: string) => p),
+}));
+
+// Mock rules module
+vi.mock("../../src/lib/rules.js", () => ({
+  loadRules: vi.fn().mockReturnValue([]),
+  addRule: vi.fn(),
+  parseClaudePermissionRule: vi.fn(),
+  applyRulesToClaudeSettings: vi.fn(),
+}));
+
+// Mock settings module
+vi.mock("../../src/lib/settings.js", () => ({
+  loadSettings: vi.fn().mockReturnValue({}),
+}));
+
+describe("handleStandaloneSession", () => {
+  let handleHookEvent: typeof import("../../src/commands/hook-event.js").handleHookEvent;
+  let db: typeof import("../../src/lib/db.js");
+  let publishMessage: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    db = await import("../../src/lib/db.js");
+    ({ handleHookEvent } = await import("../../src/commands/hook-event.js"));
+    ({ publishMessage } = await import("../../src/lib/pubsub-client.js"));
+    vi.mocked(publishMessage).mockClear();
+
+    // Simulate stdin by mocking process.stdin.isTTY
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+  });
+
+  it("creates a standalone session when worktree not found in DB", async () => {
+    // Path not in any repo/worktree - should become standalone
+    await handleHookEvent("/tmp/standalone-project", "UserPromptSubmit");
+    const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session).toBeDefined();
+    expect(session!.status).toBe("executing");
+    expect(session!.is_open).toBe(1);
+  });
+
+  it("standalone session status maps correctly for executing", async () => {
+    await handleHookEvent("/tmp/standalone-project", "UserPromptSubmit");
+    const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.status).toBe("executing");
+  });
+
+  it("standalone session maps Stop to idle when no prior status", async () => {
+    await handleHookEvent("/tmp/standalone-project", "Stop");
+    const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.status).toBe("idle");
+  });
+
+  it("standalone session maps Stop to done when previously executing", async () => {
+    // First create an executing session
+    await handleHookEvent("/tmp/standalone-project", "UserPromptSubmit");
+    // Now stop - should transition to done since it was executing
+    await handleHookEvent("/tmp/standalone-project", "Stop");
+    const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.status).toBe("done");
+  });
+
+  it("SessionEnd marks standalone session as closed (is_open=0)", async () => {
+    await handleHookEvent("/tmp/standalone-project", "UserPromptSubmit");
+    await handleHookEvent("/tmp/standalone-project", "SessionEnd");
+    const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.is_open).toBe(0);
+  });
+
+  it("publishes standalone-status-update message", async () => {
+    await handleHookEvent("/tmp/standalone-project", "UserPromptSubmit");
+    expect(publishMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "standalone-status-update",
+        sessionPath: "/tmp/standalone-project",
+        status: "executing",
+        isOpen: true,
+      })
+    );
+  });
+
+  it("skips informational Notification events for standalone sessions", async () => {
+    // A Notification without permission_prompt type should be skipped
+    await handleHookEvent("/tmp/standalone-project", "Notification");
+    const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session).toBeUndefined();
+  });
+});
+
 describe("mapEventToStatus", () => {
   let mapEventToStatus: typeof import("../../src/commands/hook-event.js").mapEventToStatus;
 

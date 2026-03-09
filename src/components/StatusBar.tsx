@@ -11,14 +11,20 @@ interface StatusBarProps {
   repoName: string;
   worktreeCount: number;
   repoCount?: number;
+  standaloneCount?: number;
   version?: string;
   updateInfo?: UpdateInfo | null;
 }
 
-export function StatusBar({ repoName, worktreeCount, repoCount, version, updateInfo }: StatusBarProps) {
+export function StatusBar({ repoName, worktreeCount, repoCount, standaloneCount, version, updateInfo }: StatusBarProps) {
   const repoLabel = repoCount && repoCount > 1
     ? `${repoCount} repos`
     : repoName;
+
+  const countParts = [`${worktreeCount} worktree${worktreeCount !== 1 ? "s" : ""}`];
+  if (standaloneCount && standaloneCount > 0) {
+    countParts.push(`${standaloneCount} other`);
+  }
 
   return (
     <Box justifyContent="space-between" paddingX={1}>
@@ -34,7 +40,7 @@ export function StatusBar({ repoName, worktreeCount, repoCount, version, updateI
         )}
       </Box>
       <Text dimColor>
-        {repoLabel} ({worktreeCount} worktree{worktreeCount !== 1 ? "s" : ""})
+        {repoLabel} ({countParts.join(", ")})
       </Text>
     </Box>
   );

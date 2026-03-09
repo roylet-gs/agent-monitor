@@ -4,11 +4,14 @@ import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
 import { isEffectivelyOpen } from "../lib/agent-utils.js";
 import { PulsingDot } from "./PulsingDot.js";
-import type { WorktreeWithStatus, WorktreeGroup } from "../lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup, StandaloneSession } from "../lib/types.js";
+import { homedir } from "os";
 
 interface WorktreeListProps {
   groups: WorktreeGroup[];
   flatWorktrees: WorktreeWithStatus[];
+  standaloneSessions: StandaloneSession[];
+  standaloneStartIndex: number;
   selectedIndex: number;
   unseenIds: Set<string>;
   compactView: boolean;
@@ -29,8 +32,19 @@ function statusColor(status: string | undefined): string {
   }
 }
 
-export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, selectedIndex, unseenIds, compactView }: WorktreeListProps) {
-  if (flatWorktrees.length === 0) {
+function abbreviatePath(fullPath: string): string {
+  const home = homedir();
+  let p = fullPath;
+  if (p.startsWith(home)) {
+    p = "~" + p.slice(home.length);
+  }
+  const segments = p.split("/").filter(Boolean);
+  if (segments.length <= 3) return p;
+  return segments.slice(-3).join("/");
+}
+
+export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView }: WorktreeListProps) {
+  if (flatWorktrees.length === 0 && standaloneSessions.length === 0) {
     return (
       <Box
         flexDirection="column"
@@ -127,6 +141,31 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
             </Box>
           );
         })}
+        {standaloneSessions.length > 0 && (
+          <Box flexDirection="column" marginTop={flatWorktrees.length > 0 ? 1 : 0}>
+            <Text dimColor>── Other Sessions ───</Text>
+            {standaloneSessions.map((session, i) => {
+              const idx = standaloneStartIndex + i;
+              const isSelected = idx === selectedIndex;
+              const open = !!session.is_open;
+              const unseen = unseenIds.has(session.id);
+
+              return (
+                <Box key={session.id} gap={1}>
+                  <Text>{isSelected ? "▸" : " "}</Text>
+                  {open ? (session.status === "executing" || session.status === "planning" ? <PulsingDot color={statusColor(session.status)} /> : session.status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(session.status)}>●</Text>) : <Text dimColor>○</Text>}
+                  <Text
+                    bold={isSelected}
+                    color={isSelected ? "cyan" : undefined}
+                  >
+                    {abbreviatePath(session.path)}
+                  </Text>
+                  {unseen && <Text color="magenta" bold>*</Text>}
+                </Box>
+              );
+            })}
+          </Box>
+        )}
       </Box>
     </Box>
   );
