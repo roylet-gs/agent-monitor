@@ -19,6 +19,9 @@ git commit -m "init" --quiet
 # Seed the repo into the database
 npx tsx src/cli.tsx repo add /work
 
+# Seed standalone sessions (simulates Claude sessions in untracked directories)
+npx tsx e2e/seed-standalone.ts
+
 # Skip setup wizard and show main branch (it's the only worktree in the container)
 echo '{"setupCompleted":true,"hideMainBranch":false}' > "$AM_DATA_DIR/settings.json"
 
