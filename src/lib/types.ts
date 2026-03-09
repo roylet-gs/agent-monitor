@@ -104,7 +104,7 @@ export interface Settings {
   linearAutoNickname: boolean;
   maxLogSizeMb: number;
   applyGlobalRulesEnabled: boolean;
-  safeCommandsPresetEnabled: boolean;
+  learnFromApprovalsEnabled: boolean;
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
@@ -159,6 +159,6 @@ export interface Rule {
   tool: string;
   input_pattern?: string;
   decision: "allow" | "deny";
-  source: "manual" | "learned" | "preset";
+  source: "manual" | "learned";
   created_at: string;
 }

@@ -254,37 +254,13 @@ ruleCmd
     ruleApply(opts);
   });
 
-// --- Rule preset subcommands ---
-
-const rulePresetCmd = ruleCmd
-  .command("preset")
-  .description("Manage rule presets");
-
-rulePresetCmd
-  .command("list")
-  .description("List available presets")
+ruleCmd
+  .command("sync")
+  .description("Learn rules from worktree .claude/settings.local.json files")
   .option("--json", "Output as JSON")
   .action(async (opts) => {
-    const { presetList } = await import("./commands/rule-preset.js");
-    presetList(opts);
-  });
-
-rulePresetCmd
-  .command("enable <name>")
-  .description("Enable a rule preset")
-  .option("--json", "Output as JSON")
-  .action(async (name, opts) => {
-    const { presetEnable } = await import("./commands/rule-preset.js");
-    presetEnable(name, opts);
-  });
-
-rulePresetCmd
-  .command("disable <name>")
-  .description("Disable a rule preset")
-  .option("--json", "Output as JSON")
-  .action(async (name, opts) => {
-    const { presetDisable } = await import("./commands/rule-preset.js");
-    presetDisable(name, opts);
+    const { ruleSync } = await import("./commands/rule.js");
+    ruleSync(opts);
   });
 
 ruleCmd

@@ -5,6 +5,7 @@ import {
   clearAllRules,
   applyRulesToClaudeSettings,
   removeAmPermissionsFromClaudeSettings,
+  syncLearnedRules,
 } from "../lib/rules.js";
 import { loadSettings, saveSettings } from "../lib/settings.js";
 import { outputJson, outputTable } from "../lib/output.js";
@@ -36,12 +37,14 @@ export function ruleList(opts: { json?: boolean }): void {
       tool: r.tool,
       pattern: r.input_pattern ?? "",
       decision: r.decision,
+      source: r.source,
     })),
     [
       { key: "id", header: "ID" },
       { key: "tool", header: "Tool" },
       { key: "pattern", header: "Pattern" },
       { key: "decision", header: "Decision" },
+      { key: "source", header: "Source" },
     ]
   );
 }
@@ -93,14 +96,29 @@ export function ruleClear(opts: { json?: boolean }): void {
   }
 
   const settings = loadSettings();
-  if (settings.safeCommandsPresetEnabled) {
-    saveSettings({ ...settings, safeCommandsPresetEnabled: false });
+  if (settings.learnFromApprovalsEnabled) {
+    saveSettings({ ...settings, learnFromApprovalsEnabled: false });
   }
   if (settings.applyGlobalRulesEnabled) {
     removeAmPermissionsFromClaudeSettings();
     if (!opts.json) {
       console.log("Restored ~/.claude/settings.json to baseline.");
     }
+  }
+}
+
+export function ruleSync(opts: { json?: boolean }): void {
+  const result = syncLearnedRules();
+
+  if (opts.json) {
+    outputJson(result);
+    return;
+  }
+
+  if (result.added === 0) {
+    console.log("No new rules learned from worktrees.");
+  } else {
+    console.log(`Learned ${result.added} new rule(s) from worktree approvals.`);
   }
 }
 
