@@ -24,9 +24,10 @@ RUN pnpm install --frozen-lockfile
 # ============================================================
 FROM base AS app
 
-# Install ttyd
+# Install ttyd (auto-detect architecture)
 ARG TTYD_VERSION=1.7.7
-RUN curl -fsSL "https://github.com/nicktehrany/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64" -o /usr/local/bin/ttyd \
+RUN ARCH=$(uname -m) \
+  && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ARCH}" -o /usr/local/bin/ttyd \
   && chmod +x /usr/local/bin/ttyd
 
 COPY --from=deps /work/node_modules ./node_modules
@@ -51,7 +52,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 # ============================================================
 FROM mcr.microsoft.com/playwright:v1.50.0-noble AS test
 
-RUN corepack enable && corepack prepare pnpm@9 --activate
+RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@9 --activate
 
 WORKDIR /work
 
@@ -60,9 +61,9 @@ COPY package.json pnpm-lock.yaml tsconfig.json ./
 COPY e2e/playwright.config.ts ./e2e/
 COPY tests/e2e/docker/ ./tests/e2e/docker/
 
-RUN npx playwright install chromium
+RUN pnpm exec playwright install chromium
 
 ENV TUI_URL=http://app:7681
 ENV MOCK_API_URL=http://mock-api:4100
 
-CMD ["npx", "playwright", "test", "--config", "e2e/playwright.config.ts"]
+CMD ["pnpm", "exec", "playwright", "test", "--config", "e2e/playwright.config.ts"]

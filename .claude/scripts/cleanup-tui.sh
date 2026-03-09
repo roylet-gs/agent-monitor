@@ -1,4 +1,8 @@
 #!/bin/bash
+# DEPRECATED: For local manual debugging only.
+# Evidence capture now uses Docker E2E infrastructure (pnpm test:e2e).
+# See .claude/commands/capture-evidence.md for the current workflow.
+#
 # Cleanup ttyd process started by capture-tui.sh and evidence data dir
 
 PID_FILE="/tmp/ttyd-evidence.pid"
