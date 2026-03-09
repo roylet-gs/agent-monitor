@@ -156,6 +156,32 @@ describe("mapEventToStatus", () => {
     expect(mapEventToStatus({ event: "SubagentStop" })).toBe("executing");
   });
 
+  // Subagent events preserve planning status
+  it("SubagentStart while planning -> planning", () => {
+    expect(mapEventToStatus({ event: "SubagentStart" }, "planning")).toBe("planning");
+  });
+
+  it("SubagentStop while planning -> planning", () => {
+    expect(mapEventToStatus({ event: "SubagentStop" }, "planning")).toBe("planning");
+  });
+
+  it("SubagentStart while executing -> executing", () => {
+    expect(mapEventToStatus({ event: "SubagentStart" }, "executing")).toBe("executing");
+  });
+
+  // PreToolUse with permission_prompt
+  it("PreToolUse with permission_prompt -> waiting", () => {
+    expect(
+      mapEventToStatus({ event: "PreToolUse", tool_name: "Read", permission_prompt: true })
+    ).toBe("waiting");
+  });
+
+  it("PreToolUse with permission_prompt in plan mode -> waiting", () => {
+    expect(
+      mapEventToStatus({ event: "PreToolUse", tool_name: "Read", permission_prompt: true, permission_mode: "plan" })
+    ).toBe("waiting");
+  });
+
   // Unknown events
   it("unknown event -> idle", () => {
     expect(mapEventToStatus({ event: "SomethingElse" })).toBe("idle");
