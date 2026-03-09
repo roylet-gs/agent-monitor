@@ -58,7 +58,7 @@
 
 ```sh
 # 1. Authenticate with GitHub Packages (one-time)
-# Create a PAT at https://github.com/settings/tokens with read:packages scope
+# Get the PAT from 1Password: https://start.1password.com/open/i?a=CFXLFRMHFNBWZLNUZISXEKVBPQ&v=kwxg7dvupd3om3qtfe2x3v7rqi&i=m6yhuhvalu4cwod6cwernzyfia&h=my.1password.com
 echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
 echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
 
@@ -87,12 +87,13 @@ The setup wizard walks you through everything on first launch — IDE preference
 
 ### From GitHub Packages
 
-GitHub Packages requires authentication even for public packages. You'll need a free GitHub account and a [Personal Access Token (classic)](https://github.com/settings/tokens) with the `read:packages` scope.
+GitHub Packages requires authentication. Get the shared PAT from [1Password](https://start.1password.com/open/i?a=CFXLFRMHFNBWZLNUZISXEKVBPQ&v=kwxg7dvupd3om3qtfe2x3v7rqi&i=m6yhuhvalu4cwod6cwernzyfia&h=my.1password.com) (Gridsight members only).
 
 Configure npm (one-time):
 
 ```sh
 # Authenticate and point npm to GitHub Packages for the @roylet-gs scope
+# Get the PAT from 1Password: https://start.1password.com/open/i?a=CFXLFRMHFNBWZLNUZISXEKVBPQ&v=kwxg7dvupd3om3qtfe2x3v7rqi&i=m6yhuhvalu4cwod6cwernzyfia&h=my.1password.com
 echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
 echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
 ```
