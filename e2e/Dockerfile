@@ -4,7 +4,7 @@
 FROM node:20-slim AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates python3 make g++ \
+    git curl ca-certificates python3 make g++ jq \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@9 --activate

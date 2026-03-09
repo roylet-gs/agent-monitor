@@ -23,7 +23,8 @@ npx tsx src/cli.tsx repo add /work
 npx tsx e2e/seed-standalone.ts
 
 # Skip setup wizard and show main branch (it's the only worktree in the container)
-echo '{"setupCompleted":true,"hideMainBranch":false}' > "$AM_DATA_DIR/settings.json"
+# Enable Linear with a dummy key so the mock-api can serve fixture data
+echo '{"setupCompleted":true,"hideMainBranch":false,"linearEnabled":true,"linearApiKey":"lin_api_mock"}' > "$AM_DATA_DIR/settings.json"
 
 # Start ttyd serving the TUI
 exec ttyd -p 7681 --writable npx tsx src/cli.tsx

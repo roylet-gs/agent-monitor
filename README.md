@@ -17,19 +17,9 @@
 
 ## Dashboard Preview
 
-```
-  Worktrees                            Detail
-  ── acme-app ──────────────────────   Claude  ● Executing
-  ▸ ● feature/auth     PR #42 ✓       Task: Implementing OAuth flow...
-    ◌ bugfix/login      (draft)
-  ── payments-api ─────────────────    PR #42  Draft
-    ● feature/billing   LIN-521        ✓ Checks passing
-    ─ main
-                                       Linear  LIN-521
-                                       In Progress · High priority
-
-  [Enter] Open  [n]ew  [d]elete  [s]ettings  [q]uit
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-dashboard-pr.png" alt="Agent Monitor dashboard showing PR and Linear integration" width="800">
+</p>
 
 ---
 
@@ -134,16 +124,9 @@ You can re-run the wizard anytime with `am setup`, or verify your setup with `am
 
 The main view is a two-pane layout: worktrees grouped by repository on the left, with a detail panel on the right showing agent status, PR info, and Linear ticket data for the selected worktree.
 
-```
-  Worktrees                            Detail
-  ── my-project ────────────────────   Claude  ● Executing
-  ▸ ● feature/auth     PR #42 ✓       Task: Adding login endpoint...
-    ◌ bugfix/crash      (draft)
-    ─ main                             PR #42  Open
-                                       ✓ CI passing · 2 approvals
-
-  [Enter] Open  [n]ew  [d]elete  [s]ettings  [q]uit
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-dashboard.png" alt="Agent Monitor dashboard" width="800">
+</p>
 
 The dashboard auto-refreshes: agent status updates are pushed instantly via a Unix domain socket, while GitHub and Linear data polls on a configurable interval.
 
@@ -151,13 +134,9 @@ The dashboard auto-refreshes: agent status updates are pushed instantly via a Un
 
 Create, delete, and open git worktrees from the TUI or CLI. The new worktree form lets you set a branch name, base branch, and optional custom name:
 
-```
-  New Worktree
-  Branch name: feature/payment-system
-  Name (optional):
-  Base branch: main
-  [Tab] Next  [Enter] Create  [Esc] Cancel
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-new-worktree.png" alt="New worktree creation form" width="800">
+</p>
 
 Key commands:
 
@@ -177,12 +156,24 @@ Track Claude Code agent status across all your worktrees in real time. Status in
 | Done      | `●` blue   | Agent finished its task                 |
 | Idle      | `◌` gray   | No active agent session                 |
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-standalone-session.png" alt="Standalone agent session monitoring" width="800">
+</p>
+
 > [!IMPORTANT]
 > Hooks must be installed for real-time agent monitoring. Run `am hooks install` or let the setup wizard handle it. Hooks write to `~/.claude/settings.json` and fire events that Agent Monitor captures.
 
 ### GitHub Integration
 
 PR status appears inline next to each worktree — `PR #42 ✓`, `(draft)`, or CI status. The detail panel shows the full picture: title, review state, and check results.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-dashboard-pr.png" alt="Dashboard with PR and CI status" width="800">
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-pr-draft.png" alt="Dashboard with draft PR" width="800">
+</p>
 
 - `am pr` — show PR info for the current branch
 - `am pr open` — open the PR in your browser
@@ -193,6 +184,10 @@ Requires the `gh` CLI to be installed and authenticated.
 ### Linear Integration
 
 Branch names containing Linear ticket identifiers (e.g., `feature/LIN-521-auth-flow`) are automatically linked to their tickets. The dashboard shows ticket status and priority in the detail panel.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-linear-ticket.png" alt="Linear ticket integration" width="800">
+</p>
 
 - `am linear` — show ticket info for the current branch
 - `am linear open` — open the ticket in your browser
@@ -215,23 +210,11 @@ Scripts are stored at `~/.agent-monitor/scripts/<repo-id>.sh`.
 
 All settings are accessible from the TUI (press `s`) or CLI. Categories include IDE preference, worktree defaults, GitHub, Linear, and polling intervals.
 
-Settings are stored in `~/.agent-monitor/settings.json` (or `$AM_DATA_DIR/settings.json`) and can be edited directly. The TUI also provides an **Open settings.json** shortcut at the top of the settings panel to open the file in your configured editor.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/roylet-gs/agent-monitor/evidence-images/main/readme-settings.png" alt="Settings screen" width="800">
+</p>
 
-```
-  Settings
-  ▸ Open settings.json              (Enter to open)
-  ── Worktree ──────────────────────
-    IDE                  cursor
-    Branch prefix        feature/
-    Base branch          main
-    Hide main branch     yes
-  ── GitHub ────────────────────────
-    PR status            enabled
-    Poll interval        3m
-  ── Linear ────────────────────────
-    Enabled              yes
-    Poll interval        3m
-```
+Settings are stored in `~/.agent-monitor/settings.json` (or `$AM_DATA_DIR/settings.json`) and can be edited directly. The TUI also provides an **Open settings.json** shortcut at the top of the settings panel to open the file in your configured editor.
 
 CLI access: `am settings list`, `am settings get <key>`, `am settings set <key> <value>`.
 
