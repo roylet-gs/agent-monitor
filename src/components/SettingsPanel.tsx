@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, removeStartupScript } from "../lib/scripts.js";
-import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings, enablePreset, disablePreset, isPresetEnabled } from "../lib/rules.js";
+import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings, syncLearnedRules, clearLearnedRules } from "../lib/rules.js";
 import type { Rule } from "../lib/types.js";
 
 type SettingsField =
@@ -30,7 +30,7 @@ type SettingsField =
   | "linearRefreshOnManual"
   | "linearAutoNickname"
   | "applyGlobalRules"
-  | "safeCommandsPreset"
+  | "learnFromApprovals"
   | "manageRules"
   | "removeAllRules"
   | "repos"
@@ -58,7 +58,7 @@ const FIELDS: SettingsField[] = [
   "linearRefreshOnManual",
   "linearAutoNickname",
   "applyGlobalRules",
-  "safeCommandsPreset",
+  "learnFromApprovals",
   "manageRules",
   "removeAllRules",
   "repos",
@@ -87,7 +87,7 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
   applyGlobalRules: "Write am rules to ~/.claude/settings.json permissions (persists without TUI)",
-  safeCommandsPreset: "Auto-approve harmless read-only Bash commands (find, ls, cat, git log, grep, etc.)",
+  learnFromApprovals: "Learn auto-approval rules from worktree .claude/settings.local.json files",
   manageRules: "View and remove auto-approval rules",
   removeAllRules: "Remove all auto-approval rules and clean up Claude settings.",
   repos: "Monitored repositories and their startup scripts",
@@ -226,7 +226,7 @@ export function SettingsPanel({
       if (rules.length === 0) return;
       if (key.upArrow) { setRuleIndex((i) => Math.max(0, i - 1)); return; }
       if (key.downArrow) { setRuleIndex((i) => Math.min(rules.length - 1, i + 1)); return; }
-      if ((input === "d" || input === "x") && rules[ruleIndex] && rules[ruleIndex].source !== "preset") {
+      if ((input === "d" || input === "x") && rules[ruleIndex]) {
         removeRule(rules[ruleIndex].id);
         const updated = loadRules();
         setRules(updated);
@@ -245,8 +245,8 @@ export function SettingsPanel({
             setClearRulesMsg("No rules to remove");
           } else {
             setClearRulesMsg(`Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}`);
-            if (current.safeCommandsPresetEnabled) {
-              setCurrent((s) => ({ ...s, safeCommandsPresetEnabled: false }));
+            if (current.learnFromApprovalsEnabled) {
+              setCurrent((s) => ({ ...s, learnFromApprovalsEnabled: false }));
             }
             if (current.applyGlobalRulesEnabled) {
               removeAmPermissionsFromClaudeSettings();
@@ -366,15 +366,15 @@ export function SettingsPanel({
       return;
     }
 
-    if (activeField === "safeCommandsPreset" && (key.return || input === " ")) {
-      const newEnabled = !current.safeCommandsPresetEnabled;
-      const updated = { ...current, safeCommandsPresetEnabled: newEnabled };
+    if (activeField === "learnFromApprovals" && (key.return || input === " ")) {
+      const newEnabled = !current.learnFromApprovalsEnabled;
+      const updated = { ...current, learnFromApprovalsEnabled: newEnabled };
       setCurrent(updated);
       onSave(updated);
       if (newEnabled) {
-        enablePreset("safe-commands");
+        syncLearnedRules();
       } else {
-        disablePreset("safe-commands");
+        clearLearnedRules();
       }
       return;
     }
@@ -470,17 +470,12 @@ export function SettingsPanel({
   );
 
   if (showRulesList) {
-    const manualRules = rules.filter((r) => r.source !== "preset");
-    const presetRules = rules.filter((r) => r.source === "preset");
-    // ruleIndex navigates the full combined list: manual first, then preset
-    const isPresetSelected = ruleIndex >= manualRules.length;
-
     const renderRule = (r: Rule, flatIndex: number) => (
       <Text key={r.id}>
         {flatIndex === ruleIndex ? "▸ " : "  "}
         <Text color={r.decision === "deny" ? "red" : "green"}>{r.decision}</Text>
         {"  "}{r.tool}{r.input_pattern ? `(${r.input_pattern})` : ""}
-        {r.source === "preset" && <Text dimColor> [preset]</Text>}
+        {r.source === "learned" && <Text dimColor> [learned]</Text>}
       </Text>
     );
 
@@ -491,28 +486,13 @@ export function SettingsPanel({
           {rules.length === 0 ? (
             <Text dimColor>No rules. Use `am rule add &lt;tool&gt;` to add one.</Text>
           ) : (
-            <>
-              <Text bold dimColor>Manual &amp; Learned</Text>
-              {manualRules.length === 0 ? (
-                <Text dimColor>  No manual rules</Text>
-              ) : (
-                manualRules.map((r, i) => renderRule(r, i))
-              )}
-              <Box marginTop={1}>
-                <Text bold dimColor>Preset (safe-commands)</Text>
-              </Box>
-              {presetRules.length === 0 ? (
-                <Text dimColor>  No preset rules</Text>
-              ) : (
-                presetRules.map((r, i) => renderRule(r, manualRules.length + i))
-              )}
-            </>
+            rules.map((r, i) => renderRule(r, i))
           )}
         </Box>
         <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
           <Text>
             <Text color="yellow">[↑↓]</Text> Navigate{" "}
-            {!isPresetSelected && rules.length > 0 && (
+            {rules.length > 0 && (
               <><Text color="yellow">[d]</Text> Remove{" "}</>
             )}
             <Text color="yellow">[Esc]</Text> Back
@@ -778,11 +758,11 @@ export function SettingsPanel({
         </Box>
 
         <Box>
-          <Text bold={activeField === "safeCommandsPreset"}>
-            {activeField === "safeCommandsPreset" ? "▸" : " "} Safe Commands Preset:{" "}
+          <Text bold={activeField === "learnFromApprovals"}>
+            {activeField === "learnFromApprovals" ? "▸" : " "} Learn from Approvals:{" "}
           </Text>
-          <Text color={current.safeCommandsPresetEnabled ? "green" : "gray"}>
-            [{current.safeCommandsPresetEnabled ? "✓" : " "}]
+          <Text color={current.learnFromApprovalsEnabled ? "green" : "gray"}>
+            [{current.learnFromApprovalsEnabled ? "✓" : " "}]
           </Text>
         </Box>
 

@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS: Settings = {
   linearAutoNickname: true,
   maxLogSizeMb: 2,
   applyGlobalRulesEnabled: false,
-  safeCommandsPresetEnabled: false,
+  learnFromApprovalsEnabled: false,
 };
 
 export function loadSettings(): Settings {
