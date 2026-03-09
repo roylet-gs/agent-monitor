@@ -122,6 +122,7 @@ export type AppMode =
   | "creating-worktree"
   | "deleting-worktree"
   | "run-script-prompt"
+  | "delete-session-confirm"
   | "setup";
 
 export interface HookEvent {

@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import { randomBytes } from "crypto";
 import path from "path";
 import { log } from "./logger.js";
@@ -177,6 +177,12 @@ export function openTerminal(worktreePath: string, title?: string): string | und
           { stdio: "ignore" }
         );
         break;
+      case "Ghostty":
+        spawn("/Applications/Ghostty.app/Contents/MacOS/ghostty", [
+          `--working-directory=${worktreePath}`,
+          `--title=${windowTitle}`,
+        ], { stdio: "ignore", detached: true }).unref();
+        return windowId; // Ghostty sets title natively, skip setTerminalTitle
       default:
         execSync(`open -a "${app}" "${worktreePath}"`, { stdio: "ignore" });
         break;
@@ -212,6 +218,14 @@ export function openClaudeInTerminal(worktreePath: string, continueSession: bool
             { stdio: "ignore" }
           );
           break;
+        case "Ghostty":
+          spawn("/Applications/Ghostty.app/Contents/MacOS/ghostty", [
+            `--working-directory=${worktreePath}`,
+            `--title=${windowTitle}`,
+            "-e", `/bin/zsh`, "-ic", `cd "${escapedPath}" && ${claudeCmd}`,
+          ], { stdio: "ignore", detached: true }).unref();
+          log("info", "ide", `Opened claude in ${app} at ${worktreePath} (${windowTitle})`);
+          return windowId;
         default:
           execSync(`open -a "${app}" "${worktreePath}"`, { stdio: "ignore" });
           // Small delay to let the terminal window open before sending the command

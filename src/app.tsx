@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import path from "path";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { Dashboard } from "./components/Dashboard.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
 import { RepoSelector } from "./components/RepoSelector.js";
 import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
 import { DeleteConfirm, type DeleteOptions } from "./components/DeleteConfirm.js";
+import { StandaloneDeleteConfirm } from "./components/StandaloneDeleteConfirm.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
@@ -22,6 +24,7 @@ import {
   removeRepository,
   removeWorktree as removeWorktreeDb,
   updateWorktreeCustomName,
+  removeStandaloneSession,
   resetAll,
 } from "./lib/db.js";
 import {
@@ -39,6 +42,7 @@ import {
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde, openClaudeInTerminal, openTerminal } from "./lib/ide-launcher.js";
+import { killClaudeAtPath } from "./lib/process.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -250,9 +254,18 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, []);
 
-  // Handle open in IDE (only for worktrees, not standalone sessions; or terminal if opened via [t])
+  // Handle open in IDE (worktrees or standalone sessions; or terminal if opened via [t])
   const handleOpen = useCallback(async () => {
-    if (selectedIndex >= flatWorktrees.length) return; // standalone session
+    if (selectedIndex >= flatWorktrees.length) {
+      const session = standaloneSessions[selectedIndex - flatWorktrees.length];
+      if (!session) return;
+      try {
+        openInIde(session.path, settings.ide, path.basename(session.path));
+      } catch (err) {
+        setError(`${err}`);
+      }
+      return;
+    }
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
@@ -284,7 +297,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     } catch (err) {
       setError(`${err}`);
     }
-  }, [flatWorktrees, selectedIndex, settings, terminalOpenedIds]);
+  }, [flatWorktrees, standaloneSessions, selectedIndex, settings, terminalOpenedIds]);
 
   // Handle open Claude in a new terminal window (only for worktrees)
   const handleOpenClaude = useCallback(() => {
@@ -669,6 +682,23 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, { isActive: mode === "deleting-worktree" && deleteRecovery !== null });
 
+  // Handle delete standalone session
+  const handleDeleteSession = useCallback(() => {
+    const session = standaloneSessions[selectedIndex - flatWorktrees.length];
+    if (!session) return;
+
+    const isActive = session.status !== "idle" && session.status !== "done";
+    if (isActive) {
+      killClaudeAtPath(session.path);
+    }
+
+    removeStandaloneSession(session.id);
+    refreshStandaloneRef.current();
+    setSelectedIndex((i) => Math.max(0, i - 1));
+    setMode("dashboard");
+    log("info", "app", `Removed standalone session at ${session.path}`);
+  }, [standaloneSessions, flatWorktrees.length, selectedIndex]);
+
   // Handle repo selection from folder browser
   const handleSelectFolder = useCallback(
     async (path: string) => {
@@ -769,7 +799,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       }
     },
     onDelete: () => {
-      if (selectedIndex < flatWorktrees.length && flatWorktrees[selectedIndex]) setMode("delete-confirm");
+      if (selectedIndex < flatWorktrees.length && flatWorktrees[selectedIndex]) {
+        setMode("delete-confirm");
+      } else if (selectedIndex >= flatWorktrees.length) {
+        const session = standaloneSessions[selectedIndex - flatWorktrees.length];
+        if (session) setMode("delete-session-confirm");
+      }
     },
     onSettings: () => setMode("settings"),
     onRefresh: async () => {
@@ -962,6 +997,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           onCancel={() => setMode("dashboard")}
         />
       )}
+
+      {mode === "delete-session-confirm" && (() => {
+        const session = standaloneSessions[selectedIndex - flatWorktrees.length];
+        return session ? (
+          <StandaloneDeleteConfirm
+            session={session}
+            onConfirm={handleDeleteSession}
+            onCancel={() => setMode("dashboard")}
+          />
+        ) : null;
+      })()}
 
       {mode === "settings" && (
         <SettingsPanel

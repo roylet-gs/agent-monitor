@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { execSync } from "child_process";
 
+const mockSpawnProcess = { unref: vi.fn() };
 vi.mock("child_process", () => ({
   execSync: vi.fn(),
+  spawn: vi.fn(() => mockSpawnProcess),
 }));
 
 vi.mock("fs", () => ({
@@ -149,16 +151,16 @@ describe("ide-launcher", () => {
   });
 
   describe("openTerminal with Ghostty", () => {
-    it("uses System Events for focus and title", async () => {
+    it("uses spawn with --title and --working-directory flags", async () => {
       process.env.TERM_PROGRAM = "ghostty";
+      const { spawn } = await import("child_process");
+      const mockedSpawn = vi.mocked(spawn);
 
       mockedExecSync
-        .mockReturnValueOnce("not_found\n") // focus attempt
-        .mockReturnValueOnce("" as any)     // open -a
-        .mockReturnValueOnce("" as any);    // title via keystroke
+        .mockReturnValueOnce("not_found\n"); // focus attempt
 
       const { openTerminal } = await import("../../src/lib/ide-launcher.js");
-      openTerminal("/tmp/worktrees/feat", "feat");
+      const windowId = openTerminal("/tmp/worktrees/feat", "feat");
 
       // Focus should use System Events
       const focusCall = mockedExecSync.mock.calls[0][0] as string;
@@ -166,9 +168,18 @@ describe("ide-launcher", () => {
       expect(focusCall).toContain("Ghostty");
       expect(focusCall).toContain("AXRaise");
 
-      // Open should use open -a
-      const openCall = mockedExecSync.mock.calls[1][0] as string;
-      expect(openCall).toContain('open -a "Ghostty"');
+      // Open should use spawn with Ghostty binary directly
+      expect(mockedSpawn).toHaveBeenCalledWith(
+        "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+        expect.arrayContaining([
+          expect.stringContaining("--working-directory=/tmp/worktrees/feat"),
+          expect.stringContaining("--title=[am] feat"),
+        ]),
+        expect.objectContaining({ stdio: "ignore", detached: true }),
+      );
+
+      // Should return a window ID (not undefined)
+      expect(windowId).toBeDefined();
     });
   });
 
