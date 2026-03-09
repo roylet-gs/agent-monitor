@@ -7,3 +7,9 @@ dist/
 
 # Evidence screenshots (only on feature branches)
 .github/evidence/
+
+# Docker E2E test artifacts
+tests/e2e/tmp/
+
+# Playwright MCP local state
+.playwright-mcp/

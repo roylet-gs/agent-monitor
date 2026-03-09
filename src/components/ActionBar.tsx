@@ -10,9 +10,10 @@ interface ActionBarProps {
   linearEnabled?: boolean;
   hasPr?: boolean;
   hasLinear?: boolean;
+  ideIsTerm?: boolean;
 }
 
-export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear }: ActionBarProps) {
+export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -36,6 +37,7 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
       {hasWorktrees ? (
         <Text>
           <Text color="yellow">[Enter]</Text> Open
+          {!ideIsTerm && <><Text color="yellow"> [t]</Text>erminal</>}
           <Text color="yellow"> [n]</Text>ew
           <Text color="yellow"> [d]</Text>elete
           {(ghPrStatus || linearEnabled) && (

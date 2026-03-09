@@ -198,8 +198,24 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
     return event.event === "PostToolUse" ? "planning" : "waiting";
   }
 
+  // PreToolUse with permission_prompt → waiting (safety net for prompts
+  // that don't fire a Notification event)
+  if (event.event === "PreToolUse" && event.permission_prompt === true) {
+    return "waiting";
+  }
+
   // Plan mode folds into the planning status
   if (event.permission_mode === "plan") {
+    return "planning";
+  }
+
+  // SubagentStart/SubagentStop don't carry permission_mode — preserve
+  // "planning" if the agent is already in plan mode, otherwise "executing"
+  if (
+    (event.event === "SubagentStart" || event.event === "SubagentStop") &&
+    currentStatus === "planning"
+  ) {
+    log("debug", "hook-event", `${event.event} during planning → preserving planning status`);
     return "planning";
   }
 

@@ -345,8 +345,24 @@ export function useWorktrees(config: WorktreeHookConfig): {
 
   // Exposed refresh always forces integrations fetch
   const forceRefresh = useCallback(() => refresh(true), [refresh]);
-  // Light refresh: just re-reads DB + git status, no network calls
-  const lightRefresh = useCallback(() => refresh(false), [refresh]);
+
+  // Light refresh: debounced to avoid excessive git status calls from rapid pub/sub events
+  const lightRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lightRefresh = useCallback(() => {
+    if (lightRefreshTimerRef.current) return Promise.resolve();
+    lightRefreshTimerRef.current = setTimeout(() => {
+      lightRefreshTimerRef.current = null;
+      refresh(false);
+    }, 300);
+    return Promise.resolve();
+  }, [refresh]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (lightRefreshTimerRef.current) clearTimeout(lightRefreshTimerRef.current);
+    };
+  }, []);
 
   return { groups, flatWorktrees, refresh: forceRefresh, lightRefresh };
 }

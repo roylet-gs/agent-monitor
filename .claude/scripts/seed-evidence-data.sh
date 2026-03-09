@@ -1,4 +1,8 @@
 #!/bin/bash
+# DEPRECATED: For local manual debugging only.
+# Evidence capture now uses Docker E2E infrastructure (pnpm test:e2e).
+# See .claude/commands/capture-evidence.md for the current workflow.
+#
 # Create an isolated data dir and seed it with the current repo.
 # Usage: source seed-evidence-data.sh
 # Sets AM_DATA_DIR and AM_EVIDENCE_DIR env vars for the caller.

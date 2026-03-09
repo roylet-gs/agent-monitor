@@ -23,6 +23,7 @@ interface DashboardProps {
   updateInfo?: UpdateInfo | null;
   ghPrStatus?: boolean;
   linearEnabled?: boolean;
+  ideIsTerm?: boolean;
 }
 
 export const Dashboard = React.memo(function Dashboard({
@@ -41,6 +42,7 @@ export const Dashboard = React.memo(function Dashboard({
   updateInfo,
   ghPrStatus,
   linearEnabled,
+  ideIsTerm,
 }: DashboardProps) {
   const isStandaloneSelected = selectedIndex >= flatWorktrees.length;
   const selectedWorktree = isStandaloneSelected ? null : (flatWorktrees[selectedIndex] ?? null);
@@ -56,7 +58,7 @@ export const Dashboard = React.memo(function Dashboard({
         <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} />
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
-      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} />
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} ideIsTerm={ideIsTerm} />
     </Box>
   );
 });

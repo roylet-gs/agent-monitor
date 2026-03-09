@@ -38,7 +38,7 @@ import {
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
-import { openInIde, openClaudeInTerminal } from "./lib/ide-launcher.js";
+import { openInIde, openClaudeInTerminal, openTerminal } from "./lib/ide-launcher.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
@@ -82,6 +82,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // For create-worktree flow: repo picked from RepoSelector
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
+  const [terminalOpenedIds, setTerminalOpenedIds] = useState<Set<string>>(new Set());
   const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
@@ -225,6 +226,23 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [selectedIndex, flatWorktrees, standaloneSessions, unseenIds]);
 
+  // Clean up terminalOpenedIds when terminals are closed
+  useEffect(() => {
+    if (terminalOpenedIds.size === 0) return;
+    const closedIds = new Set<string>();
+    for (const id of terminalOpenedIds) {
+      const wt = flatWorktrees.find((w) => w.id === id);
+      if (!wt || !wt.has_terminal) closedIds.add(id);
+    }
+    if (closedIds.size > 0) {
+      setTerminalOpenedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of closedIds) next.delete(id);
+        return next;
+      });
+    }
+  }, [flatWorktrees, terminalOpenedIds]);
+
   // Auto-install global hooks on startup if not present (skip during setup wizard)
   useEffect(() => {
     if (mode !== "setup" && !isGlobalHooksInstalled()) {
@@ -232,11 +250,29 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, []);
 
-  // Handle open in IDE (only for worktrees, not standalone sessions)
+  // Handle open in IDE (only for worktrees, not standalone sessions; or terminal if opened via [t])
   const handleOpen = useCallback(async () => {
     if (selectedIndex >= flatWorktrees.length) return; // standalone session
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
+
+    // If this worktree was opened via [t] and terminal is still running, focus it
+    if (terminalOpenedIds.has(wt.id)) {
+      if (wt.has_terminal) {
+        try {
+          openTerminal(wt.path, wt.custom_name ?? wt.branch);
+        } catch (err) {
+          setError(`${err}`);
+        }
+        return;
+      }
+      // Terminal was closed — remove from set and fall through to IDE
+      setTerminalOpenedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(wt.id);
+        return next;
+      });
+    }
 
     try {
       const result = await ensureBranchForOpen(wt.path, wt.branch, wt.is_main === 1);
@@ -248,7 +284,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     } catch (err) {
       setError(`${err}`);
     }
-  }, [flatWorktrees, selectedIndex, settings]);
+  }, [flatWorktrees, selectedIndex, settings, terminalOpenedIds]);
 
   // Handle open Claude in a new terminal window (only for worktrees)
   const handleOpenClaude = useCallback(() => {
@@ -259,6 +295,23 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const continueSession = !!wt.agent_status?.session_id;
     try {
       openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch);
+    } catch (err) {
+      setError(`${err}`);
+    }
+  }, [flatWorktrees, selectedIndex]);
+
+  // Handle open terminal via [t]
+  const handleOpenTerminal = useCallback(() => {
+    const wt = flatWorktrees[selectedIndex];
+    if (!wt) return;
+
+    try {
+      openTerminal(wt.path, wt.custom_name ?? wt.branch);
+      setTerminalOpenedIds((prev) => {
+        const next = new Set(prev);
+        next.add(wt.id);
+        return next;
+      });
     } catch (err) {
       setError(`${err}`);
     }
@@ -753,6 +806,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           exit();
         }
       : undefined,
+    onTerminal: handleOpenTerminal,
     onClaude: handleOpenClaude,
     onQuit: () => exit(),
     onEscHint: setEscHint,
@@ -940,6 +994,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           updateInfo={updateInfo}
           ghPrStatus={settings.ghPrStatus}
           linearEnabled={settings.linearEnabled}
+          ideIsTerm={settings.ide === "terminal"}
         />
       )}
     </Box>

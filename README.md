@@ -214,8 +214,11 @@ Scripts are stored at `~/.agent-monitor/scripts/<repo-id>.sh`.
 
 All settings are accessible from the TUI (press `s`) or CLI. Categories include IDE preference, worktree defaults, GitHub, Linear, and polling intervals.
 
+Settings are stored in `~/.agent-monitor/settings.json` (or `$AM_DATA_DIR/settings.json`) and can be edited directly. The TUI also provides an **Open settings.json** shortcut at the top of the settings panel to open the file in your configured editor.
+
 ```
   Settings
+  ▸ Open settings.json              (Enter to open)
   ── Worktree ──────────────────────
     IDE                  cursor
     Branch prefix        feature/
@@ -230,6 +233,29 @@ All settings are accessible from the TUI (press `s`) or CLI. Categories include 
 ```
 
 CLI access: `am settings list`, `am settings get <key>`, `am settings set <key> <value>`.
+
+<details>
+<summary><strong>Example settings.json</strong></summary>
+
+```json
+{
+  "ide": "cursor",
+  "defaultBranchPrefix": "feature/",
+  "defaultBaseBranch": "main",
+  "pollingIntervalMs": 30000,
+  "autoSyncOnStartup": true,
+  "compactView": false,
+  "hideMainBranch": true,
+  "ghPrStatus": true,
+  "ghPollingIntervalMs": 180000,
+  "logLevel": "info",
+  "linearEnabled": false,
+  "linearApiKey": "",
+  "linearPollingIntervalMs": 180000
+}
+```
+
+</details>
 
 ---
 
@@ -381,6 +407,10 @@ All data is stored in `~/.agent-monitor/`:
 | `linearPollingIntervalMs` | `180000`     | Linear polling interval (ms)                              |
 | `linearUseDesktopApp`     | `false`      | Open Linear links in desktop app                          |
 | `linearRefreshOnManual`   | `true`       | Refresh Linear data on manual refresh                     |
+| `linearAutoNickname`      | `true`       | Auto-set worktree nicknames from Linear ticket titles     |
+| `maxLogSizeMb`            | `2`          | Max debug log file size in MB before rotation             |
+| `applyGlobalRulesEnabled` | `false`      | Write auto-approval rules to `~/.claude/settings.json`    |
+| `safeCommandsPresetEnabled` | `false`    | Auto-approve harmless read-only Bash commands             |
 
 </details>
 
@@ -400,6 +430,34 @@ Claude Code hooks → am hook-event → SQLite → Unix socket → TUI renders
 Only one TUI instance owns the socket at a time — others fall back to polling. SQLite (WAL mode) is the source of truth, ensuring safe concurrent reads/writes between the TUI and hook events.
 
 See [CLAUDE.md](./CLAUDE.md) for full architecture details.
+
+---
+
+## Testing
+
+### Unit Tests
+
+```sh
+pnpm test              # Run all vitest tests
+pnpm test:watch        # Watch mode
+pnpm test:coverage     # With coverage report
+```
+
+### Docker E2E Tests
+
+End-to-end tests run the real TUI in Docker containers with mocked GitHub and Linear APIs. Requires Docker.
+
+```sh
+pnpm test:e2e          # Build containers, run Playwright specs, exit
+pnpm test:e2e:clean    # Tear down containers and images
+```
+
+The Docker setup uses three containers:
+- **mock-api** — Configurable HTTP server serving gh CLI and Linear API fixtures
+- **app** — The real TUI served via ttyd in a seeded environment
+- **tests** — Playwright (Chromium) connecting to the TUI, running specs, capturing screenshots
+
+Test specs live in `tests/e2e/docker/`. Screenshots are saved to `tests/e2e/tmp/`. See [CLAUDE.md](./CLAUDE.md) for details on writing new specs and configuring mock fixtures.
 
 ---
 
