@@ -1,8 +1,11 @@
+import http from "node:http";
 import https from "node:https";
 import { log } from "./logger.js";
 import type { LinearInfo, PrInfo } from "./types.js";
 
-function httpsPost(
+const LINEAR_API_URL = process.env.AM_LINEAR_API_URL || "https://api.linear.app/graphql";
+
+function httpPost(
   url: string,
   headers: Record<string, string>,
   body: string,
@@ -10,10 +13,12 @@ function httpsPost(
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
-    const req = https.request(
+    const transport = parsed.protocol === "https:" ? https : http;
+    const req = transport.request(
       {
         hostname: parsed.hostname,
-        path: parsed.pathname,
+        port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+        path: parsed.pathname + parsed.search,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -65,8 +70,8 @@ export async function fetchLinearInfo(
   `;
 
   try {
-    const raw = await httpsPost(
-      "https://api.linear.app/graphql",
+    const raw = await httpPost(
+      LINEAR_API_URL,
       { Authorization: apiKey },
       JSON.stringify({ query, variables: { branch } })
     );
@@ -105,8 +110,8 @@ export async function fetchLinearInfo(
 
 export async function verifyLinearApiKey(apiKey: string): Promise<{ ok: boolean; name?: string; error?: string }> {
   try {
-    const raw = await httpsPost(
-      "https://api.linear.app/graphql",
+    const raw = await httpPost(
+      LINEAR_API_URL,
       { Authorization: apiKey },
       JSON.stringify({ query: "{ viewer { name email } }" })
     );

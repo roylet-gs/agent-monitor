@@ -1,0 +1,51 @@
+services:
+  mock-api:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+      target: deps
+    working_dir: /work
+    command: ["npx", "tsx", "e2e/mock-api/server.ts"]
+    ports:
+      - "4100:4100"
+    volumes:
+      - ../e2e/mock-api:/work/e2e/mock-api:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4100/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+      target: app
+    depends_on:
+      mock-api:
+        condition: service_healthy
+    ports:
+      - "7681:7681"
+    environment:
+      - AM_DATA_DIR=/tmp/am-e2e
+      - AM_MOCK_API_URL=http://mock-api:4100
+      - AM_LINEAR_API_URL=http://mock-api:4100/linear
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7681/"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  tests:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+      target: test
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      - TUI_URL=http://app:7681
+      - MOCK_API_URL=http://mock-api:4100
+    volumes:
+      - ../tests/e2e/tmp:/work/tests/e2e/tmp

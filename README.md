@@ -433,6 +433,34 @@ See [CLAUDE.md](./CLAUDE.md) for full architecture details.
 
 ---
 
+## Testing
+
+### Unit Tests
+
+```sh
+pnpm test              # Run all vitest tests
+pnpm test:watch        # Watch mode
+pnpm test:coverage     # With coverage report
+```
+
+### Docker E2E Tests
+
+End-to-end tests run the real TUI in Docker containers with mocked GitHub and Linear APIs. Requires Docker.
+
+```sh
+pnpm test:e2e          # Build containers, run Playwright specs, exit
+pnpm test:e2e:clean    # Tear down containers and images
+```
+
+The Docker setup uses three containers:
+- **mock-api** — Configurable HTTP server serving gh CLI and Linear API fixtures
+- **app** — The real TUI served via ttyd in a seeded environment
+- **tests** — Playwright (Chromium) connecting to the TUI, running specs, capturing screenshots
+
+Test specs live in `tests/e2e/docker/`. Screenshots are saved to `tests/e2e/tmp/`. See [CLAUDE.md](./CLAUDE.md) for details on writing new specs and configuring mock fixtures.
+
+---
+
 ## Troubleshooting
 
 Run `am doctor` to check the health of your setup — it verifies hooks, `gh` CLI, database, and Linear connectivity.

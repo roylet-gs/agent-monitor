@@ -48,6 +48,8 @@ vi.mock("../../src/lib/hooks-installer.js", () => ({
 
 vi.mock("../../src/lib/ide-launcher.js", () => ({
   openInIde: vi.fn(),
+  openClaudeInTerminal: vi.fn(),
+  openTerminal: vi.fn(),
 }));
 
 vi.mock("../../src/lib/sync.js", () => ({

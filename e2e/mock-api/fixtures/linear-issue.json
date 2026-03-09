@@ -1,0 +1,33 @@
+{
+  "data": {
+    "issueVcsBranchSearch": {
+      "identifier": "ENG-123",
+      "title": "Implement dashboard feature",
+      "url": "https://linear.app/team/issue/ENG-123",
+      "state": {
+        "name": "In Progress",
+        "color": "#0ea5e9",
+        "type": "started"
+      },
+      "priorityLabel": "High",
+      "assignee": {
+        "name": "Test User"
+      },
+      "attachments": {
+        "nodes": [
+          {
+            "url": "https://github.com/test/repo/pull/42",
+            "title": "feat: add new dashboard feature",
+            "sourceType": "github",
+            "metadata": {
+              "number": 42,
+              "draft": false,
+              "mergedAt": null,
+              "closedAt": null
+            }
+          }
+        ]
+      }
+    }
+  }
+}

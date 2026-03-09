@@ -1,6 +1,6 @@
 {
   "name": "@roylet-gs/agent-monitor",
-  "version": "1.0.40",
+  "version": "1.0.42",
   "description": "CLI TUI tool for monitoring git worktrees and Claude Code agent status",
   "type": "module",
   "main": "dist/cli.js",
@@ -24,7 +24,10 @@
     "dev": "tsx --watch src/cli.tsx",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "docker compose -f e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from tests",
+    "test:e2e:build": "docker compose -f e2e/docker-compose.yml build",
+    "test:e2e:clean": "docker compose -f e2e/docker-compose.yml down -v --rmi local"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
@@ -36,6 +39,7 @@
     "simple-git": "^3.27.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.50.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/react": "^18.3.12",
     "@vitest/coverage-v8": "^4.0.18",

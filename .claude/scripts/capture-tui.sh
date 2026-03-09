@@ -1,4 +1,8 @@
 #!/bin/bash
+# DEPRECATED: For local manual debugging only.
+# Evidence capture now uses Docker E2E infrastructure (pnpm test:e2e).
+# See .claude/commands/capture-evidence.md for the current workflow.
+#
 # Usage: capture-tui.sh <command> [screenshot-dir] [port]
 # Starts ttyd serving the given command, waits for it to be ready,
 # and outputs the URL. PID file at /tmp/ttyd-evidence.pid for cleanup.

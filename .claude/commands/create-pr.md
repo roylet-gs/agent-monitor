@@ -58,7 +58,7 @@ Idempotent: detects existing PRs and updates them instead of failing.
    gh api "repos/$OWNER_REPO/pulls/$PR_NUMBER" -X PATCH -f body='...'
    ```
 
-   If screenshots exist, upload them first via `bash .claude/scripts/upload-evidence.sh`.
+   If screenshots exist, upload them first via `bash .claude/scripts/upload-evidence.sh tests/e2e/tmp`.
 
 8. **Wait for checks** — Monitor CI status:
    ```bash
