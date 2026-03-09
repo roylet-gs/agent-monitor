@@ -1,0 +1,19 @@
+#!/bin/bash
+# Fake gh CLI that proxies all calls to the mock-api server.
+# This sits on $PATH ahead of any real gh binary.
+
+MOCK_URL="${AM_MOCK_API_URL:-http://mock-api:4100}"
+
+response=$(curl -sf "${MOCK_URL}/gh" \
+  -H "Content-Type: application/json" \
+  -d "$(printf '{"args":%s,"cwd":"%s"}' "$(printf '%s\n' "$@" | jq -R . | jq -s .)" "$(pwd)")" \
+  2>/dev/null)
+
+exit_code=$?
+
+if [ $exit_code -ne 0 ]; then
+  echo "no pull requests found" >&2
+  exit 1
+fi
+
+echo "$response"
