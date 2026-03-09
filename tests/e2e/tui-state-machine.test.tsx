@@ -119,11 +119,11 @@ describe("TUI State Machine", () => {
     expect(lastFrame()!).toContain("Agent Monitor");
 
     stdin.write("s");
-    await waitForFrame();
+    await waitForFrame(300);
     expect(lastFrame()!).toContain("Settings");
 
     stdin.write(ESCAPE);
-    await waitForFrame();
+    await waitForFrame(300);
     expect(lastFrame()!).toContain("Agent Monitor");
   });
 
