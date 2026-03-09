@@ -95,4 +95,25 @@ describe("ActionBar", () => {
     const frame = lastFrame()!;
     expect(frame).toContain("inear");
   });
+
+  it("shows terminal action when hasWorktrees and ideIsTerm is false", () => {
+    const { lastFrame } = render(
+      <ActionBar busy={null} hasWorktrees={true} escHint={false} ideIsTerm={false} />
+    );
+    expect(lastFrame()!).toContain("erminal");
+  });
+
+  it("hides terminal action when ideIsTerm is true", () => {
+    const { lastFrame } = render(
+      <ActionBar busy={null} hasWorktrees={true} escHint={false} ideIsTerm={true} />
+    );
+    expect(lastFrame()!).not.toContain("erminal");
+  });
+
+  it("hides terminal action when no worktrees", () => {
+    const { lastFrame } = render(
+      <ActionBar busy={null} hasWorktrees={false} escHint={false} ideIsTerm={false} />
+    );
+    expect(lastFrame()!).not.toContain("erminal");
+  });
 });

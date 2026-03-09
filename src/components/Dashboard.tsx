@@ -22,6 +22,7 @@ interface DashboardProps {
   updateInfo?: UpdateInfo | null;
   ghPrStatus?: boolean;
   linearEnabled?: boolean;
+  ideIsTerm?: boolean;
 }
 
 export const Dashboard = React.memo(function Dashboard({
@@ -39,6 +40,7 @@ export const Dashboard = React.memo(function Dashboard({
   updateInfo,
   ghPrStatus,
   linearEnabled,
+  ideIsTerm,
 }: DashboardProps) {
   const selected = flatWorktrees[selectedIndex] ?? null;
 
@@ -50,7 +52,7 @@ export const Dashboard = React.memo(function Dashboard({
         <WorktreeDetail worktree={selected} />
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
-      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selected?.pr_info} hasLinear={!!selected?.linear_info} />
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selected?.pr_info} hasLinear={!!selected?.linear_info} ideIsTerm={ideIsTerm} />
     </Box>
   );
 });
