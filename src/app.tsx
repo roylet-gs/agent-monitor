@@ -172,6 +172,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const seenStatusRef = useRef<Map<string, string>>(new Map());
   const [unseenIds, setUnseenIds] = useState<Set<string>>(new Set());
 
+  // Detect unseen status changes AND mark selected item as seen in one pass
   useEffect(() => {
     const seen = seenStatusRef.current;
     const newUnseen = new Set<string>();
@@ -200,31 +201,28 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       }
     }
 
-    if (newUnseen.size > 0) {
-      setUnseenIds((prev) => {
-        const merged = new Set(prev);
-        for (const id of newUnseen) merged.add(id);
-        return merged;
-      });
-    }
-  }, [flatWorktrees, standaloneSessions]);
-
-  // Mark selected worktree/session as seen
-  useEffect(() => {
+    // Determine which item is currently selected so we can mark it seen immediately
     let selectedId: string | undefined;
     if (selectedIndex < flatWorktrees.length) {
       selectedId = flatWorktrees[selectedIndex]?.id;
     } else {
       selectedId = standaloneSessions[selectedIndex - flatWorktrees.length]?.id;
     }
-    if (selectedId && unseenIds.has(selectedId)) {
-      setUnseenIds((prev) => {
-        const next = new Set(prev);
-        next.delete(selectedId);
-        return next;
-      });
-    }
-  }, [selectedIndex, flatWorktrees, standaloneSessions, unseenIds]);
+
+    // Remove selected item from newUnseen (it's visible, so already "seen")
+    if (selectedId) newUnseen.delete(selectedId);
+
+    setUnseenIds((prev) => {
+      // Remove selected item from prev if present, add new unseen items
+      const hasSelectedToRemove = selectedId ? prev.has(selectedId) : false;
+      if (newUnseen.size === 0 && !hasSelectedToRemove) return prev;
+
+      const next = new Set(prev);
+      if (selectedId) next.delete(selectedId);
+      for (const id of newUnseen) next.add(id);
+      return next;
+    });
+  }, [flatWorktrees, standaloneSessions, selectedIndex]);
 
   // Clean up terminalOpenedIds when terminals are closed
   useEffect(() => {

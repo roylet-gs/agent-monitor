@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Text } from "ink";
+import { useAnimationStep } from "../hooks/useAnimationStep.js";
 
 const BASE_RGB: Record<string, [number, number, number]> = {
   green: [0x8B, 0xBD, 0x58],
@@ -11,7 +12,6 @@ const BASE_RGB: Record<string, [number, number, number]> = {
 };
 
 const STEPS = 12;
-const INTERVAL = 200; // ~2.4s full cycle
 
 function toHex(r: number, g: number, b: number): string {
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
@@ -57,15 +57,8 @@ interface PulsingDotProps {
 }
 
 export function PulsingDot({ color }: PulsingDotProps) {
-  const [step, setStep] = useState(0);
+  const step = useAnimationStep();
   const gradient = getGradient(color);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setStep((s) => (s + 1) % gradient.length);
-    }, INTERVAL);
-    return () => clearInterval(timer);
-  }, [gradient]);
 
   return <Text color={gradient[step]}>●</Text>;
 }
