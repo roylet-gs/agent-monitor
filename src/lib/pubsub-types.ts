@@ -19,4 +19,15 @@ export interface GitActivityMessage {
   activity: "push" | "pr-create";
 }
 
-export type PubSubMessage = AgentStatusUpdateMessage | GitActivityMessage;
+export interface StandaloneStatusUpdateMessage {
+  type: "standalone-status-update";
+  sessionPath: string;
+  status: AgentStatusType;
+  sessionId: string | null;
+  lastResponse: string | null;
+  transcriptSummary: string | null;
+  isOpen: boolean;
+  updatedAt: string;
+}
+
+export type PubSubMessage = AgentStatusUpdateMessage | GitActivityMessage | StandaloneStatusUpdateMessage;

@@ -38,6 +38,7 @@ COPY src/ ./src/
 COPY e2e/bin/gh /usr/local/bin/gh
 RUN chmod +x /usr/local/bin/gh
 
+COPY e2e/seed-standalone.ts ./e2e/seed-standalone.ts
 COPY e2e/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

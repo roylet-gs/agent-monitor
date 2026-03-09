@@ -259,4 +259,92 @@ describe("db", () => {
       expect(db.getRepositories()).toHaveLength(0);
     });
   });
+
+  describe("standalone_sessions", () => {
+    it("upsertStandaloneSession creates a new session", () => {
+      const session = db.upsertStandaloneSession("/tmp/standalone", "executing", "sess-1", "hello", "summary", true);
+      expect(session).toBeDefined();
+      expect(session.path).toBe("/tmp/standalone");
+      expect(session.status).toBe("executing");
+      expect(session.session_id).toBe("sess-1");
+      expect(session.last_response).toBe("hello");
+      expect(session.transcript_summary).toBe("summary");
+      expect(session.is_open).toBe(1);
+    });
+
+    it("upsertStandaloneSession updates on duplicate path", () => {
+      db.upsertStandaloneSession("/tmp/standalone", "executing", "sess-1", "first", null, true);
+      db.upsertStandaloneSession("/tmp/standalone", "idle", null, null, null, null);
+      const session = db.getStandaloneSessionByPath("/tmp/standalone");
+      expect(session).toBeDefined();
+      expect(session!.status).toBe("idle");
+      // COALESCE preserves previous values when null is passed
+      expect(session!.session_id).toBe("sess-1");
+      expect(session!.last_response).toBe("first");
+    });
+
+    it("upsertStandaloneSession defaults is_open to 1 on insert", () => {
+      const session = db.upsertStandaloneSession("/tmp/standalone", "executing");
+      expect(session.is_open).toBe(1);
+    });
+
+    it("getStandaloneSessions returns sessions ordered by updated_at DESC", () => {
+      db.upsertStandaloneSession("/tmp/a", "idle");
+      db.upsertStandaloneSession("/tmp/b", "executing");
+      // Touch /tmp/a again to make it most recent
+      db.upsertStandaloneSession("/tmp/a", "executing");
+      const sessions = db.getStandaloneSessions();
+      expect(sessions).toHaveLength(2);
+      expect(sessions[0]!.path).toBe("/tmp/a");
+      expect(sessions[1]!.path).toBe("/tmp/b");
+    });
+
+    it("getStandaloneSessionByPath finds by path", () => {
+      db.upsertStandaloneSession("/tmp/standalone", "idle");
+      const found = db.getStandaloneSessionByPath("/tmp/standalone");
+      expect(found).toBeDefined();
+      expect(found!.path).toBe("/tmp/standalone");
+    });
+
+    it("getStandaloneSessionByPath returns undefined for non-existent path", () => {
+      expect(db.getStandaloneSessionByPath("/nope")).toBeUndefined();
+    });
+
+    it("removeStandaloneSession deletes by id", () => {
+      const session = db.upsertStandaloneSession("/tmp/standalone", "idle");
+      db.removeStandaloneSession(session.id);
+      expect(db.getStandaloneSessionByPath("/tmp/standalone")).toBeUndefined();
+    });
+
+    it("removeStandaloneSessionByPath deletes by path", () => {
+      db.upsertStandaloneSession("/tmp/standalone", "idle");
+      db.removeStandaloneSessionByPath("/tmp/standalone");
+      expect(db.getStandaloneSessionByPath("/tmp/standalone")).toBeUndefined();
+    });
+
+    it("pruneStaleStandaloneSessions removes old closed sessions", () => {
+      // Create a closed session
+      db.upsertStandaloneSession("/tmp/stale", "idle", null, null, null, false);
+      // Prune with a very large maxAge so the cutoff is far in the future
+      // (cutoff = now + 1 hour in the future, meaning anything before then is stale)
+      const removed = db.pruneStaleStandaloneSessions(-3600000);
+      expect(removed).toBe(1);
+      expect(db.getStandaloneSessionByPath("/tmp/stale")).toBeUndefined();
+    });
+
+    it("pruneStaleStandaloneSessions does not remove open sessions", () => {
+      db.upsertStandaloneSession("/tmp/active", "executing", null, null, null, true);
+      const removed = db.pruneStaleStandaloneSessions(0);
+      expect(removed).toBe(0);
+      expect(db.getStandaloneSessionByPath("/tmp/active")).toBeDefined();
+    });
+
+    it("upsertWorktree removes standalone session at same path (promotion)", () => {
+      db.upsertStandaloneSession("/tmp/repo/.worktrees/feat", "executing");
+      const repo = db.addRepository("/tmp/repo", "repo");
+      db.upsertWorktree(repo.id, "/tmp/repo/.worktrees/feat", "feature/test", "test");
+      // Standalone session should be removed after promotion
+      expect(db.getStandaloneSessionByPath("/tmp/repo/.worktrees/feat")).toBeUndefined();
+    });
+  });
 });
