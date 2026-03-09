@@ -17,7 +17,7 @@ function isDimLine(line: string): boolean {
   return line.includes("[DEBUG]");
 }
 
-export function LogPanel({ height }: LogPanelProps) {
+export const LogPanel = React.memo(function LogPanel({ height }: LogPanelProps) {
   const lines = useLogTail(true, height - 2);
 
   return (
@@ -40,4 +40,4 @@ export function LogPanel({ height }: LogPanelProps) {
       ))}
     </Box>
   );
-}
+});

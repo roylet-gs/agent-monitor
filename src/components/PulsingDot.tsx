@@ -10,8 +10,8 @@ const BASE_RGB: Record<string, [number, number, number]> = {
   gray: [128, 128, 128],
 };
 
-const STEPS = 24;
-const INTERVAL = 100; // ~2.4s full cycle
+const STEPS = 12;
+const INTERVAL = 200; // ~2.4s full cycle
 
 function toHex(r: number, g: number, b: number): string {
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;

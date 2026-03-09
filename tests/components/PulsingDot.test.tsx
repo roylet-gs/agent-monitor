@@ -25,7 +25,7 @@ describe("PulsingDot", () => {
 
   it("completes a full pulse cycle without errors", () => {
     const { lastFrame } = render(<PulsingDot color="green" />);
-    // Advance through a full cycle (24 steps * 100ms)
+    // Advance through a full cycle (12 steps * 200ms)
     vi.advanceTimersByTime(2400);
     expect(lastFrame()!).toContain("●");
   });
