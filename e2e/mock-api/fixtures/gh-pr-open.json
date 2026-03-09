@@ -1,0 +1,22 @@
+{
+  "number": 42,
+  "title": "feat: add new dashboard feature",
+  "url": "https://github.com/test/repo/pull/42",
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "REVIEW_REQUIRED",
+  "statusCheckRollup": [
+    {
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "name": "build",
+      "detailsUrl": "https://github.com/test/repo/actions/runs/1"
+    },
+    {
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "name": "test",
+      "detailsUrl": "https://github.com/test/repo/actions/runs/2"
+    }
+  ]
+}
