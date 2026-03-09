@@ -19,6 +19,7 @@ vi.mock("../../src/lib/linear.js", () => ({
 vi.mock("../../src/lib/scripts.js", () => ({
   hasStartupScript: vi.fn(() => false),
   openScriptInEditor: vi.fn(),
+  openFileInEditor: vi.fn(),
   removeStartupScript: vi.fn(),
 }));
 
@@ -90,5 +91,22 @@ describe("SettingsPanel", () => {
     const frame = lastFrame()!;
     expect(frame).toContain("Reset Settings");
     expect(frame).toContain("Factory Reset");
+  });
+
+  it("shows Open settings.json as the first field", () => {
+    const { lastFrame } = render(<SettingsPanel {...defaultProps} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Open settings.json");
+    // It should be selected by default (first field)
+    expect(frame).toContain("▸ Open settings.json");
+  });
+
+  it("calls openFileInEditor when Enter is pressed on Open settings.json", async () => {
+    const { openFileInEditor } = await import("../../src/lib/scripts.js");
+    const { stdin } = render(<SettingsPanel {...defaultProps} />);
+    await waitForFrame();
+    // First field is openSettingsJson, press Enter
+    stdin.write("\r");
+    expect(openFileInEditor).toHaveBeenCalled();
   });
 });
