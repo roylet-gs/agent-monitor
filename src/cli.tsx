@@ -366,6 +366,36 @@ scriptCmd
     scriptShow(opts);
   });
 
+// --- Daemon commands ---
+
+const daemonCmd = program
+  .command("daemon")
+  .description("Manage the background daemon");
+
+daemonCmd
+  .command("start")
+  .description("Start the background daemon")
+  .action(async () => {
+    const { daemonStart } = await import("./commands/daemon.js");
+    daemonStart();
+  });
+
+daemonCmd
+  .command("stop")
+  .description("Stop the background daemon")
+  .action(async () => {
+    const { daemonStop } = await import("./commands/daemon.js");
+    daemonStop();
+  });
+
+daemonCmd
+  .command("status")
+  .description("Show daemon status")
+  .action(async () => {
+    const { daemonStatus } = await import("./commands/daemon.js");
+    daemonStatus();
+  });
+
 // --- Doctor ---
 
 program

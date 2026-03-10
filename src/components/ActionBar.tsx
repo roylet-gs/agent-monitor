@@ -13,7 +13,7 @@ interface ActionBarProps {
   ideIsTerm?: boolean;
 }
 
-export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm }: ActionBarProps) {
+export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -61,4 +61,4 @@ export function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabl
       )}
     </Box>
   );
-}
+});

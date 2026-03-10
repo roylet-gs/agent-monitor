@@ -1,6 +1,19 @@
 import { execSync } from "child_process";
+import { execFile } from "child_process";
 import { realpathSync } from "fs";
 import { log } from "./logger.js";
+
+function execFileAsync(cmd: string, args: string[], timeout: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout, encoding: "utf-8" }, (err, stdout) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+}
 
 /**
  * Runs a single `lsof` call and returns all paths where a shell process has its cwd.
@@ -125,4 +138,66 @@ export function isTerminalOpenAt(worktreePath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Async version of getTerminalPaths. Uses execFile instead of execSync
+ * so the event loop is not blocked during the lsof call.
+ */
+export async function getTerminalPathsAsync(): Promise<Set<string>> {
+  const paths = new Set<string>();
+  try {
+    const output = await execFileAsync(
+      "lsof",
+      ["-d", "cwd", "-c", "zsh", "-c", "bash", "-c", "fish", "-c", "nu", "-Fn"],
+      3000
+    );
+    for (const line of output.split("\n")) {
+      if (line.startsWith("n") && line.length > 1) {
+        paths.add(line.substring(1));
+      }
+    }
+    log("debug", "process", `getTerminalPathsAsync found ${paths.size} shell cwd paths`);
+  } catch {
+    log("debug", "process", "lsof async returned no results or failed");
+  }
+  return paths;
+}
+
+/**
+ * Async version of getIdePaths. Uses execFile instead of execSync
+ * so the event loop is not blocked during the ps call.
+ */
+export async function getIdePathsAsync(): Promise<Map<string, "cursor" | "vscode">> {
+  const paths = new Map<string, "cursor" | "vscode">();
+  try {
+    const output = await execFileAsync("ps", ["-eo", "args"], 3000);
+    for (const line of output.split("\n")) {
+      const trimmed = line.trim();
+      let ide: "cursor" | "vscode" | null = null;
+      if (trimmed.includes("/Cursor.app/") || trimmed.startsWith("cursor ")) {
+        ide = "cursor";
+      } else if (trimmed.includes("/Code.app/") || trimmed.startsWith("code ")) {
+        ide = "vscode";
+      }
+      if (!ide) continue;
+
+      const parts = trimmed.split(/\s+/);
+      for (let i = parts.length - 1; i >= 1; i--) {
+        if (parts[i].startsWith("/") && !parts[i].startsWith("/--")) {
+          try {
+            const resolved = realpathSync(parts[i]);
+            paths.set(resolved, ide);
+          } catch {
+            // path doesn't exist, skip
+          }
+          break;
+        }
+      }
+    }
+    log("debug", "process", `getIdePathsAsync found ${paths.size} IDE workspace paths`);
+  } catch {
+    log("debug", "process", "ps async returned no results or failed");
+  }
+  return paths;
 }

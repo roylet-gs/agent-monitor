@@ -39,7 +39,7 @@ export function useLogTail(enabled: boolean, maxLines: number): string[] {
     };
 
     poll();
-    const id = setInterval(poll, 500);
+    const id = setInterval(poll, 2000);
     return () => clearInterval(id);
   }, [enabled, maxLines]);
 

@@ -12,10 +12,8 @@ import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
-import { useWorktrees } from "./hooks/useWorktrees.js";
-import { useStandaloneSessions } from "./hooks/useStandaloneSessions.js";
+import { useDaemon } from "./hooks/useDaemon.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
-import { usePubSub } from "./hooks/usePubSub.js";
 import {
   getDb,
   addRepository,
@@ -126,44 +124,21 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [repositories.length > 0 && settings.autoSyncOnStartup]);
 
-  const { groups, flatWorktrees, refresh, lightRefresh } = useWorktrees({
+  const { groups, flatWorktrees, standaloneSessions, refresh, lightRefresh } = useDaemon({
     repositories,
-    pollingIntervalMs: settings.pollingIntervalMs,
-    ghPollingIntervalMs: settings.ghPollingIntervalMs,
-    linearPollingIntervalMs: settings.linearPollingIntervalMs,
-    ghPrStatus: settings.ghPrStatus,
-    linearEnabled: settings.linearEnabled,
-    linearApiKey: settings.linearApiKey,
-    hideMainBranch: settings.hideMainBranch,
-    ghRefreshOnManual: settings.ghRefreshOnManual,
-    linearRefreshOnManual: settings.linearRefreshOnManual,
-    linearAutoNickname: settings.linearAutoNickname,
+    settings,
+    onAgentUpdate: (msg) => {
+      if (msg.type === "git-activity") {
+        log("info", "app", `Git activity detected: ${msg.activity} on ${msg.branch}`);
+      }
+    },
   });
-
-  const { sessions: standaloneSessions, refresh: refreshStandalone } = useStandaloneSessions(settings.pollingIntervalMs);
-  const refreshStandaloneRef = useRef(refreshStandalone);
-  useEffect(() => { refreshStandaloneRef.current = refreshStandalone; }, [refreshStandalone]);
 
   // Keep refs to always call the latest refresh (avoids stale closures in async handlers)
   const refreshRef = useRef(refresh);
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
   const lightRefreshRef = useRef(lightRefresh);
   useEffect(() => { lightRefreshRef.current = lightRefresh; }, [lightRefresh]);
-
-  // Pub/sub: instant refresh on agent status updates
-  usePubSub((msg) => {
-    if (msg.type === "agent-status-update") {
-      // Light refresh only: re-read DB + git status without triggering GitHub/Linear API calls
-      lightRefreshRef.current();
-    } else if (msg.type === "standalone-status-update") {
-      refreshStandaloneRef.current();
-    } else if (msg.type === "git-activity") {
-      // Git push or PR creation detected — force full refresh (with integrations) after a short
-      // delay to give GitHub time to process the push/PR.
-      log("info", "app", `Git activity detected: ${msg.activity} on ${msg.branch}`);
-      setTimeout(() => refreshRef.current(), 3000);
-    }
-  });
 
   // Derive the active repo from the currently selected worktree
   const activeRepo = useMemo((): Repository | null => {
