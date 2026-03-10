@@ -17,6 +17,7 @@ export function FolderBrowser({ onSelect, onCancel }: FolderBrowserProps) {
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [filter, setFilter] = useState("");
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [entries, setEntries] = useState<
     { name: string; isDir: boolean; isRepo: boolean; fullPath: string }[]
   >([]);
@@ -65,6 +66,7 @@ export function FolderBrowser({ onSelect, onCancel }: FolderBrowserProps) {
 
       setEntries(items);
       setSelectedIndex(0);
+      setScrollOffset(0);
     } catch (err) {
       log("warn", "FolderBrowser", `Failed to read directory ${currentPath}: ${err}`);
       setEntries([]);
@@ -78,12 +80,22 @@ export function FolderBrowser({ onSelect, onCancel }: FolderBrowserProps) {
     }
 
     if (key.upArrow) {
-      setSelectedIndex((i) => Math.max(0, i - 1));
+      setSelectedIndex((prev) => {
+        const next = Math.max(0, prev - 1);
+        setScrollOffset((offset) => (next < offset ? next : offset));
+        return next;
+      });
       return;
     }
 
     if (key.downArrow) {
-      setSelectedIndex((i) => Math.min(entries.length - 1, i + 1));
+      setSelectedIndex((prev) => {
+        const next = Math.min(entries.length - 1, prev + 1);
+        setScrollOffset((offset) =>
+          next >= offset + 15 ? next - 14 : offset
+        );
+        return next;
+      });
       return;
     }
 
@@ -122,7 +134,8 @@ export function FolderBrowser({ onSelect, onCancel }: FolderBrowserProps) {
   });
 
   const displayPath = currentPath.replace(homedir(), "~");
-  const visibleEntries = entries.slice(0, 15);
+  const maxVisible = 15;
+  const visibleEntries = entries.slice(scrollOffset, scrollOffset + maxVisible);
 
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1}>
@@ -139,23 +152,29 @@ export function FolderBrowser({ onSelect, onCancel }: FolderBrowserProps) {
       </Box>
 
       <Box flexDirection="column" marginTop={1}>
-        {visibleEntries.map((entry, i) => (
-          <Box key={entry.fullPath} gap={1}>
-            <Text>{i === selectedIndex ? "▸" : " "}</Text>
-            <Text>{entry.name === ".." ? "📁" : "📁"}</Text>
-            <Text
-              bold={i === selectedIndex}
-              color={i === selectedIndex ? "cyan" : undefined}
-            >
-              {entry.name}
-            </Text>
-            {entry.isRepo && (
-              <Text color="green">(git repo ✓)</Text>
-            )}
-          </Box>
-        ))}
-        {entries.length > 15 && (
-          <Text dimColor>... {entries.length - 15} more</Text>
+        {scrollOffset > 0 && (
+          <Text dimColor>{scrollOffset} above ...</Text>
+        )}
+        {visibleEntries.map((entry, i) => {
+          const absoluteIndex = i + scrollOffset;
+          return (
+            <Box key={entry.fullPath} gap={1}>
+              <Text>{absoluteIndex === selectedIndex ? "▸" : " "}</Text>
+              <Text>{entry.name === ".." ? "📁" : "📁"}</Text>
+              <Text
+                bold={absoluteIndex === selectedIndex}
+                color={absoluteIndex === selectedIndex ? "cyan" : undefined}
+              >
+                {entry.name}
+              </Text>
+              {entry.isRepo && (
+                <Text color="green">(git repo ✓)</Text>
+              )}
+            </Box>
+          );
+        })}
+        {entries.length > scrollOffset + maxVisible && (
+          <Text dimColor>... {entries.length - scrollOffset - maxVisible} more</Text>
         )}
         {entries.length === 0 && (
           <Text dimColor>No directories found</Text>
