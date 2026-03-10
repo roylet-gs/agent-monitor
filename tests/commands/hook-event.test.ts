@@ -127,12 +127,24 @@ describe("mapEventToStatus", () => {
     expect(mapEventToStatus({ event: "Stop" }, "executing")).toBe("done");
   });
 
-  it("Stop while planning -> done", () => {
-    expect(mapEventToStatus({ event: "Stop" }, "planning")).toBe("done");
+  it("Stop while planning -> waiting (plan review)", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "planning")).toBe("waiting");
   });
 
-  it("Stop while waiting -> idle (not done)", () => {
-    expect(mapEventToStatus({ event: "Stop" }, "waiting")).toBe("idle");
+  it("Stop while waiting -> waiting (preserves waiting)", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "waiting")).toBe("waiting");
+  });
+
+  it("Stop with permission_mode=plan while executing -> waiting", () => {
+    expect(mapEventToStatus({ event: "Stop", permission_mode: "plan" } as any, "executing")).toBe("waiting");
+  });
+
+  it("Stop with permission_mode=plan and no currentStatus -> waiting", () => {
+    expect(mapEventToStatus({ event: "Stop", permission_mode: "plan" } as any)).toBe("waiting");
+  });
+
+  it("Stop while waiting preserves waiting regardless of stop_hook_active", () => {
+    expect(mapEventToStatus({ event: "Stop", stop_hook_active: false }, "waiting")).toBe("waiting");
   });
 
   it("Stop while idle -> idle (not done)", () => {
