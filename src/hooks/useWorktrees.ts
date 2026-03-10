@@ -160,7 +160,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const shouldFetchLinear = linearEnabledRef.current;
 
     if (repos.length === 0) {
-      setData({ groups: [], flatWorktrees: [] });
+      setData((prev) => prev.groups.length === 0 && prev.flatWorktrees.length === 0 ? prev : { groups: [], flatWorktrees: [] });
       return;
     }
 

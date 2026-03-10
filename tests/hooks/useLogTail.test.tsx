@@ -65,7 +65,7 @@ describe("useLogTail", () => {
     expect(lastFrame()!).toContain("line1,line2,line3");
 
     mockReadFileSync.mockReturnValue("line1\nline2\nline3\nline4\n");
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(2000);
 
     expect(lastFrame()!).toContain("line1,line2,line3,line4");
   });

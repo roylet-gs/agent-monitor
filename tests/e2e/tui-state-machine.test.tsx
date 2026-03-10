@@ -69,8 +69,29 @@ vi.mock("../../src/lib/pubsub-client.js", () => ({
 vi.mock("../../src/lib/process.js", () => ({
   getTerminalPaths: vi.fn(() => new Set()),
   getIdePaths: vi.fn(() => new Map()),
+  getTerminalPathsAsync: vi.fn().mockResolvedValue(new Set()),
+  getIdePathsAsync: vi.fn().mockResolvedValue(new Map()),
   isTerminalOpenAt: vi.fn(() => false),
 }));
+
+vi.mock("../../src/lib/daemon.js", () => ({
+  isDaemonRunning: vi.fn(() => false),
+  getDaemonPid: vi.fn(() => null),
+  stopDaemon: vi.fn(() => false),
+}));
+
+// Mock DaemonClient to fail connection — triggers fallback to in-process polling
+vi.mock("../../src/lib/daemon-client.js", () => {
+  class MockDaemonClient {
+    connected = false;
+    constructor(_options: unknown) {}
+    async connect() { return false; }
+    async forceRefresh() {}
+    configReload() {}
+    destroy() {}
+  }
+  return { DaemonClient: MockDaemonClient };
+});
 
 vi.mock("../../src/lib/version.js", () => ({
   getVersion: vi.fn(() => "0.0.0-test"),
@@ -146,7 +167,8 @@ describe("TUI State Machine", () => {
   it("dashboard -> delete confirm -> cancel back to dashboard", async () => {
     await setupDashboard();
     const { stdin, lastFrame } = render(<App />);
-    await waitForFrame();
+    // Wait for initial worktree data to load via fallback polling
+    await waitForFrame(300);
     expect(lastFrame()!).toContain("Agent Monitor");
 
     stdin.write("d");
@@ -174,7 +196,7 @@ describe("TUI State Machine", () => {
 
     await setupDashboard();
     const { stdin, lastFrame } = render(<App />);
-    await waitForFrame();
+    await waitForFrame(300);
 
     // Enter delete confirm
     stdin.write("d");
@@ -206,7 +228,7 @@ describe("TUI State Machine", () => {
 
     await setupDashboard();
     const { stdin, lastFrame } = render(<App />);
-    await waitForFrame();
+    await waitForFrame(300);
 
     // Enter delete confirm
     stdin.write("d");

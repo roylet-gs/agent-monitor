@@ -61,6 +61,32 @@ vi.mock("../../src/lib/pubsub-client.js", () => ({
   publishMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../../src/lib/process.js", () => ({
+  getTerminalPaths: vi.fn(() => new Set()),
+  getIdePaths: vi.fn(() => new Map()),
+  getTerminalPathsAsync: vi.fn().mockResolvedValue(new Set()),
+  getIdePathsAsync: vi.fn().mockResolvedValue(new Map()),
+  isTerminalOpenAt: vi.fn(() => false),
+}));
+
+vi.mock("../../src/lib/daemon.js", () => ({
+  isDaemonRunning: vi.fn(() => false),
+  getDaemonPid: vi.fn(() => null),
+  stopDaemon: vi.fn(() => false),
+}));
+
+vi.mock("../../src/lib/daemon-client.js", () => {
+  class MockDaemonClient {
+    connected = false;
+    constructor(_options: unknown) {}
+    async connect() { return false; }
+    async forceRefresh() {}
+    configReload() {}
+    destroy() {}
+  }
+  return { DaemonClient: MockDaemonClient };
+});
+
 vi.mock("../../src/lib/version.js", () => ({
   getVersion: vi.fn(() => "0.0.0-test"),
   isNewVersion: vi.fn(() => false),

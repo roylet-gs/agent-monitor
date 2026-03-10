@@ -16,7 +16,7 @@ interface StatusBarProps {
   updateInfo?: UpdateInfo | null;
 }
 
-export function StatusBar({ repoName, worktreeCount, repoCount, standaloneCount, version, updateInfo }: StatusBarProps) {
+export const StatusBar = React.memo(function StatusBar({ repoName, worktreeCount, repoCount, standaloneCount, version, updateInfo }: StatusBarProps) {
   const repoLabel = repoCount && repoCount > 1
     ? `${repoCount} repos`
     : repoName;
@@ -44,4 +44,4 @@ export function StatusBar({ repoName, worktreeCount, repoCount, standaloneCount,
       </Text>
     </Box>
   );
-}
+});
