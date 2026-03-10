@@ -129,7 +129,7 @@ Screenshots land in `tests/e2e/tmp/`. New specs are automatically picked up via 
 - `/create-pr` — Idempotent PR creation: detects existing PRs via `gh pr view`, runs `/capture-evidence`, then creates or updates the PR with evidence.
 
 ### Scripts (`.claude/scripts/`)
-- `upload-evidence.sh [evidence-dir]` — Pushes screenshots to the `evidence-images` orphan branch. Outputs `raw.githubusercontent.com` URLs. Called with `tests/e2e/tmp` as the evidence dir.
+- `upload-evidence.sh [evidence-dir]` — Uploads screenshots as assets to the `evidence-store` GitHub release via `gh release upload --clobber`. Outputs release asset URLs. Called with `tests/e2e/tmp` as the evidence dir.
 - `seed-evidence-data.sh` — **Deprecated.** For local manual debugging only. Use `pnpm test:e2e` instead.
 - `capture-tui.sh` — **Deprecated.** For local manual debugging only. Use `pnpm test:e2e` instead.
 - `cleanup-tui.sh` — **Deprecated.** For local manual debugging only. Use `pnpm test:e2e:clean` instead.

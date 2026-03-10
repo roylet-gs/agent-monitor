@@ -1,50 +1,44 @@
 #!/bin/bash
-# Upload screenshots from .github/evidence/ to the evidence-images orphan branch.
+# Upload screenshots to a GitHub release as assets.
 # Usage: upload-evidence.sh [evidence-dir]
-# Outputs the raw GitHub URLs for each uploaded image.
+# Outputs the GitHub release asset URLs for each uploaded image.
 
 set -euo pipefail
 
 EVIDENCE_DIR="${1:-.github/evidence}"
 BRANCH=$(git branch --show-current)
 REPO=$(gh repo view --json nameWithOwner -q '.nameWithOwner')
+RELEASE_TAG="evidence-store"
 
 if [ ! -d "$EVIDENCE_DIR" ] || [ -z "$(ls "$EVIDENCE_DIR"/*.png 2>/dev/null)" ]; then
   echo "ERROR: No PNG files found in $EVIDENCE_DIR" >&2
   exit 1
 fi
 
+# Ensure the release exists
+if ! gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
+  echo "Creating release '$RELEASE_TAG'..." >&2
+  gh release create "$RELEASE_TAG" --repo "$REPO" --title "Evidence Store" --notes "Automated screenshot storage for PRs and documentation." --latest=false
+fi
+
+# Sanitize branch name: replace / with -
+SAFE_BRANCH="${BRANCH//\//-}"
+
+# Copy PNGs to temp dir with branch-prefixed names
 TMPDIR=$(mktemp -d)
-trap 'git worktree remove --force "$TMPDIR" 2>/dev/null || true; rm -rf "$TMPDIR"' EXIT
+trap 'rm -rf "$TMPDIR"' EXIT
 
-# Check if orphan branch exists on remote
-if git ls-remote --heads origin evidence-images | grep -q evidence-images; then
-  git fetch origin evidence-images
-  git worktree add --force "$TMPDIR" evidence-images
-else
-  git worktree add --force --orphan -b evidence-images "$TMPDIR"
-  git -C "$TMPDIR" rm -rf . 2>/dev/null || true
-  git -C "$TMPDIR" commit --allow-empty -m "init evidence-images branch"
-fi
+for img in "$EVIDENCE_DIR"/*.png; do
+  NAME=$(basename "$img")
+  cp "$img" "$TMPDIR/${SAFE_BRANCH}--${NAME}"
+done
 
-# Copy screenshots into branch-named folder
-mkdir -p "$TMPDIR/$BRANCH"
-cp "$EVIDENCE_DIR"/*.png "$TMPDIR/$BRANCH/"
-
-# Commit and push
-git -C "$TMPDIR" add .
-if git -C "$TMPDIR" diff --cached --quiet; then
-  echo "No new images to upload" >&2
-else
-  git -C "$TMPDIR" commit -m "evidence: $BRANCH"
-  if ! git -C "$TMPDIR" push origin evidence-images; then
-    echo "ERROR: Failed to push evidence-images branch" >&2
-    exit 1
-  fi
-fi
+# Upload all assets (--clobber overwrites existing assets with same name)
+gh release upload "$RELEASE_TAG" "$TMPDIR"/*.png --repo "$REPO" --clobber
 
 # Output URLs
 for img in "$EVIDENCE_DIR"/*.png; do
   NAME=$(basename "$img")
-  echo "https://raw.githubusercontent.com/$REPO/evidence-images/$BRANCH/$NAME"
+  ASSET_NAME="${SAFE_BRANCH}--${NAME}"
+  echo "https://github.com/$REPO/releases/download/$RELEASE_TAG/$ASSET_NAME"
 done
