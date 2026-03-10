@@ -102,9 +102,15 @@ export function useWorktrees(config: WorktreeHookConfig): {
             if (info !== null || !prCacheRef.current.has(cacheKey)) {
               prCacheRef.current.set(cacheKey, info);
             }
-            // Cache PR number for cheaper subsequent fetches
+            // Cache PR number for cheaper subsequent fetches,
+            // but clear it for terminal PRs so next cycle fetches by branch name
+            // (to discover new PRs on the same branch)
             if (info?.number != null) {
-              prNumberCacheRef.current.set(cacheKey, info.number);
+              if (info.state === "MERGED" || info.state === "CLOSED") {
+                prNumberCacheRef.current.delete(cacheKey);
+              } else {
+                prNumberCacheRef.current.set(cacheKey, info.number);
+              }
             }
           }
         } catch (err) {
