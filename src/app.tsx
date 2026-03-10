@@ -41,7 +41,7 @@ import {
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
-import { openInIde, openClaudeInTerminal, openTerminal } from "./lib/ide-launcher.js";
+import { openInIde, openClaudeInTerminal, openTerminal, focusTerminal } from "./lib/ide-launcher.js";
 import { killClaudeAtPath } from "./lib/process.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
@@ -230,22 +230,29 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [selectedIndex, flatWorktrees, standaloneSessions, unseenIds]);
 
-  // Clean up terminalOpenedIds when terminals are closed
+  // Clean up terminalOpenedIds when worktrees are removed (deleted).
+  // We intentionally do NOT clean up based on has_terminal — process detection
+  // is unreliable for some terminal apps (e.g. Ghostty), so cleaning up on
+  // has_terminal=false would remove the ID before the user can press Enter.
+  // Instead, we only remove IDs for worktrees that no longer exist in the list.
+  const terminalOpenedIdsRef = useRef(terminalOpenedIds);
+  terminalOpenedIdsRef.current = terminalOpenedIds;
   useEffect(() => {
-    if (terminalOpenedIds.size === 0) return;
-    const closedIds = new Set<string>();
-    for (const id of terminalOpenedIds) {
-      const wt = flatWorktrees.find((w) => w.id === id);
-      if (!wt || !wt.has_terminal) closedIds.add(id);
+    const ids = terminalOpenedIdsRef.current;
+    if (ids.size === 0) return;
+    const currentWtIds = new Set(flatWorktrees.map((w) => w.id));
+    const removedIds = new Set<string>();
+    for (const id of ids) {
+      if (!currentWtIds.has(id)) removedIds.add(id);
     }
-    if (closedIds.size > 0) {
+    if (removedIds.size > 0) {
       setTerminalOpenedIds((prev) => {
         const next = new Set(prev);
-        for (const id of closedIds) next.delete(id);
+        for (const id of removedIds) next.delete(id);
         return next;
       });
     }
-  }, [flatWorktrees, terminalOpenedIds]);
+  }, [flatWorktrees]);
 
   // Auto-install global hooks on startup if not present (skip during setup wizard)
   useEffect(() => {
@@ -287,22 +294,15 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const wt = flatWorktrees[selectedIndex];
     if (!wt) return;
 
-    // If this worktree was opened via [t] and terminal is still running, focus it
-    if (terminalOpenedIds.has(wt.id)) {
-      if (wt.has_terminal) {
-        try {
-          openTerminal(wt.path, wt.custom_name ?? wt.branch);
-        } catch (err) {
-          setError(`${err}`);
-        }
-        return;
+    // If this worktree was opened via [t], always try to focus/reopen the terminal.
+    // The cleanup useEffect handles removing stale IDs when the terminal is actually closed.
+    if (terminalOpenedIds.has(wt.id) || wt.has_terminal) {
+      try {
+        focusTerminal(wt.path, wt.custom_name ?? wt.branch);
+      } catch (err) {
+        setError(`${err}`);
       }
-      // Terminal was closed — remove from set and fall through to IDE
-      setTerminalOpenedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(wt.id);
-        return next;
-      });
+      return;
     }
 
     try {
@@ -311,7 +311,15 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setError(result.error ?? "Cannot open worktree");
         return;
       }
-      openInIde(wt.path, settings.ide, wt.custom_name ?? wt.branch);
+      const windowId = openInIde(wt.path, settings.ide, wt.custom_name ?? wt.branch);
+      // Track if a terminal was opened (IDE = terminal) so subsequent Enter presses focus it
+      if (windowId !== undefined) {
+        setTerminalOpenedIds((prev) => {
+          const next = new Set(prev);
+          next.add(wt.id);
+          return next;
+        });
+      }
     } catch (err) {
       setError(`${err}`);
     }
@@ -337,6 +345,11 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     if (!wt) return;
 
     try {
+      // If a terminal is already known open, just focus it (don't open a new tab)
+      if (terminalOpenedIds.has(wt.id) || wt.has_terminal) {
+        focusTerminal(wt.path, wt.custom_name ?? wt.branch);
+        return;
+      }
       openTerminal(wt.path, wt.custom_name ?? wt.branch);
       setTerminalOpenedIds((prev) => {
         const next = new Set(prev);
@@ -346,7 +359,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     } catch (err) {
       setError(`${err}`);
     }
-  }, [flatWorktrees, selectedIndex]);
+  }, [flatWorktrees, selectedIndex, terminalOpenedIds]);
 
   // Handle create worktree
   const handleCreate = useCallback(
