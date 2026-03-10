@@ -42,8 +42,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     linearAutoNickname,
   } = config;
 
-  const [groups, setGroups] = useState<WorktreeGroup[]>([]);
-  const [flatWorktrees, setFlatWorktrees] = useState<WorktreeWithStatus[]>([]);
+  const [data, setData] = useState<{ groups: WorktreeGroup[]; flatWorktrees: WorktreeWithStatus[] }>({ groups: [], flatWorktrees: [] });
   const prCacheRef = useRef<Map<string, PrInfo | null>>(new Map());
   const prNumberCacheRef = useRef<Map<string, number>>(new Map());
   const linearCacheRef = useRef<Map<string, LinearInfo | null>>(new Map());
@@ -64,9 +63,16 @@ export function useWorktrees(config: WorktreeHookConfig): {
   linearRefreshOnManualRef.current = linearRefreshOnManual;
   const linearAutoNicknameRef = useRef(linearAutoNickname);
   linearAutoNicknameRef.current = linearAutoNickname;
+  const linearApiKeyRef = useRef(linearApiKey);
+  linearApiKeyRef.current = linearApiKey;
 
   // Generation counter: stale refresh calls check this before setting state
   const genRef = useRef(0);
+
+  // Store integration functions in refs so refresh can have [] deps
+  const refreshPrInfoRef = useRef<(repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }>) => Promise<void>>(async () => {});
+  const refreshLinearInfoRef = useRef<(branches: string[]) => Promise<void>>(async () => {});
+  const autoSetLinearNicknamesRef = useRef<() => void>(() => {});
 
   // Fetch PR info for all branches, batched by repo, and update cache
   const refreshPrInfo = useCallback(async (repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }>) => {
@@ -113,7 +119,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const entries = await Promise.all(
       branches.map(async (branch) => {
         try {
-          const info = await fetchLinearInfo(branch, linearApiKey);
+          const info = await fetchLinearInfo(branch, linearApiKeyRef.current);
           return [branch, info] as const;
         } catch {
           return [branch, linearCacheRef.current.get(branch) ?? null] as const;
@@ -123,7 +129,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     for (const [branch, info] of entries) {
       linearCacheRef.current.set(branch, info);
     }
-  }, [linearApiKey]);
+  }, []);
 
   // Auto-set worktree nicknames from Linear ticket titles
   const autoSetLinearNicknames = useCallback(() => {
@@ -140,6 +146,11 @@ export function useWorktrees(config: WorktreeHookConfig): {
     }
   }, []);
 
+  // Keep refs in sync so refresh (with [] deps) always calls the latest versions
+  refreshPrInfoRef.current = refreshPrInfo;
+  refreshLinearInfoRef.current = refreshLinearInfo;
+  autoSetLinearNicknamesRef.current = autoSetLinearNicknames;
+
   // Single stable refresh function that reads latest values from refs
   const refresh = useCallback(async (forceIntegrations = false) => {
     const myGen = ++genRef.current;
@@ -149,8 +160,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const shouldFetchLinear = linearEnabledRef.current;
 
     if (repos.length === 0) {
-      setGroups([]);
-      setFlatWorktrees([]);
+      setData({ groups: [], flatWorktrees: [] });
       return;
     }
 
@@ -174,10 +184,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
         const shouldRefreshPr = shouldFetchPr && ghRefreshOnManualRef.current;
         const shouldRefreshLinear = shouldFetchLinear && linearRefreshOnManualRef.current;
         await Promise.all([
-          shouldRefreshPr ? refreshPrInfo(repoGroups) : Promise.resolve(),
-          shouldRefreshLinear ? refreshLinearInfo(allBranchNames) : Promise.resolve(),
+          shouldRefreshPr ? refreshPrInfoRef.current(repoGroups) : Promise.resolve(),
+          shouldRefreshLinear ? refreshLinearInfoRef.current(allBranchNames) : Promise.resolve(),
         ]);
-        autoSetLinearNicknames();
+        autoSetLinearNicknamesRef.current();
         // Bail if a newer refresh started while we were fetching
         if (myGen !== genRef.current) return;
       }
@@ -272,13 +282,12 @@ export function useWorktrees(config: WorktreeHookConfig): {
       })));
       if (fingerprint !== prevFingerprintRef.current) {
         prevFingerprintRef.current = fingerprint;
-        setGroups(newGroups);
-        setFlatWorktrees(allFlat);
+        setData({ groups: newGroups, flatWorktrees: allFlat });
       }
     } catch (err) {
       log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);
     }
-  }, [refreshPrInfo, refreshLinearInfo, autoSetLinearNicknames]);
+  }, []);
 
   // Re-fetch immediately when repositories change
   useEffect(() => {
@@ -289,7 +298,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
   useEffect(() => {
     const timer = setInterval(() => refresh(false), pollingIntervalMs);
     return () => clearInterval(timer);
-  }, [refresh, pollingIntervalMs]);
+  }, [pollingIntervalMs]);
 
   // GitHub PR polling loop
   useEffect(() => {
@@ -305,14 +314,14 @@ export function useWorktrees(config: WorktreeHookConfig): {
           .filter((b) => !linearCacheRef.current.get(b)?.prAttachment);
         repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
       }
-      await refreshPrInfo(repoGroups);
+      await refreshPrInfoRef.current(repoGroups);
       refresh(false);
     };
 
     doFetch();
     const timer = setInterval(doFetch, ghPollingIntervalMs);
     return () => clearInterval(timer);
-  }, [repositories, ghPrStatus, ghPollingIntervalMs, refreshPrInfo, refresh]);
+  }, [repositories, ghPrStatus, ghPollingIntervalMs]);
 
   // Clear Linear-sourced nicknames when the feature is turned off
   useEffect(() => {
@@ -333,18 +342,18 @@ export function useWorktrees(config: WorktreeHookConfig): {
           allBranches.push(wt.branch);
         }
       }
-      await refreshLinearInfo(allBranches);
-      autoSetLinearNicknames();
+      await refreshLinearInfoRef.current(allBranches);
+      autoSetLinearNicknamesRef.current();
       refresh(false);
     };
 
     doFetch();
     const timer = setInterval(doFetch, linearPollingIntervalMs);
     return () => clearInterval(timer);
-  }, [repositories, linearEnabled, linearPollingIntervalMs, refreshLinearInfo, refresh]);
+  }, [repositories, linearEnabled, linearPollingIntervalMs]);
 
   // Exposed refresh always forces integrations fetch
-  const forceRefresh = useCallback(() => refresh(true), [refresh]);
+  const forceRefresh = useCallback(() => refresh(true), []);
 
   // Light refresh: debounced to avoid excessive git status calls from rapid pub/sub events
   const lightRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -355,7 +364,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
       refresh(false);
     }, 300);
     return Promise.resolve();
-  }, [refresh]);
+  }, []);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -364,5 +373,5 @@ export function useWorktrees(config: WorktreeHookConfig): {
     };
   }, []);
 
-  return { groups, flatWorktrees, refresh: forceRefresh, lightRefresh };
+  return { groups: data.groups, flatWorktrees: data.flatWorktrees, refresh: forceRefresh, lightRefresh };
 }
