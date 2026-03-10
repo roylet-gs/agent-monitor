@@ -7,17 +7,10 @@
  */
 import net from "net";
 import { existsSync } from "fs";
-import { spawn } from "child_process";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { SOCKET_PATH } from "./paths.js";
-import { isDaemonRunning } from "./daemon.js";
+import { SOCKET_PATH, DAEMON_PID_PATH } from "./paths.js";
 import { log } from "./logger.js";
 import type { DaemonToTuiMessage } from "./daemon-types.js";
 import type { ForceRefreshMessage, ConfigReloadMessage } from "./daemon-types.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 export interface DaemonClientOptions {
   onData: (msg: DaemonToTuiMessage) => void;
@@ -45,19 +38,12 @@ export class DaemonClient {
   }
 
   /**
-   * Ensure the daemon is running and connect to it.
+   * Try to connect to a running daemon.
    * Returns true if connection succeeds, false if daemon can't be reached.
+   * Does NOT auto-start the daemon — use `am daemon start` or startDaemonProcess() externally.
    */
   async connect(): Promise<boolean> {
     if (this.destroyed) return false;
-
-    // Start daemon if not running
-    if (!isDaemonRunning()) {
-      await this.startDaemon();
-      // Wait a moment for daemon to start listening
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
     return this.doConnect();
   }
 
@@ -68,7 +54,10 @@ export class DaemonClient {
         return;
       }
 
-      if (!existsSync(SOCKET_PATH)) {
+      // Only connect if both the socket and daemon PID file exist.
+      // This prevents connecting to the pubsub server (which uses the same socket)
+      // when no daemon is running.
+      if (!existsSync(SOCKET_PATH) || !existsSync(DAEMON_PID_PATH)) {
         resolve(false);
         return;
       }
@@ -147,12 +136,6 @@ export class DaemonClient {
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       if (this.destroyed) return;
-
-      // Try to start daemon if not running
-      if (!isDaemonRunning()) {
-        await this.startDaemon();
-        await new Promise((r) => setTimeout(r, 500));
-      }
 
       this.doConnect().then((ok) => {
         if (!ok && !this.destroyed) {
@@ -237,41 +220,4 @@ export class DaemonClient {
     this.pendingResolvers.clear();
   }
 
-  /**
-   * Start the daemon as a detached background process.
-   */
-  private async startDaemon(): Promise<void> {
-    log("info", "daemon-client", "Starting daemon process");
-    try {
-      // Find the daemon script
-      const daemonScript = join(__dirname, "..", "lib", "daemon.js");
-      const daemonTsScript = join(__dirname, "..", "lib", "daemon.ts");
-
-      let cmd: string;
-      let args: string[];
-
-      if (existsSync(daemonScript)) {
-        // Built version — use node directly
-        cmd = process.execPath;
-        args = [daemonScript];
-      } else if (existsSync(daemonTsScript)) {
-        // Dev mode — use tsx
-        cmd = "npx";
-        args = ["tsx", daemonTsScript];
-      } else {
-        log("error", "daemon-client", "Cannot find daemon script");
-        return;
-      }
-
-      const child = spawn(cmd, args, {
-        detached: true,
-        stdio: "ignore",
-        env: { ...process.env, AM_DAEMON_MODE: "1" },
-      });
-      child.unref();
-      log("info", "daemon-client", `Daemon spawned (pid=${child.pid})`);
-    } catch (err) {
-      log("error", "daemon-client", `Failed to start daemon: ${err}`);
-    }
-  }
 }

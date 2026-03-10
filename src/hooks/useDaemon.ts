@@ -28,7 +28,8 @@ export interface DaemonHookResult {
   connected: boolean;
 }
 
-const DAEMON_CONNECT_TIMEOUT_MS = 3000;
+const DISABLED_INTERVAL = 2_147_483_647; // max safe 32-bit int for setInterval
+const EMPTY_REPOS: Repository[] = []; // stable reference to avoid infinite re-render loops
 
 export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
   const { repositories, settings, onAgentUpdate } = config;
@@ -41,7 +42,9 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
   }>({ groups: [], flatWorktrees: [], standaloneSessions: [] });
 
   const [connected, setConnected] = useState(false);
-  const [fallbackMode, setFallbackMode] = useState(false);
+  // Start in fallback mode so useWorktrees loads data immediately.
+  // Switch to daemon mode only if connection succeeds.
+  const [fallbackMode, setFallbackMode] = useState(true);
   const clientRef = useRef<DaemonClient | null>(null);
   const prevFingerprintRef = useRef("");
   const onAgentUpdateRef = useRef(onAgentUpdate);
@@ -49,10 +52,10 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
 
   // --- Fallback mode hooks (always called, but only used when fallbackMode=true) ---
   // When daemon is connected, disable fallback polling by passing empty repos and huge intervals
-  const DISABLED_INTERVAL = 2_147_483_647; // max safe 32-bit int for setInterval
-
+  // IMPORTANT: Use stable EMPTY_REPOS to avoid triggering useWorktrees' useEffect([repositories])
+  // on every render, which would cause an infinite re-render loop.
   const worktreeConfig: WorktreeHookConfig = {
-    repositories: fallbackMode ? repositories : [],
+    repositories: fallbackMode ? repositories : EMPTY_REPOS,
     pollingIntervalMs: fallbackMode ? settings.pollingIntervalMs : DISABLED_INTERVAL,
     ghPollingIntervalMs: fallbackMode ? settings.ghPollingIntervalMs : DISABLED_INTERVAL,
     linearPollingIntervalMs: fallbackMode ? settings.linearPollingIntervalMs : DISABLED_INTERVAL,
@@ -175,25 +178,16 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
 
     clientRef.current = client;
 
-    // Try to connect, fall back after timeout
-    const connectTimeout = setTimeout(() => {
-      if (!cancelled && !client.connected) {
-        log("warn", "useDaemon", "Daemon connect timeout — using fallback polling");
-        setFallbackMode(true);
-      }
-    }, DAEMON_CONNECT_TIMEOUT_MS);
-
+    // Try to connect — fallback is already active, so data loads immediately.
+    // If daemon connects, onConnected will switch off fallback mode.
     client.connect().then((ok) => {
-      clearTimeout(connectTimeout);
       if (!cancelled && !ok) {
-        log("warn", "useDaemon", "Could not connect to daemon — using fallback polling");
-        setFallbackMode(true);
+        log("info", "useDaemon", "Could not connect to daemon — continuing with fallback polling");
       }
     });
 
     return () => {
       cancelled = true;
-      clearTimeout(connectTimeout);
       client.destroy();
       clientRef.current = null;
     };

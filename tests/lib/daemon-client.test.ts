@@ -1,11 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import net from "net";
-import { mkdtempSync, unlinkSync } from "fs";
+import { mkdtempSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-const tempDir = mkdtempSync(join(tmpdir(), "am-dclient-test-"));
-process.env.AM_DATA_DIR = tempDir;
+const { testSocketPath, tempDir } = vi.hoisted(() => {
+  const { mkdtempSync } = require("fs");
+  const { tmpdir } = require("os");
+  const { join } = require("path");
+  const tempDir = mkdtempSync(join(tmpdir(), "am-dclient-test-"));
+  return { testSocketPath: join(tempDir, "am.sock"), tempDir };
+});
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
@@ -13,15 +18,21 @@ vi.mock("../../src/lib/logger.js", () => ({
   setLogLevel: vi.fn(),
 }));
 
-vi.mock("../../src/lib/daemon.js", () => ({
-  isDaemonRunning: vi.fn(() => true),
-  getDaemonPid: vi.fn(() => process.pid),
-  stopDaemon: vi.fn(() => false),
+vi.mock("../../src/lib/paths.js", () => ({
+  SOCKET_PATH: testSocketPath,
+  APP_DIR: tempDir,
+  DB_PATH: join(tempDir, "agent-monitor.db"),
+  SETTINGS_PATH: join(tempDir, "settings.json"),
+  LOG_PATH: join(tempDir, "debug.log"),
+  RULES_PATH: join(tempDir, "rules.json"),
+  AM_MANAGED_PERMISSIONS_PATH: join(tempDir, "am-managed-permissions.json"),
+  DAEMON_PID_PATH: join(tempDir, "am.daemon.pid"),
 }));
 
 import { DaemonClient } from "../../src/lib/daemon-client.js";
-import { SOCKET_PATH } from "../../src/lib/paths.js";
 import type { DaemonToTuiMessage } from "../../src/lib/daemon-types.js";
+
+const testPidPath = join(tempDir, "am.daemon.pid");
 
 describe("DaemonClient", () => {
   let mockServer: net.Server | null = null;
@@ -29,16 +40,22 @@ describe("DaemonClient", () => {
   function startMockServer(): Promise<net.Server> {
     return new Promise((resolve) => {
       const srv = net.createServer();
-      srv.listen(SOCKET_PATH, () => resolve(srv));
+      srv.listen(testSocketPath, () => resolve(srv));
     });
   }
+
+  beforeEach(() => {
+    // Create a fake PID file so the client will attempt to connect
+    writeFileSync(testPidPath, String(process.pid));
+  });
 
   afterEach(() => {
     if (mockServer) {
       mockServer.close();
       mockServer = null;
-      try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }
+      try { unlinkSync(testSocketPath); } catch { /* ignore */ }
     }
+    try { unlinkSync(testPidPath); } catch { /* ignore */ }
   });
 
   it("connects to a running daemon and sends subscribe", async () => {
@@ -103,9 +120,7 @@ describe("DaemonClient", () => {
   it("forceRefresh sends message and resolves on response", async () => {
     mockServer = await startMockServer();
 
-    let serverConn: net.Socket | null = null;
     mockServer.on("connection", (conn) => {
-      serverConn = conn;
       let buffer = "";
       conn.on("data", (chunk) => {
         buffer += chunk.toString();
@@ -115,7 +130,6 @@ describe("DaemonClient", () => {
           if (!line.trim()) continue;
           const parsed = JSON.parse(line);
           if (parsed.type === "force-refresh") {
-            // Echo back a refresh-result with matching id
             const response: DaemonToTuiMessage = {
               type: "refresh-result",
               id: parsed.id,
@@ -131,17 +145,15 @@ describe("DaemonClient", () => {
     await client.connect();
     await new Promise((r) => setTimeout(r, 50));
 
-    // forceRefresh should resolve when matching response arrives
     await client.forceRefresh(true);
 
     client.destroy();
   });
 
-  it("returns false when no socket exists", async () => {
+  it("returns false when no daemon PID file exists", async () => {
+    try { unlinkSync(testPidPath); } catch { /* ignore */ }
     const client = new DaemonClient({ onData: () => {} });
     const ok = await client.connect();
-    // Daemon mock says running but no socket = connection fails
-    // Client will try to reconnect in background, but initial connect returns false
     expect(ok).toBe(false);
     client.destroy();
   });
