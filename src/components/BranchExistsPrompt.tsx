@@ -46,7 +46,7 @@ export function BranchExistsPrompt({
       </Box>
       <Box marginTop={1} flexDirection="column">
         <Text>
-          <Text color="yellow">[Enter/y]</Text> Reuse existing branch
+          <Text color="yellow">[Enter/y]</Text> Reuse existing branch (pulls latest from remote)
         </Text>
         <Text>
           <Text color="red">[d]</Text> Delete branch and re-create from main

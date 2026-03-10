@@ -33,6 +33,7 @@ import {
   branchExists,
   getRepoName,
   fetchBranch,
+  fetchAndResetBranch,
   checkoutBranch,
   ensureBranchForOpen,
   remoteBranchExists,
@@ -384,7 +385,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       const hasScript = hasStartupScript(targetRepo.id);
 
       const steps: StepInfo[] = [
-        { label: "Fetching latest base branch", status: "active" },
+        { label: reuse ? "Fetching latest branch" : "Fetching latest base branch", status: "active" },
         { label: "Creating git worktree", status: "pending" },
         { label: "Syncing database", status: "pending" },
         ...(hasScript
@@ -400,16 +401,23 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       let stepIdx = 0;
 
       try {
-        // Step: Fetch base branch
-        const effectiveBase = baseBranch?.trim() || await getMainBranch(targetRepo.path);
-        await fetchBranch(targetRepo.path, effectiveBase);
+        let baseRef: string | undefined;
+
+        if (reuse) {
+          // Reusing existing branch: fetch latest from remote and reset local
+          await fetchAndResetBranch(targetRepo.path, branchName);
+        } else {
+          // New branch: fetch base branch and determine ref
+          const effectiveBase = baseBranch?.trim() || await getMainBranch(targetRepo.path);
+          await fetchBranch(targetRepo.path, effectiveBase);
+          const hasRemote = await remoteBranchExists(targetRepo.path, effectiveBase);
+          baseRef = hasRemote ? `origin/${effectiveBase}` : effectiveBase;
+        }
         updateStep(stepIdx, "done");
         stepIdx++;
 
         // Step: Create worktree
         updateStep(stepIdx, "active");
-        const hasRemote = await remoteBranchExists(targetRepo.path, effectiveBase);
-        const baseRef = hasRemote ? `origin/${effectiveBase}` : effectiveBase;
         let wtPath: string;
         try {
           wtPath = await gitCreateWorktree(
@@ -424,7 +432,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
             updateStep(stepIdx, "error");
             setCreationError(null);
             setMode("dashboard");
-            setPendingBranch({ branch: branchName, customName, baseBranch: baseBranch ?? effectiveBase });
+            setPendingBranch({ branch: branchName, customName, baseBranch: baseBranch ?? "" });
             setMode("branch-exists");
             return;
           }
