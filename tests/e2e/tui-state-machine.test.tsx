@@ -80,97 +80,16 @@ vi.mock("../../src/lib/daemon.js", () => ({
   stopDaemon: vi.fn(() => false),
 }));
 
-// Mock DaemonClient to immediately provide data from DB
+// Mock DaemonClient to fail connection — triggers fallback to in-process polling
 vi.mock("../../src/lib/daemon-client.js", () => {
   class MockDaemonClient {
-    private options: { onData: (msg: unknown) => void; onConnected?: () => void; onDisconnected?: () => void };
-    private pollTimer: ReturnType<typeof setInterval> | null = null;
     connected = false;
-
-    constructor(options: { onData: (msg: unknown) => void; onConnected?: () => void; onDisconnected?: () => void }) {
-      this.options = options;
-    }
-
-    async connect() {
-      // Simulate connected state and start polling DB directly
-      this.connected = true;
-      this.options.onConnected?.();
-      this.refresh();
-      this.pollTimer = setInterval(() => this.refresh(), 500);
-      return true;
-    }
-
-    private async refresh() {
-      try {
-        const db = await import("../../src/lib/db.js");
-        const git = await import("../../src/lib/git.js");
-        const repos = db.getRepositories();
-        const groups: unknown[] = [];
-        const allFlat: unknown[] = [];
-
-        for (const repo of repos) {
-          const dbWorktrees = db.getWorktrees(repo.id);
-          const statuses = db.getAgentStatuses(repo.id);
-
-          const enriched = await Promise.all(
-            dbWorktrees.map(async (wt: { id: string; branch: string; path: string; is_main: number; repo_id: string; name: string; custom_name: string | null; nickname_source: string | null; created_at: string }) => {
-              let git_status = null;
-              let last_commit = null;
-              try {
-                [git_status, last_commit] = await Promise.all([
-                  git.getGitStatus(wt.path),
-                  git.getLastCommit(wt.path),
-                ]);
-              } catch { /* ignore */ }
-              return {
-                ...wt,
-                agent_status: statuses.get(wt.id) ?? null,
-                git_status,
-                last_commit,
-                has_terminal: false,
-                open_ide: null,
-                pr_info: null,
-                linear_info: null,
-              };
-            })
-          );
-
-          enriched.sort((a: { is_main: number; created_at: string }, b: { is_main: number; created_at: string }) => {
-            if (a.is_main !== b.is_main) return a.is_main - b.is_main;
-            return b.created_at.localeCompare(a.created_at);
-          });
-
-          if (enriched.length > 0 || repos.length === 1) {
-            groups.push({ repo, worktrees: enriched });
-          }
-          allFlat.push(...enriched);
-        }
-
-        this.options.onData({
-          type: "refresh-result",
-          id: null,
-          data: { groups, flatWorktrees: allFlat, standaloneSessions: [] },
-        });
-      } catch { /* ignore during teardown */ }
-    }
-
-    async forceRefresh() {
-      this.refresh();
-    }
-
-    configReload() {
-      this.refresh();
-    }
-
-    destroy() {
-      this.connected = false;
-      if (this.pollTimer) {
-        clearInterval(this.pollTimer);
-        this.pollTimer = null;
-      }
-    }
+    constructor(_options: unknown) {}
+    async connect() { return false; }
+    async forceRefresh() {}
+    configReload() {}
+    destroy() {}
   }
-
   return { DaemonClient: MockDaemonClient };
 });
 
@@ -248,11 +167,9 @@ describe("TUI State Machine", () => {
   it("dashboard -> delete confirm -> cancel back to dashboard", async () => {
     await setupDashboard();
     const { stdin, lastFrame } = render(<App />);
-    await waitForFrame(200);
+    // Wait for initial worktree data to load via fallback polling
+    await waitForFrame(300);
     expect(lastFrame()!).toContain("Agent Monitor");
-
-    // Wait for worktree data to arrive from mock daemon
-    await waitForFrame(500);
 
     stdin.write("d");
     await waitForFrame();
@@ -279,10 +196,7 @@ describe("TUI State Machine", () => {
 
     await setupDashboard();
     const { stdin, lastFrame } = render(<App />);
-    await waitForFrame(200);
-
-    // Wait for worktree data to arrive from mock daemon
-    await waitForFrame(500);
+    await waitForFrame(300);
 
     // Enter delete confirm
     stdin.write("d");
@@ -314,10 +228,7 @@ describe("TUI State Machine", () => {
 
     await setupDashboard();
     const { stdin, lastFrame } = render(<App />);
-    await waitForFrame(200);
-
-    // Wait for worktree data to arrive from mock daemon
-    await waitForFrame(500);
+    await waitForFrame(300);
 
     // Enter delete confirm
     stdin.write("d");

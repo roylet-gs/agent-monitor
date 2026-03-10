@@ -5,6 +5,9 @@
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { DaemonClient } from "../lib/daemon-client.js";
+import { useWorktrees, type WorktreeHookConfig } from "./useWorktrees.js";
+import { useStandaloneSessions } from "./useStandaloneSessions.js";
+import { usePubSub } from "./usePubSub.js";
 import { log } from "../lib/logger.js";
 import type { DaemonToTuiMessage } from "../lib/daemon-types.js";
 import type { PubSubMessage } from "../lib/pubsub-types.js";
@@ -25,20 +28,69 @@ export interface DaemonHookResult {
   connected: boolean;
 }
 
+const DAEMON_CONNECT_TIMEOUT_MS = 3000;
+
 export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
   const { repositories, settings, onAgentUpdate } = config;
 
-  const [data, setData] = useState<{
+  // --- Daemon mode state ---
+  const [daemonData, setDaemonData] = useState<{
     groups: WorktreeGroup[];
     flatWorktrees: WorktreeWithStatus[];
     standaloneSessions: StandaloneSession[];
   }>({ groups: [], flatWorktrees: [], standaloneSessions: [] });
 
   const [connected, setConnected] = useState(false);
+  const [fallbackMode, setFallbackMode] = useState(false);
   const clientRef = useRef<DaemonClient | null>(null);
   const prevFingerprintRef = useRef("");
   const onAgentUpdateRef = useRef(onAgentUpdate);
   onAgentUpdateRef.current = onAgentUpdate;
+
+  // --- Fallback mode hooks (always called, but only used when fallbackMode=true) ---
+  // When daemon is connected, disable fallback polling by passing empty repos and huge intervals
+  const DISABLED_INTERVAL = 2_147_483_647; // max safe 32-bit int for setInterval
+
+  const worktreeConfig: WorktreeHookConfig = {
+    repositories: fallbackMode ? repositories : [],
+    pollingIntervalMs: fallbackMode ? settings.pollingIntervalMs : DISABLED_INTERVAL,
+    ghPollingIntervalMs: fallbackMode ? settings.ghPollingIntervalMs : DISABLED_INTERVAL,
+    linearPollingIntervalMs: fallbackMode ? settings.linearPollingIntervalMs : DISABLED_INTERVAL,
+    ghPrStatus: fallbackMode ? settings.ghPrStatus : false,
+    linearEnabled: fallbackMode ? settings.linearEnabled : false,
+    linearApiKey: settings.linearApiKey,
+    hideMainBranch: settings.hideMainBranch,
+    ghRefreshOnManual: settings.ghRefreshOnManual,
+    linearRefreshOnManual: settings.linearRefreshOnManual,
+    linearAutoNickname: settings.linearAutoNickname,
+  };
+
+  const fallbackWorktrees = useWorktrees(worktreeConfig);
+  const fallbackStandalone = useStandaloneSessions(
+    fallbackMode ? settings.pollingIntervalMs : DISABLED_INTERVAL
+  );
+
+  // Fallback pubsub refs
+  const fallbackRefreshRef = useRef(fallbackWorktrees.refresh);
+  useEffect(() => { fallbackRefreshRef.current = fallbackWorktrees.refresh; }, [fallbackWorktrees.refresh]);
+  const fallbackLightRefreshRef = useRef(fallbackWorktrees.lightRefresh);
+  useEffect(() => { fallbackLightRefreshRef.current = fallbackWorktrees.lightRefresh; }, [fallbackWorktrees.lightRefresh]);
+  const fallbackStandaloneRefreshRef = useRef(fallbackStandalone.refresh);
+  useEffect(() => { fallbackStandaloneRefreshRef.current = fallbackStandalone.refresh; }, [fallbackStandalone.refresh]);
+
+  usePubSub(fallbackMode ? (msg) => {
+    if (msg.type === "agent-status-update") {
+      fallbackLightRefreshRef.current();
+    } else if (msg.type === "standalone-status-update") {
+      fallbackStandaloneRefreshRef.current();
+    } else if (msg.type === "git-activity") {
+      log("info", "useDaemon", `Git activity detected (fallback): ${msg.activity} on ${msg.branch}`);
+      setTimeout(() => fallbackRefreshRef.current(), 3000);
+    }
+    onAgentUpdateRef.current?.(msg);
+  } : () => {});
+
+  // --- Daemon connection ---
 
   // Track settings changes to notify daemon
   const settingsRef = useRef(settings);
@@ -46,8 +98,7 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     const prev = settingsRef.current;
     settingsRef.current = settings;
 
-    // If polling intervals or integration settings changed, tell daemon to reload
-    if (
+    if (!fallbackMode && (
       prev.pollingIntervalMs !== settings.pollingIntervalMs ||
       prev.ghPollingIntervalMs !== settings.ghPollingIntervalMs ||
       prev.linearPollingIntervalMs !== settings.linearPollingIntervalMs ||
@@ -56,23 +107,27 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       prev.linearApiKey !== settings.linearApiKey ||
       prev.hideMainBranch !== settings.hideMainBranch ||
       prev.linearAutoNickname !== settings.linearAutoNickname
-    ) {
+    )) {
       clientRef.current?.configReload();
     }
-  }, [settings]);
+  }, [settings, fallbackMode]);
 
   // Notify daemon when repos change
   useEffect(() => {
-    clientRef.current?.configReload();
-  }, [repositories]);
+    if (!fallbackMode) {
+      clientRef.current?.configReload();
+    }
+  }, [repositories, fallbackMode]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const client = new DaemonClient({
       onData: (msg: DaemonToTuiMessage) => {
+        if (cancelled) return;
         if (msg.type === "refresh-result") {
           const { data: newData } = msg;
 
-          // Fingerprint to avoid unnecessary re-renders
           const fingerprint = JSON.stringify(newData.flatWorktrees.map(wt => ({
             id: wt.id, branch: wt.branch, custom_name: wt.custom_name, is_main: wt.is_main,
             status: wt.agent_status?.status,
@@ -95,37 +150,63 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
 
           if (fingerprint !== prevFingerprintRef.current) {
             prevFingerprintRef.current = fingerprint;
-            setData(newData);
+            setDaemonData(newData);
           }
         } else if (msg.type === "agent-update") {
           onAgentUpdateRef.current?.(msg.original);
         }
       },
       onConnected: () => {
-        setConnected(true);
+        if (!cancelled) {
+          setConnected(true);
+          setFallbackMode(false);
+          log("info", "useDaemon", "Connected to daemon — disabling fallback polling");
+        }
       },
       onDisconnected: () => {
-        setConnected(false);
+        if (!cancelled) {
+          setConnected(false);
+          // Switch to fallback mode when daemon disconnects
+          setFallbackMode(true);
+          log("info", "useDaemon", "Daemon disconnected — enabling fallback polling");
+        }
       },
     });
 
     clientRef.current = client;
+
+    // Try to connect, fall back after timeout
+    const connectTimeout = setTimeout(() => {
+      if (!cancelled && !client.connected) {
+        log("warn", "useDaemon", "Daemon connect timeout — using fallback polling");
+        setFallbackMode(true);
+      }
+    }, DAEMON_CONNECT_TIMEOUT_MS);
+
     client.connect().then((ok) => {
-      if (!ok) {
-        log("warn", "useDaemon", "Could not connect to daemon — will retry");
+      clearTimeout(connectTimeout);
+      if (!cancelled && !ok) {
+        log("warn", "useDaemon", "Could not connect to daemon — using fallback polling");
+        setFallbackMode(true);
       }
     });
 
     return () => {
+      cancelled = true;
+      clearTimeout(connectTimeout);
       client.destroy();
       clientRef.current = null;
     };
   }, []);
 
+  // --- Choose data source based on mode ---
+
   const refresh = useCallback(async () => {
     const client = clientRef.current;
     if (client?.connected) {
       await client.forceRefresh(true);
+    } else {
+      await fallbackRefreshRef.current();
     }
   }, []);
 
@@ -133,15 +214,29 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     const client = clientRef.current;
     if (client?.connected) {
       await client.forceRefresh(false);
+    } else {
+      await fallbackLightRefreshRef.current();
     }
   }, []);
 
+  // Use daemon data when connected, fallback data otherwise
+  if (connected && !fallbackMode) {
+    return {
+      groups: daemonData.groups,
+      flatWorktrees: daemonData.flatWorktrees,
+      standaloneSessions: daemonData.standaloneSessions,
+      refresh,
+      lightRefresh,
+      connected: true,
+    };
+  }
+
   return {
-    groups: data.groups,
-    flatWorktrees: data.flatWorktrees,
-    standaloneSessions: data.standaloneSessions,
+    groups: fallbackWorktrees.groups,
+    flatWorktrees: fallbackWorktrees.flatWorktrees,
+    standaloneSessions: fallbackStandalone.sessions,
     refresh,
     lightRefresh,
-    connected,
+    connected: false,
   };
 }
