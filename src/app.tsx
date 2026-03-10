@@ -697,7 +697,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
 
     removeStandaloneSession(session.id);
-    refreshStandaloneRef.current();
+    lightRefreshRef.current();
     setSelectedIndex((i) => Math.max(0, i - 1));
     setMode("dashboard");
     log("info", "app", `Removed standalone session at ${session.path}`);
