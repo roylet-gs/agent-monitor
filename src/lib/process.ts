@@ -68,6 +68,52 @@ export function getIdePaths(): Map<string, "cursor" | "vscode"> {
 }
 
 /**
+ * Find and kill Claude Code processes whose cwd matches the given path.
+ * Uses lsof to find node processes at the path, then verifies via ps that they're Claude.
+ * Returns the number of processes killed.
+ */
+export function killClaudeAtPath(targetPath: string): number {
+  let killed = 0;
+  try {
+    const realPath = realpathSync(targetPath);
+    // Find node processes with cwd at the target path
+    const output = execSync(`lsof -d cwd -c node -Fpn 2>/dev/null`, {
+      timeout: 3000,
+      encoding: "utf-8",
+    });
+
+    let currentPid: number | null = null;
+    for (const line of output.split("\n")) {
+      if (line.startsWith("p")) {
+        currentPid = parseInt(line.substring(1), 10);
+      } else if (line.startsWith("n") && currentPid !== null) {
+        const cwdPath = line.substring(1);
+        if (cwdPath === realPath) {
+          // Verify this is actually a Claude process
+          try {
+            const args = execSync(`ps -p ${currentPid} -o args= 2>/dev/null`, {
+              timeout: 2000,
+              encoding: "utf-8",
+            }).trim();
+            if (args.includes("claude")) {
+              process.kill(currentPid, "SIGTERM");
+              killed++;
+              log("info", "process", `Killed Claude process ${currentPid} at ${realPath}`);
+            }
+          } catch {
+            // Process may have already exited
+          }
+        }
+        currentPid = null;
+      }
+    }
+  } catch {
+    log("debug", "process", `killClaudeAtPath: lsof returned no results or failed for ${targetPath}`);
+  }
+  return killed;
+}
+
+/**
  * Check if a terminal shell has its cwd at the given path.
  * Convenience wrapper for single-path checks (used by ide-launcher).
  */

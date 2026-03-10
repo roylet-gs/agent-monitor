@@ -50,6 +50,7 @@ vi.mock("../../src/lib/ide-launcher.js", () => ({
   openInIde: vi.fn(),
   openClaudeInTerminal: vi.fn(),
   openTerminal: vi.fn(),
+  focusTerminal: vi.fn(),
 }));
 
 vi.mock("../../src/lib/sync.js", () => ({

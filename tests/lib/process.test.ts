@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
@@ -18,11 +18,20 @@ vi.mock("fs", () => ({
   realpathSync: (p: string) => mockRealpathSync(p),
 }));
 
-import { getTerminalPaths, getIdePaths, isTerminalOpenAt } from "../../src/lib/process.js";
+import { getTerminalPaths, getIdePaths, isTerminalOpenAt, killClaudeAtPath } from "../../src/lib/process.js";
+
+const originalProcessKill = process.kill;
+const mockProcessKill = vi.fn(() => true);
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockRealpathSync.mockImplementation((p: string) => p);
+  mockProcessKill.mockImplementation(() => true);
+  process.kill = mockProcessKill as unknown as typeof process.kill;
+});
+
+afterAll(() => {
+  process.kill = originalProcessKill;
 });
 
 describe("getTerminalPaths", () => {
@@ -140,6 +149,74 @@ describe("getIdePaths", () => {
     mockRealpathSync.mockReturnValue("/Users/dev/real-project");
     const paths = getIdePaths();
     expect(paths.get("/Users/dev/real-project")).toBe("cursor");
+  });
+});
+
+describe("killClaudeAtPath", () => {
+  it("finds and kills a claude process at the target path", () => {
+    // lsof output: pid 1234 with cwd at /Users/dev/project
+    mockExecSync
+      .mockReturnValueOnce("p1234\nn/Users/dev/project\n") // lsof
+      .mockReturnValueOnce("node /Users/dev/.claude/local/claude\n"); // ps
+    const killed = killClaudeAtPath("/Users/dev/project");
+    expect(killed).toBe(1);
+    expect(mockProcessKill).toHaveBeenCalledWith(1234, "SIGTERM");
+  });
+
+  it("skips non-claude node processes", () => {
+    mockExecSync
+      .mockReturnValueOnce("p1234\nn/Users/dev/project\n") // lsof
+      .mockReturnValueOnce("node /Users/dev/server.js\n"); // ps — not claude
+    const killed = killClaudeAtPath("/Users/dev/project");
+    expect(killed).toBe(0);
+    expect(mockProcessKill).not.toHaveBeenCalled();
+  });
+
+  it("handles lsof failure gracefully and returns 0", () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error("lsof not found");
+    });
+    const killed = killClaudeAtPath("/Users/dev/project");
+    expect(killed).toBe(0);
+    expect(mockProcessKill).not.toHaveBeenCalled();
+  });
+
+  it("returns 0 when no processes match the target path", () => {
+    // lsof shows a process at a different path
+    mockExecSync.mockReturnValueOnce("p1234\nn/Users/dev/other-project\n");
+    const killed = killClaudeAtPath("/Users/dev/project");
+    expect(killed).toBe(0);
+    expect(mockProcessKill).not.toHaveBeenCalled();
+  });
+
+  it("kills multiple claude processes at the same path", () => {
+    mockExecSync
+      .mockReturnValueOnce("p1234\nn/Users/dev/project\np5678\nn/Users/dev/project\n")
+      .mockReturnValueOnce("node claude\n") // ps for 1234
+      .mockReturnValueOnce("node claude\n"); // ps for 5678
+    const killed = killClaudeAtPath("/Users/dev/project");
+    expect(killed).toBe(2);
+    expect(mockProcessKill).toHaveBeenCalledWith(1234, "SIGTERM");
+    expect(mockProcessKill).toHaveBeenCalledWith(5678, "SIGTERM");
+  });
+
+  it("handles ps failure gracefully (process already exited)", () => {
+    mockExecSync
+      .mockReturnValueOnce("p1234\nn/Users/dev/project\n") // lsof
+      .mockImplementationOnce(() => { throw new Error("No such process"); }); // ps fails
+    const killed = killClaudeAtPath("/Users/dev/project");
+    expect(killed).toBe(0);
+    expect(mockProcessKill).not.toHaveBeenCalled();
+  });
+
+  it("resolves symlinks via realpathSync before matching", () => {
+    mockRealpathSync.mockReturnValue("/Users/dev/real-project");
+    mockExecSync
+      .mockReturnValueOnce("p1234\nn/Users/dev/real-project\n")
+      .mockReturnValueOnce("node claude\n");
+    const killed = killClaudeAtPath("/Users/dev/symlink-project");
+    expect(killed).toBe(1);
+    expect(mockRealpathSync).toHaveBeenCalledWith("/Users/dev/symlink-project");
   });
 });
 

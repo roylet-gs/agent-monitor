@@ -150,12 +150,98 @@ function setTerminalTitle(app: string, windowTitle: string): void {
   }
 }
 
+function openGhosttyTab(command: string, windowTitle: string): void {
+  const escapedTitle = windowTitle.replace(/"/g, '\\"');
+  const escapedCmd = command.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const script = `
+    tell application "Ghostty" to activate
+    delay 0.3
+    tell application "System Events"
+      tell process "Ghostty"
+        keystroke "t" using command down
+      end tell
+    end tell
+    delay 0.3
+    tell application "System Events"
+      tell process "Ghostty"
+        keystroke "${escapedCmd}" & return
+        delay 0.1
+        keystroke "printf '\\\\e]0;${escapedTitle}\\\\a'" & return
+      end tell
+    end tell
+  `;
+  try {
+    execSync(`osascript <<'APPLESCRIPT'\n${script}\nAPPLESCRIPT`, {
+      stdio: "ignore",
+      timeout: 5000,
+      shell: "/bin/bash",
+    });
+  } catch (err) {
+    log("warn", "terminal", `openGhosttyTab failed: ${err}`);
+  }
+}
+
+function openITermTab(command: string): void {
+  const escapedCmd = command.replace(/"/g, '\\"');
+  const script = `
+    tell application "iTerm2"
+      activate
+      if (count of windows) > 0 then
+        tell current window
+          create tab with default profile command "${escapedCmd}"
+        end tell
+      else
+        create window with default profile command "${escapedCmd}"
+      end if
+    end tell
+  `;
+  try {
+    execSync(`osascript <<'APPLESCRIPT'\n${script}\nAPPLESCRIPT`, {
+      stdio: "ignore",
+      timeout: 5000,
+      shell: "/bin/bash",
+    });
+  } catch (err) {
+    log("warn", "terminal", `openITermTab failed: ${err}`);
+  }
+}
+
+export function focusTerminal(worktreePath: string, title?: string): boolean {
+  const app = detectTerminalApp();
+  // Tier 1: try exact title match (works well for Terminal.app, iTerm2)
+  if (tryFocusTerminalWindow(app, worktreePath, title)) {
+    log("info", "terminal", `Re-focused ${app} window for ${worktreePath}`);
+    return true;
+  }
+  // Tier 2: just activate the terminal app (guaranteed to bring it forward)
+  try {
+    execSync(`osascript -e 'tell application "${app}" to activate'`, {
+      stdio: "ignore", timeout: 2000,
+    });
+    log("info", "terminal", `Activated ${app} (title match failed, but terminal is open)`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function openTerminal(worktreePath: string, title?: string): string | undefined {
   const app = detectTerminalApp();
   const escapedPath = worktreePath.replace(/"/g, '\\"');
 
   if (tryFocusTerminalWindow(app, worktreePath, title)) {
     log("info", "terminal", `Re-focused ${app} window for ${worktreePath}`);
+    return;
+  }
+
+  // Check if a terminal IS open but we just couldn't find the window by title
+  if (isTerminalOpenAt(worktreePath)) {
+    try {
+      execSync(`osascript -e 'tell application "${app}" to activate'`, {
+        stdio: "ignore", timeout: 2000,
+      });
+      log("info", "terminal", `Activated ${app} (terminal detected at ${worktreePath})`);
+    } catch { /* ignore */ }
     return;
   }
 
@@ -172,11 +258,11 @@ export function openTerminal(worktreePath: string, title?: string): string | und
         );
         break;
       case "iTerm2":
-        execSync(
-          `osascript -e 'tell app "iTerm2" to create window with default profile command "cd ${escapedPath} && exec $SHELL"'`,
-          { stdio: "ignore" }
-        );
+        openITermTab(`cd ${escapedPath} && exec $SHELL`);
         break;
+      case "Ghostty":
+        openGhosttyTab(`cd "${escapedPath}" && exec $SHELL`, windowTitle);
+        return windowId; // Ghostty sets title via escape sequence in helper
       default:
         execSync(`open -a "${app}" "${worktreePath}"`, { stdio: "ignore" });
         break;
@@ -207,11 +293,12 @@ export function openClaudeInTerminal(worktreePath: string, continueSession: bool
           );
           break;
         case "iTerm2":
-          execSync(
-            `osascript -e 'tell app "iTerm2" to create window with default profile command "cd \\"${escapedPath}\\" && ${claudeCmd}"'`,
-            { stdio: "ignore" }
-          );
+          openITermTab(`cd \\"${escapedPath}\\" && ${claudeCmd}`);
           break;
+        case "Ghostty":
+          openGhosttyTab(`cd "${escapedPath}" && ${claudeCmd}`, windowTitle);
+          log("info", "ide", `Opened claude in ${app} at ${worktreePath} (${windowTitle})`);
+          return windowId;
         default:
           execSync(`open -a "${app}" "${worktreePath}"`, { stdio: "ignore" });
           // Small delay to let the terminal window open before sending the command

@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { execSync } from "child_process";
 
+const mockSpawnProcess = { unref: vi.fn() };
 vi.mock("child_process", () => ({
   execSync: vi.fn(),
+  spawn: vi.fn(() => mockSpawnProcess),
 }));
 
 vi.mock("fs", () => ({
@@ -11,6 +13,11 @@ vi.mock("fs", () => ({
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
+}));
+
+const mockIsTerminalOpenAt = vi.fn(() => false);
+vi.mock("../../src/lib/process.js", () => ({
+  isTerminalOpenAt: (...args: unknown[]) => mockIsTerminalOpenAt(...args),
 }));
 
 const mockedExecSync = vi.mocked(execSync);
@@ -26,6 +33,7 @@ describe("ide-launcher", () => {
     originalTermProgram = process.env.TERM_PROGRAM;
     Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
     process.env.TERM_PROGRAM = "Apple_Terminal";
+    mockIsTerminalOpenAt.mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -137,10 +145,10 @@ describe("ide-launcher", () => {
       expect(focusCall).toContain("iTerm2");
       expect(focusCall).toContain("sessions");
 
-      // Open should use iTerm2 create window
+      // Open should use iTerm2 tab (with window fallback)
       const openCall = mockedExecSync.mock.calls[1][0] as string;
       expect(openCall).toContain("iTerm2");
-      expect(openCall).toContain("create window with default profile");
+      expect(openCall).toContain("create tab with default profile");
 
       // Title should use iTerm2 session name
       const titleCall = mockedExecSync.mock.calls[2][0] as string;
@@ -149,16 +157,15 @@ describe("ide-launcher", () => {
   });
 
   describe("openTerminal with Ghostty", () => {
-    it("uses System Events for focus and title", async () => {
+    it("opens a new tab via AppleScript with Cmd+T", async () => {
       process.env.TERM_PROGRAM = "ghostty";
 
       mockedExecSync
         .mockReturnValueOnce("not_found\n") // focus attempt
-        .mockReturnValueOnce("" as any)     // open -a
-        .mockReturnValueOnce("" as any);    // title via keystroke
+        .mockReturnValueOnce("" as any); // openGhosttyTab execSync
 
       const { openTerminal } = await import("../../src/lib/ide-launcher.js");
-      openTerminal("/tmp/worktrees/feat", "feat");
+      const windowId = openTerminal("/tmp/worktrees/feat", "feat");
 
       // Focus should use System Events
       const focusCall = mockedExecSync.mock.calls[0][0] as string;
@@ -166,9 +173,70 @@ describe("ide-launcher", () => {
       expect(focusCall).toContain("Ghostty");
       expect(focusCall).toContain("AXRaise");
 
-      // Open should use open -a
+      // Open should use AppleScript with Cmd+T for new tab
       const openCall = mockedExecSync.mock.calls[1][0] as string;
-      expect(openCall).toContain('open -a "Ghostty"');
+      expect(openCall).toContain("Ghostty");
+      expect(openCall).toContain('keystroke "t" using command down');
+      expect(openCall).toContain("/tmp/worktrees/feat");
+
+      // Should return a window ID (not undefined)
+      expect(windowId).toBeDefined();
+    });
+
+    it("activates Ghostty instead of opening new tab when terminal is detected at path", async () => {
+      process.env.TERM_PROGRAM = "ghostty";
+      mockIsTerminalOpenAt.mockReturnValue(true);
+
+      mockedExecSync
+        .mockReturnValueOnce("not_found\n") // focus attempt fails (title mismatch)
+        .mockReturnValueOnce("" as any);    // activate fallback
+
+      const { openTerminal } = await import("../../src/lib/ide-launcher.js");
+      const windowId = openTerminal("/tmp/worktrees/feat", "feat");
+
+      // Should return undefined (no new window opened)
+      expect(windowId).toBeUndefined();
+      // Should only have focus attempt + activate, NOT a new tab
+      expect(mockedExecSync).toHaveBeenCalledTimes(2);
+      const activateCall = mockedExecSync.mock.calls[1][0] as string;
+      expect(activateCall).toContain('tell application "Ghostty" to activate');
+    });
+  });
+
+  describe("focusTerminal", () => {
+    it("returns true when title match succeeds", async () => {
+      mockedExecSync.mockReturnValueOnce("found\n");
+
+      const { focusTerminal } = await import("../../src/lib/ide-launcher.js");
+      const result = focusTerminal("/tmp/worktrees/feat", "feat");
+
+      expect(result).toBe(true);
+      expect(mockedExecSync).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to activate when title match fails", async () => {
+      mockedExecSync
+        .mockReturnValueOnce("not_found\n") // title match fails
+        .mockReturnValueOnce("" as any);    // activate succeeds
+
+      const { focusTerminal } = await import("../../src/lib/ide-launcher.js");
+      const result = focusTerminal("/tmp/worktrees/feat", "feat");
+
+      expect(result).toBe(true);
+      expect(mockedExecSync).toHaveBeenCalledTimes(2);
+      const activateCall = mockedExecSync.mock.calls[1][0] as string;
+      expect(activateCall).toContain("to activate");
+    });
+
+    it("returns false when both title match and activate fail", async () => {
+      mockedExecSync
+        .mockReturnValueOnce("not_found\n")
+        .mockImplementationOnce(() => { throw new Error("activate failed"); });
+
+      const { focusTerminal } = await import("../../src/lib/ide-launcher.js");
+      const result = focusTerminal("/tmp/worktrees/feat", "feat");
+
+      expect(result).toBe(false);
     });
   });
 
