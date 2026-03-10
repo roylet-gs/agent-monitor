@@ -190,16 +190,17 @@ export async function fetchAllPrInfo(
     return result;
   }
 
-  // Filter out branches with terminal-state PRs (no need to re-fetch)
+  // Determine which branches need fetching and how
   const branchesToFetch: string[] = [];
   for (const branch of branches) {
     const cached = prCache?.get(branch) ?? null;
     if (shouldSkipPrFetch(cached)) {
-      log("debug", "github", `Skipping PR fetch for ${branch} (terminal state: ${cached!.state}/${cached!.checksStatus})`);
-      result.set(branch, cached);
-    } else {
-      branchesToFetch.push(branch);
+      // Terminal PRs still need a branch-name fetch to discover new PRs,
+      // but we clear the cached PR number so we don't just re-fetch the old one.
+      log("debug", "github", `Re-fetching ${branch} by name (cached PR #${cached!.number} is ${cached!.state})`);
+      prNumberCache?.delete(branch);
     }
+    branchesToFetch.push(branch);
   }
 
   const CONCURRENCY = 3;
