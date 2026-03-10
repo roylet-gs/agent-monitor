@@ -157,12 +157,23 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
   // Stop/Notification waiting cases take priority
   if (event.event === "Stop") {
     if (event.stop_hook_active) return "waiting";
-    // If agent was actively working (executing/planning), mark as "done"
-    // so the user can see the task completed. Otherwise go to "idle".
-    if (currentStatus === "executing" || currentStatus === "planning") {
-      log("debug", "hook-event", `Stop while ${currentStatus} → done`);
+
+    // Preserve waiting state — Stop fires after AskUserQuestion/ExitPlanMode
+    // but Claude is still waiting for user input
+    if (currentStatus === "waiting") return "waiting";
+
+    // Planning mode Stop = waiting for user feedback on the plan
+    if (event.permission_mode === "plan" || currentStatus === "planning") {
+      log("debug", "hook-event", `Stop in planning mode → waiting (was ${currentStatus})`);
+      return "waiting";
+    }
+
+    // Normal executing → done (task completed)
+    if (currentStatus === "executing") {
+      log("debug", "hook-event", `Stop while executing → done`);
       return "done";
     }
+
     return "idle";
   }
   if (event.event === "Notification") {
