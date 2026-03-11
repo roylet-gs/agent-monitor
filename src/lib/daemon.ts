@@ -244,9 +244,7 @@ async function refreshPrInfo(): Promise<void> {
   const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
   for (const repo of repositories) {
     const dbWorktrees = getWorktrees(repo.id);
-    const branches = dbWorktrees
-      .map((wt) => wt.branch)
-      .filter((b) => !linearCache.get(b)?.prAttachment);
+    const branches = dbWorktrees.map((wt) => wt.branch);
     repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
   }
 
@@ -411,9 +409,11 @@ async function buildData(): Promise<DaemonData> {
           has_terminal,
           open_ide,
           pr_info: (() => {
+            const ghPr = prCache.get(`${repo.id}:${wt.branch}`);
+            if (ghPr) return ghPr;
             const linearInfo = linearCache.get(wt.branch);
             if (linearInfo?.prAttachment) return linearAttachmentToPrInfo(linearInfo.prAttachment);
-            return prCache.get(`${repo.id}:${wt.branch}`) ?? null;
+            return null;
           })(),
           linear_info: linearCache.get(wt.branch) ?? null,
         };
