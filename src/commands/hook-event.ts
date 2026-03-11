@@ -1,11 +1,7 @@
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
 import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, getStandaloneSessionByPath, upsertStandaloneSession } from "../lib/db.js";
 import { getWorktreeRoot } from "../lib/git.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
-import { loadRules, addRule, parseClaudePermissionRule, applyRulesToClaudeSettings } from "../lib/rules.js";
-import { loadSettings } from "../lib/settings.js";
 import type { AgentStatusType, HookEvent } from "../lib/types.js";
 
 export async function handleHookEvent(
@@ -102,8 +98,6 @@ export async function handleHookEvent(
       }).catch(() => {});
     }
 
-    // Detect new auto-approval permissions from settings.local.json
-    detectNewPermissions(resolvedPath);
   }
 }
 
@@ -251,43 +245,6 @@ export function detectGitActivity(command: string): "push" | "pr-create" | null 
   if (/\bgit\s+push\b/.test(command)) return "push";
   if (/\bgh\s+pr\s+create\b/.test(command)) return "pr-create";
   return null;
-}
-
-function detectNewPermissions(worktreePath: string): void {
-  try {
-    const settingsPath = join(worktreePath, ".claude", "settings.local.json");
-    if (!existsSync(settingsPath)) return;
-
-    const raw = readFileSync(settingsPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    const allowEntries: string[] = parsed?.permissions?.allow ?? [];
-    if (allowEntries.length === 0) return;
-
-    const existingRules = loadRules();
-    let added = 0;
-
-    for (const entry of allowEntries) {
-      const { tool, input_pattern } = parseClaudePermissionRule(entry);
-      const exists = existingRules.some(
-        (r) => r.tool === tool && (r.input_pattern ?? "") === (input_pattern ?? "")
-      );
-      if (exists) continue;
-
-      addRule(tool, input_pattern, "allow", "learned");
-      added++;
-      log("info", "hook-event", `Learned rule from ${worktreePath}: ${tool}${input_pattern ? ` (${input_pattern})` : ""}`);
-    }
-
-    if (added > 0) {
-      const settings = loadSettings();
-      if (settings.applyGlobalRulesEnabled) {
-        applyRulesToClaudeSettings();
-        log("info", "hook-event", `Applied ${added} new rule(s) to Claude settings`);
-      }
-    }
-  } catch (err) {
-    log("debug", "hook-event", `Failed to detect permissions from ${worktreePath}: ${err}`);
-  }
 }
 
 function readStdin(): Promise<string> {

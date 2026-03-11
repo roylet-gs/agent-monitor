@@ -393,8 +393,6 @@ All data is stored in `~/.agent-monitor/`:
 | `linearRefreshOnManual`   | `true`       | Refresh Linear data on manual refresh                     |
 | `linearAutoNickname`      | `true`       | Auto-set worktree nicknames from Linear ticket titles     |
 | `maxLogSizeMb`            | `2`          | Max debug log file size in MB before rotation             |
-| `applyGlobalRulesEnabled` | `false`      | Write auto-approval rules to `~/.claude/settings.json`    |
-| `safeCommandsPresetEnabled` | `false`    | Auto-approve harmless read-only Bash commands             |
 
 </details>
 

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
+import React, { useState } from "react";
+import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { verifyLinearApiKey } from "../lib/linear.js";
 import type { UpdateInfo } from "../hooks/useUpdateCheck.js";
@@ -8,8 +8,6 @@ import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, openFileInEditor, removeStartupScript } from "../lib/scripts.js";
 import { SETTINGS_PATH } from "../lib/paths.js";
-import { loadRules, removeRule, clearAllRules, applyRulesToClaudeSettings, removeAmPermissionsFromClaudeSettings, syncLearnedRules, clearLearnedRules } from "../lib/rules.js";
-import type { Rule } from "../lib/types.js";
 
 type SettingsField =
   | "openSettingsJson"
@@ -31,10 +29,6 @@ type SettingsField =
   | "linearPolling"
   | "linearRefreshOnManual"
   | "linearAutoNickname"
-  | "applyGlobalRules"
-  | "learnFromApprovals"
-  | "manageRules"
-  | "removeAllRules"
   | "repos"
   | "checkForUpdates"
   | "resetSettings"
@@ -60,10 +54,6 @@ const FIELDS: SettingsField[] = [
   "linearPolling",
   "linearRefreshOnManual",
   "linearAutoNickname",
-  "applyGlobalRules",
-  "learnFromApprovals",
-  "manageRules",
-  "removeAllRules",
   "repos",
   "checkForUpdates",
   "resetSettings",
@@ -90,10 +80,6 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearPolling: "How often to fetch Linear ticket status (minimum 10s)",
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
-  applyGlobalRules: "Write am rules to ~/.claude/settings.json permissions (persists without TUI)",
-  learnFromApprovals: "Learn auto-approval rules from worktree .claude/settings.local.json files",
-  manageRules: "View and remove auto-approval rules",
-  removeAllRules: "Remove all auto-approval rules and clean up Claude settings.",
   repos: "Monitored repositories and their startup scripts",
   checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
@@ -126,9 +112,6 @@ export function SettingsPanel({
   onFactoryReset,
   onCheckForUpdates,
 }: SettingsPanelProps) {
-  const { stdout } = useStdout();
-  const termCols = stdout?.columns ?? 80;
-  const termRows = stdout?.rows ?? 24;
   const [current, setCurrent] = useState({ ...settings });
   const [fieldIndex, setFieldIndex] = useState(0);
   const [repoIndex, setRepoIndex] = useState(0);
@@ -136,13 +119,9 @@ export function SettingsPanel({
   const [editValue, setEditValue] = useState("");
   const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
   const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
-  const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | "removeAllRules" | null>(null);
-  const [clearRulesMsg, setClearRulesMsg] = useState("");
+  const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | null>(null);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<"idle" | "checking" | "ok" | "update" | "error">("idle");
   const [updateCheckMsg, setUpdateCheckMsg] = useState("");
-  const [showRulesList, setShowRulesList] = useState(false);
-  const [rules, setRules] = useState<Rule[]>([]);
-  const [ruleIndex, setRuleIndex] = useState(0);
 
   const verifyLinearKey = (key: string) => {
     if (!key) {
@@ -227,39 +206,10 @@ export function SettingsPanel({
   };
 
   useInput((input, key) => {
-    // Rules sub-view input handling
-    if (showRulesList) {
-      if (key.escape) { setShowRulesList(false); return; }
-      if (rules.length === 0) return;
-      if (key.upArrow) { setRuleIndex((i) => Math.max(0, i - 1)); return; }
-      if (key.downArrow) { setRuleIndex((i) => Math.min(rules.length - 1, i + 1)); return; }
-      if ((input === "d" || input === "x") && rules[ruleIndex]) {
-        removeRule(rules[ruleIndex].id);
-        const updated = loadRules();
-        setRules(updated);
-        setRuleIndex((i) => updated.length === 0 ? 0 : Math.min(i, updated.length - 1));
-        if (current.applyGlobalRulesEnabled) applyRulesToClaudeSettings();
-      }
-      return;
-    }
-
     // When awaiting confirmation on a danger zone action
     if (confirming) {
       if (input === "y" || input === "Y") {
-        if (confirming === "removeAllRules") {
-          const result = clearAllRules();
-          if (result.removed === 0) {
-            setClearRulesMsg("No rules to remove");
-          } else {
-            setClearRulesMsg(`Removed ${result.removed} rule${result.removed === 1 ? "" : "s"}`);
-            if (current.learnFromApprovalsEnabled) {
-              setCurrent((s) => ({ ...s, learnFromApprovalsEnabled: false }));
-            }
-            if (current.applyGlobalRulesEnabled) {
-              removeAmPermissionsFromClaudeSettings();
-            }
-          }
-        } else if (confirming === "resetSettings") {
+        if (confirming === "resetSettings") {
           onSettingsReset();
         } else if (confirming === "factoryReset") {
           onFactoryReset();
@@ -367,43 +317,6 @@ export function SettingsPanel({
       return;
     }
 
-    if (activeField === "applyGlobalRules" && (key.return || input === " ")) {
-      const newEnabled = !current.applyGlobalRulesEnabled;
-      setCurrent((s) => ({ ...s, applyGlobalRulesEnabled: newEnabled }));
-      if (newEnabled) {
-        applyRulesToClaudeSettings();
-      } else {
-        removeAmPermissionsFromClaudeSettings();
-      }
-      return;
-    }
-
-    if (activeField === "learnFromApprovals" && (key.return || input === " ")) {
-      const newEnabled = !current.learnFromApprovalsEnabled;
-      const updated = { ...current, learnFromApprovalsEnabled: newEnabled };
-      setCurrent(updated);
-      onSave(updated);
-      if (newEnabled) {
-        syncLearnedRules();
-      } else {
-        clearLearnedRules();
-      }
-      return;
-    }
-
-    if (activeField === "manageRules" && key.return) {
-      setRules(loadRules());
-      setRuleIndex(0);
-      setShowRulesList(true);
-      return;
-    }
-
-    if (activeField === "removeAllRules" && key.return) {
-      setConfirming("removeAllRules");
-      return;
-    }
-
-
     if (activeField === "logLevel" && (key.return || input === " ")) {
       const idx = LOG_LEVELS.indexOf(current.logLevel);
       const next = LOG_LEVELS[(idx + 1) % LOG_LEVELS.length]!;
@@ -480,65 +393,6 @@ export function SettingsPanel({
       <Text dimColor> {"─".repeat(2)}</Text>
     </Box>
   );
-
-  if (showRulesList) {
-    // Scrollable window: reserve lines for header, footer, border
-    const visibleRows = Math.max(3, termRows - 7);
-    const scrollStart = Math.max(0, Math.min(ruleIndex - Math.floor(visibleRows / 2), rules.length - visibleRows));
-    const visibleRules = rules.slice(scrollStart, scrollStart + visibleRows);
-
-    // Max width for rule text: terminal width minus border (2+2), padding (1+1), prefix (2), decision (5), gap (2), tag (10)
-    const maxRuleWidth = Math.max(20, termCols - 25);
-
-    const truncate = (s: string, max: number) => s.length <= max ? s : s.slice(0, max - 1) + "…";
-
-    const renderRule = (r: Rule, displayIndex: number) => {
-      const flatIndex = scrollStart + displayIndex;
-      const ruleText = r.input_pattern ? `${r.tool}(${r.input_pattern})` : r.tool;
-      return (
-        <Box key={r.id}>
-          <Text>
-            {flatIndex === ruleIndex ? "▸ " : "  "}
-            <Text color={r.decision === "deny" ? "red" : "green"}>{r.decision}</Text>
-            {"  "}{truncate(ruleText, maxRuleWidth)}
-            {r.source === "learned" && <Text dimColor> [learned]</Text>}
-          </Text>
-        </Box>
-      );
-    };
-
-    const showScrollUp = scrollStart > 0;
-    const showScrollDown = scrollStart + visibleRows < rules.length;
-
-    return (
-      <Box flexDirection="column" borderStyle="single" paddingX={1}>
-        <Box>
-          <Text bold color="cyan">Manage Rules</Text>
-          <Text dimColor>  ({rules.length} rule{rules.length === 1 ? "" : "s"})</Text>
-        </Box>
-        <Box marginTop={1} flexDirection="column">
-          {rules.length === 0 ? (
-            <Text dimColor>No rules. Use `am rule add &lt;tool&gt;` to add one.</Text>
-          ) : (
-            <>
-              {showScrollUp && <Text dimColor>  ↑ {scrollStart} more</Text>}
-              {visibleRules.map((r, i) => renderRule(r, i))}
-              {showScrollDown && <Text dimColor>  ↓ {rules.length - scrollStart - visibleRows} more</Text>}
-            </>
-          )}
-        </Box>
-        <Box marginTop={1} borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false}>
-          <Text>
-            <Text color="yellow">[↑↓]</Text> Navigate{" "}
-            {rules.length > 0 && (
-              <><Text color="yellow">[d]</Text> Remove{" "}</>
-            )}
-            <Text color="yellow">[Esc]</Text> Back
-          </Text>
-        </Box>
-      </Box>
-    );
-  }
 
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1}>
@@ -793,51 +647,6 @@ export function SettingsPanel({
             [{current.linearAutoNickname ? "✓" : " "}]
           </Text>
         </Box>
-
-        {/* === Rules Section === */}
-        {renderSectionHeader("Auto-Approval Rules")}
-        <Box>
-          <Text bold={activeField === "applyGlobalRules"}>
-            {activeField === "applyGlobalRules" ? "▸" : " "} Enabled:{" "}
-          </Text>
-          <Text color={current.applyGlobalRulesEnabled ? "green" : "gray"}>
-            [{current.applyGlobalRulesEnabled ? "✓" : " "}]
-          </Text>
-        </Box>
-
-        <Box>
-          <Text bold={activeField === "learnFromApprovals"}>
-            {activeField === "learnFromApprovals" ? "▸" : " "} Learn from Approvals:{" "}
-          </Text>
-          <Text color={current.learnFromApprovalsEnabled ? "green" : "gray"}>
-            [{current.learnFromApprovalsEnabled ? "✓" : " "}]
-          </Text>
-        </Box>
-
-        <Box>
-          <Text bold={activeField === "manageRules"}>
-            {activeField === "manageRules" ? "▸" : " "} Manage Rules
-          </Text>
-          {activeField === "manageRules" && (
-            <Text dimColor> (Enter to open)</Text>
-          )}
-        </Box>
-
-        <Box>
-          <Text bold={activeField === "removeAllRules"} color="red">
-            {activeField === "removeAllRules" ? "▸" : " "} Remove All Rules
-          </Text>
-          {activeField === "removeAllRules" && confirming === "removeAllRules" && (
-            <Text color="yellow"> Are you sure? [y/n]</Text>
-          )}
-          {activeField === "removeAllRules" && !confirming && !clearRulesMsg && (
-            <Text dimColor> (Enter to remove)</Text>
-          )}
-          {clearRulesMsg && !confirming && (
-            <Text color="green"> {clearRulesMsg}</Text>
-          )}
-        </Box>
-
 
         {/* === Repositories Section === */}
         {renderSectionHeader("Repositories")}

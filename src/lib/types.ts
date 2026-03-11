@@ -103,8 +103,6 @@ export interface Settings {
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
   maxLogSizeMb: number;
-  applyGlobalRulesEnabled: boolean;
-  learnFromApprovalsEnabled: boolean;
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
@@ -155,11 +153,3 @@ export interface StandaloneSession {
   updated_at: string;
 }
 
-export interface Rule {
-  id: string;
-  tool: string;
-  input_pattern?: string;
-  decision: "allow" | "deny";
-  source: "manual" | "learned";
-  created_at: string;
-}
