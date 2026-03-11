@@ -29,6 +29,7 @@ import {
   createWorktree as gitCreateWorktree,
   deleteWorktree as gitDeleteWorktree,
   deleteBranch,
+  deleteRemoteBranch,
   getMainBranch,
   branchExists,
   getRepoName,
@@ -378,20 +379,32 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
   // Actually create the worktree (called directly or after branch-exists confirmation)
   const doCreateWorktree = useCallback(
-    async (branchName: string, customName: string, reuse: boolean, repo?: Repository, baseBranch?: string) => {
+    async (branchName: string, customName: string, reuse: boolean, repo?: Repository, baseBranch?: string, deleteFirst?: boolean, deleteRemote?: boolean) => {
       const targetRepo = repo ?? createTargetRepo ?? activeRepo;
       if (!targetRepo) return;
 
       const hasScript = hasStartupScript(targetRepo.id);
 
+      const deleteStepsArr: StepInfo[] = [];
+      if (deleteFirst) {
+        deleteStepsArr.push({ label: "Deleting local branch", status: "pending" });
+        if (deleteRemote) {
+          deleteStepsArr.push({ label: "Deleting remote branch", status: "pending" });
+        }
+      }
+
       const steps: StepInfo[] = [
-        { label: reuse ? "Fetching latest branch" : "Fetching latest base branch", status: "active" },
+        ...deleteStepsArr,
+        { label: reuse ? "Fetching latest branch" : "Fetching latest base branch", status: "pending" },
         { label: "Creating git worktree", status: "pending" },
         { label: "Syncing database", status: "pending" },
         ...(hasScript
           ? [{ label: "Running startup script", status: "pending" as const }]
           : []),
       ];
+
+      // Mark the first step as active
+      steps[0].status = "active";
 
       setCreatingBranch(branchName);
       setCreationSteps(steps);
@@ -401,8 +414,34 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       let stepIdx = 0;
 
       try {
+        // Pre-deletion steps
+        if (deleteFirst) {
+          // Delete local branch
+          updateStep(stepIdx, "active");
+          try {
+            await deleteBranch(targetRepo.path, branchName, true);
+          } catch (err) {
+            log("debug", "app", `Local branch delete failed (may only exist on remote): ${err}`);
+          }
+          updateStep(stepIdx, "done");
+          stepIdx++;
+
+          // Delete remote branch
+          if (deleteRemote) {
+            updateStep(stepIdx, "active");
+            try {
+              await deleteRemoteBranch(targetRepo.path, branchName);
+            } catch (err) {
+              log("debug", "app", `Remote branch delete failed: ${err}`);
+            }
+            updateStep(stepIdx, "done");
+            stepIdx++;
+          }
+        }
+
         let baseRef: string | undefined;
 
+        updateStep(stepIdx, "active");
         if (reuse) {
           // Reusing existing branch: fetch latest from remote and reset local
           await fetchAndResetBranch(targetRepo.path, branchName);
@@ -937,19 +976,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
             doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true, undefined, pendingBranch.baseBranch);
             setPendingBranch(null);
           }}
-          onDeleteAndRecreate={async () => {
+          onDeleteAndRecreate={(deleteRemote: boolean) => {
             const repo = createTargetRepo ?? activeRepo;
             if (!repo) return;
             const branch = pendingBranch.branch;
             const customName = pendingBranch.customName;
             const baseBranch = pendingBranch.baseBranch;
             setPendingBranch(null);
-            try {
-              await deleteBranch(repo.path, branch, true);
-            } catch (err) {
-              log("debug", "app", `Local branch delete failed (may only exist on remote): ${err}`);
-            }
-            await doCreateWorktree(branch, customName, false, repo, baseBranch);
+            doCreateWorktree(branch, customName, false, repo, baseBranch, true, deleteRemote);
           }}
           onCancel={() => {
             setPendingBranch(null);
