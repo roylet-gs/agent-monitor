@@ -226,6 +226,29 @@ export async function fetchBranch(repoPath: string, branch: string): Promise<voi
   }
 }
 
+export async function fetchAndResetBranch(repoPath: string, branch: string): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    await git.raw(["fetch", "origin", branch]);
+    log("info", "git", `Fetched origin/${branch} for reuse`);
+  } catch (err) {
+    log("warn", "git", `Failed to fetch origin/${branch} (using local branch as-is): ${err}`);
+    return false;
+  }
+
+  try {
+    // Check if the remote tracking ref actually exists after fetch
+    await git.raw(["rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
+    // Reset local branch to match remote
+    await git.raw(["branch", "-f", branch, `origin/${branch}`]);
+    log("info", "git", `Reset local branch ${branch} to origin/${branch}`);
+    return true;
+  } catch (err) {
+    log("debug", "git", `No remote branch origin/${branch}, using local as-is: ${err}`);
+    return false;
+  }
+}
+
 export async function getCurrentBranch(repoPath: string): Promise<string> {
   const git = getGit(repoPath);
   const branch = await git.raw(["rev-parse", "--abbrev-ref", "HEAD"]);

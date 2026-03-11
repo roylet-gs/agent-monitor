@@ -43,7 +43,29 @@ function abbreviatePath(fullPath: string): string {
   return segments.slice(-3).join("/");
 }
 
+// Build a map of Linear identifiers that have 2+ worktrees (across all groups)
+function buildLinearGroups(flatWorktrees: WorktreeWithStatus[]): Map<string, { title: string; count: number; firstIdx: number }> {
+  const counts = new Map<string, { title: string; count: number; firstIdx: number }>();
+  for (let i = 0; i < flatWorktrees.length; i++) {
+    const id = flatWorktrees[i].linear_info?.identifier;
+    if (!id) continue;
+    const existing = counts.get(id);
+    if (existing) {
+      existing.count++;
+    } else {
+      counts.set(id, { title: flatWorktrees[i].linear_info!.title, count: 1, firstIdx: i });
+    }
+  }
+  // Only keep groups with 2+ worktrees
+  for (const [id, info] of counts) {
+    if (info.count < 2) counts.delete(id);
+  }
+  return counts;
+}
+
 export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView }: WorktreeListProps) {
+  const linearGroups = React.useMemo(() => buildLinearGroups(flatWorktrees), [flatWorktrees]);
+
   if (flatWorktrees.length === 0 && standaloneSessions.length === 0) {
     return (
       <Box
@@ -77,12 +99,35 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
           const groupWorktrees = group.worktrees;
           const startIdx = flatIdx;
 
+          // Track which Linear group headers have been emitted within this repo group
+          const emittedLinearHeaders = new Set<string>();
+
           const renderedItems = groupWorktrees.map((wt, i) => {
             const currentFlatIdx = startIdx + i;
             const isSelected = currentFlatIdx === selectedIndex;
-            const displayName = wt.custom_name ?? wt.branch;
             const unseen = unseenIds.has(wt.id);
             const open = isEffectivelyOpen(wt.agent_status);
+
+            const linearId = wt.linear_info?.identifier;
+            const isInLinearGroup = linearId ? linearGroups.has(linearId) : false;
+
+            // Grouped worktrees show branch name (title is in the header)
+            const displayName = isInLinearGroup ? wt.branch : (wt.custom_name ?? wt.branch);
+            const showSubline = !isInLinearGroup && !!wt.custom_name;
+
+            // Emit a Linear group header before the first worktree in a multi-worktree group
+            let linearHeader: React.ReactNode = null;
+            if (isInLinearGroup && linearId && !emittedLinearHeaders.has(linearId)) {
+              emittedLinearHeaders.add(linearId);
+              const groupInfo = linearGroups.get(linearId)!;
+              linearHeader = (
+                <Box key={`linear-header-${linearId}`} marginTop={i > 0 ? 1 : 0}>
+                  <Text dimColor>── </Text>
+                  <Text color={getLinearStatusColor(wt.linear_info!.state.type)}>{linearId}</Text>
+                  <Text dimColor>: {groupInfo.title} ──</Text>
+                </Box>
+              );
+            }
 
             const isBranchOnly = wt.is_main === 1;
             const inlineMeta: React.ReactNode[] = [];
@@ -93,7 +138,8 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               );
             }
 
-            if (wt.linear_info) {
+            // Hide inline Linear badge when it's already shown in the group header
+            if (wt.linear_info && !isInLinearGroup) {
               inlineMeta.push(
                 <Text key="linear" color={getLinearStatusColor(wt.linear_info.state.type)}>{wt.linear_info.identifier}</Text>
               );
@@ -106,27 +152,32 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               );
             }
 
+            const indent = isInLinearGroup ? 1 : 0;
+
             return (
-              <Box key={wt.id} flexDirection="column" marginBottom={!compactView && wt.custom_name && i < groupWorktrees.length - 1 ? 1 : 0}>
-                <Box gap={1}>
-                  <Text>{isSelected ? "▸" : " "}</Text>
-                  {open ? (wt.agent_status?.status === "executing" || wt.agent_status?.status === "planning" ? <PulsingDot color={statusColor(wt.agent_status.status)} /> : wt.agent_status?.status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(wt.agent_status?.status)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
-                  <Text
-                    bold={isSelected}
-                    color={isSelected ? "cyan" : undefined}
-                  >
-                    {displayName}
-                  </Text>
-                  {!wt.custom_name && inlineMeta}
-                  {unseen && <Text color="magenta" bold>*</Text>}
-                </Box>
-                {wt.custom_name && (
-                  <Box paddingLeft={5} gap={1}>
-                    <Text dimColor>{wt.branch}</Text>
-                    {inlineMeta}
+              <React.Fragment key={wt.id}>
+                {linearHeader}
+                <Box flexDirection="column" marginBottom={!compactView && showSubline && i < groupWorktrees.length - 1 ? 1 : 0} paddingLeft={indent}>
+                  <Box gap={1}>
+                    <Text>{isSelected ? "▸" : " "}</Text>
+                    {open ? (wt.agent_status?.status === "executing" || wt.agent_status?.status === "planning" ? <PulsingDot color={statusColor(wt.agent_status.status)} /> : wt.agent_status?.status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(wt.agent_status?.status)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
+                    <Text
+                      bold={isSelected}
+                      color={isSelected ? "cyan" : undefined}
+                    >
+                      {displayName}
+                    </Text>
+                    {!showSubline && inlineMeta}
+                    {unseen && <Text color="magenta" bold>*</Text>}
                   </Box>
-                )}
-              </Box>
+                  {showSubline && (
+                    <Box paddingLeft={5} gap={1}>
+                      <Text dimColor>{wt.branch}</Text>
+                      {inlineMeta}
+                    </Box>
+                  )}
+                </Box>
+              </React.Fragment>
             );
           });
 

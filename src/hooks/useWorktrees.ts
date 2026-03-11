@@ -255,6 +255,15 @@ export function useWorktrees(config: WorktreeHookConfig): {
         enriched.sort((a, b) => {
           // Dedicated worktrees first, main worktree branches last
           if (a.is_main !== b.is_main) return a.is_main - b.is_main;
+          // Cluster worktrees sharing a Linear ticket together
+          const aLinear = a.linear_info?.identifier ?? "";
+          const bLinear = b.linear_info?.identifier ?? "";
+          if (aLinear !== bLinear) {
+            // Worktrees with Linear tickets sort before those without
+            if (aLinear && !bLinear) return -1;
+            if (!aLinear && bLinear) return 1;
+            return aLinear.localeCompare(bLinear);
+          }
           return b.created_at.localeCompare(a.created_at);
         });
 
