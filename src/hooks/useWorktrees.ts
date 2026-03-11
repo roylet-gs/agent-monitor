@@ -180,10 +180,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
           const ghBranches: string[] = [];
           for (const wt of dbWorktrees) {
             allBranchNames.push(wt.branch);
-            // Only fetch gh for branches without Linear PR data
-            if (!linearCacheRef.current.get(wt.branch)?.prAttachment) {
-              ghBranches.push(wt.branch);
-            }
+            ghBranches.push(wt.branch);
           }
           repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches: ghBranches });
         }
@@ -240,9 +237,11 @@ export function useWorktrees(config: WorktreeHookConfig): {
               has_terminal,
               open_ide,
               pr_info: (() => {
+                const ghPr = prCacheRef.current.get(`${repo.id}:${wt.branch}`);
+                if (ghPr) return ghPr;
                 const linearInfo = linearCacheRef.current.get(wt.branch);
                 if (linearInfo?.prAttachment) return linearAttachmentToPrInfo(linearInfo.prAttachment);
-                return prCacheRef.current.get(`${repo.id}:${wt.branch}`) ?? null;
+                return null;
               })(),
               linear_info: linearCacheRef.current.get(wt.branch) ?? null,
             };
@@ -323,10 +322,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
       const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
       for (const repo of reposRef.current) {
         const dbWorktrees = getWorktrees(repo.id);
-        // Skip branches where Linear already provides PR data
-        const branches = dbWorktrees
-          .map((wt) => wt.branch)
-          .filter((b) => !linearCacheRef.current.get(b)?.prAttachment);
+        const branches = dbWorktrees.map((wt) => wt.branch);
         repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
       }
       await refreshPrInfoRef.current(repoGroups);
