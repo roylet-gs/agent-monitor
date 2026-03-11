@@ -220,10 +220,13 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
     return "planning";
   }
 
-  // SubagentStart/SubagentStop don't carry permission_mode — preserve
+  // Tool/subagent events don't always carry permission_mode — preserve
   // "planning" if the agent is already in plan mode, otherwise "executing"
   if (
-    (event.event === "SubagentStart" || event.event === "SubagentStop") &&
+    (event.event === "PreToolUse" ||
+     event.event === "PostToolUse" ||
+     event.event === "SubagentStart" ||
+     event.event === "SubagentStop") &&
     currentStatus === "planning"
   ) {
     log("debug", "hook-event", `${event.event} during planning → preserving planning status`);

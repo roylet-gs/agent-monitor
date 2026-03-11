@@ -276,6 +276,39 @@ describe("mapEventToStatus", () => {
     expect(mapEventToStatus({ event: "SubagentStart" }, "executing")).toBe("executing");
   });
 
+  // PreToolUse/PostToolUse preserve planning status
+  it("PreToolUse while planning without permission_mode -> planning", () => {
+    expect(mapEventToStatus({ event: "PreToolUse", tool_name: "Read" }, "planning")).toBe("planning");
+  });
+
+  it("PostToolUse while planning without permission_mode -> planning", () => {
+    expect(mapEventToStatus({ event: "PostToolUse", tool_name: "Write" }, "planning")).toBe("planning");
+  });
+
+  it("PreToolUse while executing -> executing", () => {
+    expect(mapEventToStatus({ event: "PreToolUse", tool_name: "Read" }, "executing")).toBe("executing");
+  });
+
+  it("PostToolUse while executing -> executing", () => {
+    expect(mapEventToStatus({ event: "PostToolUse", tool_name: "Write" }, "executing")).toBe("executing");
+  });
+
+  // Full sequence: EnterPlanMode → tool events → Stop → waiting
+  it("EnterPlanMode → PreToolUse → PostToolUse → Stop transitions correctly", () => {
+    // EnterPlanMode sets planning
+    const s1 = mapEventToStatus({ event: "PostToolUse", tool_name: "EnterPlanMode" });
+    expect(s1).toBe("planning");
+    // PreToolUse without permission_mode preserves planning
+    const s2 = mapEventToStatus({ event: "PreToolUse", tool_name: "Read" }, s1);
+    expect(s2).toBe("planning");
+    // PostToolUse without permission_mode preserves planning
+    const s3 = mapEventToStatus({ event: "PostToolUse", tool_name: "Read" }, s2);
+    expect(s3).toBe("planning");
+    // Stop from planning → waiting
+    const s4 = mapEventToStatus({ event: "Stop" }, s3);
+    expect(s4).toBe("waiting");
+  });
+
   // PreToolUse with permission_prompt
   it("PreToolUse with permission_prompt -> waiting", () => {
     expect(
