@@ -88,6 +88,18 @@ describe("listWorktrees", () => {
     expect(result[0]!.branch).toBe("feature/bar");
   });
 
+  it("does not lose entries when blank line separators are missing", async () => {
+    mockRaw.mockResolvedValueOnce(
+      "worktree /tmp/repo\nbranch refs/heads/main\nworktree /tmp/repo/.wt/feat\nbranch refs/heads/feature/foo\n"
+    );
+
+    const result = await listWorktrees("/tmp/repo");
+    expect(result).toEqual([
+      { path: "/tmp/repo", branch: "main", isMain: true },
+      { path: "/tmp/repo/.wt/feat", branch: "feature/foo", isMain: false },
+    ]);
+  });
+
   it("skips detached worktree when recovery fails", async () => {
     mockRaw.mockResolvedValueOnce(
       "worktree /tmp/repo\nbranch refs/heads/main\n\nworktree /tmp/repo/.wt/feat\ndetached\n\n"

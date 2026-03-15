@@ -4,6 +4,7 @@ import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo, linearAttachmentToPrInfo } from "../lib/linear.js";
 import { log } from "../lib/logger.js";
+import { syncWorktrees } from "../lib/sync.js";
 import { getTerminalPaths, getIdePaths } from "../lib/process.js";
 import { realpathSync } from "fs";
 import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
@@ -333,6 +334,25 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const timer = setInterval(doFetch, ghPollingIntervalMs);
     return () => clearInterval(timer);
   }, [repositories, ghPrStatus, ghPollingIntervalMs]);
+
+  // Periodic worktree sync — discovers worktrees created outside of am
+  useEffect(() => {
+    if (repositories.length === 0) return;
+    const syncIntervalMs = pollingIntervalMs * 2;
+    const doSync = async () => {
+      try {
+        for (const repo of reposRef.current) {
+          await syncWorktrees(repo.id);
+        }
+        refresh(false);
+      } catch (err) {
+        log("warn", "useWorktrees", `Periodic sync failed: ${err}`);
+      }
+    };
+    doSync();
+    const timer = setInterval(doSync, syncIntervalMs);
+    return () => clearInterval(timer);
+  }, [repositories, pollingIntervalMs]);
 
   // Clear Linear-sourced nicknames when the feature is turned off
   useEffect(() => {
