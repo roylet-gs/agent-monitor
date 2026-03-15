@@ -93,6 +93,7 @@ export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]
 
     for (const line of result.split("\n")) {
       if (line.startsWith("worktree ")) {
+        finishEntry(); // flush previous entry if blank line separator was missing
         currentPath = line.slice(9).trim();
       } else if (line.startsWith("branch ")) {
         const ref = line.slice(7).trim();

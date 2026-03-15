@@ -18,6 +18,7 @@ import { fetchAllPrInfo } from "./github.js";
 import { fetchLinearInfo, linearAttachmentToPrInfo } from "./linear.js";
 import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
 import { isEffectivelyOpenStandalone } from "./agent-utils.js";
+import { syncWorktrees } from "./sync.js";
 import { realpathSync } from "fs";
 import type { PubSubMessage } from "./pubsub-types.js";
 import type {
@@ -47,6 +48,7 @@ const tuiClients = new Set<net.Socket>();
 let mainPollTimer: ReturnType<typeof setInterval> | null = null;
 let ghPollTimer: ReturnType<typeof setInterval> | null = null;
 let linearPollTimer: ReturnType<typeof setInterval> | null = null;
+let syncPollTimer: ReturnType<typeof setInterval> | null = null;
 let gracePeriodTimer: ReturnType<typeof setTimeout> | null = null;
 
 const GRACE_PERIOD_MS = 30_000;
@@ -212,9 +214,25 @@ function restartPolling(): void {
   if (mainPollTimer) clearInterval(mainPollTimer);
   if (ghPollTimer) clearInterval(ghPollTimer);
   if (linearPollTimer) clearInterval(linearPollTimer);
+  if (syncPollTimer) clearInterval(syncPollTimer);
 
   // Main poll
   mainPollTimer = setInterval(() => doRefresh(null, false), settings.pollingIntervalMs);
+
+  // Periodic worktree sync — discovers worktrees created outside of am
+  const syncIntervalMs = settings.pollingIntervalMs * 2;
+  const doSync = async () => {
+    try {
+      for (const repo of repositories) {
+        await syncWorktrees(repo.id);
+      }
+      doRefresh(null, false);
+    } catch (err) {
+      log("warn", "daemon", `Periodic sync failed: ${err}`);
+    }
+  };
+  doSync();
+  syncPollTimer = setInterval(doSync, syncIntervalMs);
 
   // GitHub PR poll
   if (settings.ghPrStatus && repositories.length > 0) {
@@ -473,6 +491,7 @@ function shutdown(): void {
   if (mainPollTimer) clearInterval(mainPollTimer);
   if (ghPollTimer) clearInterval(ghPollTimer);
   if (linearPollTimer) clearInterval(linearPollTimer);
+  if (syncPollTimer) clearInterval(syncPollTimer);
   cancelGracePeriod();
 
   // Close all client connections
