@@ -1,7 +1,8 @@
 import { listWorktrees, getRepoName } from "./git.js";
 import { getWorktrees, upsertWorktree, removeWorktree, getRepositoryById } from "./db.js";
 import { log } from "./logger.js";
-import { basename } from "path";
+import { existsSync } from "fs";
+import { basename, join } from "path";
 
 export async function syncWorktrees(repoId: string): Promise<void> {
   const repo = getRepositoryById(repoId);
@@ -29,6 +30,12 @@ export async function syncWorktrees(repoId: string): Promise<void> {
   // Remove DB entries for worktrees that no longer exist in git
   for (const dw of dbWorktrees) {
     if (!gitBranches.has(dw.branch)) {
+      // Safety net: don't delete if the worktree path still exists on disk
+      // (likely detached/rebasing and recoverDetachedBranch didn't catch it)
+      if (existsSync(join(dw.path, ".git"))) {
+        log("debug", "sync", `Keeping worktree ${dw.branch} (path exists, likely detached/rebasing)`);
+        continue;
+      }
       removeWorktree(dw.id);
       log("info", "sync", `Removed worktree ${dw.branch} from DB (no longer in git)`);
     }

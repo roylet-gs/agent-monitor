@@ -13,6 +13,120 @@ vi.mock("simple-git", () => ({
   simpleGit: () => ({ raw: mockRaw, status: mockStatus }),
 }));
 
+const mockExecSync = vi.fn();
+vi.mock("child_process", () => ({
+  execSync: (...args: unknown[]) => mockExecSync(...args),
+}));
+
+const mockExistsSync = vi.fn();
+const mockReadFileSync = vi.fn();
+vi.mock("fs", () => ({
+  existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+}));
+
+describe("listWorktrees", () => {
+  let listWorktrees: typeof import("../../src/lib/git.js").listWorktrees;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRaw.mockReset();
+    mockExecSync.mockReset();
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
+    const git = await import("../../src/lib/git.js");
+    listWorktrees = git.listWorktrees;
+  });
+
+  it("parses normal porcelain output", async () => {
+    mockRaw.mockResolvedValueOnce(
+      "worktree /tmp/repo\nbranch refs/heads/main\n\nworktree /tmp/repo/.wt/feat\nbranch refs/heads/feature/foo\n\n"
+    );
+
+    const result = await listWorktrees("/tmp/repo");
+    expect(result).toEqual([
+      { path: "/tmp/repo", branch: "main", isMain: true },
+      { path: "/tmp/repo/.wt/feat", branch: "feature/foo", isMain: false },
+    ]);
+  });
+
+  it("recovers branch for detached worktree mid-rebase", async () => {
+    mockRaw.mockResolvedValueOnce(
+      "worktree /tmp/repo\nbranch refs/heads/main\n\nworktree /tmp/repo/.wt/feat\ndetached\n\n"
+    );
+
+    // recoverDetachedBranch: git rev-parse --git-dir
+    mockExecSync.mockReturnValueOnce("/tmp/repo/.wt/feat/.git\n");
+    // existsSync for rebase-merge/head-name
+    mockExistsSync.mockReturnValueOnce(true);
+    // readFileSync for head-name
+    mockReadFileSync.mockReturnValueOnce("refs/heads/feature/foo\n");
+
+    const result = await listWorktrees("/tmp/repo");
+    expect(result).toHaveLength(2);
+    expect(result[1]).toEqual({
+      path: "/tmp/repo/.wt/feat",
+      branch: "feature/foo",
+      isMain: false,
+    });
+  });
+
+  it("recovers branch from rebase-apply when rebase-merge missing", async () => {
+    mockRaw.mockResolvedValueOnce(
+      "worktree /tmp/repo/.wt/feat\ndetached\n\n"
+    );
+
+    mockExecSync.mockReturnValueOnce(".git\n");
+    // rebase-merge/head-name does not exist
+    mockExistsSync.mockReturnValueOnce(false);
+    // rebase-apply/head-name exists
+    mockExistsSync.mockReturnValueOnce(true);
+    mockReadFileSync.mockReturnValueOnce("refs/heads/feature/bar\n");
+
+    const result = await listWorktrees("/tmp/repo");
+    expect(result).toHaveLength(1);
+    expect(result[0]!.branch).toBe("feature/bar");
+  });
+
+  it("skips detached worktree when recovery fails", async () => {
+    mockRaw.mockResolvedValueOnce(
+      "worktree /tmp/repo\nbranch refs/heads/main\n\nworktree /tmp/repo/.wt/feat\ndetached\n\n"
+    );
+
+    // recoverDetachedBranch: execSync throws
+    mockExecSync.mockImplementationOnce(() => { throw new Error("not a git dir"); });
+
+    const result = await listWorktrees("/tmp/repo");
+    expect(result).toHaveLength(1);
+    expect(result[0]!.branch).toBe("main");
+  });
+});
+
+describe("recoverDetachedBranch", () => {
+  let recoverDetachedBranch: typeof import("../../src/lib/git.js").recoverDetachedBranch;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockExecSync.mockReset();
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
+    const git = await import("../../src/lib/git.js");
+    recoverDetachedBranch = git.recoverDetachedBranch;
+  });
+
+  it("returns undefined when not in rebase", () => {
+    mockExecSync.mockReturnValueOnce(".git\n");
+    mockExistsSync.mockReturnValue(false);
+
+    expect(recoverDetachedBranch("/tmp/wt")).toBeUndefined();
+  });
+
+  it("returns undefined when git dir resolution fails", () => {
+    mockExecSync.mockImplementationOnce(() => { throw new Error("fail"); });
+    expect(recoverDetachedBranch("/tmp/wt")).toBeUndefined();
+  });
+});
+
 describe("ensureBranchForOpen", () => {
   let ensureBranchForOpen: typeof import("../../src/lib/git.js").ensureBranchForOpen;
 
@@ -20,6 +134,9 @@ describe("ensureBranchForOpen", () => {
     vi.resetModules();
     mockRaw.mockReset();
     mockStatus.mockReset();
+    mockExecSync.mockReset();
+    mockExistsSync.mockReset();
+    mockReadFileSync.mockReset();
     const git = await import("../../src/lib/git.js");
     ensureBranchForOpen = git.ensureBranchForOpen;
   });

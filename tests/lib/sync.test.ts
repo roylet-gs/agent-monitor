@@ -14,6 +14,23 @@ vi.mock("../../src/lib/git.js", () => ({
   getRepoName: (...args: unknown[]) => mockGetRepoName(...args),
 }));
 
+const mockExistsSyncForSync = vi.fn();
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return {
+    ...actual,
+    existsSync: (...args: unknown[]) => {
+      // Only intercept paths that contain ".worktrees/" (our test paths)
+      // Let all other calls through to the real fs (e.g., db.ts mkdirSync check)
+      const p = args[0] as string;
+      if (typeof p === "string" && p.includes(".worktrees/")) {
+        return mockExistsSyncForSync(p);
+      }
+      return actual.existsSync(p);
+    },
+  };
+});
+
 describe("syncWorktrees", () => {
   let sync: typeof import("../../src/lib/sync.js");
   let db: typeof import("../../src/lib/db.js");
@@ -21,6 +38,8 @@ describe("syncWorktrees", () => {
   beforeEach(async () => {
     mockListWorktrees.mockReset();
     mockGetRepoName.mockReset();
+    mockExistsSyncForSync.mockReset();
+    mockExistsSyncForSync.mockReturnValue(false);
     db = await import("../../src/lib/db.js");
     sync = await import("../../src/lib/sync.js");
   });
@@ -83,6 +102,40 @@ describe("syncWorktrees", () => {
     await sync.syncWorktrees(repo.id);
     const worktrees = db.getWorktrees(repo.id);
     expect(worktrees[0]!.path).toBe("/tmp/new-path");
+  });
+
+  it("keeps worktree when path exists on disk but branch missing from git", async () => {
+    const repo = db.addRepository("/tmp/repo", "repo");
+    db.upsertWorktree(repo.id, "/tmp/repo/.worktrees/rebasing", "feature/rebasing", "rebasing");
+
+    mockListWorktrees.mockResolvedValue([
+      { path: "/tmp/repo", branch: "main", isMain: true },
+    ]);
+
+    // The worktree path still has a .git entry (detached/rebasing)
+    mockExistsSyncForSync.mockReturnValue(true);
+
+    await sync.syncWorktrees(repo.id);
+    const worktrees = db.getWorktrees(repo.id);
+    expect(worktrees).toHaveLength(2);
+    expect(worktrees.map(w => w.branch).sort()).toEqual(["feature/rebasing", "main"]);
+  });
+
+  it("removes worktree when path no longer exists on disk", async () => {
+    const repo = db.addRepository("/tmp/repo", "repo");
+    db.upsertWorktree(repo.id, "/tmp/repo/.worktrees/gone", "feature/gone", "gone");
+
+    mockListWorktrees.mockResolvedValue([
+      { path: "/tmp/repo", branch: "main", isMain: true },
+    ]);
+
+    // .git does not exist at the worktree path
+    mockExistsSyncForSync.mockReturnValue(false);
+
+    await sync.syncWorktrees(repo.id);
+    const worktrees = db.getWorktrees(repo.id);
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0]!.branch).toBe("main");
   });
 
   it("does nothing for non-existent repo", async () => {

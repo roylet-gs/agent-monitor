@@ -1,6 +1,6 @@
 import { simpleGit, type SimpleGit } from "simple-git";
 import { execSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { basename, join, resolve } from "path";
 import { log } from "./logger.js";
 import type { GitStatus, CommitInfo } from "./types.js";
@@ -32,39 +32,79 @@ export interface GitWorktreeInfo {
   isMain: boolean;
 }
 
+export function recoverDetachedBranch(worktreePath: string): string | undefined {
+  try {
+    const gitDir = execSync("git rev-parse --git-dir", {
+      cwd: worktreePath,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    }).trim();
+
+    const resolvedGitDir = resolve(worktreePath, gitDir);
+
+    // Check rebase-merge (interactive rebase) then rebase-apply (git am / older rebase)
+    for (const dir of ["rebase-merge", "rebase-apply"]) {
+      const headNamePath = join(resolvedGitDir, dir, "head-name");
+      if (existsSync(headNamePath)) {
+        const ref = readFileSync(headNamePath, "utf-8").trim();
+        const branch = ref.replace("refs/heads/", "");
+        log("debug", "git", `Recovered branch "${branch}" from ${dir}/head-name for ${worktreePath}`);
+        return branch;
+      }
+    }
+  } catch (err) {
+    log("debug", "git", `Failed to recover detached branch for ${worktreePath}: ${err}`);
+  }
+  return undefined;
+}
+
 export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]> {
   const git = getGit(repoPath);
   try {
     const result = await git.raw(["worktree", "list", "--porcelain"]);
     const worktrees: GitWorktreeInfo[] = [];
-    let current: Partial<GitWorktreeInfo> = {};
+    let currentPath: string | undefined;
+    let currentBranch: string | undefined;
+    let isDetached = false;
+
+    const finishEntry = () => {
+      if (currentPath && currentBranch) {
+        worktrees.push({
+          path: currentPath,
+          branch: currentBranch,
+          isMain: currentPath === resolve(repoPath),
+        });
+      } else if (currentPath && !currentBranch && isDetached) {
+        const recovered = recoverDetachedBranch(currentPath);
+        if (recovered) {
+          worktrees.push({
+            path: currentPath,
+            branch: recovered,
+            isMain: currentPath === resolve(repoPath),
+          });
+        } else {
+          log("warn", "git", `Skipping detached worktree at ${currentPath} (could not recover branch)`);
+        }
+      }
+      currentPath = undefined;
+      currentBranch = undefined;
+      isDetached = false;
+    };
 
     for (const line of result.split("\n")) {
       if (line.startsWith("worktree ")) {
-        current.path = line.slice(9).trim();
+        currentPath = line.slice(9).trim();
       } else if (line.startsWith("branch ")) {
-        // branch refs/heads/feature/foo → feature/foo
         const ref = line.slice(7).trim();
-        current.branch = ref.replace("refs/heads/", "");
+        currentBranch = ref.replace("refs/heads/", "");
+      } else if (line === "detached") {
+        isDetached = true;
       } else if (line === "") {
-        if (current.path && current.branch) {
-          worktrees.push({
-            path: current.path,
-            branch: current.branch,
-            isMain: current.path === resolve(repoPath),
-          });
-        }
-        current = {};
+        finishEntry();
       }
     }
     // handle last entry without trailing newline
-    if (current.path && current.branch) {
-      worktrees.push({
-        path: current.path,
-        branch: current.branch,
-        isMain: current.path === resolve(repoPath),
-      });
-    }
+    finishEntry();
 
     return worktrees;
   } catch (err) {
