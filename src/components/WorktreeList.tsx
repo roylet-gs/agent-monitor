@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
-import { isEffectivelyOpen } from "../lib/agent-utils.js";
+import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone } from "../lib/agent-utils.js";
 import { PulsingDot } from "./PulsingDot.js";
 import type { WorktreeWithStatus, WorktreeGroup, StandaloneSession } from "../lib/types.js";
 import { homedir } from "os";
@@ -107,6 +107,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
             const isSelected = currentFlatIdx === selectedIndex;
             const unseen = unseenIds.has(wt.id);
             const open = isEffectivelyOpen(wt.agent_status);
+            const displayStatus = getDisplayStatus(wt.agent_status);
 
             const linearId = wt.linear_info?.identifier;
             const isInLinearGroup = linearId ? linearGroups.has(linearId) : false;
@@ -160,7 +161,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
                 <Box flexDirection="column" marginBottom={!compactView && showSubline && i < groupWorktrees.length - 1 ? 1 : 0} paddingLeft={indent}>
                   <Box gap={1}>
                     <Text>{isSelected ? "▸" : " "}</Text>
-                    {open ? (wt.agent_status?.status === "executing" || wt.agent_status?.status === "planning" ? <PulsingDot color={statusColor(wt.agent_status.status)} /> : wt.agent_status?.status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(wt.agent_status?.status)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
+                    {open ? (displayStatus === "executing" || displayStatus === "planning" ? <PulsingDot color={statusColor(displayStatus)} /> : displayStatus === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(displayStatus)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
                     <Text
                       bold={isSelected}
                       color={isSelected ? "cyan" : undefined}
@@ -200,11 +201,12 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               const isSelected = idx === selectedIndex;
               const open = !!session.is_open;
               const unseen = unseenIds.has(session.id);
+              const displayStatus = getDisplayStatusStandalone(session);
 
               return (
                 <Box key={session.id} gap={1}>
                   <Text>{isSelected ? "▸" : " "}</Text>
-                  {open ? (session.status === "executing" || session.status === "planning" ? <PulsingDot color={statusColor(session.status)} /> : session.status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(session.status)}>●</Text>) : <Text dimColor>○</Text>}
+                  {open ? (displayStatus === "executing" || displayStatus === "planning" ? <PulsingDot color={statusColor(displayStatus)} /> : displayStatus === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(displayStatus)}>●</Text>) : <Text dimColor>○</Text>}
                   <Text
                     bold={isSelected}
                     color={isSelected ? "cyan" : undefined}
