@@ -11,8 +11,8 @@ export function isEffectivelyOpen(agentStatus: AgentStatus | null | undefined): 
   return true;
 }
 
-export function getDisplayStatus(agentStatus: AgentStatus | null | undefined): AgentStatusType | undefined {
-  if (!agentStatus) return undefined;
+export function getDisplayStatus(agentStatus: AgentStatus | null | undefined): AgentStatusType {
+  if (!agentStatus) return "none";
   if (
     (agentStatus.status === "executing" || agentStatus.status === "planning") &&
     Date.now() - new Date(agentStatus.updated_at + "Z").getTime() > STALE_THRESHOLD_MS

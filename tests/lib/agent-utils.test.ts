@@ -78,12 +78,12 @@ describe("isEffectivelyOpen", () => {
 });
 
 describe("getDisplayStatus", () => {
-  it("returns undefined for null", () => {
-    expect(getDisplayStatus(null)).toBeUndefined();
+  it("returns 'none' for null", () => {
+    expect(getDisplayStatus(null)).toBe("none");
   });
 
-  it("returns undefined for undefined", () => {
-    expect(getDisplayStatus(undefined)).toBeUndefined();
+  it("returns 'none' for undefined", () => {
+    expect(getDisplayStatus(undefined)).toBe("none");
   });
 
   it("returns actual status when recently updated", () => {

@@ -38,6 +38,8 @@ function statusLabel(status: string | undefined): string {
       return "Idle";
     case "done":
       return "Done";
+    case "none":
+      return "None";
     default:
       return "Unknown";
   }

@@ -159,7 +159,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const newUnseen = new Set<string>();
 
     for (const wt of flatWorktrees) {
-      const currentStatus = wt.agent_status?.status ?? "idle";
+      const currentStatus = wt.agent_status?.status ?? "none";
       const prevStatus = seen.get(wt.id);
 
       if (prevStatus === undefined) {
