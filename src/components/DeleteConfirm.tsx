@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { existsSync } from "fs";
 import { Box, Text, useInput } from "ink";
 import type { WorktreeWithStatus } from "../lib/types.js";
 
@@ -22,7 +23,11 @@ export function DeleteConfirm({
   onConfirm,
   onCancel,
 }: DeleteConfirmProps) {
-  const isBranchOnly = worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master";
+  const pathExists = existsSync(worktree.path);
+  const isBranchOnly =
+    (worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master") ||
+    (!pathExists && worktree.is_main !== 1);
+  const isStale = !pathExists && worktree.is_main !== 1;
   const [step, setStep] = useState<Step>("confirm");
 
   useInput((input, key) => {
@@ -67,7 +72,7 @@ export function DeleteConfirm({
       borderColor={hasWarnings ? "yellow" : undefined}
     >
       <Text bold color="yellow">
-        {isBranchOnly ? `Delete branch "${name}"` : `Delete worktree "${name}"`}
+        {isStale ? `Remove stale entry "${name}"` : isBranchOnly ? `Delete branch "${name}"` : `Delete worktree "${name}"`}
       </Text>
 
       {hasWarnings && (
@@ -87,7 +92,9 @@ export function DeleteConfirm({
 
       {step === "confirm" && (
         <Box flexDirection="column" marginTop={1}>
-          {isBranchOnly ? (
+          {isStale ? (
+            <Text>Remove stale entry and delete local branch <Text bold>{worktree.branch}</Text>?</Text>
+          ) : isBranchOnly ? (
             <Text>Delete branch <Text bold>{worktree.branch}</Text> and switch back to the default branch?</Text>
           ) : (
             <Text>Remove this worktree from disk?</Text>

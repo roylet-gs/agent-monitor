@@ -10,6 +10,19 @@ vi.mock("../../src/lib/logger.js", () => ({
   setLogLevel: vi.fn(),
 }));
 
+vi.mock("fs", async () => {
+  const actual = await vi.importActual<typeof import("fs")>("fs");
+  return {
+    ...actual,
+    existsSync: (p: string) => {
+      // Test worktree paths "exist" by default unless explicitly set to non-existent
+      if (p === "/tmp/wt" || p === "/tmp/repo") return true;
+      if (p === "/tmp/wt-gone") return false;
+      return actual.existsSync(p);
+    },
+  };
+});
+
 function makeWorktree(overrides: Partial<WorktreeWithStatus> = {}): WorktreeWithStatus {
   return {
     id: "wt-1",
@@ -190,6 +203,40 @@ describe("DeleteConfirm", () => {
     expect(onConfirm).toHaveBeenCalledWith({
       deleteLocalBranch: false,
       deleteRemoteBranch: false,
+    });
+  });
+
+  it("shows stale entry confirmation when path does not exist", () => {
+    const { lastFrame } = render(
+      <DeleteConfirm
+        worktree={makeWorktree({ path: "/tmp/wt-gone", is_main: 0 })}
+        repoPath="/tmp/repo"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("Remove stale entry");
+    expect(frame).toContain("delete local branch");
+    expect(frame).not.toContain("Remove this worktree");
+  });
+
+  it("stale entry confirms with isBranchOnly on Enter", async () => {
+    const onConfirm = vi.fn();
+    const { stdin } = render(
+      <DeleteConfirm
+        worktree={makeWorktree({ path: "/tmp/wt-gone", is_main: 0 })}
+        repoPath="/tmp/repo"
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />
+    );
+    await waitForFrame();
+    stdin.write(ENTER);
+    expect(onConfirm).toHaveBeenCalledWith({
+      deleteLocalBranch: true,
+      deleteRemoteBranch: false,
+      isBranchOnly: true,
     });
   });
 });
