@@ -1,4 +1,4 @@
-import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, getStandaloneSessionByPath, upsertStandaloneSession } from "../lib/db.js";
+import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, getStandaloneSessionByPath, upsertStandaloneSession, touchAgentStatusTimestamp, touchStandaloneSessionTimestamp } from "../lib/db.js";
 import { getWorktreeRoot } from "../lib/git.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
@@ -64,6 +64,7 @@ export async function handleHookEvent(
   // Skip redundant DB write + pub/sub if status hasn't changed and there's no new content
   const currentIsOpen = current ? !!current.is_open : false;
   if (current && current.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
+    touchAgentStatusTimestamp(worktree.id);
     return;
   }
 
@@ -117,6 +118,7 @@ async function handleStandaloneSession(path: string, payload: HookEvent): Promis
   // Skip redundant write
   const currentIsOpen = existing ? !!existing.is_open : false;
   if (existing && existing.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
+    touchStandaloneSessionTimestamp(path);
     return;
   }
 
@@ -162,10 +164,10 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
       return "waiting";
     }
 
-    // Normal executing → done (task completed)
+    // Normal executing → waiting (Claude finished and is waiting for user input)
     if (currentStatus === "executing") {
-      log("debug", "hook-event", `Stop while executing → done`);
-      return "done";
+      log("debug", "hook-event", `Stop while executing → waiting`);
+      return "waiting";
     }
 
     return "idle";

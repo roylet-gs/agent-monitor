@@ -284,6 +284,12 @@ export function getAllAgentStatuses(): Map<string, AgentStatus> {
   return map;
 }
 
+export function touchAgentStatusTimestamp(worktreeId: string): void {
+  getDb()
+    .prepare("UPDATE agent_status SET updated_at = datetime('now') WHERE worktree_id = ?")
+    .run(worktreeId);
+}
+
 // --- Standalone Sessions ---
 
 export function upsertStandaloneSession(
@@ -320,6 +326,12 @@ export function getStandaloneSessionByPath(path: string): StandaloneSession | un
   return getDb()
     .prepare("SELECT * FROM standalone_sessions WHERE path = ?")
     .get(path) as StandaloneSession | undefined;
+}
+
+export function touchStandaloneSessionTimestamp(path: string): void {
+  getDb()
+    .prepare("UPDATE standalone_sessions SET updated_at = datetime('now') WHERE path = ?")
+    .run(path);
 }
 
 export function removeStandaloneSession(id: string): void {

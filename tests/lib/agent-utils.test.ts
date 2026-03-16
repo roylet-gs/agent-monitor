@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { isEffectivelyOpen } from "../../src/lib/agent-utils.js";
+import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone } from "../../src/lib/agent-utils.js";
+import type { StandaloneSession } from "../../src/lib/types.js";
 import type { AgentStatus } from "../../src/lib/types.js";
 
 // SQLite datetime('now') format: "YYYY-MM-DD HH:MM:SS" (no timezone suffix)
@@ -73,5 +74,80 @@ describe("isEffectivelyOpen", () => {
       status: "executing",
       updated_at: staleTime,
     }))).toBe(true);
+  });
+});
+
+describe("getDisplayStatus", () => {
+  it("returns undefined for null", () => {
+    expect(getDisplayStatus(null)).toBeUndefined();
+  });
+
+  it("returns undefined for undefined", () => {
+    expect(getDisplayStatus(undefined)).toBeUndefined();
+  });
+
+  it("returns actual status when recently updated", () => {
+    expect(getDisplayStatus(makeStatus({ status: "executing" }))).toBe("executing");
+  });
+
+  it("returns 'waiting' when executing and stale (>90s)", () => {
+    const staleTime = sqliteDate(new Date(Date.now() - 100 * 1000));
+    expect(getDisplayStatus(makeStatus({ status: "executing", updated_at: staleTime }))).toBe("waiting");
+  });
+
+  it("returns 'waiting' when planning and stale (>90s)", () => {
+    const staleTime = sqliteDate(new Date(Date.now() - 100 * 1000));
+    expect(getDisplayStatus(makeStatus({ status: "planning", updated_at: staleTime }))).toBe("waiting");
+  });
+
+  it("returns 'idle' as-is regardless of staleness", () => {
+    const staleTime = sqliteDate(new Date(Date.now() - 200 * 1000));
+    expect(getDisplayStatus(makeStatus({ status: "idle", updated_at: staleTime }))).toBe("idle");
+  });
+
+  it("returns 'waiting' as-is regardless of staleness", () => {
+    const staleTime = sqliteDate(new Date(Date.now() - 200 * 1000));
+    expect(getDisplayStatus(makeStatus({ status: "waiting", updated_at: staleTime }))).toBe("waiting");
+  });
+
+  it("returns 'done' as-is regardless of staleness", () => {
+    const staleTime = sqliteDate(new Date(Date.now() - 200 * 1000));
+    expect(getDisplayStatus(makeStatus({ status: "done", updated_at: staleTime }))).toBe("done");
+  });
+
+  it("returns executing when just under threshold (89s)", () => {
+    const recentTime = sqliteDate(new Date(Date.now() - 89 * 1000));
+    expect(getDisplayStatus(makeStatus({ status: "executing", updated_at: recentTime }))).toBe("executing");
+  });
+});
+
+describe("getDisplayStatusStandalone", () => {
+  function makeSession(overrides: Partial<StandaloneSession> = {}): StandaloneSession {
+    return {
+      id: "s-1",
+      path: "/tmp/test",
+      status: "idle",
+      session_id: null,
+      last_response: null,
+      transcript_summary: null,
+      is_open: 1,
+      created_at: sqliteNow(),
+      updated_at: sqliteNow(),
+      ...overrides,
+    };
+  }
+
+  it("returns 'waiting' when executing and stale", () => {
+    const staleTime = sqliteDate(new Date(Date.now() - 100 * 1000));
+    expect(getDisplayStatusStandalone(makeSession({ status: "executing", updated_at: staleTime }))).toBe("waiting");
+  });
+
+  it("returns actual status when recently updated", () => {
+    expect(getDisplayStatusStandalone(makeSession({ status: "executing" }))).toBe("executing");
+  });
+
+  it("returns idle as-is regardless of staleness", () => {
+    const staleTime = sqliteDate(new Date(Date.now() - 200 * 1000));
+    expect(getDisplayStatusStandalone(makeSession({ status: "idle", updated_at: staleTime }))).toBe("idle");
   });
 });

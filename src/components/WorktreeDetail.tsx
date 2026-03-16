@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
-import { isEffectivelyOpen } from "../lib/agent-utils.js";
+import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone } from "../lib/agent-utils.js";
 import { PulsingDot } from "./PulsingDot.js";
 import type { WorktreeWithStatus, StandaloneSession } from "../lib/types.js";
 
@@ -64,7 +64,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
     );
   }
 
-  const status = worktree.agent_status?.status;
+  const status = getDisplayStatus(worktree.agent_status);
   const open = isEffectivelyOpen(worktree.agent_status);
   const isActive = status === "executing" || status === "planning";
 
@@ -194,7 +194,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
 });
 
 function StandaloneDetail({ session }: { session: StandaloneSession }) {
-  const status = session.status;
+  const status = getDisplayStatusStandalone(session);
   const open = !!session.is_open;
   const isActive = status === "executing" || status === "planning";
 
