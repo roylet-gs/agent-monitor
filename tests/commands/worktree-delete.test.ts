@@ -7,6 +7,19 @@ vi.mock("../../src/lib/logger.js", () => ({
   setLogLevel: vi.fn(),
 }));
 
+vi.mock("fs", async () => {
+  const actual = await vi.importActual<typeof import("fs")>("fs");
+  return {
+    ...actual,
+    existsSync: (p: string) => {
+      // Test worktree paths "exist" by default unless explicitly set to non-existent
+      if (p === "/tmp/wt" || p === "/tmp/repo") return true;
+      if (p === "/tmp/wt-gone") return false;
+      return actual.existsSync(p);
+    },
+  };
+});
+
 const mockDeleteWorktree = vi.fn();
 const mockDeleteBranch = vi.fn();
 const mockDeleteRemoteBranch = vi.fn();
@@ -84,5 +97,19 @@ describe("worktree delete", () => {
     expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/repo", "feature/test", undefined);
     expect(mockDeleteWorktree).not.toHaveBeenCalled();
     expect(spy.getLog()).toContain("branch-only");
+  });
+
+  it("handles stale worktree (path gone) without git worktree remove", async () => {
+    const repo = db.addRepository("/tmp/repo", "repo");
+    db.upsertWorktree(repo.id, "/tmp/wt-gone", "feature/stale", "stale");
+    await worktreeDelete("feature/stale", { repo: "/tmp/repo" });
+    // Should NOT try to git worktree remove or checkout
+    expect(mockDeleteWorktree).not.toHaveBeenCalled();
+    expect(mockCheckoutBranch).not.toHaveBeenCalled();
+    // Should try to delete the local branch
+    expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/repo", "feature/stale", undefined);
+    // Should be removed from DB
+    expect(db.getWorktrees(repo.id)).toHaveLength(0);
+    expect(spy.getLog()).toContain("stale");
   });
 });

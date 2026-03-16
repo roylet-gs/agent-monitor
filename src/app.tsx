@@ -514,7 +514,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     // Find the repo for this worktree
     const wtRepo = repositories.find((r) => r.id === wt.repo_id) ?? activeRepo;
 
-    const isBranchOnly = options.isBranchOnly || (wt.is_main === 1 && wt.branch !== "main" && wt.branch !== "master");
+    const { existsSync } = await import("fs");
+    const pathExists = existsSync(wt.path);
+    const isBranchOnly = options.isBranchOnly ||
+      (wt.is_main === 1 && wt.branch !== "main" && wt.branch !== "master") ||
+      (!pathExists && wt.is_main !== 1);
+    const isStale = !pathExists && wt.is_main !== 1;
 
     // Safety guard: never allow deleting the main working tree on the default branch
     if (wt.path === wtRepo.path && !isBranchOnly) {
@@ -523,11 +528,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
 
     // Branch-only delete: checkout default branch → delete the feature branch → sync
+    // For stale entries (worktree path gone), skip checkout and go straight to cleanup
     if (isBranchOnly) {
       const steps: StepInfo[] = [
-        { label: "Switching to default branch", status: "active" },
-        { label: `Deleting local branch ${wt.branch}`, status: "pending" },
-        { label: "Syncing database", status: "pending" },
+        ...(isStale ? [] : [{ label: "Switching to default branch", status: "active" as const }]),
+        { label: `Deleting local branch ${wt.branch}`, status: isStale ? "active" as const : "pending" as const },
+        { label: "Removing from database", status: "pending" as const },
+        { label: "Syncing database", status: "pending" as const },
       ];
 
       setDeletingBranch(wt.custom_name ?? wt.branch);
@@ -539,23 +546,38 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       let stepIdx = 0;
 
       try {
-        const mainBranch = await getMainBranch(wtRepo.path);
-        await checkoutBranch(wtRepo.path, mainBranch);
+        // Only switch branches for main worktree entries (not stale)
+        if (!isStale) {
+          const mainBranch = await getMainBranch(wtRepo.path);
+          await checkoutBranch(wtRepo.path, mainBranch);
+          updateDeleteStep(stepIdx, "done");
+          stepIdx++;
+          updateDeleteStep(stepIdx, "active");
+        }
+
+        // Delete the local branch
+        try {
+          await deleteBranch(wtRepo.path, wt.branch, true);
+        } catch (err) {
+          log("debug", "app", `Branch delete failed (may already be gone): ${err}`);
+        }
         updateDeleteStep(stepIdx, "done");
         stepIdx++;
 
+        // Explicitly remove from DB
         updateDeleteStep(stepIdx, "active");
-        await deleteBranch(wtRepo.path, wt.branch, true);
+        removeWorktreeDb(wt.id);
         updateDeleteStep(stepIdx, "done");
         stepIdx++;
 
+        // Sync
         updateDeleteStep(stepIdx, "active");
         await syncWorktrees(wtRepo.id);
         await refreshRef.current();
         updateDeleteStep(stepIdx, "done");
 
         setSelectedIndex((i) => Math.max(0, i - 1));
-        log("info", "app", `Deleted branch-only entry ${wt.branch}`);
+        log("info", "app", `Deleted ${isStale ? "stale" : "branch-only"} entry ${wt.branch}`);
 
         await new Promise((r) => setTimeout(r, 500));
         setMode("dashboard");

@@ -1,3 +1,4 @@
+import { existsSync } from "fs";
 import { deleteWorktree, deleteBranch, deleteRemoteBranch, remoteBranchExists, checkoutBranch, getMainBranch } from "../../lib/git.js";
 import { removeWorktree, getRepositoryById } from "../../lib/db.js";
 import { syncWorktrees } from "../../lib/sync.js";
@@ -16,25 +17,36 @@ export async function worktreeDelete(
     process.exit(1);
   }
 
-  const isBranchOnly = worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master";
+  const pathExists = existsSync(worktree.path);
+  const isBranchOnly =
+    (worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master") ||
+    (!pathExists && worktree.is_main !== 1);
+  const isStale = !pathExists && worktree.is_main !== 1;
 
   if (isBranchOnly) {
-    // Branch-only: checkout default branch → delete the feature branch → sync
-    const mainBranch = await getMainBranch(repoObj.path);
-    try {
-      await checkoutBranch(repoObj.path, mainBranch);
-      console.log(`Switched to ${mainBranch}`);
-    } catch (err) {
-      console.error(`Failed to switch to ${mainBranch}. Commit or stash changes first.\n${err}`);
-      process.exit(1);
+    // For main worktree entries: checkout default branch first
+    // For stale entries (path gone): skip checkout, go straight to cleanup
+    if (!isStale) {
+      const mainBranch = await getMainBranch(repoObj.path);
+      try {
+        await checkoutBranch(repoObj.path, mainBranch);
+        console.log(`Switched to ${mainBranch}`);
+      } catch (err) {
+        console.error(`Failed to switch to ${mainBranch}. Commit or stash changes first.\n${err}`);
+        process.exit(1);
+      }
     }
 
     try {
       await deleteBranch(repoObj.path, worktree.branch, opts.force);
       console.log(`Deleted local branch: ${worktree.branch}`);
     } catch (err) {
-      console.error(`Failed to delete local branch: ${err}`);
-      process.exit(1);
+      if (isStale) {
+        console.log(`Local branch ${worktree.branch} already removed or not found.`);
+      } else {
+        console.error(`Failed to delete local branch: ${err}`);
+        process.exit(1);
+      }
     }
 
     // Delete remote branch if requested
@@ -50,8 +62,10 @@ export async function worktreeDelete(
       }
     }
 
+    // Explicitly remove from DB for stale entries
+    removeWorktree(worktree.id);
     await syncWorktrees(repoObj.id);
-    console.log(`Deleted branch-only entry: ${worktree.branch}`);
+    console.log(`Deleted ${isStale ? "stale" : "branch-only"} entry: ${worktree.branch}`);
     return;
   }
 
