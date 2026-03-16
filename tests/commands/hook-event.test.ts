@@ -66,13 +66,13 @@ describe("handleStandaloneSession", () => {
     expect(session!.status).toBe("idle");
   });
 
-  it("standalone session maps Stop to waiting when previously executing", async () => {
+  it("standalone session maps Stop to done when previously executing", async () => {
     // First create an executing session
     await handleHookEvent("/tmp/standalone-project", "UserPromptSubmit");
-    // Now stop - should transition to waiting since Claude is waiting for user input
+    // Now stop without stop_hook_active - Claude finished the task
     await handleHookEvent("/tmp/standalone-project", "Stop");
     const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
-    expect(session!.status).toBe("waiting");
+    expect(session!.status).toBe("done");
   });
 
   it("SessionEnd marks standalone session as closed (is_open=0)", async () => {
@@ -123,8 +123,8 @@ describe("mapEventToStatus", () => {
   });
 
   // Stop → waiting when agent was actively working (Claude is now waiting for user)
-  it("Stop while executing -> waiting", () => {
-    expect(mapEventToStatus({ event: "Stop" }, "executing")).toBe("waiting");
+  it("Stop while executing -> done", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "executing")).toBe("done");
   });
 
   it("Stop while planning -> waiting (plan review)", () => {

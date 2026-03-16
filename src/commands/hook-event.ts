@@ -164,10 +164,10 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
       return "waiting";
     }
 
-    // Normal executing → waiting (Claude finished and is waiting for user input)
+    // Executing → done (Claude finished the task, no stop_hook_active means session ended)
     if (currentStatus === "executing") {
-      log("debug", "hook-event", `Stop while executing → waiting`);
-      return "waiting";
+      log("debug", "hook-event", `Stop while executing without stop_hook_active → done`);
+      return "done";
     }
 
     return "idle";
