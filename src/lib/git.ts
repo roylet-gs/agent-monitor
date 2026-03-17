@@ -1,6 +1,6 @@
 import { simpleGit, type SimpleGit } from "simple-git";
 import { execSync } from "child_process";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, rmSync } from "fs";
 import { basename, join, resolve } from "path";
 import { log } from "./logger.js";
 import type { GitStatus, CommitInfo } from "./types.js";
@@ -142,7 +142,19 @@ export async function deleteWorktree(repoPath: string, worktreePath: string, for
   const git = getGit(repoPath);
   const args = ["worktree", "remove", worktreePath];
   if (force) args.push("--force");
-  await git.raw(args);
+  try {
+    await git.raw(args);
+  } catch (err) {
+    // git worktree remove --force can still fail with "Directory not empty"
+    // when untracked files exist (e.g. .claude/ dirs). Fall back to manual cleanup.
+    if (force && existsSync(worktreePath)) {
+      log("warn", "git", `git worktree remove failed, removing directory manually: ${err}`);
+      rmSync(worktreePath, { recursive: true, force: true });
+      await git.raw(["worktree", "prune"]);
+    } else {
+      throw err;
+    }
+  }
   log("info", "git", `Deleted worktree at ${worktreePath}`);
 }
 
