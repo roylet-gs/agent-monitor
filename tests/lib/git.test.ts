@@ -20,9 +20,11 @@ vi.mock("child_process", () => ({
 
 const mockExistsSync = vi.fn();
 const mockReadFileSync = vi.fn();
+const mockRmSync = vi.fn();
 vi.mock("fs", () => ({
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
+  rmSync: (...args: unknown[]) => mockRmSync(...args),
 }));
 
 describe("listWorktrees", () => {
@@ -244,5 +246,55 @@ describe("ensureBranchForOpen", () => {
     expect(result.ready).toBe(false);
     expect(result.error).toContain("1 uncommitted change.");
     expect(result.error).not.toContain("changes.");
+  });
+});
+
+describe("deleteWorktree", () => {
+  let deleteWorktree: typeof import("../../src/lib/git.js").deleteWorktree;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRaw.mockReset();
+    mockExistsSync.mockReset();
+    mockRmSync.mockReset();
+    const git = await import("../../src/lib/git.js");
+    deleteWorktree = git.deleteWorktree;
+  });
+
+  it("calls git worktree remove", async () => {
+    mockRaw.mockResolvedValueOnce("");
+    await deleteWorktree("/repo", "/repo/.wt/feat");
+    expect(mockRaw).toHaveBeenCalledWith(["worktree", "remove", "/repo/.wt/feat"]);
+  });
+
+  it("adds --force flag when force=true", async () => {
+    mockRaw.mockResolvedValueOnce("");
+    await deleteWorktree("/repo", "/repo/.wt/feat", true);
+    expect(mockRaw).toHaveBeenCalledWith(["worktree", "remove", "/repo/.wt/feat", "--force"]);
+  });
+
+  it("falls back to rmSync + prune when force removal fails with directory not empty", async () => {
+    mockRaw.mockRejectedValueOnce(new Error("failed to delete: Directory not empty"));
+    mockExistsSync.mockReturnValueOnce(true);
+    mockRmSync.mockReturnValueOnce(undefined);
+    mockRaw.mockResolvedValueOnce(""); // git worktree prune
+
+    await deleteWorktree("/repo", "/repo/.wt/feat", true);
+
+    expect(mockRmSync).toHaveBeenCalledWith("/repo/.wt/feat", { recursive: true, force: true });
+    expect(mockRaw).toHaveBeenCalledWith(["worktree", "prune"]);
+  });
+
+  it("re-throws error when force=false", async () => {
+    mockRaw.mockRejectedValueOnce(new Error("Directory not empty"));
+    await expect(deleteWorktree("/repo", "/repo/.wt/feat", false)).rejects.toThrow("Directory not empty");
+    expect(mockRmSync).not.toHaveBeenCalled();
+  });
+
+  it("re-throws error when path no longer exists on disk", async () => {
+    mockRaw.mockRejectedValueOnce(new Error("Directory not empty"));
+    mockExistsSync.mockReturnValueOnce(false);
+    await expect(deleteWorktree("/repo", "/repo/.wt/feat", true)).rejects.toThrow("Directory not empty");
+    expect(mockRmSync).not.toHaveBeenCalled();
   });
 });
