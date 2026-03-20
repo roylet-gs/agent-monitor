@@ -200,9 +200,9 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
     return "waiting";
   }
 
-  // EnterPlanMode: PreToolUse → waiting (about to enter), PostToolUse → planning (now active)
+  // EnterPlanMode: transitioning to plan mode (not waiting for user input)
   if (event.tool_name === "EnterPlanMode") {
-    return event.event === "PostToolUse" ? "planning" : "waiting";
+    return "planning";
   }
 
   // PreToolUse with permission_prompt → waiting (safety net for prompts
