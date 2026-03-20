@@ -215,9 +215,9 @@ describe("mapEventToStatus", () => {
     );
   });
 
-  it("PreToolUse EnterPlanMode -> waiting", () => {
+  it("PreToolUse EnterPlanMode -> planning", () => {
     expect(mapEventToStatus({ event: "PreToolUse", tool_name: "EnterPlanMode" })).toBe(
-      "waiting"
+      "planning"
     );
   });
 
