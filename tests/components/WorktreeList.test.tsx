@@ -316,6 +316,68 @@ describe("WorktreeList", () => {
     expect(lastFrame()!).toContain("▸");
   });
 
+  it("adds visual break after Linear group before ungrouped worktree", () => {
+    const linearInfo = {
+      identifier: "PROJ-1",
+      title: "Some Task",
+      state: { id: "s1", name: "In Progress", type: "started" as const },
+    };
+    const wt1 = makeWorktree({ id: "wt-1", branch: "feature/proj-1-a", linear_info: linearInfo });
+    const wt2 = makeWorktree({ id: "wt-2", branch: "feature/proj-1-b", linear_info: linearInfo });
+    const wt3 = makeWorktree({ id: "wt-3", branch: "feature/standalone" });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt1, wt2, wt3] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt1, wt2, wt3]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    const lines = frame.split("\n");
+    // Find the standalone worktree line and the line before it
+    const standaloneIdx = lines.findIndex((l) => l.includes("feature/standalone"));
+    // There should be a blank line between the last grouped item and the standalone
+    // Ink renders box borders (│) so strip those before checking
+    expect(standaloneIdx).toBeGreaterThan(0);
+    const prevLine = lines[standaloneIdx - 1]!.replace(/│/g, "").trim();
+    expect(prevLine).toBe("");
+  });
+
+  it("uses single em-dash style for Linear group headers", () => {
+    const linearInfo = {
+      identifier: "PROJ-1",
+      title: "Some Task",
+      state: { id: "s1", name: "In Progress", type: "started" as const },
+    };
+    const wt1 = makeWorktree({ id: "wt-1", branch: "feature/proj-1-a", linear_info: linearInfo });
+    const wt2 = makeWorktree({ id: "wt-2", branch: "feature/proj-1-b", linear_info: linearInfo });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt1, wt2] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt1, wt2]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    // Linear header uses single em-dash (—) not double (──)
+    expect(frame).toContain("— PROJ-1");
+    expect(frame).toContain("Some Task —");
+    // Should NOT use the double-dash repo header style
+    expect(frame).not.toContain("── PROJ-1");
+  });
+
   it("shows closed standalone session with dim dot", () => {
     const session: StandaloneSession = {
       id: "ss-1",

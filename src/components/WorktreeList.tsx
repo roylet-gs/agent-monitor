@@ -102,6 +102,8 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
           // Track which Linear group headers have been emitted within this repo group
           const emittedLinearHeaders = new Set<string>();
 
+          let lastWasInLinearGroup = false;
+
           const renderedItems = groupWorktrees.map((wt, i) => {
             const currentFlatIdx = startIdx + i;
             const isSelected = currentFlatIdx === selectedIndex;
@@ -111,6 +113,8 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
 
             const linearId = wt.linear_info?.identifier;
             const isInLinearGroup = linearId ? linearGroups.has(linearId) : false;
+            const needsBreakAfterGroup = !isInLinearGroup && lastWasInLinearGroup;
+            lastWasInLinearGroup = isInLinearGroup;
 
             // Grouped worktrees show branch name (title is in the header)
             const displayName = isInLinearGroup ? wt.branch : (wt.custom_name ?? wt.branch);
@@ -122,10 +126,10 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               emittedLinearHeaders.add(linearId);
               const groupInfo = linearGroups.get(linearId)!;
               linearHeader = (
-                <Box key={`linear-header-${linearId}`} marginTop={i > 0 ? 1 : 0}>
-                  <Text dimColor>── </Text>
+                <Box key={`linear-header-${linearId}`} marginTop={i > 0 ? 1 : 0} paddingLeft={1}>
+                  <Text dimColor>— </Text>
                   <Text color={getLinearStatusColor(wt.linear_info!.state.type)}>{linearId}</Text>
-                  <Text dimColor>: {groupInfo.title} ──</Text>
+                  <Text dimColor>: {groupInfo.title} —</Text>
                 </Box>
               );
             }
@@ -158,7 +162,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
             return (
               <React.Fragment key={wt.id}>
                 {linearHeader}
-                <Box flexDirection="column" marginBottom={!compactView && showSubline && i < groupWorktrees.length - 1 ? 1 : 0} paddingLeft={indent}>
+                <Box flexDirection="column" marginTop={needsBreakAfterGroup ? 1 : 0} marginBottom={!compactView && showSubline && i < groupWorktrees.length - 1 ? 1 : 0} paddingLeft={indent}>
                   <Box gap={1}>
                     <Text>{isSelected ? "▸" : " "}</Text>
                     {open ? (displayStatus === "executing" || displayStatus === "planning" ? <PulsingDot color={statusColor(displayStatus)} /> : displayStatus === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(displayStatus)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
