@@ -9,6 +9,7 @@ interface GhPrResult {
   state: string;
   isDraft: boolean;
   reviewDecision: string;
+  headRefName: string;
   statusCheckRollup: Array<{
     status: string;
     conclusion: string;
@@ -17,7 +18,7 @@ interface GhPrResult {
   }>;
 }
 
-const GH_PR_FIELDS = "number,title,url,state,isDraft,reviewDecision,statusCheckRollup";
+const GH_PR_FIELDS = "number,title,url,state,isDraft,reviewDecision,headRefName,statusCheckRollup";
 
 function execGh(args: string[], cwd: string, timeout = 5000): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -154,6 +155,14 @@ export async function fetchPrInfo(
 
     const pr: GhPrResult = JSON.parse(stdout);
     onGhSuccess(repoPath);
+
+    // When fetching by branch name, gh can return a fuzzy match for a different branch.
+    // Verify the returned PR's head branch matches exactly.
+    if (prNumber == null && pr.headRefName !== branch) {
+      log("debug", "github", `PR #${pr.number} head branch "${pr.headRefName}" does not match requested branch "${branch}", ignoring`);
+      return null;
+    }
+
     return ghResultToPrInfo(pr);
   } catch (err) {
     const msg = String(err);
