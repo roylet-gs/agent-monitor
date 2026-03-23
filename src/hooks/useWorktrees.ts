@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getWorktrees, getAgentStatuses, updateWorktreeCustomName, clearLinearNicknames } from "../lib/db.js";
 import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
-import { fetchLinearInfo, linearAttachmentToPrInfo } from "../lib/linear.js";
+import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "../lib/linear.js";
 import { log } from "../lib/logger.js";
 import { syncWorktrees } from "../lib/sync.js";
 import { getTerminalPaths, getIdePaths } from "../lib/process.js";
@@ -241,7 +241,9 @@ export function useWorktrees(config: WorktreeHookConfig): {
                 const ghPr = prCacheRef.current.get(`${repo.id}:${wt.branch}`);
                 if (ghPr) return ghPr;
                 const linearInfo = linearCacheRef.current.get(wt.branch);
-                if (linearInfo?.prAttachment) return linearAttachmentToPrInfo(linearInfo.prAttachment);
+                if (linearInfo?.prAttachment && linearAttachmentMatchesBranch(linearInfo.prAttachment, wt.branch)) {
+                  return linearAttachmentToPrInfo(linearInfo.prAttachment);
+                }
                 return null;
               })(),
               linear_info: linearCacheRef.current.get(wt.branch) ?? null,

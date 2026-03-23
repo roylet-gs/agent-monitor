@@ -126,6 +126,22 @@ export async function verifyLinearApiKey(apiKey: string): Promise<{ ok: boolean;
   }
 }
 
+/**
+ * Check if a Linear PR attachment's branch matches the given worktree branch.
+ * Returns false if the attachment is for a different branch.
+ */
+export function linearAttachmentMatchesBranch(
+  attachment: NonNullable<LinearInfo["prAttachment"]>,
+  branch: string
+): boolean {
+  const prBranch = attachment.metadata?.branch as string | undefined;
+  if (prBranch && prBranch !== branch) {
+    log("debug", "linear", `PR attachment branch "${prBranch}" does not match worktree branch "${branch}", ignoring`);
+    return false;
+  }
+  return true;
+}
+
 export function linearAttachmentToPrInfo(
   attachment: NonNullable<LinearInfo["prAttachment"]>
 ): PrInfo {
