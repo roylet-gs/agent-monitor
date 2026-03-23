@@ -15,7 +15,7 @@ import { loadSettings } from "./settings.js";
 import { getDb, getRepositories, getWorktrees, getAgentStatuses, getStandaloneSessions, pruneStaleStandaloneSessions, updateWorktreeCustomName, clearLinearNicknames } from "./db.js";
 import { getGitStatus, getLastCommit } from "./git.js";
 import { fetchAllPrInfo } from "./github.js";
-import { fetchLinearInfo, linearAttachmentToPrInfo } from "./linear.js";
+import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
 import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
 import { isEffectivelyOpenStandalone } from "./agent-utils.js";
 import { syncWorktrees } from "./sync.js";
@@ -430,7 +430,9 @@ async function buildData(): Promise<DaemonData> {
             const ghPr = prCache.get(`${repo.id}:${wt.branch}`);
             if (ghPr) return ghPr;
             const linearInfo = linearCache.get(wt.branch);
-            if (linearInfo?.prAttachment) return linearAttachmentToPrInfo(linearInfo.prAttachment);
+            if (linearInfo?.prAttachment && linearAttachmentMatchesBranch(linearInfo.prAttachment, wt.branch)) {
+              return linearAttachmentToPrInfo(linearInfo.prAttachment);
+            }
             return null;
           })(),
           linear_info: linearCache.get(wt.branch) ?? null,
