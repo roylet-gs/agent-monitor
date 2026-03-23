@@ -25,6 +25,8 @@ export interface DaemonHookResult {
   standaloneSessions: StandaloneSession[];
   refresh: () => Promise<void>;
   lightRefresh: () => Promise<void>;
+  quickRefresh: () => Promise<void>;
+  refreshIntegrations: (onStatus?: (status: string | null) => void) => Promise<void>;
   connected: boolean;
 }
 
@@ -78,6 +80,10 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
   useEffect(() => { fallbackRefreshRef.current = fallbackWorktrees.refresh; }, [fallbackWorktrees.refresh]);
   const fallbackLightRefreshRef = useRef(fallbackWorktrees.lightRefresh);
   useEffect(() => { fallbackLightRefreshRef.current = fallbackWorktrees.lightRefresh; }, [fallbackWorktrees.lightRefresh]);
+  const fallbackQuickRefreshRef = useRef(fallbackWorktrees.quickRefresh);
+  useEffect(() => { fallbackQuickRefreshRef.current = fallbackWorktrees.quickRefresh; }, [fallbackWorktrees.quickRefresh]);
+  const fallbackRefreshIntegrationsRef = useRef(fallbackWorktrees.refreshIntegrations);
+  useEffect(() => { fallbackRefreshIntegrationsRef.current = fallbackWorktrees.refreshIntegrations; }, [fallbackWorktrees.refreshIntegrations]);
   const fallbackStandaloneRefreshRef = useRef(fallbackStandalone.refresh);
   useEffect(() => { fallbackStandaloneRefreshRef.current = fallbackStandalone.refresh; }, [fallbackStandalone.refresh]);
 
@@ -213,6 +219,26 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     }
   }, []);
 
+  const quickRefresh = useCallback(async () => {
+    const client = clientRef.current;
+    if (client?.connected) {
+      await client.forceRefresh(false);
+    } else {
+      await fallbackQuickRefreshRef.current();
+    }
+  }, []);
+
+  const refreshIntegrations = useCallback(async (onStatus?: (status: string | null) => void) => {
+    const client = clientRef.current;
+    if (client?.connected) {
+      onStatus?.("Syncing GitHub, Linear…");
+      await client.forceRefresh(true);
+      onStatus?.(null);
+    } else {
+      await fallbackRefreshIntegrationsRef.current(onStatus);
+    }
+  }, []);
+
   // Use daemon data when connected, fallback data otherwise
   if (connected && !fallbackMode) {
     return {
@@ -221,6 +247,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       standaloneSessions: daemonData.standaloneSessions,
       refresh,
       lightRefresh,
+      quickRefresh,
+      refreshIntegrations,
       connected: true,
     };
   }
@@ -231,6 +259,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     standaloneSessions: fallbackStandalone.sessions,
     refresh,
     lightRefresh,
+    quickRefresh,
+    refreshIntegrations,
     connected: false,
   };
 }

@@ -28,6 +28,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
   flatWorktrees: WorktreeWithStatus[];
   refresh: () => Promise<void>;
   lightRefresh: () => Promise<void>;
+  quickRefresh: () => Promise<void>;
+  refreshIntegrations: (onStatus?: (status: string | null) => void) => Promise<void>;
 } {
   const {
     repositories,
@@ -388,6 +390,56 @@ export function useWorktrees(config: WorktreeHookConfig): {
   // Exposed refresh always forces integrations fetch
   const forceRefresh = useCallback(() => refresh(true), []);
 
+  // Quick refresh: immediate refresh using cached integration data (no debounce)
+  const quickRefresh = useCallback(() => refresh(false), []);
+
+  // Refresh only integrations (GitHub PR + Linear), then re-enrich from updated caches.
+  // Optional onStatus callback reports which sources are still loading.
+  const refreshIntegrations = useCallback(async (onStatus?: (status: string | null) => void) => {
+    const repos = reposRef.current;
+    const shouldFetchPr = ghPrStatusRef.current && ghRefreshOnManualRef.current;
+    const shouldFetchLinear = linearEnabledRef.current && linearRefreshOnManualRef.current;
+    if (!shouldFetchPr && !shouldFetchLinear) return;
+
+    const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
+    const allBranchNames: string[] = [];
+    for (const repo of repos) {
+      const dbWorktrees = getWorktrees(repo.id);
+      const ghBranches: string[] = [];
+      for (const wt of dbWorktrees) {
+        allBranchNames.push(wt.branch);
+        ghBranches.push(wt.branch);
+      }
+      repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches: ghBranches });
+    }
+
+    // Track which sources are still pending for status reporting
+    const pending = new Set<string>();
+    if (shouldFetchPr) pending.add("GitHub");
+    if (shouldFetchLinear) pending.add("Linear");
+
+    const reportStatus = () => {
+      if (!onStatus) return;
+      if (pending.size === 0) { onStatus(null); return; }
+      onStatus(`Syncing ${[...pending].join(", ")}…`);
+    };
+
+    reportStatus();
+
+    await Promise.all([
+      shouldFetchPr
+        ? refreshPrInfoRef.current(repoGroups).then(() => { pending.delete("GitHub"); reportStatus(); })
+        : Promise.resolve(),
+      shouldFetchLinear
+        ? refreshLinearInfoRef.current(allBranchNames).then(() => { pending.delete("Linear"); reportStatus(); })
+        : Promise.resolve(),
+    ]);
+    autoSetLinearNicknamesRef.current();
+
+    // Re-enrich worktrees with fresh integration data
+    await refresh(false);
+  }, []);
+
   // Light refresh: debounced to avoid excessive git status calls from rapid pub/sub events
   const lightRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lightRefresh = useCallback(() => {
@@ -406,5 +458,5 @@ export function useWorktrees(config: WorktreeHookConfig): {
     };
   }, []);
 
-  return { groups: data.groups, flatWorktrees: data.flatWorktrees, refresh: forceRefresh, lightRefresh };
+  return { groups: data.groups, flatWorktrees: data.flatWorktrees, refresh: forceRefresh, lightRefresh, quickRefresh, refreshIntegrations };
 }

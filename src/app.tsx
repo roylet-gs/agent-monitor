@@ -126,7 +126,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [repositories.length > 0 && settings.autoSyncOnStartup]);
 
-  const { groups, flatWorktrees, standaloneSessions, refresh, lightRefresh } = useDaemon({
+  const { groups, flatWorktrees, standaloneSessions, refresh, lightRefresh, quickRefresh, refreshIntegrations } = useDaemon({
     repositories,
     settings,
     onAgentUpdate: (msg) => {
@@ -141,6 +141,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
   const lightRefreshRef = useRef(lightRefresh);
   useEffect(() => { lightRefreshRef.current = lightRefresh; }, [lightRefresh]);
+  const quickRefreshRef = useRef(quickRefresh);
+  useEffect(() => { quickRefreshRef.current = quickRefresh; }, [quickRefresh]);
+  const refreshIntegrationsRef = useRef(refreshIntegrations);
+  useEffect(() => { refreshIntegrationsRef.current = refreshIntegrations; }, [refreshIntegrations]);
+
+  const [integrationLoading, setIntegrationLoading] = useState<string | null>(null);
 
   // Derive the active repo from the currently selected worktree
   const activeRepo = useMemo((): Repository | null => {
@@ -863,10 +869,18 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     },
     onSettings: () => setMode("settings"),
     onRefresh: async () => {
+      // Phase 1: fast local refresh with cached integration data
       setBusy("Syncing worktrees...");
       await Promise.all(repositories.map((repo) => syncWorktrees(repo.id)));
-      await refreshRef.current();
+      await quickRefreshRef.current();
       setBusy(null);
+
+      // Phase 2: background integration refresh (non-blocking)
+      try {
+        await refreshIntegrationsRef.current(setIntegrationLoading);
+      } finally {
+        setIntegrationLoading(null);
+      }
     },
     onOpenPr: () => {
       const wt = flatWorktrees[selectedIndex];
@@ -1091,6 +1105,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           ghPrStatus={settings.ghPrStatus}
           linearEnabled={settings.linearEnabled}
           ideIsTerm={settings.ide === "terminal"}
+          integrationLoading={integrationLoading}
         />
       )}
     </Box>

@@ -11,9 +11,10 @@ interface ActionBarProps {
   hasPr?: boolean;
   hasLinear?: boolean;
   ideIsTerm?: boolean;
+  integrationLoading?: string | null;
 }
 
-export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm }: ActionBarProps) {
+export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm, integrationLoading }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -34,6 +35,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
 
   return (
     <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
+      {integrationLoading && <><Spinner label={integrationLoading} /><Text> </Text></>}
       {hasWorktrees ? (
         <Text>
           <Text color="yellow">[Enter]</Text> Open
