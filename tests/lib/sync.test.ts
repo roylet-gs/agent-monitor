@@ -138,6 +138,24 @@ describe("syncWorktrees", () => {
     expect(worktrees[0]!.branch).toBe("main");
   });
 
+  it("removes stale DB entry when branch is renamed (same path, different branch)", async () => {
+    const repo = db.addRepository("/tmp/repo", "repo");
+    db.upsertWorktree(repo.id, "/tmp/repo/.worktrees/my-feature", "feature/old-name", "old-name");
+
+    mockListWorktrees.mockResolvedValue([
+      { path: "/tmp/repo", branch: "main", isMain: true },
+      { path: "/tmp/repo/.worktrees/my-feature", branch: "feature/new-name", isMain: false },
+    ]);
+
+    // Path exists on disk (same physical folder)
+    mockExistsSyncForSync.mockReturnValue(true);
+
+    await sync.syncWorktrees(repo.id);
+    const worktrees = db.getWorktrees(repo.id);
+    expect(worktrees).toHaveLength(2);
+    expect(worktrees.map(w => w.branch).sort()).toEqual(["feature/new-name", "main"]);
+  });
+
   it("does nothing for non-existent repo", async () => {
     await sync.syncWorktrees("non-existent-id");
     expect(mockListWorktrees).not.toHaveBeenCalled();
