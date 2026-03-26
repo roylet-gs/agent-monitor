@@ -159,13 +159,14 @@ describe("mapEventToStatus", () => {
     expect(mapEventToStatus({ event: "Stop", stop_hook_active: true }, "executing")).toBe("waiting");
   });
 
-  // acceptEdits mode (after user approves plan)
-  it("Stop with permission_mode=acceptEdits -> waiting", () => {
-    expect(mapEventToStatus({ event: "Stop", permission_mode: "acceptEdits" } as any)).toBe("waiting");
+  // acceptEdits mode (after user approves plan) — acceptEdits is the normal
+  // working mode, not a planning mode, so Stop follows standard rules
+  it("Stop with permission_mode=acceptEdits -> idle", () => {
+    expect(mapEventToStatus({ event: "Stop", permission_mode: "acceptEdits" } as any)).toBe("idle");
   });
 
-  it("Stop with permission_mode=acceptEdits while executing -> waiting", () => {
-    expect(mapEventToStatus({ event: "Stop", permission_mode: "acceptEdits" } as any, "executing")).toBe("waiting");
+  it("Stop with permission_mode=acceptEdits while executing -> done", () => {
+    expect(mapEventToStatus({ event: "Stop", permission_mode: "acceptEdits" } as any, "executing")).toBe("done");
   });
 
   it("UserPromptSubmit with permission_mode=acceptEdits -> executing", () => {

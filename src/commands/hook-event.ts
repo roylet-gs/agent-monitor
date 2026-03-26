@@ -159,7 +159,7 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
     if (currentStatus === "waiting") return "waiting";
 
     // Planning mode Stop = waiting for user feedback on the plan
-    if (event.permission_mode === "plan" || event.permission_mode === "acceptEdits" || currentStatus === "planning") {
+    if (event.permission_mode === "plan" || currentStatus === "planning") {
       log("debug", "hook-event", `Stop in planning mode → waiting (was ${currentStatus})`);
       return "waiting";
     }
