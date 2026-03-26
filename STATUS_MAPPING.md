@@ -19,7 +19,7 @@
 | -------------------------------------------------------------- | --------- |
 | `stop_hook_active: true`                                       | `waiting` |
 | `currentStatus === "waiting"`                                  | `waiting` |
-| `permission_mode === "plan"` or `"acceptEdits"` or `currentStatus === "planning"` | `waiting` |
+| `permission_mode === "plan"` or `currentStatus === "planning"` | `waiting` |
 | `currentStatus === "executing"`                                | `done`    |
 | Fallback                                                       | `idle`    |
 
