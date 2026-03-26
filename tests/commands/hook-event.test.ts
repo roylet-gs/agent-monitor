@@ -159,6 +159,27 @@ describe("mapEventToStatus", () => {
     expect(mapEventToStatus({ event: "Stop", stop_hook_active: true }, "executing")).toBe("waiting");
   });
 
+  // acceptEdits mode (after user approves plan)
+  it("Stop with permission_mode=acceptEdits -> waiting", () => {
+    expect(mapEventToStatus({ event: "Stop", permission_mode: "acceptEdits" } as any)).toBe("waiting");
+  });
+
+  it("Stop with permission_mode=acceptEdits while executing -> waiting", () => {
+    expect(mapEventToStatus({ event: "Stop", permission_mode: "acceptEdits" } as any, "executing")).toBe("waiting");
+  });
+
+  it("UserPromptSubmit with permission_mode=acceptEdits -> executing", () => {
+    expect(
+      mapEventToStatus({ event: "UserPromptSubmit", permission_mode: "acceptEdits" } as any)
+    ).toBe("executing");
+  });
+
+  it("PreToolUse with permission_mode=acceptEdits -> executing", () => {
+    expect(
+      mapEventToStatus({ event: "PreToolUse", tool_name: "Edit", permission_mode: "acceptEdits" } as any)
+    ).toBe("executing");
+  });
+
   // Notification events
   it("Notification with permission_prompt -> waiting", () => {
     expect(
@@ -174,6 +195,12 @@ describe("mapEventToStatus", () => {
 
   it("Notification without permission_prompt -> null (skip)", () => {
     expect(mapEventToStatus({ event: "Notification" })).toBe(null);
+  });
+
+  it("Notification with idle_prompt -> waiting", () => {
+    expect(
+      mapEventToStatus({ event: "Notification", notification_type: "idle_prompt" })
+    ).toBe("waiting");
   });
 
   it("Notification with other type -> null (skip)", () => {
