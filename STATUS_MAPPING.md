@@ -19,7 +19,7 @@
 | -------------------------------------------------------------- | --------- |
 | `stop_hook_active: true`                                       | `waiting` |
 | `currentStatus === "waiting"`                                  | `waiting` |
-| `permission_mode === "plan"` or `currentStatus === "planning"` | `waiting` |
+| `permission_mode === "plan"` or `"acceptEdits"` or `currentStatus === "planning"` | `waiting` |
 | `currentStatus === "executing"`                                | `done`    |
 | Fallback                                                       | `idle`    |
 
@@ -27,7 +27,7 @@
 
 | Condition                                                             | Result             |
 | --------------------------------------------------------------------- | ------------------ |
-| `notification_type === "permission_prompt"` or `"elicitation_dialog"` | `waiting`          |
+| `notification_type === "permission_prompt"` or `"elicitation_dialog"` or `"idle_prompt"` | `waiting`          |
 | Other notification types                                              | No change (`null`) |
 
 ### SessionStart / SessionEnd
@@ -74,7 +74,6 @@
 
 ## Display-time Override (`getDisplayStatus`)
 
-| Condition                                                 | Displayed As |
-| --------------------------------------------------------- | ------------ |
-| `executing` or `planning` older than `STALE_THRESHOLD_MS` | `waiting`    |
-| Everything else                                           | As stored    |
+| Condition       | Displayed As |
+| --------------- | ------------ |
+| Everything      | As stored    |
