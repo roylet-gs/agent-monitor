@@ -177,9 +177,16 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
     // don't change status
     if (
       event.notification_type === "permission_prompt" ||
-      event.notification_type === "elicitation_dialog" ||
-      event.notification_type === "idle_prompt"
+      event.notification_type === "elicitation_dialog"
     ) {
+      return "waiting";
+    }
+    if (event.notification_type === "idle_prompt") {
+      // idle_prompt after done = task is complete, don't downgrade
+      if (currentStatus === "done") {
+        log("debug", "hook-event", `idle_prompt after done → preserving done status`);
+        return null;
+      }
       return "waiting";
     }
     return null;
