@@ -12,12 +12,9 @@ interface ActionBarProps {
   hasLinear?: boolean;
   ideIsTerm?: boolean;
   integrationLoading?: string | null;
-  managedMode?: boolean;
-  hasPendingInput?: boolean;
-  selectedCanMessage?: boolean;
 }
 
-export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm, integrationLoading, managedMode, hasPendingInput, selectedCanMessage }: ActionBarProps) {
+export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm, integrationLoading }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -51,7 +48,6 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           {linearEnabled && (
             hasLinear ? <><Text color="yellow"> [l]</Text>inear</> : <Text dimColor> [l]inear</Text>
           )}
-          {managedMode && selectedCanMessage && <><Text color="yellow"> [m]</Text>essage</>}
           <Text color="yellow"> [r]</Text>efresh
           <Text color="yellow"> [w]</Text>atch
           <Text color="yellow"> [s]</Text>ettings

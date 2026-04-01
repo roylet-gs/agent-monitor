@@ -4,6 +4,7 @@ import { StatusBar, type UpdateInfo } from "./StatusBar.js";
 import { WorktreeList } from "./WorktreeList.js";
 import { WorktreeDetail } from "./WorktreeDetail.js";
 import { ActionBar } from "./ActionBar.js";
+import { ManagedActionBar } from "./ManagedActionBar.js";
 import { LogPanel } from "./LogPanel.js";
 import type { WorktreeWithStatus, WorktreeGroup, StandaloneSession, PendingInput } from "../lib/types.js";
 
@@ -74,7 +75,14 @@ export const Dashboard = React.memo(function Dashboard({
         <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} pendingInput={selectedPendingInput} managedMode={managedMode} />
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
-      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} managedMode={managedMode} hasPendingInput={!!selectedPendingInput} selectedCanMessage={selectedCanMessage} />
+      {managedMode && (
+        <ManagedActionBar
+          pendingInput={selectedPendingInput}
+          canMessage={!!selectedCanMessage}
+          pendingCount={pendingInputs?.size ?? 0}
+        />
+      )}
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} />
     </Box>
   );
 });

@@ -669,6 +669,26 @@ export function SettingsPanel({
 
         {/* === Managed Mode Section === */}
         {renderSectionHeader("Managed Mode")}
+        <Box flexDirection="column" marginBottom={1}>
+          <Text dimColor>
+            Control Claude agents from this dashboard. When enabled, a new
+          </Text>
+          <Text dimColor>
+            action bar appears above the main controls showing contextual actions:
+          </Text>
+          <Text dimColor>
+            {"  "}- Permission requests: approve [a] or deny [x] directly
+          </Text>
+          <Text dimColor>
+            {"  "}- Questions from Claude: press Enter to type your answer
+          </Text>
+          <Text dimColor>
+            {"  "}- Idle agents: press [m] to send a follow-up message
+          </Text>
+          <Text dimColor>
+            Requires restarting active Claude sessions to pick up new hooks.
+          </Text>
+        </Box>
         <Box>
           <Text bold={activeField === "managedMode"}>
             {activeField === "managedMode" ? "▸" : " "} Enabled:{" "}
