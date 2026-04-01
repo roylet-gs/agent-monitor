@@ -12,7 +12,7 @@ import { existsSync, unlinkSync, writeFileSync, readFileSync, mkdirSync } from "
 import { SOCKET_PATH, DAEMON_PID_PATH, APP_DIR } from "./paths.js";
 import { initLogger, log } from "./logger.js";
 import { loadSettings } from "./settings.js";
-import { getDb, getRepositories, getWorktrees, getAgentStatuses, getStandaloneSessions, pruneStaleStandaloneSessions, updateWorktreeCustomName, clearLinearNicknames } from "./db.js";
+import { getDb, getRepositories, getWorktrees, getAgentStatuses, getAgentStatus, getStandaloneSessions, pruneStaleStandaloneSessions, updateWorktreeCustomName, clearLinearNicknames, getWorktreeById, removePendingInput, removePendingInputsForWorktree } from "./db.js";
 import { getGitStatus, getLastCommit } from "./git.js";
 import { fetchAllPrInfo } from "./github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
@@ -20,15 +20,17 @@ import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
 import { isEffectivelyOpenStandalone } from "./agent-utils.js";
 import { syncWorktrees } from "./sync.js";
 import { realpathSync } from "fs";
-import type { PubSubMessage } from "./pubsub-types.js";
+import type { PubSubMessage, PendingInputMessage } from "./pubsub-types.js";
 import type {
   DaemonInboundMessage,
   DaemonData,
   RefreshResultMessage,
   AgentUpdatePassthroughMessage,
   DaemonToTuiMessage,
+  PendingInputNotification,
+  PendingInputResolvedNotification,
 } from "./daemon-types.js";
-import type { WorktreeGroup, WorktreeWithStatus, PrInfo, LinearInfo, Repository, Settings, StandaloneSession } from "./types.js";
+import type { WorktreeGroup, WorktreeWithStatus, PrInfo, LinearInfo, Repository, Settings, StandaloneSession, PendingInput } from "./types.js";
 import { getVersion } from "./version.js";
 
 // --- State ---
@@ -43,6 +45,10 @@ const linearCache = new Map<string, LinearInfo | null>();
 
 // TUI subscriber connections
 const tuiClients = new Set<net.Socket>();
+
+// Managed mode: hook connections waiting for user responses
+const pendingHookConnections = new Map<string, net.Socket>(); // inputId → hook socket
+const pendingInputs = new Map<string, PendingInput>(); // inputId → PendingInput
 
 // Timers
 let mainPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -71,6 +77,7 @@ function startDaemonServer(): net.Server {
   const srv = net.createServer((conn) => {
     let buffer = "";
     let isSubscriber = false;
+    let hookInputId: string | null = null; // Track if this is a managed mode hook connection
 
     conn.on("data", (chunk) => {
       buffer += chunk.toString();
@@ -85,25 +92,27 @@ function startDaemonServer(): net.Server {
           if (msg.type === "subscribe") {
             isSubscriber = true;
           }
+          if (msg.type === "pending-input") {
+            hookInputId = (msg as PendingInputMessage).input.id;
+          }
         } catch {
           log("debug", "daemon", `Failed to parse message: ${line.slice(0, 200)}`);
         }
       }
     });
 
-    conn.on("error", () => {
+    const cleanup = () => {
       if (isSubscriber) {
         tuiClients.delete(conn);
         onTuiDisconnected();
       }
-    });
+      if (hookInputId) {
+        cleanupPendingInput(hookInputId);
+      }
+    };
 
-    conn.on("close", () => {
-      if (isSubscriber) {
-        tuiClients.delete(conn);
-        onTuiDisconnected();
-      }
-    });
+    conn.on("error", cleanup);
+    conn.on("close", cleanup);
   });
 
   srv.on("error", (err) => {
@@ -134,6 +143,21 @@ function handleInboundMessage(msg: DaemonInboundMessage, conn: net.Socket): void
       log("info", "daemon", "Config reload requested");
       reloadConfig();
       doRefresh(null, false);
+      break;
+
+    // Managed mode: hook process waiting for user response
+    case "pending-input":
+      handlePendingInput(msg as PendingInputMessage, conn);
+      break;
+
+    // Managed mode: TUI sending response to a waiting hook
+    case "send-response":
+      handleSendResponse(msg.inputId, msg.response, msg.decision);
+      break;
+
+    // Managed mode: TUI sending a follow-up prompt to an idle/done agent
+    case "send-prompt":
+      handleSendPrompt(msg.worktreeId, msg.message);
       break;
 
     // Passthrough from hook-event
@@ -197,6 +221,146 @@ function cancelGracePeriod(): void {
   if (gracePeriodTimer) {
     clearTimeout(gracePeriodTimer);
     gracePeriodTimer = null;
+  }
+}
+
+// --- Managed Mode handlers ---
+
+function handlePendingInput(msg: PendingInputMessage, conn: net.Socket): void {
+  const { input, hookConnectionId } = msg;
+  log("info", "daemon", `Pending input received: id=${input.id} type=${input.type} worktree=${input.worktreeId} hookConn=${hookConnectionId}`);
+
+  // Store the hook socket so we can send the response back
+  pendingHookConnections.set(input.id, conn);
+  pendingInputs.set(input.id, input);
+
+  // Notify all TUI clients
+  const notification: PendingInputNotification = {
+    type: "pending-input-notify",
+    input,
+  };
+  broadcast(notification);
+}
+
+function handleSendResponse(inputId: string, response: string, decision?: "allow" | "deny"): void {
+  const hookConn = pendingHookConnections.get(inputId);
+  if (!hookConn) {
+    log("warn", "daemon", `No hook connection found for inputId=${inputId}`);
+    return;
+  }
+
+  log("info", "daemon", `Sending response for inputId=${inputId} decision=${decision ?? "answer"}`);
+
+  try {
+    // Send response back to the blocked hook process
+    hookConn.write(JSON.stringify({
+      type: "respond-input",
+      inputId,
+      response,
+      decision,
+    }) + "\n");
+    hookConn.end();
+  } catch (err) {
+    log("warn", "daemon", `Failed to send response to hook: ${err}`);
+  }
+
+  // Clean up
+  pendingHookConnections.delete(inputId);
+  pendingInputs.delete(inputId);
+  removePendingInput(inputId);
+
+  // Notify TUI that this pending input is resolved
+  const resolved: PendingInputResolvedNotification = {
+    type: "pending-input-resolved",
+    inputId,
+  };
+  broadcast(resolved);
+}
+
+function handleSendPrompt(worktreeId: string, message: string): void {
+  const worktree = getWorktreeById(worktreeId);
+  if (!worktree) {
+    log("warn", "daemon", `Cannot send prompt: worktree ${worktreeId} not found`);
+    broadcast({ type: "prompt-sent", worktreeId, success: false, error: "Worktree not found" });
+    return;
+  }
+
+  const agentStatus = getAgentStatus(worktreeId);
+  const sessionId = agentStatus?.session_id ?? null;
+
+  const promptMode = settings.managedPromptMode ?? "headless";
+
+  if (promptMode === "interactive") {
+    sendPromptInteractive(worktree.path, sessionId, message, worktreeId);
+  } else {
+    sendPromptHeadless(worktree.path, sessionId, message, worktreeId);
+  }
+}
+
+function sendPromptHeadless(worktreePath: string, sessionId: string | null, message: string, worktreeId: string): void {
+  const { spawn } = require("child_process") as typeof import("child_process");
+
+  const args = sessionId
+    ? ["--resume", sessionId, "-p", message, "--allowedTools", "Read,Glob,Grep,Bash,Edit,Write"]
+    : ["-c", "-p", message, "--allowedTools", "Read,Glob,Grep,Bash,Edit,Write"];
+
+  log("info", "daemon", `Spawning headless claude in ${worktreePath} with args: ${args.join(" ").slice(0, 100)}`);
+
+  try {
+    const child = spawn("claude", args, {
+      cwd: worktreePath,
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    broadcast({ type: "prompt-sent", worktreeId, success: true });
+  } catch (err) {
+    log("error", "daemon", `Failed to spawn claude: ${err}`);
+    broadcast({ type: "prompt-sent", worktreeId, success: false, error: String(err) });
+  }
+}
+
+function sendPromptInteractive(worktreePath: string, sessionId: string | null, message: string, worktreeId: string): void {
+  const { spawn } = require("child_process") as typeof import("child_process");
+
+  const claudeArgs = sessionId
+    ? `--resume ${sessionId} -p '${message.replace(/'/g, "'\\''")}'`
+    : `-c -p '${message.replace(/'/g, "'\\''")}'`;
+
+  const ide = settings.ide ?? "cursor";
+
+  log("info", "daemon", `Opening interactive claude in ${worktreePath} via ${ide}`);
+
+  try {
+    if (ide === "terminal") {
+      // Open a new Terminal.app window on macOS
+      const script = `tell application "Terminal" to do script "cd '${worktreePath}' && claude ${claudeArgs}"`;
+      spawn("osascript", ["-e", script], { detached: true, stdio: "ignore" }).unref();
+    } else {
+      // Open in IDE's integrated terminal
+      const ideCmd = ide === "cursor" ? "cursor" : "code";
+      spawn(ideCmd, ["--folder-uri", worktreePath], { detached: true, stdio: "ignore" }).unref();
+    }
+    broadcast({ type: "prompt-sent", worktreeId, success: true });
+  } catch (err) {
+    log("error", "daemon", `Failed to open interactive session: ${err}`);
+    broadcast({ type: "prompt-sent", worktreeId, success: false, error: String(err) });
+  }
+}
+
+function cleanupPendingInput(inputId: string): void {
+  if (pendingHookConnections.has(inputId)) {
+    log("debug", "daemon", `Cleaning up pending input ${inputId} (hook disconnected)`);
+    pendingHookConnections.delete(inputId);
+    pendingInputs.delete(inputId);
+    removePendingInput(inputId);
+
+    // Notify TUI that this pending input is gone
+    const resolved: PendingInputResolvedNotification = {
+      type: "pending-input-resolved",
+      inputId,
+    };
+    broadcast(resolved);
   }
 }
 
@@ -501,6 +665,13 @@ function shutdown(): void {
     try { client.end(); } catch { /* ignore */ }
   }
   tuiClients.clear();
+
+  // Close managed mode hook connections
+  for (const [, hookConn] of pendingHookConnections) {
+    try { hookConn.end(); } catch { /* ignore */ }
+  }
+  pendingHookConnections.clear();
+  pendingInputs.clear();
 
   if (server) {
     try { server.close(); } catch { /* ignore */ }

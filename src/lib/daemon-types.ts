@@ -1,4 +1,4 @@
-import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession } from "./types.js";
+import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession, PendingInput } from "./types.js";
 import type { PubSubMessage } from "./pubsub-types.js";
 
 // --- hook-event → Daemon (existing messages, unchanged) ---
@@ -21,7 +21,20 @@ export interface ConfigReloadMessage {
   type: "config-reload";
 }
 
-export type TuiToDaemonMessage = SubscribeMessage | ForceRefreshMessage | ConfigReloadMessage;
+export interface SendResponseMessage {
+  type: "send-response";
+  inputId: string;
+  response: string;
+  decision?: "allow" | "deny";
+}
+
+export interface SendPromptMessage {
+  type: "send-prompt";
+  worktreeId: string;
+  message: string;
+}
+
+export type TuiToDaemonMessage = SubscribeMessage | ForceRefreshMessage | ConfigReloadMessage | SendResponseMessage | SendPromptMessage;
 
 // --- Daemon → TUI (new) ---
 
@@ -42,7 +55,24 @@ export interface AgentUpdatePassthroughMessage {
   original: PubSubMessage;
 }
 
-export type DaemonToTuiMessage = RefreshResultMessage | AgentUpdatePassthroughMessage;
+export interface PendingInputNotification {
+  type: "pending-input-notify";
+  input: PendingInput;
+}
+
+export interface PromptSentNotification {
+  type: "prompt-sent";
+  worktreeId: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface PendingInputResolvedNotification {
+  type: "pending-input-resolved";
+  inputId: string;
+}
+
+export type DaemonToTuiMessage = RefreshResultMessage | AgentUpdatePassthroughMessage | PendingInputNotification | PromptSentNotification | PendingInputResolvedNotification;
 
 // --- All messages the daemon socket can receive ---
 export type DaemonInboundMessage = PubSubMessage | TuiToDaemonMessage;

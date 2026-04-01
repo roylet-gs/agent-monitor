@@ -4,11 +4,13 @@ import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
 import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone } from "../lib/agent-utils.js";
 import { PulsingDot } from "./PulsingDot.js";
-import type { WorktreeWithStatus, StandaloneSession } from "../lib/types.js";
+import type { WorktreeWithStatus, StandaloneSession, PendingInput } from "../lib/types.js";
 
 interface WorktreeDetailProps {
   worktree: WorktreeWithStatus | null;
   standaloneSession?: StandaloneSession | null;
+  pendingInput?: PendingInput | null;
+  managedMode?: boolean;
 }
 
 function statusColor(status: string | undefined): string {
@@ -45,7 +47,7 @@ function statusLabel(status: string | undefined): string {
   }
 }
 
-export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, standaloneSession }: WorktreeDetailProps) {
+export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, standaloneSession, pendingInput, managedMode }: WorktreeDetailProps) {
   if (standaloneSession) {
     return <StandaloneDetail session={standaloneSession} />;
   }
@@ -103,6 +105,28 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
             <Text dimColor>○ No active session</Text>
           )}
         </Box>
+
+        {/* Managed Mode: Pending Input */}
+        {managedMode && pendingInput && (
+          <Box flexDirection="column">
+            <Text bold color={pendingInput.type === "permission" ? "yellow" : "cyan"}>
+              {pendingInput.type === "permission" ? "Needs Permission" : "Needs Answer"}
+            </Text>
+            <Text wrap="truncate-end">{pendingInput.question?.slice(0, 200)}</Text>
+            {pendingInput.type === "permission" ? (
+              <Text dimColor>Press <Text color="green">[a]</Text>pprove or <Text color="red">[x]</Text> deny</Text>
+            ) : (
+              <Text dimColor>Press <Text color="yellow">[Enter]</Text> to respond</Text>
+            )}
+          </Box>
+        )}
+
+        {/* Managed Mode: Send message hint for idle/done */}
+        {managedMode && !pendingInput && (status === "idle" || status === "done") && worktree.agent_status?.session_id && (
+          <Box>
+            <Text dimColor>Press <Text color="yellow">[m]</Text> to send a message</Text>
+          </Box>
+        )}
 
         {/* Contextual Response */}
         {responseText && (

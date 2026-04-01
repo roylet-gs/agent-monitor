@@ -35,6 +35,9 @@ export const DEFAULT_SETTINGS: Settings = {
   linearRefreshOnManual: true,
   linearAutoNickname: true,
   maxLogSizeMb: 2,
+  managedMode: false,
+  managedModeTimeoutMs: 300000,
+  managedPromptMode: "headless",
 };
 
 export function loadSettings(): Settings {

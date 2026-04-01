@@ -113,4 +113,60 @@ describe("hooks-installer", () => {
     const { isGlobalHooksInstalled } = await import("../../src/lib/hooks-installer.js");
     expect(isGlobalHooksInstalled()).toBe(false);
   });
+
+  it("installs managed mode hooks with --managed flag and longer timeout", async () => {
+    const { installGlobalHooks } = await import("../../src/lib/hooks-installer.js");
+    installGlobalHooks(true);
+
+    const settingsPath = join(tempHome, ".claude", "settings.json");
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+
+    // PreToolUse should have --managed flag and 5 min timeout
+    const preToolUse = settings.hooks.PreToolUse[0];
+    expect(preToolUse.hooks[0].command).toContain("--managed");
+    expect(preToolUse.hooks[0].timeout).toBe(300000);
+
+    // PermissionRequest should also be installed in managed mode
+    expect(settings.hooks.PermissionRequest).toBeDefined();
+    expect(settings.hooks.PermissionRequest[0].hooks[0].command).toContain("--managed");
+    expect(settings.hooks.PermissionRequest[0].hooks[0].timeout).toBe(300000);
+
+    // Other events should NOT have --managed or long timeout
+    const stop = settings.hooks.Stop[0];
+    expect(stop.hooks[0].command).not.toContain("--managed");
+    expect(stop.hooks[0].timeout).toBe(5000);
+  });
+
+  it("non-managed install does not add PermissionRequest hook", async () => {
+    const { installGlobalHooks } = await import("../../src/lib/hooks-installer.js");
+    installGlobalHooks(false);
+
+    const settingsPath = join(tempHome, ".claude", "settings.json");
+    const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+
+    expect(settings.hooks.PermissionRequest).toBeUndefined();
+    // PreToolUse should not have --managed flag
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).not.toContain("--managed");
+    expect(settings.hooks.PreToolUse[0].hooks[0].timeout).toBe(5000);
+  });
+
+  it("reinstallHooksForManagedMode toggles between modes", async () => {
+    const { installGlobalHooks, reinstallHooksForManagedMode } = await import(
+      "../../src/lib/hooks-installer.js"
+    );
+    installGlobalHooks(false);
+    const settingsPath = join(tempHome, ".claude", "settings.json");
+
+    // Switch to managed mode
+    reinstallHooksForManagedMode(true);
+    let settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    expect(settings.hooks.PermissionRequest).toBeDefined();
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain("--managed");
+
+    // Switch back to normal mode
+    reinstallHooksForManagedMode(false);
+    settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+    expect(settings.hooks.PermissionRequest).toBeUndefined();
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).not.toContain("--managed");
+  });
 });

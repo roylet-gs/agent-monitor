@@ -10,7 +10,7 @@ import { existsSync } from "fs";
 import { SOCKET_PATH, DAEMON_PID_PATH } from "./paths.js";
 import { log } from "./logger.js";
 import type { DaemonToTuiMessage } from "./daemon-types.js";
-import type { ForceRefreshMessage, ConfigReloadMessage } from "./daemon-types.js";
+import type { ForceRefreshMessage, ConfigReloadMessage, SendResponseMessage, SendPromptMessage } from "./daemon-types.js";
 
 export interface DaemonClientOptions {
   onData: (msg: DaemonToTuiMessage) => void;
@@ -191,6 +191,32 @@ export class DaemonClient {
   configReload(): void {
     if (!this.conn || !this._connected) return;
     const msg: ConfigReloadMessage = { type: "config-reload" };
+    try {
+      this.conn.write(JSON.stringify(msg) + "\n");
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Send a response to a waiting Claude agent (managed mode).
+   */
+  sendResponse(inputId: string, response: string, decision?: "allow" | "deny"): void {
+    if (!this.conn || !this._connected) return;
+    const msg: SendResponseMessage = { type: "send-response", inputId, response, decision };
+    try {
+      this.conn.write(JSON.stringify(msg) + "\n");
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Send a follow-up prompt to an idle/done Claude agent (managed mode).
+   */
+  sendPrompt(worktreeId: string, message: string): void {
+    if (!this.conn || !this._connected) return;
+    const msg: SendPromptMessage = { type: "send-prompt", worktreeId, message };
     try {
       this.conn.write(JSON.stringify(msg) + "\n");
     } catch {

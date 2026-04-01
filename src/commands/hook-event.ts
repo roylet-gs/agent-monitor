@@ -2,11 +2,14 @@ import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, getStandaloneSess
 import { getWorktreeRoot } from "../lib/git.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
+import { shouldBlockForInput, waitForManagedResponse } from "../lib/managed-bridge.js";
+import { loadSettings } from "../lib/settings.js";
 import type { AgentStatusType, HookEvent } from "../lib/types.js";
 
 export async function handleHookEvent(
   worktreePath: string,
-  eventOverride?: string
+  eventOverride?: string,
+  managed?: boolean
 ): Promise<void> {
   // Read stdin
   let stdinData = "";
@@ -82,6 +85,20 @@ export async function handleHookEvent(
     isOpen,
     updatedAt: new Date().toISOString(),
   }).catch(() => {});
+
+  // Managed mode: block and wait for user response for questions/permissions
+  if (managed && shouldBlockForInput(payload)) {
+    const settings = loadSettings();
+    const hookResponse = await waitForManagedResponse(
+      worktree.id,
+      sessionId,
+      payload,
+      settings.managedModeTimeoutMs
+    );
+    if (hookResponse) {
+      process.stdout.write(JSON.stringify(hookResponse));
+    }
+  }
 
   // Detect git push / gh pr create and publish a git-activity message
   // so the TUI can trigger a targeted PR/CI refresh

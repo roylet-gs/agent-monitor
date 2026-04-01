@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { dirname } from "path";
 import { APP_DIR, DB_PATH } from "./paths.js";
 import { log } from "./logger.js";
-import type { Repository, Worktree, AgentStatus, AgentStatusType, StandaloneSession } from "./types.js";
+import type { Repository, Worktree, AgentStatus, AgentStatusType, StandaloneSession, PendingInput } from "./types.js";
 import { randomUUID } from "crypto";
 
 let db: Database.Database | null = null;
@@ -62,6 +62,21 @@ function initSchema(db: Database.Database): void {
       is_open INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Pending inputs table (for managed mode — questions/permissions awaiting user response)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pending_inputs (
+      id TEXT PRIMARY KEY,
+      worktree_id TEXT NOT NULL,
+      session_id TEXT,
+      type TEXT NOT NULL,
+      question TEXT,
+      options TEXT,
+      tool_name TEXT,
+      tool_input TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 
@@ -348,6 +363,76 @@ export function pruneStaleStandaloneSessions(maxAgeMs: number = 60 * 60 * 1000):
     .prepare("DELETE FROM standalone_sessions WHERE is_open = 0 AND updated_at < ?")
     .run(cutoff);
   return result.changes;
+}
+
+// --- Pending Inputs (Managed Mode) ---
+
+export function insertPendingInput(input: PendingInput): void {
+  getDb()
+    .prepare(
+      `INSERT OR REPLACE INTO pending_inputs (id, worktree_id, session_id, type, question, options, tool_name, tool_input, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      input.worktreeId,
+      input.sessionId,
+      input.type,
+      input.question ?? null,
+      input.options ? JSON.stringify(input.options) : null,
+      input.toolName ?? null,
+      input.toolInput ? JSON.stringify(input.toolInput) : null,
+      input.createdAt
+    );
+}
+
+export function getPendingInput(id: string): PendingInput | undefined {
+  const row = getDb()
+    .prepare("SELECT * FROM pending_inputs WHERE id = ?")
+    .get(id) as Record<string, unknown> | undefined;
+  return row ? deserializePendingInput(row) : undefined;
+}
+
+export function getPendingInputForWorktree(worktreeId: string): PendingInput | undefined {
+  const row = getDb()
+    .prepare("SELECT * FROM pending_inputs WHERE worktree_id = ? ORDER BY created_at DESC LIMIT 1")
+    .get(worktreeId) as Record<string, unknown> | undefined;
+  return row ? deserializePendingInput(row) : undefined;
+}
+
+export function getAllPendingInputs(): PendingInput[] {
+  const rows = getDb()
+    .prepare("SELECT * FROM pending_inputs ORDER BY created_at DESC")
+    .all() as Record<string, unknown>[];
+  return rows.map(deserializePendingInput);
+}
+
+export function removePendingInput(id: string): void {
+  getDb().prepare("DELETE FROM pending_inputs WHERE id = ?").run(id);
+}
+
+export function removePendingInputsForWorktree(worktreeId: string): void {
+  getDb().prepare("DELETE FROM pending_inputs WHERE worktree_id = ?").run(worktreeId);
+}
+
+function deserializePendingInput(row: Record<string, unknown>): PendingInput {
+  return {
+    id: row.id as string,
+    worktreeId: row.worktree_id as string,
+    sessionId: (row.session_id as string) ?? null,
+    type: row.type as "question" | "permission",
+    question: (row.question as string) ?? undefined,
+    options: row.options ? JSON.parse(row.options as string) : undefined,
+    toolName: (row.tool_name as string) ?? undefined,
+    toolInput: row.tool_input ? JSON.parse(row.tool_input as string) : undefined,
+    createdAt: row.created_at as string,
+  };
+}
+
+export function getWorktreeById(id: string): Worktree | undefined {
+  return getDb()
+    .prepare("SELECT * FROM worktrees WHERE id = ?")
+    .get(id) as Worktree | undefined;
 }
 
 export function closeDb(): void {

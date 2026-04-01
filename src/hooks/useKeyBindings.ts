@@ -21,6 +21,10 @@ interface KeyBindingActions {
   onClaude: () => void;
   onQuit: () => void;
   onEscHint: (show: boolean) => void;
+  onMessage?: () => void;
+  onRespond?: () => void;
+  onApprove?: () => void;
+  onDeny?: () => void;
 }
 
 const ESC_DOUBLE_TAP_MS = 500;
@@ -99,6 +103,22 @@ export function useKeyBindings(actions: KeyBindingActions): void {
     if (input === "u") {
       actions.onUpdate?.();
       return;
+    }
+    if (input === "m") {
+      actions.onMessage?.();
+      return;
+    }
+    if (input === "a") {
+      if (actions.onApprove) {
+        actions.onApprove();
+        return;
+      }
+    }
+    if (input === "x") {
+      if (actions.onDeny) {
+        actions.onDeny();
+        return;
+      }
     }
     if (input === "q") {
       actions.onQuit();

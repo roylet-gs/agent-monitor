@@ -103,6 +103,9 @@ export interface Settings {
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
   maxLogSizeMb: number;
+  managedMode: boolean;
+  managedModeTimeoutMs: number;
+  managedPromptMode: "headless" | "interactive";
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
@@ -121,7 +124,9 @@ export type AppMode =
   | "deleting-worktree"
   | "run-script-prompt"
   | "delete-session-confirm"
-  | "setup";
+  | "setup"
+  | "respond-input"
+  | "send-prompt";
 
 export interface HookEvent {
   event: string;
@@ -139,6 +144,18 @@ export interface HookEvent {
   title?: string;
   notification_type?: string;
   permission_prompt?: boolean;
+}
+
+export interface PendingInput {
+  id: string;
+  worktreeId: string;
+  sessionId: string | null;
+  type: "question" | "permission";
+  question?: string;
+  options?: Array<{ label: string; description?: string }>;
+  toolName?: string;
+  toolInput?: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface StandaloneSession {

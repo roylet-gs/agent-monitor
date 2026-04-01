@@ -384,9 +384,32 @@ program
   .description("Receive hook event from stdin (internal)")
   .requiredOption("-w, --worktree <path>", "Worktree path")
   .option("-e, --event <name>", "Event name override")
+  .option("--managed", "Enable managed mode blocking for questions/permissions")
   .action(async (opts) => {
     const { handleHookEvent } = await import("./commands/hook-event.js");
-    await handleHookEvent(opts.worktree, opts.event);
+    await handleHookEvent(opts.worktree, opts.event, opts.managed);
+  });
+
+// --- Managed Mode commands ---
+
+program
+  .command("respond <target> [message]")
+  .description("Respond to a waiting Claude agent (managed mode)")
+  .option("--approve", "Approve a permission request")
+  .option("--deny", "Deny a permission request")
+  .option("--repo <path>", "Repository path")
+  .action(async (target, message, opts) => {
+    const { respond } = await import("./commands/respond.js");
+    await respond(target, message, opts);
+  });
+
+program
+  .command("prompt <target> <message>")
+  .description("Send a follow-up prompt to an idle/done Claude agent (managed mode)")
+  .option("--repo <path>", "Repository path")
+  .action(async (target, message, opts) => {
+    const { sendPrompt } = await import("./commands/prompt.js");
+    await sendPrompt(target, message, opts);
   });
 
 // --- Short aliases ---

@@ -40,7 +40,7 @@ import {
   remoteBranchExists,
 } from "./lib/git.js";
 import { syncWorktrees } from "./lib/sync.js";
-import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
+import { installGlobalHooks, isGlobalHooksInstalled, reinstallHooksForManagedMode } from "./lib/hooks-installer.js";
 import { openInIde, openClaudeInTerminal, openTerminal, focusTerminal } from "./lib/ide-launcher.js";
 import { killClaudeAtPath } from "./lib/process.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
@@ -49,6 +49,7 @@ import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
 import { SetupWizard } from "./components/SetupWizard.js";
+import { InputPrompt } from "./components/InputPrompt.js";
 import type { AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
@@ -87,6 +88,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
   const [terminalOpenedIds, setTerminalOpenedIds] = useState<Set<string>>(new Set());
+  const [managedTargetWorktreeId, setManagedTargetWorktreeId] = useState<string | null>(null);
   const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
@@ -126,7 +128,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [repositories.length > 0 && settings.autoSyncOnStartup]);
 
-  const { groups, flatWorktrees, standaloneSessions, refresh, lightRefresh, quickRefresh, refreshIntegrations } = useDaemon({
+  const { groups, flatWorktrees, standaloneSessions, pendingInputs, refresh, lightRefresh, quickRefresh, refreshIntegrations, sendResponse, sendPrompt } = useDaemon({
     repositories,
     settings,
     onAgentUpdate: (msg) => {
@@ -803,10 +805,15 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // Handle settings save
   const handleSaveSettings = useCallback(
     (newSettings: Settings) => {
+      const prevManagedMode = settings.managedMode;
       setSettings(newSettings);
       saveSettings(newSettings);
+      // Reinstall hooks when managed mode toggles
+      if (newSettings.managedMode !== prevManagedMode) {
+        reinstallHooksForManagedMode(newSettings.managedMode);
+      }
     },
-    []
+    [settings.managedMode]
   );
 
   // Check for updates
@@ -848,7 +855,28 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     mode,
     busy,
     onSelect: setSelectedIndex,
-    onEnter: handleOpen,
+    onEnter: () => {
+      // In managed mode, Enter on a waiting worktree with a pending question enters respond mode
+      if (settings.managedMode) {
+        const wt = flatWorktrees[selectedIndex];
+        if (wt) {
+          const pi = Array.from(pendingInputs.values()).find(p => p.worktreeId === wt.id);
+          if (pi) {
+            if (pi.type === "question") {
+              setManagedTargetWorktreeId(wt.id);
+              setMode("respond-input");
+              return;
+            }
+            // Permission: approve on enter
+            if (pi.type === "permission") {
+              sendResponse(pi.id, "", "allow");
+              return;
+            }
+          }
+        }
+      }
+      handleOpen();
+    },
     onNew: () => {
       if (repositories.length > 1) {
         // Show repo picker first, then chain into new-worktree
@@ -914,6 +942,40 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     onClaude: handleOpenClaude,
     onQuit: () => exit(),
     onEscHint: setEscHint,
+    onMessage: settings.managedMode ? () => {
+      const wt = flatWorktrees[selectedIndex];
+      if (!wt) return;
+      const status = wt.agent_status?.status;
+      if ((status === "idle" || status === "done") && wt.agent_status?.session_id) {
+        setManagedTargetWorktreeId(wt.id);
+        setMode("send-prompt");
+      }
+    } : undefined,
+    onRespond: settings.managedMode ? () => {
+      const wt = flatWorktrees[selectedIndex];
+      if (!wt) return;
+      const pi = Array.from(pendingInputs.values()).find(p => p.worktreeId === wt.id);
+      if (pi && pi.type === "question") {
+        setManagedTargetWorktreeId(wt.id);
+        setMode("respond-input");
+      }
+    } : undefined,
+    onApprove: settings.managedMode ? () => {
+      const wt = flatWorktrees[selectedIndex];
+      if (!wt) return;
+      const pi = Array.from(pendingInputs.values()).find(p => p.worktreeId === wt.id);
+      if (pi && pi.type === "permission") {
+        sendResponse(pi.id, "", "allow");
+      }
+    } : undefined,
+    onDeny: settings.managedMode ? () => {
+      const wt = flatWorktrees[selectedIndex];
+      if (!wt) return;
+      const pi = Array.from(pendingInputs.values()).find(p => p.worktreeId === wt.id);
+      if (pi && pi.type === "permission") {
+        sendResponse(pi.id, "", "deny");
+      }
+    } : undefined,
   });
 
   // Clear error after 3 seconds
@@ -1073,6 +1135,49 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         ) : null;
       })()}
 
+      {mode === "respond-input" && (() => {
+        const wt = flatWorktrees.find(w => w.id === managedTargetWorktreeId);
+        const pi = managedTargetWorktreeId
+          ? Array.from(pendingInputs.values()).find(p => p.worktreeId === managedTargetWorktreeId)
+          : null;
+        return pi ? (
+          <InputPrompt
+            pendingInput={pi}
+            branchName={wt?.branch}
+            onSubmit={(response, decision) => {
+              sendResponse(pi.id, response, decision);
+              setManagedTargetWorktreeId(null);
+              setMode("dashboard");
+            }}
+            onCancel={() => {
+              setManagedTargetWorktreeId(null);
+              setMode("dashboard");
+            }}
+          />
+        ) : null;
+      })()}
+
+      {mode === "send-prompt" && (() => {
+        const wt = flatWorktrees.find(w => w.id === managedTargetWorktreeId);
+        return (
+          <InputPrompt
+            composeMode
+            branchName={wt?.branch}
+            onSubmit={(message) => {
+              if (managedTargetWorktreeId && message.trim()) {
+                sendPrompt(managedTargetWorktreeId, message);
+              }
+              setManagedTargetWorktreeId(null);
+              setMode("dashboard");
+            }}
+            onCancel={() => {
+              setManagedTargetWorktreeId(null);
+              setMode("dashboard");
+            }}
+          />
+        );
+      })()}
+
       {mode === "settings" && (
         <SettingsPanel
           settings={settings}
@@ -1106,6 +1211,8 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           linearEnabled={settings.linearEnabled}
           ideIsTerm={settings.ide === "terminal"}
           integrationLoading={integrationLoading}
+          managedMode={settings.managedMode}
+          pendingInputs={pendingInputs}
         />
       )}
     </Box>

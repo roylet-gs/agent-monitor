@@ -29,6 +29,8 @@ type SettingsField =
   | "linearPolling"
   | "linearRefreshOnManual"
   | "linearAutoNickname"
+  | "managedMode"
+  | "managedPromptMode"
   | "repos"
   | "checkForUpdates"
   | "resetSettings"
@@ -54,6 +56,8 @@ const FIELDS: SettingsField[] = [
   "linearPolling",
   "linearRefreshOnManual",
   "linearAutoNickname",
+  "managedMode",
+  "managedPromptMode",
   "repos",
   "checkForUpdates",
   "resetSettings",
@@ -80,6 +84,8 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearPolling: "How often to fetch Linear ticket status (minimum 10s)",
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
+  managedMode: "Control Claude instances from the TUI — respond to questions, approve permissions, send prompts",
+  managedPromptMode: "How to send follow-up prompts to Claude (headless runs in background, interactive opens terminal)",
   repos: "Monitored repositories and their startup scripts",
   checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
@@ -314,6 +320,19 @@ export function SettingsPanel({
 
     if (activeField === "linearAutoNickname" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearAutoNickname: !s.linearAutoNickname }));
+      return;
+    }
+
+    if (activeField === "managedMode" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, managedMode: !s.managedMode }));
+      return;
+    }
+
+    if (activeField === "managedPromptMode" && (key.return || input === " ")) {
+      const MODES: Settings["managedPromptMode"][] = ["headless", "interactive"];
+      const idx = MODES.indexOf(current.managedPromptMode);
+      const next = MODES[(idx + 1) % MODES.length]!;
+      setCurrent((s) => ({ ...s, managedPromptMode: next }));
       return;
     }
 
@@ -647,6 +666,26 @@ export function SettingsPanel({
             [{current.linearAutoNickname ? "✓" : " "}]
           </Text>
         </Box>
+
+        {/* === Managed Mode Section === */}
+        {renderSectionHeader("Managed Mode")}
+        <Box>
+          <Text bold={activeField === "managedMode"}>
+            {activeField === "managedMode" ? "▸" : " "} Enabled:{" "}
+          </Text>
+          <Text color={current.managedMode ? "green" : "gray"}>
+            [{current.managedMode ? "✓" : " "}]
+          </Text>
+        </Box>
+
+        {current.managedMode && (
+          <Box>
+            <Text bold={activeField === "managedPromptMode"}>
+              {activeField === "managedPromptMode" ? "▸" : " "} Prompt Mode:{" "}
+            </Text>
+            <Text color="cyan">{current.managedPromptMode}</Text>
+          </Box>
+        )}
 
         {/* === Repositories Section === */}
         {renderSectionHeader("Repositories")}

@@ -1,4 +1,4 @@
-import type { AgentStatusType } from "./types.js";
+import type { AgentStatusType, PendingInput } from "./types.js";
 
 export interface AgentStatusUpdateMessage {
   type: "agent-status-update";
@@ -30,4 +30,10 @@ export interface StandaloneStatusUpdateMessage {
   updatedAt: string;
 }
 
-export type PubSubMessage = AgentStatusUpdateMessage | GitActivityMessage | StandaloneStatusUpdateMessage;
+export interface PendingInputMessage {
+  type: "pending-input";
+  input: PendingInput;
+  hookConnectionId: string;
+}
+
+export type PubSubMessage = AgentStatusUpdateMessage | GitActivityMessage | StandaloneStatusUpdateMessage | PendingInputMessage;

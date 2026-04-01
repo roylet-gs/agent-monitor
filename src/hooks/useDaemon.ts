@@ -11,7 +11,7 @@ import { usePubSub } from "./usePubSub.js";
 import { log } from "../lib/logger.js";
 import type { DaemonToTuiMessage } from "../lib/daemon-types.js";
 import type { PubSubMessage } from "../lib/pubsub-types.js";
-import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession, Repository, Settings } from "../lib/types.js";
+import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession, Repository, Settings, PendingInput } from "../lib/types.js";
 
 export interface DaemonHookConfig {
   repositories: Repository[];
@@ -23,10 +23,13 @@ export interface DaemonHookResult {
   groups: WorktreeGroup[];
   flatWorktrees: WorktreeWithStatus[];
   standaloneSessions: StandaloneSession[];
+  pendingInputs: Map<string, PendingInput>;
   refresh: () => Promise<void>;
   lightRefresh: () => Promise<void>;
   quickRefresh: () => Promise<void>;
   refreshIntegrations: (onStatus?: (status: string | null) => void) => Promise<void>;
+  sendResponse: (inputId: string, response: string, decision?: "allow" | "deny") => void;
+  sendPrompt: (worktreeId: string, message: string) => void;
   connected: boolean;
 }
 
@@ -44,6 +47,7 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
   }>({ groups: [], flatWorktrees: [], standaloneSessions: [] });
 
   const [connected, setConnected] = useState(false);
+  const [pendingInputsState, setPendingInputs] = useState<Map<string, PendingInput>>(new Map());
   // Start in fallback mode so useWorktrees loads data immediately.
   // Switch to daemon mode only if connection succeeds.
   const [fallbackMode, setFallbackMode] = useState(true);
@@ -163,6 +167,18 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
           }
         } else if (msg.type === "agent-update") {
           onAgentUpdateRef.current?.(msg.original);
+        } else if (msg.type === "pending-input-notify") {
+          setPendingInputs(prev => {
+            const next = new Map(prev);
+            next.set(msg.input.id, msg.input);
+            return next;
+          });
+        } else if (msg.type === "pending-input-resolved") {
+          setPendingInputs(prev => {
+            const next = new Map(prev);
+            next.delete(msg.inputId);
+            return next;
+          });
         }
       },
       onConnected: () => {
@@ -228,6 +244,20 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     }
   }, []);
 
+  const sendResponse = useCallback((inputId: string, response: string, decision?: "allow" | "deny") => {
+    clientRef.current?.sendResponse(inputId, response, decision);
+    // Optimistically remove from local state
+    setPendingInputs(prev => {
+      const next = new Map(prev);
+      next.delete(inputId);
+      return next;
+    });
+  }, []);
+
+  const sendPrompt = useCallback((worktreeId: string, message: string) => {
+    clientRef.current?.sendPrompt(worktreeId, message);
+  }, []);
+
   const refreshIntegrations = useCallback(async (onStatus?: (status: string | null) => void) => {
     const client = clientRef.current;
     if (client?.connected) {
@@ -245,10 +275,13 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       groups: daemonData.groups,
       flatWorktrees: daemonData.flatWorktrees,
       standaloneSessions: daemonData.standaloneSessions,
+      pendingInputs: pendingInputsState,
       refresh,
       lightRefresh,
       quickRefresh,
       refreshIntegrations,
+      sendResponse,
+      sendPrompt,
       connected: true,
     };
   }
@@ -257,10 +290,13 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     groups: fallbackWorktrees.groups,
     flatWorktrees: fallbackWorktrees.flatWorktrees,
     standaloneSessions: fallbackStandalone.sessions,
+    pendingInputs: pendingInputsState,
     refresh,
     lightRefresh,
     quickRefresh,
     refreshIntegrations,
+    sendResponse,
+    sendPrompt,
     connected: false,
   };
 }

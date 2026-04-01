@@ -18,15 +18,25 @@ type HooksConfig = Record<string, HookMatcher[]>;
 
 const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Stop", "Notification", "SessionStart", "SessionEnd", "UserPromptSubmit", "SubagentStart", "SubagentStop"] as const;
 
+// PermissionRequest is only needed for managed mode
+const MANAGED_EXTRA_EVENTS = ["PermissionRequest"] as const;
+
+// Events that should use the managed mode blocking bridge (longer timeout + --managed flag)
+const MANAGED_BLOCKING_EVENTS = new Set(["PreToolUse", "PermissionRequest"]);
+
 const HOOK_MARKER = "am hook-event";
 
-function buildHookEntry(event: string): HookMatcher {
+function buildHookEntry(event: string, managedMode = false): HookMatcher {
+  const useManaged = managedMode && MANAGED_BLOCKING_EVENTS.has(event);
+  const managedFlag = useManaged ? " --managed" : "";
+  const timeout = useManaged ? 300000 : 5000; // 5 min for managed blocking, 5s otherwise
+
   return {
     hooks: [
       {
         type: "command",
-        command: `cat | am hook-event --worktree "$CLAUDE_PROJECT_DIR" --event ${event}`,
-        timeout: 5000,
+        command: `cat | am hook-event --worktree "$CLAUDE_PROJECT_DIR" --event ${event}${managedFlag}`,
+        timeout,
       },
     ],
   };
@@ -60,27 +70,32 @@ function hasAmHook(matchers: HookMatcher[]): boolean {
   );
 }
 
-export function installGlobalHooks(): void {
+export function installGlobalHooks(managedMode = false): void {
   const settings = readGlobalSettings();
   const hooks = (settings.hooks ?? {}) as HooksConfig;
 
-  for (const event of HOOK_EVENTS) {
+  const allEvents = managedMode
+    ? [...HOOK_EVENTS, ...MANAGED_EXTRA_EVENTS]
+    : [...HOOK_EVENTS];
+
+  for (const event of allEvents) {
     const existing = hooks[event] ?? [];
     if (!hasAmHook(existing)) {
-      hooks[event] = [...existing, buildHookEntry(event)];
+      hooks[event] = [...existing, buildHookEntry(event, managedMode)];
     }
   }
 
   settings.hooks = hooks;
   writeGlobalSettings(settings);
-  log("info", "hooks", `Installed global hooks into ${getGlobalSettingsPath()}`);
+  log("info", "hooks", `Installed global hooks into ${getGlobalSettingsPath()} (managedMode=${managedMode})`);
 }
 
 export function uninstallGlobalHooks(): void {
   const settings = readGlobalSettings();
   const hooks = (settings.hooks ?? {}) as HooksConfig;
 
-  for (const event of HOOK_EVENTS) {
+  const allEvents = [...HOOK_EVENTS, ...MANAGED_EXTRA_EVENTS];
+  for (const event of allEvents) {
     const existing = hooks[event];
     if (!existing) continue;
     hooks[event] = existing.filter(
@@ -100,6 +115,16 @@ export function uninstallGlobalHooks(): void {
 
   writeGlobalSettings(settings);
   log("info", "hooks", `Uninstalled global hooks from ${getGlobalSettingsPath()}`);
+}
+
+/**
+ * Reinstall hooks with the correct timeout/flags for managed mode.
+ * Removes existing AM hooks first, then installs fresh.
+ */
+export function reinstallHooksForManagedMode(enabled: boolean): void {
+  uninstallGlobalHooks();
+  installGlobalHooks(enabled);
+  log("info", "hooks", `Reinstalled hooks for managed mode: ${enabled ? "ON" : "OFF"}`);
 }
 
 export function isGlobalHooksInstalled(): boolean {

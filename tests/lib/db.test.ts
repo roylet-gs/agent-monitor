@@ -260,6 +260,133 @@ describe("db", () => {
     });
   });
 
+  describe("pending_inputs", () => {
+    it("insertPendingInput creates a pending input", () => {
+      db.insertPendingInput({
+        id: "pi-1",
+        worktreeId: "wt-1",
+        sessionId: "sess-1",
+        type: "question",
+        question: "Which framework?",
+        options: [{ label: "React" }, { label: "Vue" }],
+        createdAt: new Date().toISOString(),
+      });
+      const found = db.getPendingInput("pi-1");
+      expect(found).toBeDefined();
+      expect(found!.id).toBe("pi-1");
+      expect(found!.type).toBe("question");
+      expect(found!.question).toBe("Which framework?");
+      expect(found!.options).toHaveLength(2);
+      expect(found!.options![0]!.label).toBe("React");
+    });
+
+    it("getPendingInputForWorktree returns latest for a worktree", () => {
+      db.insertPendingInput({
+        id: "pi-1",
+        worktreeId: "wt-1",
+        sessionId: null,
+        type: "question",
+        question: "First?",
+        createdAt: "2024-01-01T00:00:00Z",
+      });
+      db.insertPendingInput({
+        id: "pi-2",
+        worktreeId: "wt-1",
+        sessionId: null,
+        type: "permission",
+        question: "Allow Bash?",
+        toolName: "Bash",
+        createdAt: "2024-01-02T00:00:00Z",
+      });
+      const latest = db.getPendingInputForWorktree("wt-1");
+      expect(latest).toBeDefined();
+      expect(latest!.id).toBe("pi-2");
+      expect(latest!.type).toBe("permission");
+    });
+
+    it("getAllPendingInputs returns all inputs", () => {
+      db.insertPendingInput({
+        id: "pi-1",
+        worktreeId: "wt-1",
+        sessionId: null,
+        type: "question",
+        question: "Q1",
+        createdAt: new Date().toISOString(),
+      });
+      db.insertPendingInput({
+        id: "pi-2",
+        worktreeId: "wt-2",
+        sessionId: null,
+        type: "permission",
+        question: "P1",
+        createdAt: new Date().toISOString(),
+      });
+      expect(db.getAllPendingInputs()).toHaveLength(2);
+    });
+
+    it("removePendingInput deletes by id", () => {
+      db.insertPendingInput({
+        id: "pi-1",
+        worktreeId: "wt-1",
+        sessionId: null,
+        type: "question",
+        question: "Q1",
+        createdAt: new Date().toISOString(),
+      });
+      db.removePendingInput("pi-1");
+      expect(db.getPendingInput("pi-1")).toBeUndefined();
+    });
+
+    it("removePendingInputsForWorktree clears all for a worktree", () => {
+      db.insertPendingInput({
+        id: "pi-1",
+        worktreeId: "wt-1",
+        sessionId: null,
+        type: "question",
+        question: "Q1",
+        createdAt: new Date().toISOString(),
+      });
+      db.insertPendingInput({
+        id: "pi-2",
+        worktreeId: "wt-1",
+        sessionId: null,
+        type: "permission",
+        question: "P1",
+        createdAt: new Date().toISOString(),
+      });
+      db.removePendingInputsForWorktree("wt-1");
+      expect(db.getAllPendingInputs()).toHaveLength(0);
+    });
+
+    it("getPendingInput returns undefined for non-existent id", () => {
+      expect(db.getPendingInput("nope")).toBeUndefined();
+    });
+
+    it("handles permission input with toolInput JSON", () => {
+      db.insertPendingInput({
+        id: "pi-1",
+        worktreeId: "wt-1",
+        sessionId: null,
+        type: "permission",
+        question: "Allow?",
+        toolName: "Bash",
+        toolInput: { command: "rm -rf /tmp" },
+        createdAt: new Date().toISOString(),
+      });
+      const found = db.getPendingInput("pi-1");
+      expect(found!.toolName).toBe("Bash");
+      expect(found!.toolInput).toEqual({ command: "rm -rf /tmp" });
+    });
+
+    it("getWorktreeById finds worktree by id", () => {
+      const repo = db.addRepository("/tmp/repo", "repo");
+      const wt = db.upsertWorktree(repo.id, "/tmp/wt", "main", "main");
+      const found = db.getWorktreeById(wt.id);
+      expect(found).toBeDefined();
+      expect(found!.branch).toBe("main");
+    });
+  });
+
   describe("standalone_sessions", () => {
     it("upsertStandaloneSession creates a new session", () => {
       const session = db.upsertStandaloneSession("/tmp/standalone", "executing", "sess-1", "hello", "summary", true);
