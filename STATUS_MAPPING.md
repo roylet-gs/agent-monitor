@@ -27,7 +27,9 @@
 
 | Condition                                                             | Result             |
 | --------------------------------------------------------------------- | ------------------ |
-| `notification_type === "permission_prompt"` or `"elicitation_dialog"` or `"idle_prompt"` | `waiting`          |
+| `notification_type === "permission_prompt"` or `"elicitation_dialog"` | `waiting`          |
+| `notification_type === "idle_prompt"` and `currentStatus !== "done"`  | `waiting`          |
+| `notification_type === "idle_prompt"` and `currentStatus === "done"`  | No change (`null`) |
 | Other notification types                                              | No change (`null`) |
 
 ### SessionStart / SessionEnd

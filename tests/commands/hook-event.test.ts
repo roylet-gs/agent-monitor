@@ -204,6 +204,12 @@ describe("mapEventToStatus", () => {
     ).toBe("waiting");
   });
 
+  it("Notification with idle_prompt after done -> null (preserve done)", () => {
+    expect(
+      mapEventToStatus({ event: "Notification", notification_type: "idle_prompt" }, "done")
+    ).toBe(null);
+  });
+
   it("Notification with other type -> null (skip)", () => {
     expect(
       mapEventToStatus({ event: "Notification", notification_type: "info" })
