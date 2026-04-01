@@ -18,6 +18,7 @@ import { fetchAllPrInfo } from "./github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
 import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
 import { isEffectivelyOpenStandalone } from "./agent-utils.js";
+import { spawnClaudeHeadless } from "./spawn-claude.js";
 import { syncWorktrees } from "./sync.js";
 import { realpathSync } from "fs";
 import type { PubSubMessage, PendingInputMessage } from "./pubsub-types.js";
@@ -297,27 +298,10 @@ function handleSendPrompt(worktreeId: string, message: string): void {
   }
 }
 
-function sendPromptHeadless(worktreePath: string, sessionId: string | null, message: string, worktreeId: string): void {
-  const { spawn } = require("child_process") as typeof import("child_process");
-
-  const args = sessionId
-    ? ["--resume", sessionId, "-p", message, "--allowedTools", "Read,Glob,Grep,Bash,Edit,Write"]
-    : ["-c", "-p", message, "--allowedTools", "Read,Glob,Grep,Bash,Edit,Write"];
-
-  log("info", "daemon", `Spawning headless claude in ${worktreePath} with args: ${args.join(" ").slice(0, 100)}`);
-
-  try {
-    const child = spawn("claude", args, {
-      cwd: worktreePath,
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-    broadcast({ type: "prompt-sent", worktreeId, success: true });
-  } catch (err) {
-    log("error", "daemon", `Failed to spawn claude: ${err}`);
-    broadcast({ type: "prompt-sent", worktreeId, success: false, error: String(err) });
-  }
+function sendPromptHeadless(_worktreePath: string, _sessionId: string | null, message: string, worktreeId: string): void {
+  spawnClaudeHeadless(worktreeId, message, (success, error) => {
+    broadcast({ type: "prompt-sent", worktreeId, success, error });
+  });
 }
 
 function sendPromptInteractive(worktreePath: string, sessionId: string | null, message: string, worktreeId: string): void {

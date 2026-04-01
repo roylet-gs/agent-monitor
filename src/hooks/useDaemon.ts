@@ -5,6 +5,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { DaemonClient } from "../lib/daemon-client.js";
+import { spawnClaudeHeadless } from "../lib/spawn-claude.js";
 import { useWorktrees, type WorktreeHookConfig } from "./useWorktrees.js";
 import { useStandaloneSessions } from "./useStandaloneSessions.js";
 import { usePubSub } from "./usePubSub.js";
@@ -17,6 +18,7 @@ export interface DaemonHookConfig {
   repositories: Repository[];
   settings: Settings;
   onAgentUpdate?: (msg: PubSubMessage) => void;
+  onPromptSent?: (worktreeId: string, success: boolean, error?: string) => void;
 }
 
 export interface DaemonHookResult {
@@ -37,7 +39,9 @@ const DISABLED_INTERVAL = 2_147_483_647; // max safe 32-bit int for setInterval
 const EMPTY_REPOS: Repository[] = []; // stable reference to avoid infinite re-render loops
 
 export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
-  const { repositories, settings, onAgentUpdate } = config;
+  const { repositories, settings, onAgentUpdate, onPromptSent } = config;
+  const onPromptSentRef = useRef(onPromptSent);
+  onPromptSentRef.current = onPromptSent;
 
   // --- Daemon mode state ---
   const [daemonData, setDaemonData] = useState<{
@@ -173,6 +177,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
             next.set(msg.input.id, msg.input);
             return next;
           });
+        } else if (msg.type === "prompt-sent") {
+          onPromptSentRef.current?.(msg.worktreeId, msg.success, msg.error);
         } else if (msg.type === "pending-input-resolved") {
           setPendingInputs(prev => {
             const next = new Map(prev);
@@ -255,7 +261,15 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
   }, []);
 
   const sendPrompt = useCallback((worktreeId: string, message: string) => {
-    clientRef.current?.sendPrompt(worktreeId, message);
+    const client = clientRef.current;
+    if (client?.connected) {
+      client.sendPrompt(worktreeId, message);
+    } else {
+      // Fallback: spawn claude directly when daemon isn't running
+      spawnClaudeHeadless(worktreeId, message, (success, error) => {
+        onPromptSentRef.current?.(worktreeId, success, error);
+      });
+    }
   }, []);
 
   const refreshIntegrations = useCallback(async (onStatus?: (status: string | null) => void) => {

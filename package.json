@@ -19,7 +19,7 @@
     "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli.js",
     "start": "tsx src/cli.tsx",
     "dev": "tsx --watch src/cli.tsx",
     "test": "vitest run",

@@ -136,6 +136,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         log("info", "app", `Git activity detected: ${msg.activity} on ${msg.branch}`);
       }
     },
+    onPromptSent: (worktreeId, success, err) => {
+      if (success) {
+        setBusy("Prompt sent — waiting for Claude to pick it up...");
+        setTimeout(() => setBusy(null), 3000);
+      } else {
+        setError(`Failed to send prompt: ${err ?? "unknown error"}`);
+      }
+    },
   });
 
   // Keep refs to always call the latest refresh (avoids stale closures in async handlers)
