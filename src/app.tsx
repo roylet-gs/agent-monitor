@@ -954,7 +954,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       const wt = flatWorktrees[selectedIndex];
       if (!wt) return;
       const status = wt.agent_status?.status;
-      if ((status === "idle" || status === "done") && wt.agent_status?.session_id) {
+      if (wt.agent_status?.is_open && (status === "idle" || status === "done") && wt.agent_status?.session_id) {
         setManagedTargetWorktreeId(wt.id);
         setMode("send-prompt");
       }

@@ -122,7 +122,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
         )}
 
         {/* Managed Mode: Send message hint for idle/done */}
-        {managedMode && !pendingInput && (status === "idle" || status === "done") && worktree.agent_status?.session_id && (
+        {managedMode && !pendingInput && open && (status === "idle" || status === "done") && worktree.agent_status?.session_id && (
           <Box>
             <Text dimColor>Press <Text color="yellow">[m]</Text> to send a message</Text>
           </Box>

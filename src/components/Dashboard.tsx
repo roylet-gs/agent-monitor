@@ -63,7 +63,8 @@ export const Dashboard = React.memo(function Dashboard({
     : null;
 
   const selectedStatus = selectedWorktree?.agent_status?.status;
-  const selectedCanMessage = managedMode && !selectedPendingInput &&
+  const selectedIsOpen = !!selectedWorktree?.agent_status?.is_open;
+  const selectedCanMessage = managedMode && !selectedPendingInput && selectedIsOpen &&
     (selectedStatus === "idle" || selectedStatus === "done") &&
     !!selectedWorktree?.agent_status?.session_id;
 
