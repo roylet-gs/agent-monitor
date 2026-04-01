@@ -84,6 +84,22 @@ export interface CommitInfo {
   relative_time: string;
 }
 
+export type SystemSound =
+  | "Basso"
+  | "Blow"
+  | "Bottle"
+  | "Frog"
+  | "Funk"
+  | "Glass"
+  | "Hero"
+  | "Morse"
+  | "Ping"
+  | "Pop"
+  | "Purr"
+  | "Sosumi"
+  | "Submarine"
+  | "Tink";
+
 export interface Settings {
   ide: "cursor" | "vscode" | "terminal";
   defaultBranchPrefix: string;
@@ -92,6 +108,9 @@ export interface Settings {
   autoSyncOnStartup: boolean;
   compactView: boolean;
   hideMainBranch: boolean;
+  audioNotifications: boolean;
+  audioWaitingSound: SystemSound;
+  audioDoneSound: SystemSound;
   ghPrStatus: boolean;
   ghPollingIntervalMs: number;
   logLevel: "debug" | "info" | "warn" | "error";

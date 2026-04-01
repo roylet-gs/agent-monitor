@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { verifyLinearApiKey } from "../lib/linear.js";
+import { playSound, SYSTEM_SOUNDS } from "../lib/audio.js";
 import type { UpdateInfo } from "../hooks/useUpdateCheck.js";
 import { DEFAULT_SETTINGS } from "../lib/settings.js";
 import type { Settings, Repository } from "../lib/types.js";
@@ -18,6 +19,9 @@ type SettingsField =
   | "autoSync"
   | "compactView"
   | "hideMainBranch"
+  | "audioNotifications"
+  | "audioWaitingSound"
+  | "audioDoneSound"
   | "logLevel"
   | "maxLogSize"
   | "ghPrStatus"
@@ -42,6 +46,9 @@ const FIELDS: SettingsField[] = [
   "autoSync",
   "compactView",
   "hideMainBranch",
+  "audioNotifications",
+  "audioWaitingSound",
+  "audioDoneSound",
   "polling",
   "logLevel",
   "maxLogSize",
@@ -68,6 +75,9 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   autoSync: "Automatically sync worktree status from git on startup",
   compactView: "Show worktrees in a compact single-line format",
   hideMainBranch: "Hide the main/master branch from the worktree list",
+  audioNotifications: "Play a sound when an agent is waiting or done",
+  audioWaitingSound: "Sound to play when an agent needs attention",
+  audioDoneSound: "Sound to play when an agent finishes",
   polling: "How often to check agent status (minimum 0.5s)",
   logLevel: "Verbosity of debug log file at ~/.agent-monitor/debug.log",
   maxLogSize: "Maximum debug log file size before rotation (minimum 1 MB)",
@@ -236,12 +246,28 @@ export function SettingsPanel({
     }
 
     if (key.tab || key.downArrow) {
-      setFieldIndex((i) => Math.min(FIELDS.length - 1, i + 1));
+      setFieldIndex((i) => {
+        let next = Math.min(FIELDS.length - 1, i + 1);
+        // Skip sound selectors when audio is disabled
+        while (next < FIELDS.length - 1 && !current.audioNotifications &&
+          (FIELDS[next] === "audioWaitingSound" || FIELDS[next] === "audioDoneSound")) {
+          next++;
+        }
+        return next;
+      });
       return;
     }
 
     if (key.upArrow) {
-      setFieldIndex((i) => Math.max(0, i - 1));
+      setFieldIndex((i) => {
+        let next = Math.max(0, i - 1);
+        // Skip sound selectors when audio is disabled
+        while (next > 0 && !current.audioNotifications &&
+          (FIELDS[next] === "audioWaitingSound" || FIELDS[next] === "audioDoneSound")) {
+          next--;
+        }
+        return next;
+      });
       return;
     }
 
@@ -284,6 +310,31 @@ export function SettingsPanel({
 
     if (activeField === "hideMainBranch" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, hideMainBranch: !s.hideMainBranch }));
+      return;
+    }
+
+    if (activeField === "audioNotifications" && (key.return || input === " ")) {
+      setCurrent((s) => {
+        const next = !s.audioNotifications;
+        if (next) playSound(s.audioDoneSound);
+        return { ...s, audioNotifications: next };
+      });
+      return;
+    }
+
+    if (activeField === "audioWaitingSound" && (key.return || input === " ")) {
+      const idx = SYSTEM_SOUNDS.indexOf(current.audioWaitingSound);
+      const next = SYSTEM_SOUNDS[(idx + 1) % SYSTEM_SOUNDS.length]!;
+      setCurrent((s) => ({ ...s, audioWaitingSound: next }));
+      playSound(next);
+      return;
+    }
+
+    if (activeField === "audioDoneSound" && (key.return || input === " ")) {
+      const idx = SYSTEM_SOUNDS.indexOf(current.audioDoneSound);
+      const next = SYSTEM_SOUNDS[(idx + 1) % SYSTEM_SOUNDS.length]!;
+      setCurrent((s) => ({ ...s, audioDoneSound: next }));
+      playSound(next);
       return;
     }
 
@@ -487,6 +538,36 @@ export function SettingsPanel({
             [{current.hideMainBranch ? "✓" : " "}]
           </Text>
         </Box>
+        <Box>
+          <Text bold={activeField === "audioNotifications"}>
+            {activeField === "audioNotifications" ? "▸" : " "} Audio Notifications:{" "}
+          </Text>
+          <Text color={current.audioNotifications ? "green" : "gray"}>
+            [{current.audioNotifications ? "✓" : " "}]
+          </Text>
+        </Box>
+        {current.audioNotifications && (
+          <>
+            <Box>
+              <Text bold={activeField === "audioWaitingSound"}>
+                {activeField === "audioWaitingSound" ? "▸" : " "}   Waiting Sound:{" "}
+              </Text>
+              <Text color="cyan">{current.audioWaitingSound}</Text>
+              {activeField === "audioWaitingSound" && (
+                <Text dimColor> (Enter to cycle & preview)</Text>
+              )}
+            </Box>
+            <Box>
+              <Text bold={activeField === "audioDoneSound"}>
+                {activeField === "audioDoneSound" ? "▸" : " "}   Done Sound:{" "}
+              </Text>
+              <Text color="cyan">{current.audioDoneSound}</Text>
+              {activeField === "audioDoneSound" && (
+                <Text dimColor> (Enter to cycle & preview)</Text>
+              )}
+            </Box>
+          </>
+        )}
         <Box>
           <Text bold={activeField === "polling"}>
             {activeField === "polling" ? "▸" : " "} Status Poll Interval (s):{" "}
