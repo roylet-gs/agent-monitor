@@ -84,8 +84,8 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearPolling: "How often to fetch Linear ticket status (minimum 10s)",
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
-  managedMode: "Control Claude instances from the TUI — respond to questions, approve permissions, send prompts",
-  managedPromptMode: "How to send follow-up prompts to Claude (headless runs in background, interactive opens terminal)",
+  managedMode: "Control Claude agents from this dashboard. When enabled, a new action bar appears showing contextual actions: approve/deny permissions with [a]/[x], answer questions with Enter, send messages to idle agents with [m]. Requires restarting active Claude sessions to pick up new hooks.",
+  managedPromptMode: "How to send follow-up prompts to idle/done Claude agents. Headless: runs claude -p in the background. Interactive: opens a new terminal window.",
   repos: "Monitored repositories and their startup scripts",
   checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
@@ -669,26 +669,6 @@ export function SettingsPanel({
 
         {/* === Managed Mode Section === */}
         {renderSectionHeader("Managed Mode")}
-        <Box flexDirection="column" marginBottom={1}>
-          <Text dimColor>
-            Control Claude agents from this dashboard. When enabled, a new
-          </Text>
-          <Text dimColor>
-            action bar appears above the main controls showing contextual actions:
-          </Text>
-          <Text dimColor>
-            {"  "}- Permission requests: approve [a] or deny [x] directly
-          </Text>
-          <Text dimColor>
-            {"  "}- Questions from Claude: press Enter to type your answer
-          </Text>
-          <Text dimColor>
-            {"  "}- Idle agents: press [m] to send a follow-up message
-          </Text>
-          <Text dimColor>
-            Requires restarting active Claude sessions to pick up new hooks.
-          </Text>
-        </Box>
         <Box>
           <Text bold={activeField === "managedMode"}>
             {activeField === "managedMode" ? "▸" : " "} Enabled:{" "}
