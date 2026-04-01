@@ -47,9 +47,10 @@ import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
+import { playSound } from "./lib/audio.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
 import { SetupWizard } from "./components/SetupWizard.js";
-import type { AppMode, Repository, Settings } from "./lib/types.js";
+import type { AgentStatusType, AppMode, Repository, Settings } from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
@@ -186,6 +187,23 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         newUnseen.add(s.id);
         seen.set(s.id, currentStatus);
       }
+    }
+
+    // Play audio cues for new status changes (deduplicated per status type)
+    if (settings.audioNotifications && newUnseen.size > 0) {
+      const newStatuses = new Set<AgentStatusType>();
+      for (const wt of flatWorktrees) {
+        if (newUnseen.has(wt.id)) {
+          newStatuses.add(wt.agent_status?.status ?? "none");
+        }
+      }
+      for (const s of standaloneSessions) {
+        if (newUnseen.has(s.id)) {
+          newStatuses.add(s.status);
+        }
+      }
+      if (newStatuses.has("waiting")) playSound(settings.audioWaitingSound);
+      if (newStatuses.has("done")) playSound(settings.audioDoneSound);
     }
 
     // Determine which item is currently selected so we can mark it seen immediately
