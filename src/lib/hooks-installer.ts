@@ -16,17 +16,25 @@ interface HookMatcher {
 
 type HooksConfig = Record<string, HookMatcher[]>;
 
-const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Stop", "Notification", "SessionStart", "SessionEnd", "UserPromptSubmit", "SubagentStart", "SubagentStop"] as const;
+const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "Stop", "Notification", "SessionStart", "SessionEnd", "UserPromptSubmit", "SubagentStart", "SubagentStop", "PermissionRequest"] as const;
 
 const HOOK_MARKER = "am hook-event";
 
+// Events that coordinate with Claude Code's permission layer. Claude Code
+// rewrites these entries to include --managed with a 5-minute timeout on its
+// own; writing them in that shape up front keeps install idempotent so Claude
+// Code doesn't need to modify settings.json after every upgrade.
+const MANAGED_HOOK_EVENTS = new Set<string>(["PermissionRequest"]);
+
 function buildHookEntry(event: string): HookMatcher {
+  const isManaged = MANAGED_HOOK_EVENTS.has(event);
+  const managedFlag = isManaged ? " --managed" : "";
   return {
     hooks: [
       {
         type: "command",
-        command: `cat | am hook-event --worktree "$CLAUDE_PROJECT_DIR" --event ${event}`,
-        timeout: 5000,
+        command: `cat | am hook-event --worktree "$CLAUDE_PROJECT_DIR" --event ${event}${managedFlag}`,
+        timeout: isManaged ? 300000 : 5000,
       },
     ],
   };

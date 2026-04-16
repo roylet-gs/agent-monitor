@@ -216,6 +216,15 @@ describe("mapEventToStatus", () => {
     ).toBe(null);
   });
 
+  // PermissionRequest event (Claude Code 2.x managed hook)
+  it("PermissionRequest -> waiting", () => {
+    expect(mapEventToStatus({ event: "PermissionRequest" })).toBe("waiting");
+  });
+
+  it("PermissionRequest while executing -> waiting", () => {
+    expect(mapEventToStatus({ event: "PermissionRequest" }, "executing")).toBe("waiting");
+  });
+
   // Session events
   it("SessionStart -> idle", () => {
     expect(mapEventToStatus({ event: "SessionStart" })).toBe("idle");
