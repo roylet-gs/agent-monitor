@@ -150,6 +150,19 @@ function extractLastResponse(event: HookEvent): string | null {
 }
 
 export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusType | null): AgentStatusType | null {
+  // Guard: protect "done" status from late-arriving events.
+  // Background subagents fire SubagentStop minutes after the parent session's
+  // Stop event, which would incorrectly overwrite "done" back to "executing".
+  // Only session-level events (user action or session lifecycle) may transition
+  // out of "done".
+  if (currentStatus === "done") {
+    const allowedAfterDone = new Set(["UserPromptSubmit", "SessionStart", "SessionEnd", "Stop", "StopFailure"]);
+    if (!allowedAfterDone.has(event.event)) {
+      log("debug", "hook-event", `Ignoring ${event.event} while done (tool=${event.tool_name ?? "none"})`);
+      return null;
+    }
+  }
+
   // Stop/Notification waiting cases take priority
   if (event.event === "Stop") {
     if (event.stop_hook_active) return "waiting";
@@ -170,6 +183,10 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
       return "done";
     }
 
+    return "idle";
+  }
+  if (event.event === "StopFailure") {
+    log("debug", "hook-event", `StopFailure → idle (turn failed, was ${currentStatus ?? "none"})`);
     return "idle";
   }
   if (event.event === "Notification") {

@@ -365,6 +365,61 @@ describe("mapEventToStatus", () => {
     ).toBe("waiting");
   });
 
+  // StopFailure event
+  it("StopFailure -> idle", () => {
+    expect(mapEventToStatus({ event: "StopFailure" })).toBe("idle");
+  });
+
+  it("StopFailure while executing -> idle", () => {
+    expect(mapEventToStatus({ event: "StopFailure" }, "executing")).toBe("idle");
+  });
+
+  it("StopFailure while planning -> idle", () => {
+    expect(mapEventToStatus({ event: "StopFailure" }, "planning")).toBe("idle");
+  });
+
+  it("StopFailure while done -> idle (allowed through guard)", () => {
+    expect(mapEventToStatus({ event: "StopFailure" }, "done")).toBe("idle");
+  });
+
+  // "done" status protection — late-arriving events must not overwrite "done"
+  it("SubagentStop while done -> null (protected)", () => {
+    expect(mapEventToStatus({ event: "SubagentStop" }, "done")).toBe(null);
+  });
+
+  it("SubagentStart while done -> null (protected)", () => {
+    expect(mapEventToStatus({ event: "SubagentStart" }, "done")).toBe(null);
+  });
+
+  it("PreToolUse while done -> null (protected)", () => {
+    expect(mapEventToStatus({ event: "PreToolUse", tool_name: "Bash" }, "done")).toBe(null);
+  });
+
+  it("PostToolUse while done -> null (protected)", () => {
+    expect(mapEventToStatus({ event: "PostToolUse", tool_name: "Bash" }, "done")).toBe(null);
+  });
+
+  it("Notification while done -> null (protected)", () => {
+    expect(mapEventToStatus({ event: "Notification", notification_type: "info" }, "done")).toBe(null);
+  });
+
+  it("PermissionRequest while done -> null (protected)", () => {
+    expect(mapEventToStatus({ event: "PermissionRequest" }, "done")).toBe(null);
+  });
+
+  // Events that CAN transition out of "done"
+  it("UserPromptSubmit while done -> executing (allowed)", () => {
+    expect(mapEventToStatus({ event: "UserPromptSubmit" }, "done")).toBe("executing");
+  });
+
+  it("SessionStart while done -> idle (allowed)", () => {
+    expect(mapEventToStatus({ event: "SessionStart" }, "done")).toBe("idle");
+  });
+
+  it("SessionEnd while done -> idle (allowed)", () => {
+    expect(mapEventToStatus({ event: "SessionEnd" }, "done")).toBe("idle");
+  });
+
   // Unknown events
   it("unknown event -> idle", () => {
     expect(mapEventToStatus({ event: "SomethingElse" })).toBe("idle");
