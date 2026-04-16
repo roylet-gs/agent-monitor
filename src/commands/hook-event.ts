@@ -191,6 +191,13 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
     }
     return null;
   }
+  // Claude Code 2.x emits a dedicated PermissionRequest event for permission
+  // prompts (in addition to / instead of the Notification path above).
+  // The hook is fired while Claude blocks on a user decision → waiting.
+  if (event.event === "PermissionRequest") {
+    log("debug", "hook-event", `PermissionRequest → waiting (was ${currentStatus ?? "none"})`);
+    return "waiting";
+  }
   if (event.event === "SessionStart" || event.event === "SessionEnd") {
     return "idle";
   }

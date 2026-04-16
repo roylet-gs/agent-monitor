@@ -113,4 +113,44 @@ describe("hooks-installer", () => {
     const { isGlobalHooksInstalled } = await import("../../src/lib/hooks-installer.js");
     expect(isGlobalHooksInstalled()).toBe(false);
   });
+
+  it("installs PermissionRequest hook with --managed and 300000ms timeout", async () => {
+    const { installGlobalHooks } = await import("../../src/lib/hooks-installer.js");
+    installGlobalHooks();
+
+    const settings = JSON.parse(
+      readFileSync(join(tempHome, ".claude", "settings.json"), "utf-8")
+    );
+    expect(settings.hooks.PermissionRequest).toBeDefined();
+    expect(settings.hooks.PermissionRequest).toHaveLength(1);
+    const entry = settings.hooks.PermissionRequest[0].hooks[0];
+    expect(entry.command).toContain("--managed");
+    expect(entry.command).toContain("--event PermissionRequest");
+    expect(entry.timeout).toBe(300000);
+  });
+
+  it("non-managed events keep 5000ms timeout and no --managed flag", async () => {
+    const { installGlobalHooks } = await import("../../src/lib/hooks-installer.js");
+    installGlobalHooks();
+
+    const settings = JSON.parse(
+      readFileSync(join(tempHome, ".claude", "settings.json"), "utf-8")
+    );
+    const preToolUse = settings.hooks.PreToolUse[0].hooks[0];
+    expect(preToolUse.command).not.toContain("--managed");
+    expect(preToolUse.timeout).toBe(5000);
+  });
+
+  it("uninstall removes PermissionRequest hook", async () => {
+    const { installGlobalHooks, uninstallGlobalHooks } = await import(
+      "../../src/lib/hooks-installer.js"
+    );
+    installGlobalHooks();
+    uninstallGlobalHooks();
+
+    const settings = JSON.parse(
+      readFileSync(join(tempHome, ".claude", "settings.json"), "utf-8")
+    );
+    expect(settings.hooks?.PermissionRequest).toBeUndefined();
+  });
 });

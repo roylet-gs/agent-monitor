@@ -384,6 +384,7 @@ program
   .description("Receive hook event from stdin (internal)")
   .requiredOption("-w, --worktree <path>", "Worktree path")
   .option("-e, --event <name>", "Event name override")
+  .option("--managed", "Hook is managed by Claude Code (informational, accepted for compatibility)")
   .action(async (opts) => {
     const { handleHookEvent } = await import("./commands/hook-event.js");
     await handleHookEvent(opts.worktree, opts.event);
