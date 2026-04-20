@@ -5,7 +5,10 @@ import { WorktreeList } from "./WorktreeList.js";
 import { WorktreeDetail } from "./WorktreeDetail.js";
 import { ActionBar } from "./ActionBar.js";
 import { LogPanel } from "./LogPanel.js";
+import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { WorktreeWithStatus, WorktreeGroup, StandaloneSession } from "../lib/types.js";
+
+const DETAIL_PANEL_MIN_COLS = 100;
 
 interface DashboardProps {
   repoName: string;
@@ -52,12 +55,15 @@ export const Dashboard = React.memo(function Dashboard({
     ? (standaloneSessions[selectedIndex - flatWorktrees.length] ?? null)
     : null;
 
+  const { columns } = useTerminalSize();
+  const showDetail = columns >= DETAIL_PANEL_MIN_COLS;
+
   return (
     <Box flexDirection="column" flexGrow={1}>
       <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} standaloneCount={standaloneSessions.length} version={version} updateInfo={updateInfo} />
       <Box flexGrow={1}>
-        <WorktreeList groups={groups} flatWorktrees={flatWorktrees} standaloneSessions={standaloneSessions} standaloneStartIndex={flatWorktrees.length} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} />
-        <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} />
+        <WorktreeList groups={groups} flatWorktrees={flatWorktrees} standaloneSessions={standaloneSessions} standaloneStartIndex={flatWorktrees.length} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} fillWidth={!showDetail} />
+        {showDetail && <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} />}
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
       <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} />

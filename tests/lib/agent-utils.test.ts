@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone } from "../../src/lib/agent-utils.js";
+import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone, normalizeSummary } from "../../src/lib/agent-utils.js";
 import type { StandaloneSession } from "../../src/lib/types.js";
 import type { AgentStatus } from "../../src/lib/types.js";
 
@@ -159,5 +159,55 @@ describe("getDisplayStatusStandalone", () => {
   it("returns idle as-is regardless of staleness", () => {
     const staleTime = sqliteDate(new Date(Date.now() - 10 * 60 * 1000));
     expect(getDisplayStatusStandalone(makeSession({ status: "idle", updated_at: staleTime }))).toBe("idle");
+  });
+});
+
+describe("normalizeSummary", () => {
+  it("strips heading markers", () => {
+    expect(normalizeSummary("## Summary\n\nDetails here")).toBe("Summary Details here");
+  });
+
+  it("strips bold markers but keeps inner text", () => {
+    expect(normalizeSummary("**Validate**: typecheck")).toBe("Validate: typecheck");
+  });
+
+  it("strips bullet list markers", () => {
+    expect(normalizeSummary("- item one\n- item two")).toBe("item one item two");
+  });
+
+  it("strips numbered list markers", () => {
+    expect(normalizeSummary("1. first\n2. second")).toBe("first second");
+  });
+
+  it("strips blockquote markers", () => {
+    expect(normalizeSummary("> quoted text")).toBe("quoted text");
+  });
+
+  it("strips inline code backticks but keeps inner text", () => {
+    expect(normalizeSummary("run `pnpm test` now")).toBe("run pnpm test now");
+  });
+
+  it("collapses multiple newlines into a single space", () => {
+    expect(normalizeSummary("line1\n\n\nline2")).toBe("line1 line2");
+  });
+
+  it("preserves emoji characters", () => {
+    expect(normalizeSummary("typecheck ✅, lint ✅")).toBe("typecheck ✅, lint ✅");
+  });
+
+  it("respects the maxChars cap", () => {
+    const long = "a".repeat(500);
+    expect(normalizeSummary(long, 50)).toHaveLength(50);
+  });
+
+  it("handles the full multiline markdown case from the bug report", () => {
+    const input = "Draft PR created: **https://github.com/Gridsight/gridsight/pull/13454**\n\n## Summary\n\n- **Validate**: typecheck ✅, my lint ✅ (auth.setup.ts)";
+    const result = normalizeSummary(input);
+    expect(result).not.toContain("\n");
+    expect(result).not.toContain("**");
+    expect(result).not.toContain("##");
+    expect(result).toContain("Summary");
+    expect(result).toContain("Validate");
+    expect(result).toContain("✅");
   });
 });
