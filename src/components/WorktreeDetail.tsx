@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { getPrStatusLabel } from "../lib/github.js";
 import { getLinearStatusColor } from "../lib/linear.js";
-import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone } from "../lib/agent-utils.js";
+import { isEffectivelyOpen, getDisplayStatus, getDisplayStatusStandalone, normalizeSummary } from "../lib/agent-utils.js";
 import { PulsingDot } from "./PulsingDot.js";
 import type { WorktreeWithStatus, StandaloneSession } from "../lib/types.js";
 
@@ -109,7 +109,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
           <Box flexDirection="column">
             <Text bold>{responseLabel}</Text>
             <Text wrap="truncate-end">
-              {responseText.slice(0, 300)}
+              {normalizeSummary(responseText)}
             </Text>
           </Box>
         )}
@@ -231,7 +231,7 @@ function StandaloneDetail({ session }: { session: StandaloneSession }) {
           <Box flexDirection="column">
             <Text bold>{responseLabel}</Text>
             <Text wrap="truncate-end">
-              {responseText.slice(0, 300)}
+              {normalizeSummary(responseText)}
             </Text>
           </Box>
         )}

@@ -46,3 +46,21 @@ export function isEffectivelyOpenStandalone(session: StandaloneSession): boolean
   const updatedAt = new Date(session.updated_at + "Z").getTime();
   return updatedAt > Date.now() - 10 * 60 * 1000;
 }
+
+// Flattens a markdown-ish transcript summary into a single line of plain text
+// suitable for Ink's truncate-end rendering. Strips common markdown syntax
+// (headings, bold/italic/code, list/blockquote markers) and collapses all
+// whitespace (including newlines) into single spaces.
+export function normalizeSummary(text: string, maxChars = 200): string {
+  return text
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    .replace(/^\s*>\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxChars);
+}

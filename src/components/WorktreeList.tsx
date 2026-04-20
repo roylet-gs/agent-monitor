@@ -15,6 +15,7 @@ interface WorktreeListProps {
   selectedIndex: number;
   unseenIds: Set<string>;
   compactView: boolean;
+  fillWidth?: boolean;
 }
 
 function statusColor(status: string | undefined): string {
@@ -63,7 +64,7 @@ function buildLinearGroups(flatWorktrees: WorktreeWithStatus[]): Map<string, { t
   return counts;
 }
 
-export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView }: WorktreeListProps) {
+export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView, fillWidth }: WorktreeListProps) {
   const linearGroups = React.useMemo(() => buildLinearGroups(flatWorktrees), [flatWorktrees]);
 
   if (flatWorktrees.length === 0 && standaloneSessions.length === 0) {
@@ -71,8 +72,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
       <Box
         flexDirection="column"
         borderStyle="single"
-        width="40%"
-        minWidth="40%"
+        {...(fillWidth ? { flexGrow: 1 } : { width: "40%", minWidth: "40%" })}
         paddingX={1}
       >
         <Text bold> Worktrees</Text>
@@ -90,7 +90,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
     <Box
       flexDirection="column"
       borderStyle="single"
-      flexShrink={0}
+      {...(fillWidth ? { flexGrow: 1 } : { flexShrink: 0 })}
       paddingX={1}
     >
       <Text bold> Worktrees</Text>
