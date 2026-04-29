@@ -69,9 +69,18 @@ export async function worktreeCreate(
     worktreePath = await createWorktree(repo.path, branch, { reuse: true });
     createdMode = "reuse";
   } else if (opts.track) {
-    // Pull remote: fetch the branch, set local ref to match, then reuse.
-    await fetchAndResetBranch(repo.path, branch);
-    worktreePath = await createWorktree(repo.path, branch, { reuse: true });
+    // Pull remote: if local exists, fetch + reset (which also sets upstream)
+    // and reuse. Otherwise create a new local branch tracking origin/<branch>.
+    if (localExists) {
+      await fetchAndResetBranch(repo.path, branch);
+      worktreePath = await createWorktree(repo.path, branch, { reuse: true });
+    } else {
+      await fetchBranch(repo.path, branch);
+      worktreePath = await createWorktree(repo.path, branch, {
+        baseRef: `origin/${branch}`,
+        track: true,
+      });
+    }
     createdMode = "track";
   } else if (opts.noTrack) {
     if (localExists) {

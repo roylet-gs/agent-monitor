@@ -112,9 +112,20 @@ describe("worktree create", () => {
     expect(mockFetchAndResetBranch).toHaveBeenCalledWith("/tmp/repo", "feature/test");
   });
 
-  it("--track pulls remote branch", async () => {
+  it("--track creates new local branch tracking origin when local is absent", async () => {
     db.addRepository("/tmp/repo", "repo");
     mockLsRemoteBranch.mockResolvedValue(true);
+    mockLocalBranchExists.mockResolvedValue(false);
+    await worktreeCreate("feature/test", { repo: "/tmp/repo", track: true });
+    const args = mockCreateWorktree.mock.calls[0];
+    expect(args[2]).toEqual({ baseRef: "origin/feature/test", track: true });
+    expect(mockFetchBranch).toHaveBeenCalledWith("/tmp/repo", "feature/test");
+  });
+
+  it("--track resets and reuses existing local branch when both exist", async () => {
+    db.addRepository("/tmp/repo", "repo");
+    mockLsRemoteBranch.mockResolvedValue(true);
+    mockLocalBranchExists.mockResolvedValue(true);
     await worktreeCreate("feature/test", { repo: "/tmp/repo", track: true });
     const args = mockCreateWorktree.mock.calls[0];
     expect(args[2]).toEqual({ reuse: true });

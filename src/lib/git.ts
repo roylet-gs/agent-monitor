@@ -120,8 +120,10 @@ export interface CreateWorktreeOptions {
   // Pass --no-track so the new branch has no upstream even when a remote
   // branch with the same name exists (git's DWIM would otherwise auto-track).
   noTrack?: boolean;
-  // Pass --track <ref>, e.g. "origin/<branch>", to set up tracking explicitly.
-  track?: string;
+  // Pass --track to set up upstream tracking from the commit-ish (baseRef).
+  // Use this together with `baseRef: "origin/<branch>"` to create a local
+  // branch tracking the remote.
+  track?: boolean;
 }
 
 export async function createWorktree(
@@ -130,7 +132,7 @@ export async function createWorktree(
   opts: CreateWorktreeOptions = {}
 ): Promise<string> {
   const git = getGit(repoPath);
-  const { baseRef, reuse = false, noTrack = false, track } = opts;
+  const { baseRef, reuse = false, noTrack = false, track = false } = opts;
   // worktrees go into .claude/worktrees/ directory next to .git
   const worktreePath = join(repoPath, ".claude", "worktrees", branch.replace(/\//g, "-"));
 
@@ -140,7 +142,7 @@ export async function createWorktree(
   } else {
     args.push("-b", branch);
     if (track) {
-      args.push("--track", track);
+      args.push("--track");
     } else if (noTrack) {
       args.push("--no-track");
     }
@@ -349,8 +351,15 @@ export async function fetchAndResetBranch(repoPath: string, branch: string): Pro
   try {
     // Check if the remote tracking ref actually exists after fetch
     await git.raw(["rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
-    // Reset local branch to match remote
+    // Reset local branch to match remote (creates the local ref if missing)
     await git.raw(["branch", "-f", branch, `origin/${branch}`]);
+    // `branch -f` does not configure upstream tracking — set it explicitly
+    // so push/pull just work in the worktree.
+    try {
+      await git.raw(["branch", "--set-upstream-to", `origin/${branch}`, branch]);
+    } catch (err) {
+      log("debug", "git", `Failed to set upstream for ${branch}: ${err}`);
+    }
     log("info", "git", `Reset local branch ${branch} to origin/${branch}`);
     return true;
   } catch (err) {

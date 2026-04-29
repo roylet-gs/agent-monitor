@@ -356,34 +356,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [flatWorktrees, selectedIndex, terminalOpenedIds]);
 
-  // Handle create worktree
+  // Handle create worktree. Existence checks are intentionally NOT done here —
+  // the slow `git ls-remote` call is folded into doCreateWorktree's first
+  // progress step so the user sees the spinner as soon as they hit Enter.
   const handleCreate = useCallback(
     async (branchName: string, customName: string, baseBranch: string) => {
       const repo = createTargetRepo ?? activeRepo;
       if (!repo) return;
-
-      const [localExists, remoteExists] = await Promise.all([
-        localBranchExists(repo.path, branchName),
-        lsRemoteBranch(repo.path, branchName),
-      ]);
-
-      if (localExists || remoteExists) {
-        setPendingBranch({ branch: branchName, customName, baseBranch, localExists, remoteExists });
-        setMode("branch-exists");
-        return;
-      }
-
-      const { existsSync } = await import("fs");
-      const { join } = await import("path");
-      const wtDir = join(repo.path, ".claude", "worktrees", branchName.replace(/\//g, "-"));
-      if (existsSync(wtDir)) {
-        // Worktree directory leftover but no branch refs — surface the prompt
-        // anyway so the user can choose to recreate.
-        setPendingBranch({ branch: branchName, customName, baseBranch, localExists, remoteExists });
-        setMode("branch-exists");
-        return;
-      }
-
       await doCreateWorktree(branchName, customName, { kind: "fresh" }, repo, baseBranch);
     },
     [activeRepo, createTargetRepo]
@@ -429,8 +408,10 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       const deletesLocal =
         createMode.kind === "delete-recreate" ||
         (createMode.kind === "create-disconnected" && createMode.deleteLocal);
+      const isFreshMode = createMode.kind === "fresh";
 
       const steps: StepInfo[] = [
+        ...(isFreshMode ? [{ label: "Checking branch availability", status: "pending" as const }] : []),
         ...(deletesLocal ? [{ label: "Deleting local branch", status: "pending" as const }] : []),
         { label: fetchLabel, status: "pending" },
         { label: createLabel, status: "pending" },
@@ -450,6 +431,39 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       let stepIdx = 0;
 
       try {
+        // Step: existence check (fresh mode only — other modes were entered
+        // from the branch-exists prompt, which already classified the state).
+        if (isFreshMode) {
+          updateStep(stepIdx, "active");
+          const { existsSync } = await import("fs");
+          const { join } = await import("path");
+          const wtDir = join(
+            targetRepo.path,
+            ".claude",
+            "worktrees",
+            branchName.replace(/\//g, "-")
+          );
+          const [localExists, remoteExists] = await Promise.all([
+            localBranchExists(targetRepo.path, branchName),
+            lsRemoteBranch(targetRepo.path, branchName),
+          ]);
+          const wtDirExists = existsSync(wtDir);
+          if (localExists || remoteExists || wtDirExists) {
+            updateStep(stepIdx, "done");
+            setPendingBranch({
+              branch: branchName,
+              customName,
+              baseBranch: baseBranch ?? "",
+              localExists,
+              remoteExists,
+            });
+            setMode("branch-exists");
+            return;
+          }
+          updateStep(stepIdx, "done");
+          stepIdx++;
+        }
+
         // Step: optional local-branch delete
         if (deletesLocal) {
           updateStep(stepIdx, "active");
@@ -465,11 +479,22 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         // Step: fetch + decide createWorktree options
         updateStep(stepIdx, "active");
         let createOpts: CreateWorktreeOptions;
-        if (createMode.kind === "reuse-local" || createMode.kind === "pull-remote") {
-          // Pull remote / reuse local share the same code path: fetch origin/<branch>
-          // (no-op if no remote), reset the local ref to match, then `git worktree add <path> <branch>`.
+        if (createMode.kind === "reuse-local") {
+          // Reuse local. fetchAndResetBranch is a no-op if no remote exists.
           await fetchAndResetBranch(targetRepo.path, branchName);
           createOpts = { reuse: true };
+        } else if (createMode.kind === "pull-remote") {
+          // We came from the prompt because remote exists. Two sub-cases:
+          //   - local exists: fetch + reset + set upstream + reuse
+          //   - local missing: fetch + create new local branch tracking origin
+          const localExistsNow = await localBranchExists(targetRepo.path, branchName);
+          if (localExistsNow) {
+            await fetchAndResetBranch(targetRepo.path, branchName);
+            createOpts = { reuse: true };
+          } else {
+            await fetchBranch(targetRepo.path, branchName);
+            createOpts = { baseRef: `origin/${branchName}`, track: true };
+          }
         } else {
           // fresh, create-disconnected, delete-recreate — start the new branch from the base ref
           const effectiveBase = baseBranch?.trim() || (await getMainBranch(targetRepo.path));

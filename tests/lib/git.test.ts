@@ -380,9 +380,12 @@ describe("createWorktree", () => {
     ]);
   });
 
-  it("inserts --track <ref> when track is set", async () => {
+  it("inserts --track flag and uses baseRef as commit-ish for upstream", async () => {
     mockRaw.mockResolvedValueOnce("");
-    await createWorktree("/repo", "feat/x", { track: "origin/feat/x" });
+    await createWorktree("/repo", "feat/x", {
+      baseRef: "origin/feat/x",
+      track: true,
+    });
     expect(mockRaw).toHaveBeenCalledWith([
       "worktree",
       "add",
