@@ -114,23 +114,41 @@ export async function listWorktrees(repoPath: string): Promise<GitWorktreeInfo[]
   }
 }
 
+export interface CreateWorktreeOptions {
+  baseRef?: string;
+  reuse?: boolean;
+  // Pass --no-track so the new branch has no upstream even when a remote
+  // branch with the same name exists (git's DWIM would otherwise auto-track).
+  noTrack?: boolean;
+  // Pass --track to set up upstream tracking from the commit-ish (baseRef).
+  // Use this together with `baseRef: "origin/<branch>"` to create a local
+  // branch tracking the remote.
+  track?: boolean;
+}
+
 export async function createWorktree(
   repoPath: string,
   branch: string,
-  baseBranch?: string,
-  reuseExisting = false
+  opts: CreateWorktreeOptions = {}
 ): Promise<string> {
   const git = getGit(repoPath);
+  const { baseRef, reuse = false, noTrack = false, track = false } = opts;
   // worktrees go into .claude/worktrees/ directory next to .git
   const worktreePath = join(repoPath, ".claude", "worktrees", branch.replace(/\//g, "-"));
 
   const args = ["worktree", "add", worktreePath];
-  if (reuseExisting) {
+  if (reuse) {
     args.push(branch);
-  } else if (baseBranch) {
-    args.push("-b", branch, baseBranch);
   } else {
     args.push("-b", branch);
+    if (track) {
+      args.push("--track");
+    } else if (noTrack) {
+      args.push("--no-track");
+    }
+    if (baseRef) {
+      args.push(baseRef);
+    }
   }
 
   await git.raw(args);
@@ -244,6 +262,16 @@ export async function branchExists(repoPath: string, branch: string): Promise<bo
   }
 }
 
+export async function localBranchExists(repoPath: string, branch: string): Promise<boolean> {
+  const git = getGit(repoPath);
+  try {
+    await git.raw(["rev-parse", "--verify", `refs/heads/${branch}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function remoteBranchExists(repoPath: string, branch: string): Promise<boolean> {
   const git = getGit(repoPath);
   try {
@@ -251,6 +279,37 @@ export async function remoteBranchExists(repoPath: string, branch: string): Prom
     return true;
   } catch {
     return false;
+  }
+}
+
+// Authoritative remote check via `git ls-remote`. Detects branches the user
+// has not yet fetched. Falls back to the cached refs/remotes/origin check on
+// network failure (no origin configured, offline, timeout).
+export async function lsRemoteBranch(
+  repoPath: string,
+  branch: string,
+  timeoutMs = 3000
+): Promise<boolean> {
+  const args = ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`];
+  try {
+    const output = execSync(`git ${args.map((a) => JSON.stringify(a)).join(" ")}`, {
+      cwd: repoPath,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: timeoutMs,
+    });
+    return output.trim().length > 0;
+  } catch (err: unknown) {
+    const e = err as { status?: number; signal?: string; code?: string };
+    // `ls-remote --exit-code` returns 2 when no matching ref found — that's
+    // an authoritative "no", not a failure.
+    if (e?.status === 2) return false;
+    log(
+      "warn",
+      "git",
+      `ls-remote failed for ${branch} (falling back to cached ref): ${err}`
+    );
+    return remoteBranchExists(repoPath, branch);
   }
 }
 
@@ -290,8 +349,15 @@ export async function fetchAndResetBranch(repoPath: string, branch: string): Pro
   try {
     // Check if the remote tracking ref actually exists after fetch
     await git.raw(["rev-parse", "--verify", `refs/remotes/origin/${branch}`]);
-    // Reset local branch to match remote
+    // Reset local branch to match remote (creates the local ref if missing)
     await git.raw(["branch", "-f", branch, `origin/${branch}`]);
+    // `branch -f` does not configure upstream tracking — set it explicitly
+    // so push/pull just work in the worktree.
+    try {
+      await git.raw(["branch", "--set-upstream-to", `origin/${branch}`, branch]);
+    } catch (err) {
+      log("debug", "git", `Failed to set upstream for ${branch}: ${err}`);
+    }
     log("info", "git", `Reset local branch ${branch} to origin/${branch}`);
     return true;
   } catch (err) {
