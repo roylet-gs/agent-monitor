@@ -3,6 +3,7 @@ import { getWorktrees, getAgentStatuses, updateWorktreeCustomName, clearLinearNi
 import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "../lib/linear.js";
+import { isEffectivelyOpen } from "../lib/agent-utils.js";
 import { log } from "../lib/logger.js";
 import { syncWorktrees } from "../lib/sync.js";
 import { getTerminalPaths, getIdePaths } from "../lib/process.js";
@@ -272,7 +273,11 @@ export function useWorktrees(config: WorktreeHookConfig): {
         });
 
         const filtered = shouldHideMain
-          ? enriched.filter((wt) => !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")))
+          ? enriched.filter(
+              (wt) =>
+                !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")) ||
+                isEffectivelyOpen(wt.agent_status),
+            )
           : enriched;
 
         if (filtered.length > 0 || repos.length === 1) {
