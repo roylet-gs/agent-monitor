@@ -222,9 +222,7 @@ export async function getMainBranch(repoPath: string): Promise<string> {
       await git.raw(["rev-parse", "--verify", "master"]);
       return "master";
     } catch {
-      // Fall back to current branch
-      const branch = await git.raw(["rev-parse", "--abbrev-ref", "HEAD"]);
-      return branch.trim();
+      return getCurrentBranch(repoPath);
     }
   }
 }
@@ -304,8 +302,15 @@ export async function fetchAndResetBranch(repoPath: string, branch: string): Pro
 
 export async function getCurrentBranch(repoPath: string): Promise<string> {
   const git = getGit(repoPath);
-  const branch = await git.raw(["rev-parse", "--abbrev-ref", "HEAD"]);
-  return branch.trim();
+  // symbolic-ref works on empty repos (no commits yet); rev-parse --abbrev-ref HEAD does not.
+  try {
+    const ref = await git.raw(["symbolic-ref", "--short", "HEAD"]);
+    return ref.trim();
+  } catch {
+    // Detached HEAD — fall back to rev-parse, which returns "HEAD" in that case.
+    const branch = await git.raw(["rev-parse", "--abbrev-ref", "HEAD"]);
+    return branch.trim();
+  }
 }
 
 export interface EnsureBranchResult {
