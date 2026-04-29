@@ -17,7 +17,7 @@ import { getGitStatus, getLastCommit } from "./git.js";
 import { fetchAllPrInfo } from "./github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
 import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
-import { isEffectivelyOpenStandalone } from "./agent-utils.js";
+import { isEffectivelyOpen, isEffectivelyOpenStandalone } from "./agent-utils.js";
 import { syncWorktrees } from "./sync.js";
 import { realpathSync } from "fs";
 import type { PubSubMessage } from "./pubsub-types.js";
@@ -446,7 +446,11 @@ async function buildData(): Promise<DaemonData> {
     });
 
     const filtered = hideMain
-      ? enriched.filter((wt) => !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")))
+      ? enriched.filter(
+          (wt) =>
+            !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")) ||
+            isEffectivelyOpen(wt.agent_status),
+        )
       : enriched;
 
     if (filtered.length > 0 || repositories.length === 1) {
