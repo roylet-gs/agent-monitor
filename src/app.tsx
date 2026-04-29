@@ -29,16 +29,24 @@ import {
   createWorktree as gitCreateWorktree,
   deleteWorktree as gitDeleteWorktree,
   deleteBranch,
-  deleteRemoteBranch,
   getMainBranch,
-  branchExists,
   getRepoName,
   fetchBranch,
   fetchAndResetBranch,
   checkoutBranch,
   ensureBranchForOpen,
   remoteBranchExists,
+  localBranchExists,
+  lsRemoteBranch,
+  type CreateWorktreeOptions,
 } from "./lib/git.js";
+
+type CreateMode =
+  | { kind: "fresh" }
+  | { kind: "reuse-local" }
+  | { kind: "pull-remote" }
+  | { kind: "create-disconnected"; deleteLocal: boolean }
+  | { kind: "delete-recreate" };
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
 import { openInIde, openClaudeInTerminal, openTerminal, focusTerminal } from "./lib/ide-launcher.js";
@@ -70,7 +78,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
-  const [pendingBranch, setPendingBranch] = useState<{ branch: string; customName: string; baseBranch: string } | null>(null);
+  const [pendingBranch, setPendingBranch] = useState<{
+    branch: string;
+    customName: string;
+    baseBranch: string;
+    localExists: boolean;
+    remoteExists: boolean;
+  } | null>(null);
   const [creatingBranch, setCreatingBranch] = useState("");
   const [creationSteps, setCreationSteps] = useState<StepInfo[]>([]);
   const [creationError, setCreationError] = useState<string | null>(null);
@@ -348,9 +362,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       const repo = createTargetRepo ?? activeRepo;
       if (!repo) return;
 
-      const exists = await branchExists(repo.path, branchName);
-      if (exists) {
-        setPendingBranch({ branch: branchName, customName, baseBranch });
+      const [localExists, remoteExists] = await Promise.all([
+        localBranchExists(repo.path, branchName),
+        lsRemoteBranch(repo.path, branchName),
+      ]);
+
+      if (localExists || remoteExists) {
+        setPendingBranch({ branch: branchName, customName, baseBranch, localExists, remoteExists });
         setMode("branch-exists");
         return;
       }
@@ -359,12 +377,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       const { join } = await import("path");
       const wtDir = join(repo.path, ".claude", "worktrees", branchName.replace(/\//g, "-"));
       if (existsSync(wtDir)) {
-        setPendingBranch({ branch: branchName, customName, baseBranch });
+        // Worktree directory leftover but no branch refs — surface the prompt
+        // anyway so the user can choose to recreate.
+        setPendingBranch({ branch: branchName, customName, baseBranch, localExists, remoteExists });
         setMode("branch-exists");
         return;
       }
 
-      await doCreateWorktree(branchName, customName, false, repo, baseBranch);
+      await doCreateWorktree(branchName, customName, { kind: "fresh" }, repo, baseBranch);
     },
     [activeRepo, createTargetRepo]
   );
@@ -385,31 +405,41 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
   // Actually create the worktree (called directly or after branch-exists confirmation)
   const doCreateWorktree = useCallback(
-    async (branchName: string, customName: string, reuse: boolean, repo?: Repository, baseBranch?: string, deleteFirst?: boolean, deleteRemote?: boolean) => {
+    async (
+      branchName: string,
+      customName: string,
+      createMode: CreateMode,
+      repo?: Repository,
+      baseBranch?: string
+    ) => {
       const targetRepo = repo ?? createTargetRepo ?? activeRepo;
       if (!targetRepo) return;
 
       const hasScript = hasStartupScript(targetRepo.id);
 
-      const deleteStepsArr: StepInfo[] = [];
-      if (deleteFirst) {
-        deleteStepsArr.push({ label: "Deleting local branch", status: "pending" });
-        if (deleteRemote) {
-          deleteStepsArr.push({ label: "Deleting remote branch", status: "pending" });
-        }
-      }
+      const usesRemote =
+        createMode.kind === "reuse-local" || createMode.kind === "pull-remote";
+      const fetchLabel = usesRemote ? "Fetching latest branch" : "Fetching latest base branch";
+      const createLabel =
+        createMode.kind === "pull-remote"
+          ? "Creating worktree (tracking origin)"
+          : createMode.kind === "create-disconnected"
+            ? "Creating worktree (not tracking remote)"
+            : "Creating git worktree";
+      const deletesLocal =
+        createMode.kind === "delete-recreate" ||
+        (createMode.kind === "create-disconnected" && createMode.deleteLocal);
 
       const steps: StepInfo[] = [
-        ...deleteStepsArr,
-        { label: reuse ? "Fetching latest branch" : "Fetching latest base branch", status: "pending" },
-        { label: "Creating git worktree", status: "pending" },
+        ...(deletesLocal ? [{ label: "Deleting local branch", status: "pending" as const }] : []),
+        { label: fetchLabel, status: "pending" },
+        { label: createLabel, status: "pending" },
         { label: "Syncing database", status: "pending" },
         ...(hasScript
           ? [{ label: "Running startup script", status: "pending" as const }]
           : []),
       ];
 
-      // Mark the first step as active
       steps[0].status = "active";
 
       setCreatingBranch(branchName);
@@ -420,43 +450,36 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       let stepIdx = 0;
 
       try {
-        // Pre-deletion steps
-        if (deleteFirst) {
-          // Delete local branch
+        // Step: optional local-branch delete
+        if (deletesLocal) {
           updateStep(stepIdx, "active");
           try {
             await deleteBranch(targetRepo.path, branchName, true);
           } catch (err) {
-            log("debug", "app", `Local branch delete failed (may only exist on remote): ${err}`);
+            log("debug", "app", `Local branch delete failed (may not exist locally): ${err}`);
           }
           updateStep(stepIdx, "done");
           stepIdx++;
-
-          // Delete remote branch
-          if (deleteRemote) {
-            updateStep(stepIdx, "active");
-            try {
-              await deleteRemoteBranch(targetRepo.path, branchName);
-            } catch (err) {
-              log("debug", "app", `Remote branch delete failed: ${err}`);
-            }
-            updateStep(stepIdx, "done");
-            stepIdx++;
-          }
         }
 
-        let baseRef: string | undefined;
-
+        // Step: fetch + decide createWorktree options
         updateStep(stepIdx, "active");
-        if (reuse) {
-          // Reusing existing branch: fetch latest from remote and reset local
+        let createOpts: CreateWorktreeOptions;
+        if (createMode.kind === "reuse-local" || createMode.kind === "pull-remote") {
+          // Pull remote / reuse local share the same code path: fetch origin/<branch>
+          // (no-op if no remote), reset the local ref to match, then `git worktree add <path> <branch>`.
           await fetchAndResetBranch(targetRepo.path, branchName);
+          createOpts = { reuse: true };
         } else {
-          // New branch: fetch base branch and determine ref
-          const effectiveBase = baseBranch?.trim() || await getMainBranch(targetRepo.path);
+          // fresh, create-disconnected, delete-recreate — start the new branch from the base ref
+          const effectiveBase = baseBranch?.trim() || (await getMainBranch(targetRepo.path));
           await fetchBranch(targetRepo.path, effectiveBase);
           const hasRemote = await remoteBranchExists(targetRepo.path, effectiveBase);
-          baseRef = hasRemote ? `origin/${effectiveBase}` : effectiveBase;
+          const baseRef = hasRemote ? `origin/${effectiveBase}` : effectiveBase;
+          createOpts =
+            createMode.kind === "create-disconnected"
+              ? { baseRef, noTrack: true }
+              : { baseRef };
         }
         updateStep(stepIdx, "done");
         stepIdx++;
@@ -465,19 +488,23 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         updateStep(stepIdx, "active");
         let wtPath: string;
         try {
-          wtPath = await gitCreateWorktree(
-            targetRepo.path,
-            branchName,
-            baseRef,
-            reuse
-          );
+          wtPath = await gitCreateWorktree(targetRepo.path, branchName, createOpts);
         } catch (gitErr) {
           const errMsg = String(gitErr);
           if (errMsg.includes("already exists") || errMsg.includes("already checked out")) {
             updateStep(stepIdx, "error");
             setCreationError(null);
-            setMode("dashboard");
-            setPendingBranch({ branch: branchName, customName, baseBranch: baseBranch ?? "" });
+            const [localExists, remoteExists] = await Promise.all([
+              localBranchExists(targetRepo.path, branchName),
+              lsRemoteBranch(targetRepo.path, branchName),
+            ]);
+            setPendingBranch({
+              branch: branchName,
+              customName,
+              baseBranch: baseBranch ?? "",
+              localExists,
+              remoteExists,
+            });
             setMode("branch-exists");
             return;
           }
@@ -1008,18 +1035,37 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       {mode === "branch-exists" && pendingBranch && (
         <BranchExistsPrompt
           branchName={pendingBranch.branch}
-          onReuse={() => {
-            doCreateWorktree(pendingBranch.branch, pendingBranch.customName, true, undefined, pendingBranch.baseBranch);
+          localExists={pendingBranch.localExists}
+          remoteExists={pendingBranch.remoteExists}
+          onReuseLocal={() => {
+            const pb = pendingBranch;
             setPendingBranch(null);
+            doCreateWorktree(pb.branch, pb.customName, { kind: "reuse-local" }, undefined, pb.baseBranch);
           }}
-          onDeleteAndRecreate={(deleteRemote: boolean) => {
+          onPullRemote={() => {
+            const pb = pendingBranch;
+            setPendingBranch(null);
+            doCreateWorktree(pb.branch, pb.customName, { kind: "pull-remote" }, undefined, pb.baseBranch);
+          }}
+          onCreateDisconnected={() => {
+            const pb = pendingBranch;
             const repo = createTargetRepo ?? activeRepo;
             if (!repo) return;
-            const branch = pendingBranch.branch;
-            const customName = pendingBranch.customName;
-            const baseBranch = pendingBranch.baseBranch;
             setPendingBranch(null);
-            doCreateWorktree(branch, customName, false, repo, baseBranch, true, deleteRemote);
+            doCreateWorktree(
+              pb.branch,
+              pb.customName,
+              { kind: "create-disconnected", deleteLocal: pb.localExists },
+              repo,
+              pb.baseBranch
+            );
+          }}
+          onDeleteAndRecreate={() => {
+            const pb = pendingBranch;
+            const repo = createTargetRepo ?? activeRepo;
+            if (!repo) return;
+            setPendingBranch(null);
+            doCreateWorktree(pb.branch, pb.customName, { kind: "delete-recreate" }, repo, pb.baseBranch);
           }}
           onCancel={() => {
             setPendingBranch(null);

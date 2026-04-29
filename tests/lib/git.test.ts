@@ -249,6 +249,152 @@ describe("ensureBranchForOpen", () => {
   });
 });
 
+describe("localBranchExists", () => {
+  let localBranchExists: typeof import("../../src/lib/git.js").localBranchExists;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRaw.mockReset();
+    const git = await import("../../src/lib/git.js");
+    localBranchExists = git.localBranchExists;
+  });
+
+  it("returns true when refs/heads/<branch> resolves", async () => {
+    mockRaw.mockResolvedValueOnce("");
+    expect(await localBranchExists("/repo", "feat/x")).toBe(true);
+    expect(mockRaw).toHaveBeenCalledWith(["rev-parse", "--verify", "refs/heads/feat/x"]);
+  });
+
+  it("returns false when rev-parse throws", async () => {
+    mockRaw.mockRejectedValueOnce(new Error("not a ref"));
+    expect(await localBranchExists("/repo", "feat/x")).toBe(false);
+  });
+
+  it("does not consult remote refs even when local missing", async () => {
+    mockRaw.mockRejectedValueOnce(new Error("not a ref"));
+    expect(await localBranchExists("/repo", "feat/x")).toBe(false);
+    // Only one rev-parse call, the local one — no remote fallback
+    expect(mockRaw).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("lsRemoteBranch", () => {
+  let lsRemoteBranch: typeof import("../../src/lib/git.js").lsRemoteBranch;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRaw.mockReset();
+    mockExecSync.mockReset();
+    const git = await import("../../src/lib/git.js");
+    lsRemoteBranch = git.lsRemoteBranch;
+  });
+
+  it("returns true when ls-remote prints a matching ref", async () => {
+    mockExecSync.mockReturnValueOnce(
+      "abc123\trefs/heads/feat/x\n"
+    );
+    expect(await lsRemoteBranch("/repo", "feat/x")).toBe(true);
+  });
+
+  it("returns false when ls-remote --exit-code returns 2 (no match)", async () => {
+    mockExecSync.mockImplementationOnce(() => {
+      const err = new Error("no match") as Error & { status?: number };
+      err.status = 2;
+      throw err;
+    });
+    expect(await lsRemoteBranch("/repo", "feat/missing")).toBe(false);
+  });
+
+  it("falls back to cached remote-tracking ref on network failure", async () => {
+    mockExecSync.mockImplementationOnce(() => {
+      const err = new Error("could not resolve host") as Error & { status?: number };
+      err.status = 128;
+      throw err;
+    });
+    // remoteBranchExists fallback succeeds
+    mockRaw.mockResolvedValueOnce("");
+    expect(await lsRemoteBranch("/repo", "feat/cached")).toBe(true);
+    expect(mockRaw).toHaveBeenCalledWith([
+      "rev-parse",
+      "--verify",
+      "refs/remotes/origin/feat/cached",
+    ]);
+  });
+
+  it("returns false when fallback also has no cached ref", async () => {
+    mockExecSync.mockImplementationOnce(() => {
+      const err = new Error("origin not configured") as Error & { status?: number };
+      err.status = 128;
+      throw err;
+    });
+    mockRaw.mockRejectedValueOnce(new Error("not a ref"));
+    expect(await lsRemoteBranch("/repo", "feat/nope")).toBe(false);
+  });
+});
+
+describe("createWorktree", () => {
+  let createWorktree: typeof import("../../src/lib/git.js").createWorktree;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRaw.mockReset();
+    const git = await import("../../src/lib/git.js");
+    createWorktree = git.createWorktree;
+  });
+
+  it("appends -b <branch> <baseRef> for fresh creation", async () => {
+    mockRaw.mockResolvedValueOnce("");
+    await createWorktree("/repo", "feat/x", { baseRef: "origin/main" });
+    expect(mockRaw).toHaveBeenCalledWith([
+      "worktree",
+      "add",
+      "/repo/.claude/worktrees/feat-x",
+      "-b",
+      "feat/x",
+      "origin/main",
+    ]);
+  });
+
+  it("uses positional reuse when reuse=true", async () => {
+    mockRaw.mockResolvedValueOnce("");
+    await createWorktree("/repo", "feat/x", { reuse: true });
+    expect(mockRaw).toHaveBeenCalledWith([
+      "worktree",
+      "add",
+      "/repo/.claude/worktrees/feat-x",
+      "feat/x",
+    ]);
+  });
+
+  it("inserts --no-track before the base ref when noTrack=true", async () => {
+    mockRaw.mockResolvedValueOnce("");
+    await createWorktree("/repo", "feat/x", { baseRef: "origin/main", noTrack: true });
+    expect(mockRaw).toHaveBeenCalledWith([
+      "worktree",
+      "add",
+      "/repo/.claude/worktrees/feat-x",
+      "-b",
+      "feat/x",
+      "--no-track",
+      "origin/main",
+    ]);
+  });
+
+  it("inserts --track <ref> when track is set", async () => {
+    mockRaw.mockResolvedValueOnce("");
+    await createWorktree("/repo", "feat/x", { track: "origin/feat/x" });
+    expect(mockRaw).toHaveBeenCalledWith([
+      "worktree",
+      "add",
+      "/repo/.claude/worktrees/feat-x",
+      "-b",
+      "feat/x",
+      "--track",
+      "origin/feat/x",
+    ]);
+  });
+});
+
 describe("deleteWorktree", () => {
   let deleteWorktree: typeof import("../../src/lib/git.js").deleteWorktree;
 

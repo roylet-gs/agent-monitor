@@ -51,7 +51,9 @@ worktreeCmd
   .option("--repo <path>", "Repository path")
   .option("--name <name>", "Custom worktree name")
   .option("--base <branch>", "Base branch (default: main)")
-  .option("--reuse", "Reuse existing branch instead of creating new")
+  .option("--reuse", "Reuse existing local branch")
+  .option("--track", "Pull remote branch (track origin/<branch>)")
+  .option("--no-track", "Create new local branch from base, do not track remote")
   .option("--json", "Output as JSON")
   .action(async (branch, opts) => {
     const { worktreeCreate } = await import("./commands/worktree/create.js");
@@ -407,7 +409,9 @@ program
   .description("Create worktree (alias for: worktree create)")
   .option("--repo <path>", "Repository path")
   .option("--base <branch>", "Base branch")
-  .option("--reuse", "Reuse existing branch")
+  .option("--reuse", "Reuse existing local branch")
+  .option("--track", "Pull remote branch (track origin/<branch>)")
+  .option("--no-track", "Create new local branch from base, do not track remote")
   .option("--json", "Output as JSON")
   .action(async (branch, opts) => {
     const { worktreeCreate } = await import("./commands/worktree/create.js");
