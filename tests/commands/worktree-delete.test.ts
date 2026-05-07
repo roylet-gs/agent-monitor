@@ -26,6 +26,7 @@ const mockDeleteRemoteBranch = vi.fn();
 const mockRemoteBranchExists = vi.fn();
 const mockCheckoutBranch = vi.fn();
 const mockGetMainBranch = vi.fn();
+const mockListWorktrees = vi.fn();
 
 vi.mock("../../src/lib/git.js", () => ({
   isGitRepo: vi.fn(() => false),
@@ -35,6 +36,7 @@ vi.mock("../../src/lib/git.js", () => ({
   remoteBranchExists: (...args: unknown[]) => mockRemoteBranchExists(...args),
   checkoutBranch: (...args: unknown[]) => mockCheckoutBranch(...args),
   getMainBranch: (...args: unknown[]) => mockGetMainBranch(...args),
+  listWorktrees: (...args: unknown[]) => mockListWorktrees(...args),
 }));
 
 vi.mock("../../src/lib/sync.js", () => ({
@@ -54,6 +56,7 @@ describe("worktree delete", () => {
     mockRemoteBranchExists.mockReset().mockResolvedValue(false);
     mockCheckoutBranch.mockReset().mockResolvedValue(undefined);
     mockGetMainBranch.mockReset().mockResolvedValue("main");
+    mockListWorktrees.mockReset().mockResolvedValue([]);
     db = await import("../../src/lib/db.js");
     ({ worktreeDelete } = await import("../../src/commands/worktree/delete.js"));
   });
@@ -111,5 +114,20 @@ describe("worktree delete", () => {
     // Should be removed from DB
     expect(db.getWorktrees(repo.id)).toHaveLength(0);
     expect(spy.getLog()).toContain("stale");
+  });
+
+  it("redirects delete when DB path is gone but git has branch live elsewhere", async () => {
+    const repo = db.addRepository("/tmp/repo", "repo");
+    db.upsertWorktree(repo.id, "/tmp/wt-gone", "feature/live", "live");
+    mockListWorktrees.mockResolvedValue([
+      { path: "/tmp/repo", branch: "main", isMain: true },
+      { path: "/tmp/wt", branch: "feature/live", isMain: false },
+    ]);
+    await worktreeDelete("feature/live", { repo: "/tmp/repo" });
+    // Should target the LIVE path, not the stale DB path
+    expect(mockDeleteWorktree).toHaveBeenCalledWith("/tmp/repo", "/tmp/wt", undefined);
+    // Should NOT take the stale/branch-only path
+    expect(mockCheckoutBranch).not.toHaveBeenCalled();
+    expect(db.getWorktrees(repo.id)).toHaveLength(0);
   });
 });

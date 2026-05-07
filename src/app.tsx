@@ -37,6 +37,7 @@ import {
   ensureBranchForOpen,
   remoteBranchExists,
   localBranchExists,
+  listWorktrees,
   lsRemoteBranch,
   type CreateWorktreeOptions,
 } from "./lib/git.js";
@@ -591,14 +592,34 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     const wtRepo = repositories.find((r) => r.id === wt.repo_id) ?? activeRepo;
 
     const { existsSync } = await import("fs");
-    const pathExists = existsSync(wt.path);
+    let livePath = wt.path;
+    let pathExists = existsSync(wt.path);
+
+    // If the DB-stored path is gone but git still has this branch checked out at
+    // a different worktree, redirect the deletion to the live path. Otherwise
+    // we'd silently leave the real worktree behind and `syncWorktrees` would
+    // re-add the DB row on the next poll, making it look like delete failed.
+    if (!pathExists) {
+      try {
+        const gitWorktrees = await listWorktrees(wtRepo.path);
+        const live = gitWorktrees.find((g) => g.branch === wt.branch && !g.isMain);
+        if (live) {
+          log("info", "app", `Redirecting delete of ${wt.branch}: DB path ${wt.path} is missing, branch is live at ${live.path}`);
+          livePath = live.path;
+          pathExists = true;
+        }
+      } catch (err) {
+        log("warn", "app", `Failed to list git worktrees while resolving delete target: ${err}`);
+      }
+    }
+
     const isBranchOnly = options.isBranchOnly ||
       (wt.is_main === 1 && wt.branch !== "main" && wt.branch !== "master") ||
       (!pathExists && wt.is_main !== 1);
     const isStale = !pathExists && wt.is_main !== 1;
 
     // Safety guard: never allow deleting the main working tree on the default branch
-    if (wt.path === wtRepo.path && !isBranchOnly) {
+    if (livePath === wtRepo.path && !isBranchOnly) {
       setError("Cannot delete the main working tree");
       return;
     }
@@ -687,7 +708,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     let stepIdx = 0;
 
     try {
-      await gitDeleteWorktree(wtRepo.path, wt.path, true);
+      await gitDeleteWorktree(wtRepo.path, livePath, true);
       removeWorktreeDb(wt.id);
       updateDeleteStep(stepIdx, "done");
       stepIdx++;
