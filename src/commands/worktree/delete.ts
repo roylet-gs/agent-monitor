@@ -1,5 +1,5 @@
 import { existsSync } from "fs";
-import { deleteWorktree, deleteBranch, deleteRemoteBranch, remoteBranchExists, checkoutBranch, getMainBranch } from "../../lib/git.js";
+import { deleteWorktree, deleteBranch, deleteRemoteBranch, remoteBranchExists, checkoutBranch, getMainBranch, listWorktrees } from "../../lib/git.js";
 import { removeWorktree, getRepositoryById } from "../../lib/db.js";
 import { syncWorktrees } from "../../lib/sync.js";
 import { resolveWorktree, resolveRepo } from "../../lib/resolve.js";
@@ -17,7 +17,20 @@ export async function worktreeDelete(
     process.exit(1);
   }
 
-  const pathExists = existsSync(worktree.path);
+  let livePath = worktree.path;
+  let pathExists = existsSync(worktree.path);
+
+  // If the DB-stored path is gone but git has the branch live at another path,
+  // redirect to that path so we don't leave the real worktree behind.
+  if (!pathExists) {
+    const gitWorktrees = await listWorktrees(repoObj.path);
+    const live = gitWorktrees.find((g) => g.branch === worktree.branch && !g.isMain);
+    if (live) {
+      livePath = live.path;
+      pathExists = true;
+    }
+  }
+
   const isBranchOnly =
     (worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master") ||
     (!pathExists && worktree.is_main !== 1);
@@ -71,7 +84,7 @@ export async function worktreeDelete(
 
   // Delete the git worktree
   try {
-    await deleteWorktree(repoObj.path, worktree.path, opts.force);
+    await deleteWorktree(repoObj.path, livePath, opts.force);
   } catch (err) {
     if (opts.force) throw err;
     console.error(`Failed to delete worktree. Use --force to override.\n${err}`);
@@ -103,5 +116,5 @@ export async function worktreeDelete(
 
   // Remove from DB
   removeWorktree(worktree.id);
-  console.log(`Deleted worktree: ${worktree.path}`);
+  console.log(`Deleted worktree: ${livePath}`);
 }

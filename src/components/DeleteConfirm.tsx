@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { existsSync } from "fs";
 import { Box, Text, useInput } from "ink";
 import type { WorktreeWithStatus } from "../lib/types.js";
+import { listWorktrees } from "../lib/git.js";
+import { log } from "../lib/logger.js";
 
 export interface DeleteOptions {
   deleteLocalBranch: boolean;
@@ -20,14 +22,35 @@ type Step = "confirm" | "local-branch";
 
 export function DeleteConfirm({
   worktree,
+  repoPath,
   onConfirm,
   onCancel,
 }: DeleteConfirmProps) {
   const pathExists = existsSync(worktree.path);
+
+  // If the DB path is gone, the branch may still be live at another worktree.
+  // We probe git asynchronously; until it resolves, assume it's a stale entry.
+  const [hasLiveElsewhere, setHasLiveElsewhere] = useState(false);
+  useEffect(() => {
+    if (pathExists || worktree.is_main === 1) return;
+    let cancelled = false;
+    listWorktrees(repoPath)
+      .then((gws) => {
+        if (cancelled) return;
+        const live = gws.find((g) => g.branch === worktree.branch && !g.isMain);
+        if (live) setHasLiveElsewhere(true);
+      })
+      .catch((err) => log("warn", "DeleteConfirm", `listWorktrees failed: ${err}`));
+    return () => {
+      cancelled = true;
+    };
+  }, [pathExists, worktree.branch, worktree.is_main, repoPath]);
+
+  const effectivelyExists = pathExists || hasLiveElsewhere;
   const isBranchOnly =
     (worktree.is_main === 1 && worktree.branch !== "main" && worktree.branch !== "master") ||
-    (!pathExists && worktree.is_main !== 1);
-  const isStale = !pathExists && worktree.is_main !== 1;
+    (!effectivelyExists && worktree.is_main !== 1);
+  const isStale = !effectivelyExists && worktree.is_main !== 1;
   const [step, setStep] = useState<Step>("confirm");
 
   useInput((input, key) => {
