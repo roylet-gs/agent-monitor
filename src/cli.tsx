@@ -100,6 +100,62 @@ worktreeCmd
     await worktreeInfo(target, opts);
   });
 
+// --- Agent commands (managed Claude sessions) ---
+
+const agentCmd = program
+  .command("agent")
+  .alias("a")
+  .description("Manage headless Claude sessions per worktree");
+
+agentCmd
+  .command("send <target> <prompt...>")
+  .description("Send a prompt to a worktree's Claude session (starts one if needed)")
+  .option("--repo <path>", "Repository path")
+  .option("--wait", "Wait for the turn to finish and print the response")
+  .option("--json", "Output as JSON")
+  .action(async (target, promptWords, opts) => {
+    const { agentSend } = await import("./commands/agent/send.js");
+    await agentSend(target, promptWords, opts);
+  });
+
+agentCmd
+  .command("list")
+  .description("List managed Claude sessions")
+  .option("--json", "Output as JSON")
+  .action(async (opts) => {
+    const { agentList } = await import("./commands/agent/list.js");
+    agentList(opts);
+  });
+
+agentCmd
+  .command("log <target>")
+  .description("Show the transcript of a worktree's Claude session")
+  .option("--repo <path>", "Repository path")
+  .option("--json", "Output raw stream-json log")
+  .action(async (target, opts) => {
+    const { agentLog } = await import("./commands/agent/log.js");
+    agentLog(target, opts);
+  });
+
+agentCmd
+  .command("attach <target>")
+  .description("Resume the session interactively in this terminal (claude --resume)")
+  .option("--repo <path>", "Repository path")
+  .option("--force", "Attach even if a headless turn is still running")
+  .action(async (target, opts) => {
+    const { agentAttach } = await import("./commands/agent/attach.js");
+    agentAttach(target, opts);
+  });
+
+agentCmd
+  .command("stop <target>")
+  .description("Stop the in-flight turn of a worktree's Claude session")
+  .option("--repo <path>", "Repository path")
+  .action(async (target, opts) => {
+    const { agentStop } = await import("./commands/agent/stop.js");
+    agentStop(target, opts);
+  });
+
 // --- Repo commands ---
 
 const repoCmd = program

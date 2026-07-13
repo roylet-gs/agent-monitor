@@ -40,6 +40,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
         <Text>
           <Text color="yellow">[Enter]</Text> Open
           {!ideIsTerm && <><Text color="yellow"> [t]</Text>erminal</>}
+          <Text color="yellow"> [c]</Text>hat
           <Text color="yellow"> [n]</Text>ew
           <Text color="yellow"> [d]</Text>elete
           {(ghPrStatus || linearEnabled) && (

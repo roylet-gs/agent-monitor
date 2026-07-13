@@ -92,6 +92,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       fallbackLightRefreshRef.current();
     } else if (msg.type === "standalone-status-update") {
       fallbackStandaloneRefreshRef.current();
+    } else if (msg.type === "managed-session-update") {
+      fallbackLightRefreshRef.current();
     } else if (msg.type === "git-activity") {
       log("info", "useDaemon", `Git activity detected (fallback): ${msg.activity} on ${msg.branch}`);
       setTimeout(() => fallbackRefreshRef.current(), 3000);

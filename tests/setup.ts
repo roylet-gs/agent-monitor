@@ -15,6 +15,7 @@ beforeEach(() => {
     SETTINGS_PATH: join(testDir, "settings.json"),
     LOG_PATH: join(testDir, "debug.log"),
     SOCKET_PATH: join(testDir, "am.sock"),
+    SESSIONS_DIR: join(testDir, "sessions"),
     RULES_PATH: join(testDir, "rules.json"),
     AM_MANAGED_PERMISSIONS_PATH: join(testDir, "am-managed-permissions.json"),
   }));

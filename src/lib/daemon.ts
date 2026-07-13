@@ -136,10 +136,11 @@ function handleInboundMessage(msg: DaemonInboundMessage, conn: net.Socket): void
       doRefresh(null, false);
       break;
 
-    // Passthrough from hook-event
+    // Passthrough from hook-event / claude-session
     case "agent-status-update":
     case "standalone-status-update":
     case "git-activity":
+    case "managed-session-update":
       handleHookMessage(msg);
       break;
   }
@@ -154,7 +155,7 @@ function handleHookMessage(msg: PubSubMessage): void {
   broadcast(passthrough);
 
   // Trigger a refresh
-  if (msg.type === "agent-status-update" || msg.type === "standalone-status-update") {
+  if (msg.type === "agent-status-update" || msg.type === "standalone-status-update" || msg.type === "managed-session-update") {
     // Light refresh — no integration calls
     doRefresh(null, false);
   } else if (msg.type === "git-activity") {

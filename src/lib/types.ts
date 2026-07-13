@@ -100,6 +100,14 @@ export type SystemSound =
   | "Submarine"
   | "Tink";
 
+export type AgentPermissionMode =
+  | "acceptEdits"
+  | "auto"
+  | "bypassPermissions"
+  | "manual"
+  | "dontAsk"
+  | "plan";
+
 export interface Settings {
   ide: "cursor" | "vscode" | "terminal";
   defaultBranchPrefix: string;
@@ -122,6 +130,8 @@ export interface Settings {
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
   maxLogSizeMb: number;
+  agentPermissionMode: AgentPermissionMode;
+  agentClaudeArgs: string;
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;
@@ -130,6 +140,7 @@ export interface Settings {
 
 export type AppMode =
   | "dashboard"
+  | "chat"
   | "new-worktree"
   | "branch-exists"
   | "delete-confirm"
@@ -158,6 +169,26 @@ export interface HookEvent {
   title?: string;
   notification_type?: string;
   permission_prompt?: boolean;
+}
+
+// A Claude Code session started and driven by am (one per worktree).
+// The session id doubles as the claude CLI session UUID (--session-id/--resume).
+export interface ManagedSession {
+  id: string;
+  worktree_id: string;
+  cwd: string;
+  last_prompt: string | null;
+  turn_pid: number | null;
+  turn_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// One rendered entry of a managed session's transcript.
+export interface ChatMessage {
+  role: "user" | "assistant" | "tool" | "system" | "error";
+  text: string;
+  ts?: string;
 }
 
 export interface StandaloneSession {

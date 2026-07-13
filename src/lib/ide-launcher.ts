@@ -276,9 +276,19 @@ export function openTerminal(worktreePath: string, title?: string): string | und
   return windowId;
 }
 
-export function openClaudeInTerminal(worktreePath: string, continueSession: boolean, title?: string): string {
+export function openClaudeInTerminal(
+  worktreePath: string,
+  continueSession: boolean,
+  title?: string,
+  resumeSessionId?: string
+): string {
   const escapedPath = worktreePath.replace(/"/g, '\\"');
-  const claudeCmd = continueSession ? "claude -c" : "claude";
+  // A managed session id takes priority: resume that exact conversation.
+  const claudeCmd = resumeSessionId
+    ? `claude --resume ${resumeSessionId}`
+    : continueSession
+      ? "claude -c"
+      : "claude";
   const app = detectTerminalApp();
   const windowId = generateWindowId();
   const windowTitle = makeWindowTitle(title, worktreePath, windowId);

@@ -11,6 +11,7 @@ import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
+import { ChatView } from "./components/ChatView.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useDaemon } from "./hooks/useDaemon.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
@@ -23,6 +24,7 @@ import {
   removeWorktree as removeWorktreeDb,
   updateWorktreeCustomName,
   removeStandaloneSession,
+  getManagedSession,
   resetAll,
 } from "./lib/db.js";
 import {
@@ -329,10 +331,19 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
     const continueSession = !!wt.agent_status?.session_id;
     try {
-      openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch);
+      // Prefer resuming the am-managed session if one exists for this worktree
+      const managed = getManagedSession(wt.id);
+      openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch, managed?.id);
     } catch (err) {
       setError(`${err}`);
     }
+  }, [flatWorktrees, selectedIndex]);
+
+  // Handle open chat view for the selected worktree
+  const handleOpenChat = useCallback(() => {
+    if (selectedIndex >= flatWorktrees.length) return; // standalone session
+    if (!flatWorktrees[selectedIndex]) return;
+    setMode("chat");
   }, [flatWorktrees, selectedIndex]);
 
   // Handle open terminal via [t]
@@ -1003,6 +1014,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       : undefined,
     onTerminal: handleOpenTerminal,
     onClaude: handleOpenClaude,
+    onChat: handleOpenChat,
     onQuit: () => exit(),
     onEscHint: setEscHint,
   });
@@ -1182,6 +1194,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           />
         ) : null;
       })()}
+
+      {mode === "chat" && flatWorktrees[selectedIndex] && (
+        <ChatView
+          worktree={flatWorktrees[selectedIndex]!}
+          settings={settings}
+          onBack={() => setMode("dashboard")}
+        />
+      )}
 
       {mode === "settings" && (
         <SettingsPanel

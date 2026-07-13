@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `agent-monitor` (`am`) is a terminal UI (TUI) dashboard for monitoring multiple Claude Code agent sessions across git worktrees. Built with Ink (React for CLIs) and SQLite.
 
-Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket integration, worktree lifecycle management (create/delete), IDE launching, per-repo startup scripts.
+Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket integration, worktree lifecycle management (create/delete), IDE launching, per-repo startup scripts, and managed Claude sessions (am starts and drives one headless Claude Code session per worktree).
 
 ## Architecture
 
@@ -26,15 +26,17 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 
 ### State Machine
 `src/app.tsx` is the root component managing an `AppMode` string union that controls rendering:
-`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings`
+`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings` → `chat` (per-worktree Claude session view)
 
 ### Data Flow
 1. **Agent status in:** Claude Code fires hook events → `am hook-event --worktree $CLAUDE_PROJECT_DIR` receives JSON on stdin → writes to SQLite via `src/commands/hook-event.ts` → publishes to Unix domain socket for instant TUI update
 2. **Pub/sub layer:** Unix domain socket at `~/.agent-monitor/am.sock` provides instant push updates. The TUI starts a server (`src/lib/pubsub-server.ts`, managed by `src/hooks/usePubSub.ts`), and `hook-event` publishes fire-and-forget messages (`src/lib/pubsub-client.ts`). Only one TUI can own the socket; others fall back to polling. SQLite remains the source of truth — pub/sub is an optimization to avoid polling delay. Messages are newline-delimited JSON, typed in `src/lib/pubsub-types.ts`.
 3. **TUI polling:** `src/hooks/useWorktrees.ts` still polls SQLite + git status (2s default), GitHub PRs (60s), and Linear tickets (60s) as a fallback. Uses JSON fingerprinting to skip re-renders when data hasn't changed.
+4. **Managed sessions (agent control):** `am agent send` / the TUI chat view spawn a **detached** `claude -p --output-format stream-json` process per turn (`src/lib/claude-session.ts`), first turn with `--session-id <uuid>`, later turns with `--resume <uuid>`. Stdout/stderr append to `~/.agent-monitor/sessions/<uuid>.jsonl`, which is the transcript store; SQLite (`managed_sessions`) tracks the session UUID, turn pid, and turn count. Because turns are detached, they survive the TUI exiting; the chat view (`src/components/ChatView.tsx` + `src/hooks/useChatTranscript.ts`) polls the log file for live updates. Regular hooks fire for these sessions too, so `agent_status` works unchanged. `claude --resume <uuid>` (via `am agent attach` or `openClaudeInTerminal`) hands the same conversation to an interactive terminal.
 
 ### Key Modules
-- `src/lib/db.ts` — SQLite with WAL mode. Tables: `repositories`, `worktrees`, `agent_status`. Handles schema migrations.
+- `src/lib/db.ts` — SQLite with WAL mode. Tables: `repositories`, `worktrees`, `agent_status`, `standalone_sessions`, `managed_sessions`. Handles schema migrations.
+- `src/lib/claude-session.ts` — managed Claude sessions: spawns detached headless `claude` turns, parses stream-json transcripts
 - `src/lib/git.ts` — Git ops via `simple-git`. Worktree creation uses raw `git worktree` commands for `--force`/`-b` flag control.
 - `src/lib/github.ts` — Shells out to `gh` CLI for PR info
 - `src/lib/linear.ts` — Raw HTTPS POST to Linear GraphQL API (no SDK)
@@ -46,6 +48,7 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 ### CLI Commands
 Commands in `src/commands/` are organized by domain:
 - `src/commands/worktree/` — list, create, delete, open, sync, info
+- `src/commands/agent/` — send, list, log, attach, stop (managed Claude sessions)
 - `src/commands/repo/` — list, add, remove
 - `src/commands/settings/` — list, get, set, reset
 - `src/commands/hooks.ts` — install, uninstall, status
@@ -57,7 +60,7 @@ Commands in `src/commands/` are organized by domain:
 - `src/commands/hook-event.ts` — receive hook events from stdin (unchanged)
 
 ### Persistence
-All data at `~/.agent-monitor/` (or `$AM_DATA_DIR` if set): SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`.
+All data at `~/.agent-monitor/` (or `$AM_DATA_DIR` if set): SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`, `sessions/<session-id>.jsonl` (managed session transcripts).
 
 ### Data Isolation (`AM_DATA_DIR`)
 `src/lib/paths.ts` exports `APP_DIR` which defaults to `~/.agent-monitor/` but can be overridden via the `AM_DATA_DIR` environment variable. All other paths (`DB_PATH`, `SETTINGS_PATH`, `LOG_PATH`, `SOCKET_PATH`, etc.) derive from `APP_DIR` automatically. This enables running the app against isolated temp directories for testing without touching real user data.

@@ -7,3 +7,4 @@ export const SETTINGS_PATH = join(APP_DIR, "settings.json");
 export const LOG_PATH = join(APP_DIR, "debug.log");
 export const SOCKET_PATH = join(APP_DIR, "am.sock");
 export const DAEMON_PID_PATH = join(APP_DIR, "am.daemon.pid");
+export const SESSIONS_DIR = join(APP_DIR, "sessions");
