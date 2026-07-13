@@ -17,6 +17,7 @@ vi.mock("../../src/lib/pubsub-client.js", () => ({
 
 vi.mock("../../src/lib/ide-launcher.js", () => ({
   openClaudeInTerminal: vi.fn(),
+  openInIde: vi.fn(),
 }));
 
 const spawnMock = vi.fn();
@@ -26,7 +27,8 @@ vi.mock("child_process", async (importOriginal) => {
 });
 
 const ESCAPE = "\u001B";
-const SETTINGS = { agentPermissionMode: "acceptEdits", agentClaudeArgs: "" } as Settings;
+const SHIFT_TAB = "\u001B[Z";
+const SETTINGS = { ide: "cursor", agentPermissionMode: "acceptEdits", agentClaudeArgs: "" } as Settings;
 
 function withStatus(wt: Worktree): WorktreeWithStatus {
   return {
@@ -131,6 +133,17 @@ describe("ChatView", () => {
     const frame = lastFrame()!;
     expect(frame).toContain("Chat — feature/x");
     expect(frame).not.toContain("[Enter] Send");
+  });
+
+  it("opens the worktree in the configured IDE on Shift+Tab", async () => {
+    const { openInIde } = await import("../../src/lib/ide-launcher.js");
+    const { stdin } = render(
+      <ChatView worktree={worktree} settings={SETTINGS} onBack={vi.fn()} />
+    );
+    await waitForFrame();
+    stdin.write(SHIFT_TAB);
+    await waitForFrame();
+    expect(openInIde).toHaveBeenCalledWith(worktree.path, "cursor", "feature/x");
   });
 
   it("calls onBack when Esc is pressed", async () => {

@@ -4,7 +4,7 @@ import TextInput from "ink-text-input";
 import { Spinner } from "./Spinner.js";
 import { useChatTranscript } from "../hooks/useChatTranscript.js";
 import { startTurn } from "../lib/claude-session.js";
-import { openClaudeInTerminal } from "../lib/ide-launcher.js";
+import { openClaudeInTerminal, openInIde } from "../lib/ide-launcher.js";
 import { log } from "../lib/logger.js";
 import type { ChatMessage, Settings, WorktreeWithStatus } from "../lib/types.js";
 
@@ -130,9 +130,23 @@ export function ChatView({ worktree, settings, pickedSession, embedded, reserved
     }
   };
 
+  const handleOpenIde = () => {
+    try {
+      openInIde(worktree.path, settings.ide, displayName);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `${err}`);
+    }
+  };
+
   useInput((input, key) => {
     if (key.escape) {
       onBack();
+      return;
+    }
+    // Shift+Tab (ESC [ Z) opens the worktree in the configured IDE —
+    // check before plain Tab since key.tab is also set.
+    if (key.shift && key.tab) {
+      handleOpenIde();
       return;
     }
     // Tab is the primary attach binding: Ctrl+T is intercepted by many
@@ -163,7 +177,8 @@ export function ChatView({ worktree, settings, pickedSession, embedded, reserved
   return (
     <Box
       flexDirection="column"
-      {...(embedded ? { borderStyle: "single" as const, flexGrow: 1 } : { height: rows })}
+      // Cyan border signals that input focus is on the chat pane
+      {...(embedded ? { borderStyle: "single" as const, borderColor: "cyan", flexGrow: 1 } : { height: rows })}
       paddingX={1}
     >
       <Box justifyContent="space-between">
@@ -214,7 +229,7 @@ export function ChatView({ worktree, settings, pickedSession, embedded, reserved
         )}
         {!embedded && (
           <Text dimColor>
-            [Enter] Send  [↑↓] Scroll  [Tab] Terminal  [Esc] Back
+            [Enter] Send  [↑↓] Scroll  [Tab] Terminal  [Shift+Tab] IDE  [Esc] Back
           </Text>
         )}
       </Box>

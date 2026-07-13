@@ -42,6 +42,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           <Text color="yellow">[Enter]</Text> Send
           <Text color="yellow"> [↑↓]</Text> Scroll
           <Text color="yellow"> [Tab]</Text> Terminal
+          <Text color="yellow"> [Shift+Tab]</Text> IDE
           <Text color="yellow"> [Esc]</Text> Back
         </Text>
       </Box>
