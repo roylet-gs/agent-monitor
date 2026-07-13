@@ -19,7 +19,12 @@ interface ChatTranscript {
  * (covers sessions started outside am and interactive attach turns), with
  * am's per-session stream-json log as fallback — see loadTranscript().
  */
-export function useChatTranscript(worktreeId: string, cwd: string, intervalMs = 500): ChatTranscript {
+export function useChatTranscript(
+  worktreeId: string,
+  cwd: string,
+  overrideSessionId: string | null = null,
+  intervalMs = 500
+): ChatTranscript {
   const [session, setSession] = useState<ManagedSession | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<ChatMessage[]>([]);
@@ -31,10 +36,10 @@ export function useChatTranscript(worktreeId: string, cwd: string, intervalMs = 
 
     const tick = () => {
       const managed = getManagedSession(worktreeId) ?? null;
-      // Fall back to a session hooks observed at this worktree (started
-      // manually in a terminal/IDE) so its history is visible before am
-      // has ever sent a prompt.
-      const effectiveId = managed?.id ?? getAgentStatus(worktreeId)?.session_id ?? null;
+      // A user-picked session wins; otherwise the managed session, then a
+      // session hooks observed at this worktree (started manually in a
+      // terminal/IDE) so its history is visible before am ever prompts.
+      const effectiveId = overrideSessionId ?? managed?.id ?? getAgentStatus(worktreeId)?.session_id ?? null;
 
       setSession((prev) =>
         prev?.id === managed?.id &&
@@ -71,7 +76,7 @@ export function useChatTranscript(worktreeId: string, cwd: string, intervalMs = 
     tick();
     const timer = setInterval(tick, intervalMs);
     return () => clearInterval(timer);
-  }, [worktreeId, cwd, intervalMs]);
+  }, [worktreeId, cwd, overrideSessionId, intervalMs]);
 
   return { session, sessionId, transcript, turnRunning };
 }

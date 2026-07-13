@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, rmSync, utimesSync } from "fs";
 import { dirname, join } from "path";
 import { getTestDir } from "../setup.js";
 import type { ManagedSession, Settings, Worktree } from "../../src/lib/types.js";
@@ -291,6 +291,58 @@ describe("claude-session", () => {
       // File removed → fallback again
       rmSync(file);
       expect(cs.loadTranscript(worktree.path, session.id).map((m) => m.text)).toContain("from am");
+    });
+  });
+
+  describe("session discovery (worktree root + subdirectories)", () => {
+    const ROOT_ID = "11111111-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const SUBDIR_ID = "22222222-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    const SIBLING_ID = "33333333-cccc-cccc-cccc-cccccccccccc";
+
+    beforeEach(() => {
+      // Session at the worktree root
+      const rootFile = writeClaudeTranscript(worktree.path, ROOT_ID, [
+        { type: "user", cwd: worktree.path, message: { role: "user", content: "root prompt" } },
+      ]);
+      utimesSync(rootFile, new Date(2000), new Date(2000));
+      // Session started in a subdirectory of the worktree
+      const subFile = writeClaudeTranscript(`${worktree.path}/src/app`, SUBDIR_ID, [
+        { type: "user", cwd: `${worktree.path}/src/app`, message: { role: "user", content: "subdir prompt" } },
+      ]);
+      utimesSync(subFile, new Date(9000), new Date(9000));
+      // Sibling dir whose encoded name collides with the worktree prefix — must be excluded
+      writeClaudeTranscript(`${worktree.path}.bak`, SIBLING_ID, [
+        { type: "user", cwd: `${worktree.path}.bak`, message: { role: "user", content: "sibling prompt" } },
+      ]);
+    });
+
+    it("discovers root and subdirectory sessions, newest first, excluding encoded-name collisions", () => {
+      const sessions = cs.discoverWorktreeSessions(worktree.path);
+      expect(sessions.map((s) => s.id)).toEqual([SUBDIR_ID, ROOT_ID]);
+      expect(sessions[0]).toMatchObject({ cwd: `${worktree.path}/src/app`, lastPrompt: "subdir prompt" });
+      expect(sessions[1]).toMatchObject({ cwd: worktree.path, lastPrompt: "root prompt" });
+    });
+
+    it("findClaudeTranscript locates a subdirectory session by id", () => {
+      const file = cs.findClaudeTranscript(worktree.path, SUBDIR_ID);
+      expect(file).toBe(cs.claudeTranscriptPath(`${worktree.path}/src/app`, SUBDIR_ID));
+      expect(cs.findClaudeTranscript(worktree.path, "99999999-0000-0000-0000-000000000000")).toBeNull();
+    });
+
+    it("startTurn with an explicit session switches the managed session and resumes from its cwd", () => {
+      // Existing managed session at the root
+      cs.startTurn(worktree, "first", SETTINGS);
+      spawnMock.mockClear();
+
+      const session = cs.startTurn(worktree, "into the subdir one", SETTINGS, SUBDIR_ID);
+      expect(session.id).toBe(SUBDIR_ID);
+      expect(session.cwd).toBe(`${worktree.path}/src/app`);
+      expect(db.getManagedSession(worktree.id)!.id).toBe(SUBDIR_ID);
+
+      const [, args, opts] = spawnMock.mock.calls[0]!;
+      expect(args).toContain("--resume");
+      expect(args).toContain(SUBDIR_ID);
+      expect(opts.cwd).toBe(`${worktree.path}/src/app`);
     });
   });
 

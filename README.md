@@ -169,9 +169,12 @@ Beyond monitoring, `am` can *drive* Claude Code: start one headless Claude sessi
 
 - `am agent send <target> "prompt"` — send a prompt (starts a session on first use); add `--wait` to print the response
 - `am agent list` — show all managed sessions and whether a turn is running
+- `am agent sessions <target>` — list every Claude session found at the worktree (root and subdirectories)
 - `am agent log <target>` — print the conversation transcript
 - `am agent attach <target>` — resume the same conversation interactively (`claude --resume`)
 - `am agent stop <target>` — stop an in-flight turn
+
+`send` and `log` take `--session <id-or-prefix>` to target a specific session. In the TUI, if several sessions exist at a worktree, pressing `c` opens a picker first (start dir, last activity, last prompt) so you choose which conversation to continue.
 
 Each prompt runs as a detached `claude -p` process writing stream-json to `~/.agent-monitor/sessions/<session-id>.jsonl`, so closing the TUI never kills a running turn. Sessions you start manually at a worktree (e.g. `claude` in a VS Code terminal) are picked up too: the chat view shows their history and prompting from `am` resumes that same conversation. Sessions bill to your normal Claude Code login. Turns run with `--permission-mode acceptEdits` by default (`agentPermissionMode` setting); when an agent needs real interaction, press `Tab` in the chat view (or run `am agent attach`) to open the session in a terminal at that worktree.
 
@@ -298,9 +301,10 @@ All read commands support `--json` for machine-readable output. `<target>` resol
 
 | Command                          | Description                                              | Flags                        |
 | -------------------------------- | -------------------------------------------------------- | ---------------------------- |
-| `am agent send <target> <prompt>`| Send a prompt to a worktree's Claude session             | `--repo`, `--wait`, `--json` |
+| `am agent send <target> <prompt>`| Send a prompt to a worktree's Claude session             | `--repo`, `--session`, `--wait`, `--json` |
 | `am agent list`                  | List managed Claude sessions                             | `--json`                     |
-| `am agent log <target>`          | Show the session transcript                              | `--repo`, `--json`           |
+| `am agent sessions <target>`     | List sessions found at a worktree (incl. subdirectories) | `--repo`, `--json`           |
+| `am agent log <target>`          | Show the session transcript                              | `--repo`, `--session`, `--json` |
 | `am agent attach <target>`       | Resume the session interactively in this terminal        | `--repo`, `--force`          |
 | `am agent stop <target>`         | Stop the in-flight turn                                  | `--repo`                     |
 

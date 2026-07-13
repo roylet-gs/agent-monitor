@@ -21,7 +21,7 @@ export function agentAttach(target: string, opts: { repo?: string; force?: boole
   }
 
   const result = spawnSync("claude", ["--resume", session.id], {
-    cwd: worktree.path,
+    cwd: session.cwd,
     stdio: "inherit",
   });
   process.exit(result.status ?? 0);

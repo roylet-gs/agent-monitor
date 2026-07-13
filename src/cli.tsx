@@ -111,6 +111,7 @@ agentCmd
   .command("send <target> <prompt...>")
   .description("Send a prompt to a worktree's Claude session (starts one if needed)")
   .option("--repo <path>", "Repository path")
+  .option("--session <id>", "Target a specific session (id or prefix, see: agent sessions)")
   .option("--wait", "Wait for the turn to finish and print the response")
   .option("--json", "Output as JSON")
   .action(async (target, promptWords, opts) => {
@@ -131,10 +132,21 @@ agentCmd
   .command("log <target>")
   .description("Show the transcript of a worktree's Claude session")
   .option("--repo <path>", "Repository path")
-  .option("--json", "Output raw stream-json log")
+  .option("--session <id>", "Target a specific session (id or prefix)")
+  .option("--json", "Output raw transcript JSONL")
   .action(async (target, opts) => {
     const { agentLog } = await import("./commands/agent/log.js");
-    agentLog(target, opts);
+    await agentLog(target, opts);
+  });
+
+agentCmd
+  .command("sessions <target>")
+  .description("List Claude sessions found at a worktree (root and subdirectories)")
+  .option("--repo <path>", "Repository path")
+  .option("--json", "Output as JSON")
+  .action(async (target, opts) => {
+    const { agentSessions } = await import("./commands/agent/sessions.js");
+    agentSessions(target, opts);
   });
 
 agentCmd

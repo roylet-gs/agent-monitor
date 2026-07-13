@@ -12,6 +12,8 @@ import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ChatView } from "./components/ChatView.js";
+import { SessionPicker } from "./components/SessionPicker.js";
+import { discoverWorktreeSessions, type DiscoveredSession } from "./lib/claude-session.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useDaemon } from "./hooks/useDaemon.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
@@ -105,6 +107,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
   const [terminalOpenedIds, setTerminalOpenedIds] = useState<Set<string>>(new Set());
+  const [pickerSessions, setPickerSessions] = useState<DiscoveredSession[]>([]);
+  const [pickerActiveId, setPickerActiveId] = useState<string | null>(null);
+  const [pickedSession, setPickedSession] = useState<DiscoveredSession | null>(null);
   const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
@@ -339,11 +344,21 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [flatWorktrees, selectedIndex]);
 
-  // Handle open chat view for the selected worktree
+  // Handle open chat view for the selected worktree. With several Claude
+  // sessions at the worktree (root or subdirectories), show a picker first.
   const handleOpenChat = useCallback(() => {
     if (selectedIndex >= flatWorktrees.length) return; // standalone session
-    if (!flatWorktrees[selectedIndex]) return;
-    setMode("chat");
+    const wt = flatWorktrees[selectedIndex];
+    if (!wt) return;
+    setPickedSession(null);
+    const sessions = discoverWorktreeSessions(wt.path);
+    if (sessions.length > 1) {
+      setPickerSessions(sessions);
+      setPickerActiveId(getManagedSession(wt.id)?.id ?? wt.agent_status?.session_id ?? null);
+      setMode("chat-pick");
+    } else {
+      setMode("chat");
+    }
   }, [flatWorktrees, selectedIndex]);
 
   // Handle open terminal via [t]
@@ -1195,10 +1210,25 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         ) : null;
       })()}
 
+      {mode === "chat-pick" && flatWorktrees[selectedIndex] && (
+        <SessionPicker
+          worktreeName={flatWorktrees[selectedIndex]!.custom_name ?? flatWorktrees[selectedIndex]!.branch}
+          worktreePath={flatWorktrees[selectedIndex]!.path}
+          sessions={pickerSessions}
+          activeSessionId={pickerActiveId}
+          onSelect={(session) => {
+            setPickedSession(session);
+            setMode("chat");
+          }}
+          onCancel={() => setMode("dashboard")}
+        />
+      )}
+
       {mode === "chat" && flatWorktrees[selectedIndex] && (
         <ChatView
           worktree={flatWorktrees[selectedIndex]!}
           settings={settings}
+          pickedSession={pickedSession}
           onBack={() => setMode("dashboard")}
         />
       )}

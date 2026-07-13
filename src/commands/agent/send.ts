@@ -7,7 +7,7 @@ import { outputJson } from "../../lib/output.js";
 export async function agentSend(
   target: string,
   promptWords: string[],
-  opts: { repo?: string; wait?: boolean; json?: boolean }
+  opts: { repo?: string; wait?: boolean; json?: boolean; session?: string }
 ): Promise<void> {
   const prompt = promptWords.join(" ").trim();
   if (!prompt) {
@@ -19,9 +19,15 @@ export async function agentSend(
   const worktree = resolveWorktree(target, repoId);
   const settings = loadSettings();
 
+  let sessionId: string | undefined;
+  if (opts.session) {
+    const { resolveSessionId } = await import("./sessions.js");
+    sessionId = resolveSessionId(worktree.path, opts.session).id;
+  }
+
   let session;
   try {
-    session = startTurn(worktree, prompt, settings);
+    session = startTurn(worktree, prompt, settings, sessionId);
   } catch (err) {
     console.error(`${err instanceof Error ? err.message : err}`);
     process.exit(1);

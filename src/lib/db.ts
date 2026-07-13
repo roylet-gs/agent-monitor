@@ -319,6 +319,31 @@ export function createManagedSession(
   return getManagedSessionById(id)!;
 }
 
+/**
+ * Point a worktree's managed session at a (possibly different) session id —
+ * used when the user picks another session to chat with. Resets turn_pid.
+ */
+export function replaceManagedSession(
+  worktreeId: string,
+  id: string,
+  cwd: string,
+  turnCount: number
+): ManagedSession {
+  getDb()
+    .prepare(
+      `INSERT INTO managed_sessions (id, worktree_id, cwd, turn_count) VALUES (?, ?, ?, ?)
+       ON CONFLICT(worktree_id) DO UPDATE SET
+         id = excluded.id,
+         cwd = excluded.cwd,
+         turn_count = excluded.turn_count,
+         turn_pid = NULL,
+         updated_at = datetime('now')`
+    )
+    .run(id, worktreeId, cwd, turnCount);
+  log("info", "db", `Managed session for worktree ${worktreeId} is now ${id}`);
+  return getManagedSession(worktreeId)!;
+}
+
 export function getManagedSession(worktreeId: string): ManagedSession | undefined {
   return getDb()
     .prepare("SELECT * FROM managed_sessions WHERE worktree_id = ?")

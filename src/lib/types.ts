@@ -141,6 +141,7 @@ export interface Settings {
 export type AppMode =
   | "dashboard"
   | "chat"
+  | "chat-pick"
   | "new-worktree"
   | "branch-exists"
   | "delete-confirm"

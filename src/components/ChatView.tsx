@@ -11,6 +11,8 @@ import type { ChatMessage, Settings, WorktreeWithStatus } from "../lib/types.js"
 interface ChatViewProps {
   worktree: WorktreeWithStatus;
   settings: Settings;
+  /** Session explicitly picked in the SessionPicker (when several exist). */
+  pickedSession?: { id: string; cwd: string } | null;
   onBack: () => void;
 }
 
@@ -66,9 +68,13 @@ function toDisplayLines(transcript: ChatMessage[], width: number): DisplayLine[]
   return lines;
 }
 
-export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
+export function ChatView({ worktree, settings, pickedSession, onBack }: ChatViewProps) {
   const { stdout } = useStdout();
-  const { session, sessionId, transcript, turnRunning } = useChatTranscript(worktree.id, worktree.path);
+  const { session, sessionId, transcript, turnRunning } = useChatTranscript(
+    worktree.id,
+    worktree.path,
+    pickedSession?.id ?? null
+  );
   const [draft, setDraft] = useState("");
   const [scrollFromBottom, setScrollFromBottom] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +97,7 @@ export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
     const prompt = draft.trim();
     if (!prompt || turnRunning) return;
     try {
-      startTurn(worktree, prompt, settings);
+      startTurn(worktree, prompt, settings, pickedSession?.id);
       setDraft("");
       setError(null);
       setScrollFromBottom(0);
@@ -104,7 +110,10 @@ export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
 
   const handleAttach = () => {
     try {
-      openClaudeInTerminal(worktree.path, !!worktree.agent_status?.session_id, displayName, sessionId ?? undefined);
+      // Resume from the session's original start directory — claude
+      // resolves --resume within the current project dir.
+      const attachCwd = pickedSession?.cwd ?? session?.cwd ?? worktree.path;
+      openClaudeInTerminal(attachCwd, !!worktree.agent_status?.session_id, displayName, sessionId ?? undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${err}`);
     }
