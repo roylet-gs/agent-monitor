@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "fs";
-import { join } from "path";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { dirname, join } from "path";
+import { getTestDir } from "../setup.js";
 import type { ManagedSession, Settings, Worktree } from "../../src/lib/types.js";
 
 // Mock logger to avoid file I/O during tests
@@ -22,6 +23,13 @@ vi.mock("child_process", async (importOriginal) => {
   return { ...actual, spawn: (...args: unknown[]) => spawnMock(...args) };
 });
 
+// Mock homedir so claudeTranscriptPath (~/.claude/projects/...) stays in the test dir
+const home = vi.hoisted(() => ({ dir: "/nonexistent" }));
+vi.mock("os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("os")>();
+  return { ...actual, homedir: () => home.dir };
+});
+
 const SETTINGS = {
   agentPermissionMode: "acceptEdits",
   agentClaudeArgs: "",
@@ -37,12 +45,20 @@ describe("claude-session", () => {
   let worktree: Worktree;
 
   beforeEach(async () => {
+    home.dir = getTestDir();
     spawnMock.mockReset().mockReturnValue(fakeChild());
     cs = await import("../../src/lib/claude-session.js");
     db = await import("../../src/lib/db.js");
     const repo = db.addRepository("/tmp/am-test-repo", "test-repo");
     worktree = db.upsertWorktree(repo.id, "/tmp/am-test-repo/wt", "feature/x", "wt");
   });
+
+  function writeClaudeTranscript(cwd: string, sessionId: string, lines: unknown[]): string {
+    const file = cs.claudeTranscriptPath(cwd, sessionId);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    return file;
+  }
 
   describe("buildTurnArgs", () => {
     const session = (turnCount: number): ManagedSession => ({
@@ -197,6 +213,84 @@ describe("claude-session", () => {
 
     it("returns empty for a missing log file", () => {
       expect(cs.parseTranscript("no-such-session")).toEqual([]);
+    });
+  });
+
+  describe("external session adoption", () => {
+    const EXTERNAL_ID = "dddddddd-eeee-ffff-0000-111111111111";
+
+    it("adopts a hook-observed session whose transcript exists and resumes it", () => {
+      db.upsertAgentStatus(worktree.id, "idle", EXTERNAL_ID);
+      writeClaudeTranscript(worktree.path, EXTERNAL_ID, [
+        { type: "user", message: { role: "user", content: "hi from terminal" } },
+      ]);
+
+      const session = cs.startTurn(worktree, "continue please", SETTINGS);
+      expect(session.id).toBe(EXTERNAL_ID);
+
+      const [, args] = spawnMock.mock.calls[0]!;
+      expect(args).toContain("--resume");
+      expect(args).toContain(EXTERNAL_ID);
+      expect(args).not.toContain("--session-id");
+    });
+
+    it("starts fresh when the hook-observed session has no transcript on disk", () => {
+      db.upsertAgentStatus(worktree.id, "idle", EXTERNAL_ID);
+
+      const session = cs.startTurn(worktree, "go", SETTINGS);
+      expect(session.id).not.toBe(EXTERNAL_ID);
+
+      const [, args] = spawnMock.mock.calls[0]!;
+      expect(args).toContain("--session-id");
+    });
+  });
+
+  describe("claude project transcripts", () => {
+    it("parses user, assistant, and tool entries; skips meta, sidechain, and wrappers", () => {
+      const lines = [
+        { type: "queue-operation", timestamp: "t" },
+        { type: "user", isMeta: true, message: { role: "user", content: "injected context" } },
+        { type: "user", message: { role: "user", content: "fix the bug" }, timestamp: "t1" },
+        { type: "user", message: { role: "user", content: "<command-name>/clear</command-name>" } },
+        { type: "user", message: { role: "user", content: [{ type: "tool_result", content: "stuff" }] } },
+        {
+          type: "assistant",
+          message: {
+            content: [
+              { type: "thinking", thinking: "hmm" },
+              { type: "text", text: "On it." },
+              { type: "tool_use", name: "Bash", input: { command: "ls" } },
+            ],
+          },
+          timestamp: "t2",
+        },
+        { type: "assistant", isSidechain: true, message: { content: [{ type: "text", text: "subagent noise" }] } },
+      ];
+      const messages = lines.flatMap((l) => cs.parseClaudeTranscriptLine(JSON.stringify(l)));
+      expect(messages).toEqual([
+        { role: "user", text: "fix the bug", ts: "t1" },
+        { role: "assistant", text: "On it.", ts: "t2" },
+        { role: "tool", text: "Bash: ls", ts: "t2" },
+      ]);
+    });
+
+    it("loadTranscript prefers the claude project file and falls back to the am log", async () => {
+      const session = cs.startTurn(worktree, "from am", SETTINGS);
+
+      // Only the am log exists → fallback shows the am prompt
+      expect(cs.loadTranscript(worktree.path, session.id).map((m) => m.text)).toContain("from am");
+
+      // Claude project file appears → it wins
+      const file = writeClaudeTranscript(worktree.path, session.id, [
+        { type: "user", message: { role: "user", content: "from claude file" } },
+      ]);
+      const preferred = cs.loadTranscript(worktree.path, session.id).map((m) => m.text);
+      expect(preferred).toContain("from claude file");
+      expect(preferred).not.toContain("from am");
+
+      // File removed → fallback again
+      rmSync(file);
+      expect(cs.loadTranscript(worktree.path, session.id).map((m) => m.text)).toContain("from am");
     });
   });
 

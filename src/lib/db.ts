@@ -306,11 +306,16 @@ export function touchAgentStatusTimestamp(worktreeId: string): void {
 
 // --- Managed Sessions ---
 
-export function createManagedSession(id: string, worktreeId: string, cwd: string): ManagedSession {
+export function createManagedSession(
+  id: string,
+  worktreeId: string,
+  cwd: string,
+  initialTurnCount = 0
+): ManagedSession {
   getDb()
-    .prepare("INSERT INTO managed_sessions (id, worktree_id, cwd) VALUES (?, ?, ?)")
-    .run(id, worktreeId, cwd);
-  log("info", "db", `Created managed session ${id} for worktree ${worktreeId}`);
+    .prepare("INSERT INTO managed_sessions (id, worktree_id, cwd, turn_count) VALUES (?, ?, ?, ?)")
+    .run(id, worktreeId, cwd, initialTurnCount);
+  log("info", "db", `Created managed session ${id} for worktree ${worktreeId} (turn_count=${initialTurnCount})`);
   return getManagedSessionById(id)!;
 }
 

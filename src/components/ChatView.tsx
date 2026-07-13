@@ -68,7 +68,7 @@ function toDisplayLines(transcript: ChatMessage[], width: number): DisplayLine[]
 
 export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
   const { stdout } = useStdout();
-  const { session, transcript, turnRunning } = useChatTranscript(worktree.id);
+  const { session, sessionId, transcript, turnRunning } = useChatTranscript(worktree.id, worktree.path);
   const [draft, setDraft] = useState("");
   const [scrollFromBottom, setScrollFromBottom] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -104,7 +104,7 @@ export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
 
   const handleAttach = () => {
     try {
-      openClaudeInTerminal(worktree.path, !!worktree.agent_status?.session_id, displayName, session?.id);
+      openClaudeInTerminal(worktree.path, !!worktree.agent_status?.session_id, displayName, sessionId ?? undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${err}`);
     }
@@ -146,14 +146,20 @@ export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
         <Text bold color="cyan">
           Chat — {displayName}
         </Text>
-        <Text dimColor>{session ? `session ${session.id.slice(0, 8)} · ${session.turn_count} turn${session.turn_count === 1 ? "" : "s"}` : "no session yet"}</Text>
+        <Text dimColor>
+          {session
+            ? `session ${session.id.slice(0, 8)} · ${session.turn_count} turn${session.turn_count === 1 ? "" : "s"}`
+            : sessionId
+              ? `session ${sessionId.slice(0, 8)} · external`
+              : "no session yet"}
+        </Text>
       </Box>
 
       <Box flexDirection="column" flexGrow={1} marginTop={1}>
         {start > 0 && <Text dimColor>… {start} more above …</Text>}
         {lines.length === 0 ? (
           <Text dimColor>
-            {session
+            {sessionId
               ? "No messages yet."
               : "No session yet — type a prompt below to start a Claude session in this worktree."}
           </Text>

@@ -13,11 +13,13 @@
 import { spawn } from "child_process";
 import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, readFileSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import { randomUUID } from "crypto";
 import { SESSIONS_DIR } from "./paths.js";
 import {
   createManagedSession,
   getManagedSession,
+  getAgentStatus,
   recordManagedSessionTurn,
   clearManagedSessionTurnPid,
 } from "./db.js";
@@ -27,6 +29,15 @@ import type { ChatMessage, ManagedSession, Settings, Worktree } from "./types.js
 
 export function sessionLogPath(sessionId: string): string {
   return join(SESSIONS_DIR, `${sessionId}.jsonl`);
+}
+
+/**
+ * Claude Code's own transcript for a session: ~/.claude/projects/<encoded cwd>/<id>.jsonl.
+ * The directory name encodes the cwd with every non-alphanumeric char as "-".
+ */
+export function claudeTranscriptPath(cwd: string, sessionId: string): string {
+  const encoded = cwd.replace(/[^a-zA-Z0-9]/g, "-");
+  return join(homedir(), ".claude", "projects", encoded, `${sessionId}.jsonl`);
 }
 
 export function isTurnRunning(session: ManagedSession): boolean {
@@ -66,7 +77,16 @@ export function buildTurnArgs(session: ManagedSession, prompt: string, settings:
 export function startTurn(worktree: Worktree, prompt: string, settings: Settings): ManagedSession {
   let session = getManagedSession(worktree.id);
   if (!session) {
-    session = createManagedSession(randomUUID(), worktree.id, worktree.path);
+    // Adopt a session started outside am (e.g. interactive claude in a
+    // terminal) when hooks recorded its id and its transcript still exists —
+    // the first managed turn then resumes that conversation.
+    const externalId = getAgentStatus(worktree.id)?.session_id;
+    if (externalId && existsSync(claudeTranscriptPath(worktree.path, externalId))) {
+      log("info", "claude-session", `Adopting external session ${externalId} for ${worktree.branch}`);
+      session = createManagedSession(externalId, worktree.id, worktree.path, 1);
+    } else {
+      session = createManagedSession(randomUUID(), worktree.id, worktree.path);
+    }
   }
   if (isTurnRunning(session)) {
     throw new Error("Agent is still working on the previous prompt");
@@ -210,6 +230,92 @@ export function parseTranscriptLine(line: string): ChatMessage[] {
       // system/init, user (tool results), stream_event — not rendered
       return [];
   }
+}
+
+/**
+ * Parse one line of a Claude Code project transcript (~/.claude/projects).
+ * The shape differs from -p stream-json: entries carry a full API message
+ * plus metadata (isMeta for injected context, isSidechain for subagents).
+ */
+export function parseClaudeTranscriptLine(line: string): ChatMessage[] {
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return [];
+  }
+  if (!event || typeof event !== "object") return [];
+  if (event.isMeta || event.isSidechain) return [];
+
+  const ts = typeof event.timestamp === "string" ? event.timestamp : undefined;
+  const message = event.message as { content?: unknown } | undefined;
+
+  if (event.type === "user") {
+    const content = message?.content;
+    const texts: string[] = [];
+    if (typeof content === "string") {
+      texts.push(content);
+    } else if (Array.isArray(content)) {
+      for (const block of content as Array<Record<string, unknown>>) {
+        if (block.type === "text" && typeof block.text === "string") texts.push(block.text);
+        // tool_result blocks are tool plumbing, not user speech
+      }
+    }
+    return texts
+      .map((t) => t.trim())
+      // skip injected wrappers (command messages, system reminders, caveats)
+      .filter((t) => t && !t.startsWith("<") && !t.startsWith("Caveat:"))
+      .map((text) => ({ role: "user" as const, text, ts }));
+  }
+
+  if (event.type === "assistant") {
+    const content = Array.isArray(message?.content) ? message.content : [];
+    const messages: ChatMessage[] = [];
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
+        messages.push({ role: "assistant", text: block.text, ts });
+      } else if (block.type === "tool_use" && typeof block.name === "string") {
+        messages.push({
+          role: "tool",
+          text: summarizeToolUse(block.name, block.input as Record<string, unknown> | undefined),
+          ts,
+        });
+      }
+    }
+    return messages;
+  }
+
+  return [];
+}
+
+/**
+ * Load the best available transcript for a session at a given cwd.
+ * Prefers Claude Code's own project transcript — it covers interactive
+ * turns (attach, sessions started outside am) that am's stream-json log
+ * never sees — and falls back to am's per-session log.
+ */
+export function loadTranscript(cwd: string, sessionId: string): ChatMessage[] {
+  const claudeFile = claudeTranscriptPath(cwd, sessionId);
+  if (existsSync(claudeFile)) {
+    try {
+      const raw = readFileSync(claudeFile, "utf-8");
+      const messages: ChatMessage[] = [];
+      for (const line of raw.split("\n")) {
+        if (!line.trim()) continue;
+        messages.push(...parseClaudeTranscriptLine(line));
+      }
+      return messages;
+    } catch (err) {
+      log("warn", "claude-session", `Failed to read claude transcript ${claudeFile}: ${err}`);
+    }
+  }
+  return parseTranscript(sessionId);
+}
+
+/** Path whose growth signals new transcript content (for cheap polling). */
+export function transcriptWatchPath(cwd: string, sessionId: string): string {
+  const claudeFile = claudeTranscriptPath(cwd, sessionId);
+  return existsSync(claudeFile) ? claudeFile : sessionLogPath(sessionId);
 }
 
 /** Parse the full session log into a transcript. Missing file → empty. */

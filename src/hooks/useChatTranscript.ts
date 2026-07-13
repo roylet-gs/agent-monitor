@@ -1,69 +1,77 @@
 import { useEffect, useRef, useState } from "react";
 import { statSync } from "fs";
-import { getManagedSession } from "../lib/db.js";
-import { parseTranscript, sessionLogPath, isTurnRunning } from "../lib/claude-session.js";
+import { getManagedSession, getAgentStatus } from "../lib/db.js";
+import { loadTranscript, transcriptWatchPath, isTurnRunning } from "../lib/claude-session.js";
 import type { ChatMessage, ManagedSession } from "../lib/types.js";
 
 interface ChatTranscript {
   session: ManagedSession | null;
+  /** Effective session id: the managed session, or one hooks observed at this worktree. */
+  sessionId: string | null;
   transcript: ChatMessage[];
   turnRunning: boolean;
 }
 
 /**
- * Live view of a worktree's managed session: polls the SQLite row (cheap,
- * synchronous) and re-parses the session's JSONL log whenever it grows.
- * The detached turn process writes the log, so polling the file is the
- * TUI's only reliable stream — it works even for turns started by the CLI
- * or a previous TUI instance.
+ * Live view of a worktree's Claude conversation: polls the SQLite rows
+ * (cheap, synchronous) and re-parses the transcript whenever it grows.
+ * The transcript source is Claude Code's own project file when it exists
+ * (covers sessions started outside am and interactive attach turns), with
+ * am's per-session stream-json log as fallback — see loadTranscript().
  */
-export function useChatTranscript(worktreeId: string, intervalMs = 500): ChatTranscript {
+export function useChatTranscript(worktreeId: string, cwd: string, intervalMs = 500): ChatTranscript {
   const [session, setSession] = useState<ManagedSession | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<ChatMessage[]>([]);
   const [turnRunning, setTurnRunning] = useState(false);
-  const logSizeRef = useRef(-1);
-  const sessionIdRef = useRef<string | null>(null);
+  const fingerprintRef = useRef("");
 
   useEffect(() => {
-    logSizeRef.current = -1;
-    sessionIdRef.current = null;
+    fingerprintRef.current = "";
 
     const tick = () => {
-      const current = getManagedSession(worktreeId) ?? null;
-      setSession((prev) =>
-        prev?.id === current?.id &&
-        prev?.turn_pid === current?.turn_pid &&
-        prev?.turn_count === current?.turn_count
-          ? prev
-          : current
-      );
-      setTurnRunning(current ? isTurnRunning(current) : false);
+      const managed = getManagedSession(worktreeId) ?? null;
+      // Fall back to a session hooks observed at this worktree (started
+      // manually in a terminal/IDE) so its history is visible before am
+      // has ever sent a prompt.
+      const effectiveId = managed?.id ?? getAgentStatus(worktreeId)?.session_id ?? null;
 
-      if (!current) {
-        if (sessionIdRef.current !== null) {
-          sessionIdRef.current = null;
+      setSession((prev) =>
+        prev?.id === managed?.id &&
+        prev?.turn_pid === managed?.turn_pid &&
+        prev?.turn_count === managed?.turn_count
+          ? prev
+          : managed
+      );
+      setSessionId(effectiveId);
+      setTurnRunning(managed ? isTurnRunning(managed) : false);
+
+      if (!effectiveId) {
+        if (fingerprintRef.current !== "") {
+          fingerprintRef.current = "";
           setTranscript([]);
         }
         return;
       }
 
+      const watchPath = transcriptWatchPath(cwd, effectiveId);
       let size = 0;
       try {
-        size = statSync(sessionLogPath(current.id)).size;
+        size = statSync(watchPath).size;
       } catch {
         size = 0;
       }
-      if (current.id !== sessionIdRef.current || size !== logSizeRef.current) {
-        sessionIdRef.current = current.id;
-        logSizeRef.current = size;
-        setTranscript(parseTranscript(current.id));
+      const fingerprint = `${effectiveId}:${watchPath}:${size}`;
+      if (fingerprint !== fingerprintRef.current) {
+        fingerprintRef.current = fingerprint;
+        setTranscript(loadTranscript(cwd, effectiveId));
       }
     };
 
     tick();
     const timer = setInterval(tick, intervalMs);
     return () => clearInterval(timer);
-  }, [worktreeId, intervalMs]);
+  }, [worktreeId, cwd, intervalMs]);
 
-  return { session, transcript, turnRunning };
+  return { session, sessionId, transcript, turnRunning };
 }
