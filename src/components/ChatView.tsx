@@ -13,6 +13,14 @@ interface ChatViewProps {
   settings: Settings;
   /** Session explicitly picked in the SessionPicker (when several exist). */
   pickedSession?: { id: string; cwd: string } | null;
+  /**
+   * Render as the dashboard's right pane (in place of the detail panel)
+   * instead of full-screen: bordered box, no own hint bar (the ActionBar
+   * shows chat keys), sized to the pane.
+   */
+  embedded?: boolean;
+  /** Rows consumed by other dashboard chrome while embedded (e.g. log panel). */
+  reservedRows?: number;
   onBack: () => void;
 }
 
@@ -68,7 +76,7 @@ function toDisplayLines(transcript: ChatMessage[], width: number): DisplayLine[]
   return lines;
 }
 
-export function ChatView({ worktree, settings, pickedSession, onBack }: ChatViewProps) {
+export function ChatView({ worktree, settings, pickedSession, embedded, reservedRows = 0, onBack }: ChatViewProps) {
   const { stdout } = useStdout();
   const { session, sessionId, transcript, turnRunning } = useChatTranscript(
     worktree.id,
@@ -81,9 +89,12 @@ export function ChatView({ worktree, settings, pickedSession, onBack }: ChatView
 
   const columns = stdout?.columns ?? 80;
   const rows = stdout?.rows ?? 24;
-  // header (2) + borders/hints/input (5) leave the rest for the transcript
-  const visibleLines = Math.max(4, rows - 7);
-  const contentWidth = Math.max(20, columns - 4);
+  // Full-screen: header (2) + borders/hints/input (5) leave the rest.
+  // Embedded: status bar, action bar, pane border, header, and input
+  // chrome eat ~10 rows of the terminal, plus whatever the caller reserves.
+  const visibleLines = Math.max(4, embedded ? rows - 10 - reservedRows : rows - 7);
+  // Embedded pane sits beside the 40%-wide worktree list.
+  const contentWidth = Math.max(20, embedded ? Math.floor(columns * 0.6) - 6 : columns - 4);
 
   const lines = useMemo(() => toDisplayLines(transcript, contentWidth), [transcript, contentWidth]);
   const maxScroll = Math.max(0, lines.length - visibleLines);
@@ -150,7 +161,11 @@ export function ChatView({ worktree, settings, pickedSession, onBack }: ChatView
   });
 
   return (
-    <Box flexDirection="column" height={rows} paddingX={1}>
+    <Box
+      flexDirection="column"
+      {...(embedded ? { borderStyle: "single" as const, flexGrow: 1 } : { height: rows })}
+      paddingX={1}
+    >
       <Box justifyContent="space-between">
         <Text bold color="cyan">
           Chat — {displayName}
@@ -197,9 +212,11 @@ export function ChatView({ worktree, settings, pickedSession, onBack }: ChatView
             <TextInput value={draft} onChange={setDraft} onSubmit={handleSubmit} placeholder="Send a prompt…" />
           </Box>
         )}
-        <Text dimColor>
-          [Enter] Send  [↑↓] Scroll  [Tab] Terminal  [Esc] Back
-        </Text>
+        {!embedded && (
+          <Text dimColor>
+            [Enter] Send  [↑↓] Scroll  [Tab] Terminal  [Esc] Back
+          </Text>
+        )}
       </Box>
     </Box>
   );

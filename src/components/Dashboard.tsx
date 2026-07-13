@@ -8,7 +8,7 @@ import { LogPanel } from "./LogPanel.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
 import type { WorktreeWithStatus, WorktreeGroup, StandaloneSession } from "../lib/types.js";
 
-const DETAIL_PANEL_MIN_COLS = 100;
+export const DETAIL_PANEL_MIN_COLS = 100;
 
 interface DashboardProps {
   repoName: string;
@@ -28,6 +28,8 @@ interface DashboardProps {
   linearEnabled?: boolean;
   ideIsTerm?: boolean;
   integrationLoading?: string | null;
+  /** When set (wide terminals), rendered in place of the detail panel with chat keys in the action bar. */
+  chatPane?: React.ReactNode;
 }
 
 export const Dashboard = React.memo(function Dashboard({
@@ -48,6 +50,7 @@ export const Dashboard = React.memo(function Dashboard({
   linearEnabled,
   ideIsTerm,
   integrationLoading,
+  chatPane,
 }: DashboardProps) {
   const isStandaloneSelected = selectedIndex >= flatWorktrees.length;
   const selectedWorktree = isStandaloneSelected ? null : (flatWorktrees[selectedIndex] ?? null);
@@ -63,10 +66,10 @@ export const Dashboard = React.memo(function Dashboard({
       <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} standaloneCount={standaloneSessions.length} version={version} updateInfo={updateInfo} />
       <Box flexGrow={1}>
         <WorktreeList groups={groups} flatWorktrees={flatWorktrees} standaloneSessions={standaloneSessions} standaloneStartIndex={flatWorktrees.length} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} fillWidth={!showDetail} />
-        {showDetail && <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} />}
+        {showDetail && (chatPane ?? <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} />)}
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
-      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} />
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} chatMode={!!chatPane && showDetail} />
     </Box>
   );
 });

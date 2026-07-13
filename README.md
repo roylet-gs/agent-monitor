@@ -176,6 +176,8 @@ Beyond monitoring, `am` can *drive* Claude Code: start one headless Claude sessi
 
 `send` and `log` take `--session <id-or-prefix>` to target a specific session. In the TUI, if several sessions exist at a worktree, pressing `c` opens a picker first (start dir, last activity, last prompt) so you choose which conversation to continue.
 
+On wide terminals (≥100 columns) the chat opens **in place of the detail panel**, keeping the worktree list visible; input focus moves to the chat and the action bar switches to chat keys. `Esc` returns to the detail panel. On narrower terminals the chat takes over the full screen.
+
 Each prompt runs as a detached `claude -p` process writing stream-json to `~/.agent-monitor/sessions/<session-id>.jsonl`, so closing the TUI never kills a running turn. Sessions you start manually at a worktree (e.g. `claude` in a VS Code terminal) are picked up too: the chat view shows their history and prompting from `am` resumes that same conversation. Sessions bill to your normal Claude Code login. Turns run with `--permission-mode acceptEdits` by default (`agentPermissionMode` setting); when an agent needs real interaction, press `Tab` in the chat view (or run `am agent attach`) to open the session in a terminal at that worktree.
 
 ### GitHub Integration

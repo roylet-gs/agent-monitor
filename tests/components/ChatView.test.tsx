@@ -124,6 +124,15 @@ describe("ChatView", () => {
     );
   });
 
+  it("embedded mode renders without its own hint bar (ActionBar owns the keys)", () => {
+    const { lastFrame } = render(
+      <ChatView worktree={worktree} settings={SETTINGS} embedded onBack={vi.fn()} />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("Chat — feature/x");
+    expect(frame).not.toContain("[Enter] Send");
+  });
+
   it("calls onBack when Esc is pressed", async () => {
     const onBack = vi.fn();
     const { stdin } = render(

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import path from "path";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
-import { Dashboard } from "./components/Dashboard.js";
+import { Dashboard, DETAIL_PANEL_MIN_COLS } from "./components/Dashboard.js";
+import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
 import { RepoSelector } from "./components/RepoSelector.js";
 import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
@@ -1042,6 +1043,22 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [error]);
 
+  // On wide terminals the chat replaces the detail panel inside the
+  // dashboard; on narrow ones it takes over the whole screen.
+  const { columns } = useTerminalSize();
+  const chatEmbedded = columns >= DETAIL_PANEL_MIN_COLS;
+  const chatWorktree = mode === "chat" ? flatWorktrees[selectedIndex] : undefined;
+  const chatNode = chatWorktree ? (
+    <ChatView
+      worktree={chatWorktree}
+      settings={settings}
+      pickedSession={pickedSession}
+      embedded={chatEmbedded}
+      reservedRows={showLogs ? Math.max(5, Math.floor((stdout?.rows ?? 24) / 3)) : 0}
+      onBack={() => setMode("dashboard")}
+    />
+  ) : null;
+
   return (
     <Box flexDirection="column" height={stdout?.rows ?? 24}>
       {error && (
@@ -1224,14 +1241,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         />
       )}
 
-      {mode === "chat" && flatWorktrees[selectedIndex] && (
-        <ChatView
-          worktree={flatWorktrees[selectedIndex]!}
-          settings={settings}
-          pickedSession={pickedSession}
-          onBack={() => setMode("dashboard")}
-        />
-      )}
+      {mode === "chat" && !chatEmbedded && chatNode}
 
       {mode === "settings" && (
         <SettingsPanel
@@ -1247,7 +1257,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         />
       )}
 
-      {mode === "dashboard" && (
+      {(mode === "dashboard" || (mode === "chat" && chatEmbedded)) && (
         <Dashboard
           repoName={activeRepo?.name ?? "No repository"}
           groups={groups}
@@ -1266,6 +1276,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           linearEnabled={settings.linearEnabled}
           ideIsTerm={settings.ide === "terminal"}
           integrationLoading={integrationLoading}
+          chatPane={mode === "chat" ? chatNode ?? undefined : undefined}
         />
       )}
     </Box>
