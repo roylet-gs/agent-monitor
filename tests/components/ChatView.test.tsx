@@ -107,6 +107,23 @@ describe("ChatView", () => {
     expect(lastFrame()).toContain("❯ hello agent");
   });
 
+  it("opens the session in a terminal when Tab is pressed", async () => {
+    const { openClaudeInTerminal } = await import("../../src/lib/ide-launcher.js");
+    const session = cs.startTurn(worktree, "go", SETTINGS);
+    const { stdin } = render(
+      <ChatView worktree={worktree} settings={SETTINGS} onBack={vi.fn()} />
+    );
+    await waitForFrame();
+    stdin.write("\t");
+    await waitForFrame();
+    expect(openClaudeInTerminal).toHaveBeenCalledWith(
+      worktree.path,
+      false,
+      "feature/x",
+      session.id
+    );
+  });
+
   it("calls onBack when Esc is pressed", async () => {
     const onBack = vi.fn();
     const { stdin } = render(

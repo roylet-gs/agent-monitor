@@ -173,7 +173,7 @@ Beyond monitoring, `am` can *drive* Claude Code: start one headless Claude sessi
 - `am agent attach <target>` — resume the same conversation interactively (`claude --resume`)
 - `am agent stop <target>` — stop an in-flight turn
 
-Each prompt runs as a detached `claude -p` process writing stream-json to `~/.agent-monitor/sessions/<session-id>.jsonl`, so closing the TUI never kills a running turn. Sessions bill to your normal Claude Code login. Turns run with `--permission-mode acceptEdits` by default (`agentPermissionMode` setting); when an agent needs real interaction, press `Ctrl+T` in the chat view (or run `am agent attach`) to open the session in a terminal at that worktree.
+Each prompt runs as a detached `claude -p` process writing stream-json to `~/.agent-monitor/sessions/<session-id>.jsonl`, so closing the TUI never kills a running turn. Sessions bill to your normal Claude Code login. Turns run with `--permission-mode acceptEdits` by default (`agentPermissionMode` setting); when an agent needs real interaction, press `Tab` in the chat view (or run `am agent attach`) to open the session in a terminal at that worktree.
 
 ### GitHub Integration
 

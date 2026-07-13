@@ -115,7 +115,10 @@ export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
       onBack();
       return;
     }
-    if (key.ctrl && input === "t") {
+    // Tab is the primary attach binding: Ctrl+T is intercepted by many
+    // macOS terminals (tty SIGINFO char / emulator keybindings) and never
+    // reaches the app, so it's kept only as an alias where it does work.
+    if (key.tab || (key.ctrl && input === "t")) {
       handleAttach();
       return;
     }
@@ -172,7 +175,7 @@ export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
 
       <Box borderStyle="single" borderBottom={false} borderLeft={false} borderRight={false} flexDirection="column">
         {turnRunning ? (
-          <Spinner label="Claude is working… (Ctrl+T to open in terminal)" />
+          <Spinner label="Claude is working… (Tab to open in terminal)" />
         ) : (
           <Box>
             <Text color="cyan">❯ </Text>
@@ -180,7 +183,7 @@ export function ChatView({ worktree, settings, onBack }: ChatViewProps) {
           </Box>
         )}
         <Text dimColor>
-          [Enter] Send  [↑↓] Scroll  [Ctrl+T] Terminal  [Esc] Back
+          [Enter] Send  [↑↓] Scroll  [Tab] Terminal  [Esc] Back
         </Text>
       </Box>
     </Box>
