@@ -83,7 +83,18 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
     );
   }
 
-  const showHeaders = groups.length > 1;
+  // A repo can appear once per project section plus once in the trailing
+  // no-project section; headers are decided per section, not globally.
+  const projectRepoCounts = new Map<string, number>();
+  let noProjectGroupCount = 0;
+  for (const g of groups) {
+    if (g.project?.id) {
+      projectRepoCounts.set(g.project.id, (projectRepoCounts.get(g.project.id) ?? 0) + 1);
+    } else {
+      noProjectGroupCount++;
+    }
+  }
+  const hasProjectSections = projectRepoCounts.size > 0;
   let flatIdx = 0;
 
   return (
@@ -95,9 +106,17 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
     >
       <Text bold> Worktrees</Text>
       <Box flexDirection="column" marginTop={1}>
-        {groups.map((group) => {
+        {groups.map((group, groupIdx) => {
           const groupWorktrees = group.worktrees;
           const startIdx = flatIdx;
+
+          const prevGroup = groups[groupIdx - 1];
+          const isNewProject = !!group.project && group.project.id !== prevGroup?.project?.id;
+          // Blank-line break between the last project section and the ungrouped remainder
+          const isFirstNoProject = hasProjectSections && !group.project && !!prevGroup?.project;
+          const showRepoHeader = group.project
+            ? (projectRepoCounts.get(group.project.id) ?? 0) > 1
+            : noProjectGroupCount > 1;
 
           // Track which Linear group headers have been emitted within this repo group
           const emittedLinearHeaders = new Set<string>();
@@ -188,9 +207,16 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
 
           flatIdx += groupWorktrees.length;
 
+          const hasSectionHeader = isNewProject || isFirstNoProject || showRepoHeader;
+
           return (
-            <Box key={group.repo.id} flexDirection="column" marginTop={showHeaders && startIdx > 0 ? 1 : 0}>
-              {showHeaders && (
+            <Box key={`${group.project?.id ?? "no-project"}:${group.repo.id}`} flexDirection="column" marginTop={hasSectionHeader && groupIdx > 0 ? 1 : 0}>
+              {isNewProject && group.project && (
+                group.project.color
+                  ? <Text bold color={group.project.color}>═ {group.project.name} ═</Text>
+                  : <Text bold dimColor>═ {group.project.name} ═</Text>
+              )}
+              {showRepoHeader && (
                 <Text dimColor>── {group.repo.name} ───</Text>
               )}
               {renderedItems}

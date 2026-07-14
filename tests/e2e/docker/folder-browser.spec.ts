@@ -17,12 +17,17 @@ test("folder browser opens via settings Add Repo and Escape returns", async ({ p
   await tui.sendKey("s");
   await page.waitForTimeout(500);
 
-  // Navigate down to the "repos" field (index 23 in the FIELDS array)
-  // Send 23 down-arrow presses to reach it
-  for (let i = 0; i < 23; i++) {
+  // Navigate down until the "Repositories" field is active. Navigation skips
+  // hidden fields (e.g. audio sounds when audio is off), so counting presses
+  // against the FIELDS array is brittle.
+  for (let i = 0; i < 40; i++) {
+    const text = await tui.getScreenText();
+    if (text.includes("▸ Repositories")) break;
     await tui.sendKey("ArrowDown");
+    await page.waitForTimeout(100);
   }
   await page.waitForTimeout(300);
+  expect(await tui.getScreenText()).toContain("▸ Repositories");
 
   // Press 'a' to add a repo, which triggers folder-browse mode
   await tui.sendKey("a");

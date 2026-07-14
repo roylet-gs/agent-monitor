@@ -68,6 +68,7 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     ghRefreshOnManual: settings.ghRefreshOnManual,
     linearRefreshOnManual: settings.linearRefreshOnManual,
     linearAutoNickname: settings.linearAutoNickname,
+    linearGroupByProject: settings.linearGroupByProject,
   };
 
   const fallbackWorktrees = useWorktrees(worktreeConfig);
@@ -117,7 +118,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       prev.linearEnabled !== settings.linearEnabled ||
       prev.linearApiKey !== settings.linearApiKey ||
       prev.hideMainBranch !== settings.hideMainBranch ||
-      prev.linearAutoNickname !== settings.linearAutoNickname
+      prev.linearAutoNickname !== settings.linearAutoNickname ||
+      prev.linearGroupByProject !== settings.linearGroupByProject
     )) {
       clientRef.current?.configReload();
     }
@@ -153,6 +155,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
             active_check: wt.pr_info?.activeCheckUrl, checks_waiting: wt.pr_info?.checksWaiting,
             linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,
             linear_pr_url: wt.linear_info?.prAttachment?.url,
+            linear_project: wt.linear_info?.project?.id,
+            linear_project_name: wt.linear_info?.project?.name,
           }))) + JSON.stringify(newData.standaloneSessions.map(s => ({
             id: s.id, path: s.path, status: s.status, is_open: s.is_open,
             session_id: s.session_id, last_response: s.last_response,

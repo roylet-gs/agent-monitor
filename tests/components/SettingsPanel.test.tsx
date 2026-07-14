@@ -59,6 +59,13 @@ describe("SettingsPanel", () => {
     expect(lastFrame()!).toContain("my-repo");
   });
 
+  it("shows the Group by Project toggle", () => {
+    const { lastFrame } = render(<SettingsPanel {...defaultProps} />);
+    expect(lastFrame()!).toContain("Group by Project");
+    // default is on
+    expect(DEFAULT_SETTINGS.linearGroupByProject).toBe(true);
+  });
+
   it("shows navigation hints", () => {
     const { lastFrame } = render(<SettingsPanel {...defaultProps} />);
     const frame = lastFrame()!;
