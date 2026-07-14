@@ -63,7 +63,7 @@ export const Dashboard = React.memo(function Dashboard({
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={groups.length} standaloneCount={standaloneSessions.length} version={version} updateInfo={updateInfo} />
+      <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={new Set(groups.map((g) => g.repo.id)).size} standaloneCount={standaloneSessions.length} version={version} updateInfo={updateInfo} />
       <Box flexGrow={1}>
         <WorktreeList groups={groups} flatWorktrees={flatWorktrees} standaloneSessions={standaloneSessions} standaloneStartIndex={flatWorktrees.length} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} fillWidth={!showDetail} />
         {showDetail && (chatPane ?? <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} />)}

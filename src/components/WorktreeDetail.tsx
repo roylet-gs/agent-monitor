@@ -160,6 +160,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
             <Text dimColor>
               Priority: {worktree.linear_info.priorityLabel}
               {worktree.linear_info.assignee && ` · Assigned: ${worktree.linear_info.assignee}`}
+              {worktree.linear_info.project && ` · Project: ${worktree.linear_info.project.name}`}
             </Text>
             <Text dimColor>{worktree.linear_info.url}</Text>
           </Box>

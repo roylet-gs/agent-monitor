@@ -202,6 +202,8 @@ Requires the `gh` CLI to be installed and authenticated.
 
 Branch names containing Linear ticket identifiers (e.g., `feature/LIN-521-auth-flow`) are automatically linked to their tickets. The dashboard shows ticket status and priority in the detail panel.
 
+When tickets belong to a Linear project, the dashboard groups worktrees by project (highest level), then repository, then ticket — so related work across multiple repos reads as one unit. Worktrees without a project render below the project sections in the regular per-repo layout. Disable with `am settings set linearGroupByProject false`.
+
 <p align="center">
   <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-linear-ticket.png" alt="Linear ticket integration" width="800">
 </p>
@@ -425,6 +427,7 @@ All data is stored in `~/.agent-monitor/`:
 | `linearUseDesktopApp`     | `false`      | Open Linear links in desktop app                          |
 | `linearRefreshOnManual`   | `true`       | Refresh Linear data on manual refresh                     |
 | `linearAutoNickname`      | `true`       | Auto-set worktree nicknames from Linear ticket titles     |
+| `linearGroupByProject`    | `true`       | Group worktrees by Linear project on the dashboard        |
 | `maxLogSizeMb`            | `2`          | Max debug log file size in MB before rotation             |
 | `agentPermissionMode`     | `"acceptEdits"` | Permission mode for managed Claude sessions (`acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, …) |
 | `agentClaudeArgs`         | `""`         | Extra CLI args appended to managed `claude` turns         |

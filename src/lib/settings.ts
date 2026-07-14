@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ghRefreshOnManual: true,
   linearRefreshOnManual: true,
   linearAutoNickname: true,
+  linearGroupByProject: true,
   maxLogSizeMb: 2,
   agentPermissionMode: "acceptEdits",
   agentClaudeArgs: "",

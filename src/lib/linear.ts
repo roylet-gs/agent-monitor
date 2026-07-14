@@ -57,6 +57,7 @@ export async function fetchLinearInfo(
         state { name color type }
         priorityLabel
         assignee { name }
+        project { id name color url }
         attachments {
           nodes {
             url
@@ -98,6 +99,7 @@ export async function fetchLinearInfo(
       state: issue.state,
       priorityLabel: issue.priorityLabel,
       assignee: issue.assignee?.name ?? null,
+      project: issue.project ?? null,
       prAttachment: prAttachment
         ? { url: prAttachment.url, title: prAttachment.title, metadata: prAttachment.metadata }
         : null,

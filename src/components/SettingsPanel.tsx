@@ -33,6 +33,7 @@ type SettingsField =
   | "linearPolling"
   | "linearRefreshOnManual"
   | "linearAutoNickname"
+  | "linearGroupByProject"
   | "repos"
   | "checkForUpdates"
   | "resetSettings"
@@ -61,6 +62,7 @@ const FIELDS: SettingsField[] = [
   "linearPolling",
   "linearRefreshOnManual",
   "linearAutoNickname",
+  "linearGroupByProject",
   "repos",
   "checkForUpdates",
   "resetSettings",
@@ -90,6 +92,7 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearPolling: "How often to fetch Linear ticket status (minimum 10s)",
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
+  linearGroupByProject: "Group worktrees by Linear project on the dashboard",
   repos: "Monitored repositories and their startup scripts",
   checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
@@ -363,6 +366,10 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "linearGroupByProject" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, linearGroupByProject: !s.linearGroupByProject }));
+      return;
+    }
     if (activeField === "linearAutoNickname" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearAutoNickname: !s.linearAutoNickname }));
       return;
@@ -726,6 +733,15 @@ export function SettingsPanel({
           </Text>
           <Text color={current.linearAutoNickname ? "green" : "gray"}>
             [{current.linearAutoNickname ? "✓" : " "}]
+          </Text>
+        </Box>
+
+        <Box>
+          <Text bold={activeField === "linearGroupByProject"}>
+            {activeField === "linearGroupByProject" ? "▸" : " "} Group by Project:{" "}
+          </Text>
+          <Text color={current.linearGroupByProject ? "green" : "gray"}>
+            [{current.linearGroupByProject ? "✓" : " "}]
           </Text>
         </Box>
 

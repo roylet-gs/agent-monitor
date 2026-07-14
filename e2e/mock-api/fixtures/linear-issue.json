@@ -13,6 +13,12 @@
       "assignee": {
         "name": "Test User"
       },
+      "project": {
+        "id": "proj-1",
+        "name": "Dashboard Revamp",
+        "color": "#5e6ad2",
+        "url": "https://linear.app/team/project/proj-1"
+      },
       "attachments": {
         "nodes": [
           {

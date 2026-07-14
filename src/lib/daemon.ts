@@ -18,6 +18,7 @@ import { fetchAllPrInfo } from "./github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
 import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
 import { isEffectivelyOpen, isEffectivelyOpenStandalone } from "./agent-utils.js";
+import { buildGroups, type RepoWorktrees } from "./grouping.js";
 import { syncWorktrees } from "./sync.js";
 import { realpathSync } from "fs";
 import type { PubSubMessage } from "./pubsub-types.js";
@@ -384,8 +385,7 @@ async function doRefresh(requestId: string | null, includeIntegrations: boolean)
 
 async function buildData(): Promise<DaemonData> {
   const hideMain = settings.hideMainBranch;
-  const newGroups: WorktreeGroup[] = [];
-  const allFlat: WorktreeWithStatus[] = [];
+  const perRepo: RepoWorktrees[] = [];
 
   // Async terminal/IDE detection
   const [terminalPaths, idePaths] = await Promise.all([
@@ -441,11 +441,6 @@ async function buildData(): Promise<DaemonData> {
       })
     );
 
-    enriched.sort((a, b) => {
-      if (a.is_main !== b.is_main) return a.is_main - b.is_main;
-      return b.created_at.localeCompare(a.created_at);
-    });
-
     const filtered = hideMain
       ? enriched.filter(
           (wt) =>
@@ -454,11 +449,14 @@ async function buildData(): Promise<DaemonData> {
         )
       : enriched;
 
-    if (filtered.length > 0 || repositories.length === 1) {
-      newGroups.push({ repo, worktrees: filtered });
-    }
-    allFlat.push(...filtered);
+    perRepo.push({ repo, worktrees: filtered });
   }
+
+  // Shared with useWorktrees: sorting (incl. Linear ticket clustering) and
+  // project-major bucketing.
+  const { groups: newGroups, flatWorktrees: allFlat } = buildGroups(perRepo, {
+    groupByProject: settings.linearGroupByProject && settings.linearEnabled,
+  });
 
   // Standalone sessions
   const allSessions = getStandaloneSessions();

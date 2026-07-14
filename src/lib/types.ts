@@ -43,6 +43,13 @@ export interface PrInfo {
   checksWaiting: boolean;
 }
 
+export interface LinearProject {
+  id: string;
+  name: string;
+  color?: string;
+  url?: string;
+}
+
 export interface LinearInfo {
   identifier: string;
   title: string;
@@ -50,6 +57,7 @@ export interface LinearInfo {
   state: { name: string; color: string; type: string };
   priorityLabel: string;
   assignee: string | null;
+  project?: LinearProject | null;
   prAttachment?: {
     url: string;
     title: string;
@@ -60,6 +68,8 @@ export interface LinearInfo {
 export interface WorktreeGroup {
   repo: Repository;
   worktrees: WorktreeWithStatus[];
+  // Linear project this bucket belongs to; absent/null for the ungrouped section
+  project?: LinearProject | null;
 }
 
 export interface WorktreeWithStatus extends Worktree {
@@ -129,6 +139,7 @@ export interface Settings {
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
+  linearGroupByProject: boolean;
   maxLogSizeMb: number;
   agentPermissionMode: AgentPermissionMode;
   agentClaudeArgs: string;

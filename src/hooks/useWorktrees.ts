@@ -4,6 +4,7 @@ import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "../lib/linear.js";
 import { isEffectivelyOpen } from "../lib/agent-utils.js";
+import { buildGroups, type RepoWorktrees } from "../lib/grouping.js";
 import { log } from "../lib/logger.js";
 import { syncWorktrees } from "../lib/sync.js";
 import { getTerminalPaths, getIdePaths } from "../lib/process.js";
@@ -22,6 +23,7 @@ export interface WorktreeHookConfig {
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
+  linearGroupByProject: boolean;
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
@@ -44,6 +46,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     ghRefreshOnManual,
     linearRefreshOnManual,
     linearAutoNickname,
+    linearGroupByProject,
   } = config;
 
   const [data, setData] = useState<{ groups: WorktreeGroup[]; flatWorktrees: WorktreeWithStatus[] }>({ groups: [], flatWorktrees: [] });
@@ -69,6 +72,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
   linearAutoNicknameRef.current = linearAutoNickname;
   const linearApiKeyRef = useRef(linearApiKey);
   linearApiKeyRef.current = linearApiKey;
+  const linearGroupByProjectRef = useRef(linearGroupByProject);
+  linearGroupByProjectRef.current = linearGroupByProject;
 
   // Generation counter: stale refresh calls check this before setting state
   const genRef = useRef(0);
@@ -199,8 +204,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         if (myGen !== genRef.current) return;
       }
 
-      const newGroups: WorktreeGroup[] = [];
-      const allFlat: WorktreeWithStatus[] = [];
+      const perRepo: RepoWorktrees[] = [];
 
       // Single lsof/ps call for all worktrees
       const terminalPaths = getTerminalPaths();
@@ -257,21 +261,6 @@ export function useWorktrees(config: WorktreeHookConfig): {
         // Bail if a newer refresh started while we were enriching
         if (myGen !== genRef.current) return;
 
-        enriched.sort((a, b) => {
-          // Dedicated worktrees first, main worktree branches last
-          if (a.is_main !== b.is_main) return a.is_main - b.is_main;
-          // Cluster worktrees sharing a Linear ticket together
-          const aLinear = a.linear_info?.identifier ?? "";
-          const bLinear = b.linear_info?.identifier ?? "";
-          if (aLinear !== bLinear) {
-            // Worktrees with Linear tickets sort before those without
-            if (aLinear && !bLinear) return -1;
-            if (!aLinear && bLinear) return 1;
-            return aLinear.localeCompare(bLinear);
-          }
-          return b.created_at.localeCompare(a.created_at);
-        });
-
         const filtered = shouldHideMain
           ? enriched.filter(
               (wt) =>
@@ -280,11 +269,14 @@ export function useWorktrees(config: WorktreeHookConfig): {
             )
           : enriched;
 
-        if (filtered.length > 0 || repos.length === 1) {
-          newGroups.push({ repo, worktrees: filtered });
-        }
-        allFlat.push(...filtered);
+        perRepo.push({ repo, worktrees: filtered });
       }
+
+      // Sorting (incl. Linear ticket clustering) and project-major bucketing
+      // both live in buildGroups, shared with the daemon.
+      const { groups: newGroups, flatWorktrees: allFlat } = buildGroups(perRepo, {
+        groupByProject: linearGroupByProjectRef.current && shouldFetchLinear,
+      });
 
       // Final staleness check before committing state
       if (myGen !== genRef.current) return;
@@ -303,6 +295,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
         active_check: wt.pr_info?.activeCheckUrl, checks_waiting: wt.pr_info?.checksWaiting,
         linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,
         linear_pr_url: wt.linear_info?.prAttachment?.url,
+        linear_project: wt.linear_info?.project?.id,
+        linear_project_name: wt.linear_info?.project?.name,
       })));
       if (fingerprint !== prevFingerprintRef.current) {
         prevFingerprintRef.current = fingerprint;

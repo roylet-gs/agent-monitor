@@ -378,6 +378,169 @@ describe("WorktreeList", () => {
     expect(frame).not.toContain("── PROJ-1");
   });
 
+  it("renders a project header above grouped worktrees", () => {
+    const project = { id: "proj-a", name: "Alpha", color: "#5e6ad2" };
+    const linearInfo = {
+      identifier: "ENG-1",
+      title: "Some Task",
+      state: { id: "s1", name: "In Progress", type: "started" as const },
+      project,
+    };
+    const wt = makeWorktree({ id: "wt-1", branch: "feature/a", linear_info: linearInfo });
+    const groups: WorktreeGroup[] = [{ repo: makeRepo(), worktrees: [wt], project }];
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={groups}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("═ Alpha ═");
+    expect(frame).toContain("feature/a");
+  });
+
+  it("shows repo headers inside a project section only when the project spans 2+ repos", () => {
+    const project = { id: "proj-a", name: "Alpha" };
+    const repo1 = makeRepo({ id: "repo-1", name: "repo-one" });
+    const repo2 = makeRepo({ id: "repo-2", name: "repo-two" });
+    const wt1 = makeWorktree({ id: "wt-1", repo_id: "repo-1", branch: "feature/a" });
+    const wt2 = makeWorktree({ id: "wt-2", repo_id: "repo-2", branch: "feature/b" });
+    const groups: WorktreeGroup[] = [
+      { repo: repo1, worktrees: [wt1], project },
+      { repo: repo2, worktrees: [wt2], project },
+    ];
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={groups}
+        flatWorktrees={[wt1, wt2]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    // Single project header, both repo headers
+    expect(frame.match(/═ Alpha ═/g)).toHaveLength(1);
+    expect(frame).toContain("── repo-one ───");
+    expect(frame).toContain("── repo-two ───");
+  });
+
+  it("hides the repo header for a single-repo project section", () => {
+    const project = { id: "proj-a", name: "Alpha" };
+    const wt = makeWorktree({ id: "wt-1", branch: "feature/a" });
+    const groups: WorktreeGroup[] = [{ repo: makeRepo(), worktrees: [wt], project }];
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={groups}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("═ Alpha ═");
+    expect(frame).not.toContain("── test-repo ───");
+  });
+
+  it("separates project sections from ungrouped worktrees with a blank line", () => {
+    const project = { id: "proj-a", name: "Alpha" };
+    const repo = makeRepo();
+    const inProject = makeWorktree({ id: "wt-1", branch: "feature/a" });
+    const ungrouped = makeWorktree({ id: "wt-2", branch: "feature/b" });
+    const groups: WorktreeGroup[] = [
+      { repo, worktrees: [inProject], project },
+      { repo, worktrees: [ungrouped] },
+    ];
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={groups}
+        flatWorktrees={[inProject, ungrouped]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    // No divider text — just a blank line before the ungrouped section
+    expect(frame).not.toContain("— other —");
+    const lines = frame.split("\n");
+    const ungroupedIdx = lines.findIndex((l) => l.includes("feature/b"));
+    expect(ungroupedIdx).toBeGreaterThan(0);
+    const prevLine = lines[ungroupedIdx - 1]!.replace(/│/g, "").trim();
+    expect(prevLine).toBe("");
+  });
+
+  it("renders ticket sub-headers inside a project section", () => {
+    const project = { id: "proj-a", name: "Alpha" };
+    const linearInfo = {
+      identifier: "ENG-1",
+      title: "Shared Ticket",
+      state: { id: "s1", name: "In Progress", type: "started" as const },
+      project,
+    };
+    const wt1 = makeWorktree({ id: "wt-1", branch: "feature/a", linear_info: linearInfo });
+    const wt2 = makeWorktree({ id: "wt-2", branch: "feature/b", linear_info: linearInfo });
+    const groups: WorktreeGroup[] = [{ repo: makeRepo(), worktrees: [wt1, wt2], project }];
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={groups}
+        flatWorktrees={[wt1, wt2]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("═ Alpha ═");
+    expect(frame).toContain("— ENG-1");
+    expect(frame).toContain("Shared Ticket —");
+  });
+
+  it("keeps the selection marker on the correct row with project headers present", () => {
+    const project = { id: "proj-a", name: "Alpha" };
+    const repo = makeRepo();
+    const inProject = makeWorktree({ id: "wt-1", branch: "feature/a" });
+    const ungrouped = makeWorktree({ id: "wt-2", branch: "feature/b" });
+    const groups: WorktreeGroup[] = [
+      { repo, worktrees: [inProject], project },
+      { repo, worktrees: [ungrouped] },
+    ];
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={groups}
+        flatWorktrees={[inProject, ungrouped]}
+        selectedIndex={1}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    const lines = lastFrame()!.split("\n");
+    const selectedLine = lines.find((l) => l.includes("▸"));
+    expect(selectedLine).toContain("feature/b");
+  });
+
   it("shows closed standalone session with dim dot", () => {
     const session: StandaloneSession = {
       id: "ss-1",
