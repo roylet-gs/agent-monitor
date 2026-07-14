@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import path from "path";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
-import { Dashboard } from "./components/Dashboard.js";
+import { Dashboard, DETAIL_PANEL_MIN_COLS } from "./components/Dashboard.js";
+import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
 import { RepoSelector } from "./components/RepoSelector.js";
 import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
@@ -11,6 +12,9 @@ import { SettingsPanel } from "./components/SettingsPanel.js";
 import { BranchExistsPrompt } from "./components/BranchExistsPrompt.js";
 import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
+import { ChatView } from "./components/ChatView.js";
+import { SessionPicker } from "./components/SessionPicker.js";
+import { discoverWorktreeSessions, type DiscoveredSession } from "./lib/claude-session.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useDaemon } from "./hooks/useDaemon.js";
 import { useKeyBindings } from "./hooks/useKeyBindings.js";
@@ -23,6 +27,7 @@ import {
   removeWorktree as removeWorktreeDb,
   updateWorktreeCustomName,
   removeStandaloneSession,
+  getManagedSession,
   resetAll,
 } from "./lib/db.js";
 import {
@@ -103,6 +108,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [createTargetRepo, setCreateTargetRepo] = useState<Repository | null>(null);
   const [pendingScript, setPendingScript] = useState<{ scriptPath: string; wtPath: string } | null>(null);
   const [terminalOpenedIds, setTerminalOpenedIds] = useState<Set<string>>(new Set());
+  const [pickerSessions, setPickerSessions] = useState<DiscoveredSession[]>([]);
+  const [pickerActiveId, setPickerActiveId] = useState<string | null>(null);
+  const [pickedSession, setPickedSession] = useState<DiscoveredSession | null>(null);
   const [currentVersion] = useState(() => getVersion());
 
   // Initialize DB and check for repos
@@ -329,9 +337,28 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
 
     const continueSession = !!wt.agent_status?.session_id;
     try {
-      openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch);
+      // Prefer resuming the am-managed session if one exists for this worktree
+      const managed = getManagedSession(wt.id);
+      openClaudeInTerminal(wt.path, continueSession, wt.custom_name ?? wt.branch, managed?.id);
     } catch (err) {
       setError(`${err}`);
+    }
+  }, [flatWorktrees, selectedIndex]);
+
+  // Handle open chat view for the selected worktree. With several Claude
+  // sessions at the worktree (root or subdirectories), show a picker first.
+  const handleOpenChat = useCallback(() => {
+    if (selectedIndex >= flatWorktrees.length) return; // standalone session
+    const wt = flatWorktrees[selectedIndex];
+    if (!wt) return;
+    setPickedSession(null);
+    const sessions = discoverWorktreeSessions(wt.path);
+    if (sessions.length > 1) {
+      setPickerSessions(sessions);
+      setPickerActiveId(getManagedSession(wt.id)?.id ?? wt.agent_status?.session_id ?? null);
+      setMode("chat-pick");
+    } else {
+      setMode("chat");
     }
   }, [flatWorktrees, selectedIndex]);
 
@@ -1003,6 +1030,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       : undefined,
     onTerminal: handleOpenTerminal,
     onClaude: handleOpenClaude,
+    onChat: handleOpenChat,
     onQuit: () => exit(),
     onEscHint: setEscHint,
   });
@@ -1014,6 +1042,22 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       return () => clearTimeout(timer);
     }
   }, [error]);
+
+  // On wide terminals the chat replaces the detail panel inside the
+  // dashboard; on narrow ones it takes over the whole screen.
+  const { columns } = useTerminalSize();
+  const chatEmbedded = columns >= DETAIL_PANEL_MIN_COLS;
+  const chatWorktree = mode === "chat" ? flatWorktrees[selectedIndex] : undefined;
+  const chatNode = chatWorktree ? (
+    <ChatView
+      worktree={chatWorktree}
+      settings={settings}
+      pickedSession={pickedSession}
+      embedded={chatEmbedded}
+      reservedRows={showLogs ? Math.max(5, Math.floor((stdout?.rows ?? 24) / 3)) : 0}
+      onBack={() => setMode("dashboard")}
+    />
+  ) : null;
 
   return (
     <Box flexDirection="column" height={stdout?.rows ?? 24}>
@@ -1183,6 +1227,22 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         ) : null;
       })()}
 
+      {mode === "chat-pick" && flatWorktrees[selectedIndex] && (
+        <SessionPicker
+          worktreeName={flatWorktrees[selectedIndex]!.custom_name ?? flatWorktrees[selectedIndex]!.branch}
+          worktreePath={flatWorktrees[selectedIndex]!.path}
+          sessions={pickerSessions}
+          activeSessionId={pickerActiveId}
+          onSelect={(session) => {
+            setPickedSession(session);
+            setMode("chat");
+          }}
+          onCancel={() => setMode("dashboard")}
+        />
+      )}
+
+      {mode === "chat" && !chatEmbedded && chatNode}
+
       {mode === "settings" && (
         <SettingsPanel
           settings={settings}
@@ -1197,7 +1257,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         />
       )}
 
-      {mode === "dashboard" && (
+      {(mode === "dashboard" || (mode === "chat" && chatEmbedded)) && (
         <Dashboard
           repoName={activeRepo?.name ?? "No repository"}
           groups={groups}
@@ -1216,6 +1276,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           linearEnabled={settings.linearEnabled}
           ideIsTerm={settings.ide === "terminal"}
           integrationLoading={integrationLoading}
+          chatPane={mode === "chat" ? chatNode ?? undefined : undefined}
         />
       )}
     </Box>

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, unlinkSync } from "fs";
 import { dirname } from "path";
 import { APP_DIR, DB_PATH } from "./paths.js";
 import { log } from "./logger.js";
-import type { Repository, Worktree, AgentStatus, AgentStatusType, StandaloneSession } from "./types.js";
+import type { Repository, Worktree, AgentStatus, AgentStatusType, StandaloneSession, ManagedSession } from "./types.js";
 import { randomUUID } from "crypto";
 
 let db: Database.Database | null = null;
@@ -60,6 +60,20 @@ function initSchema(db: Database.Database): void {
       last_response TEXT,
       transcript_summary TEXT,
       is_open INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Managed Claude sessions (started and driven by am, one per worktree)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS managed_sessions (
+      id TEXT PRIMARY KEY,
+      worktree_id TEXT NOT NULL UNIQUE REFERENCES worktrees(id) ON DELETE CASCADE,
+      cwd TEXT NOT NULL,
+      last_prompt TEXT,
+      turn_pid INTEGER,
+      turn_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -288,6 +302,84 @@ export function touchAgentStatusTimestamp(worktreeId: string): void {
   getDb()
     .prepare("UPDATE agent_status SET updated_at = datetime('now') WHERE worktree_id = ?")
     .run(worktreeId);
+}
+
+// --- Managed Sessions ---
+
+export function createManagedSession(
+  id: string,
+  worktreeId: string,
+  cwd: string,
+  initialTurnCount = 0
+): ManagedSession {
+  getDb()
+    .prepare("INSERT INTO managed_sessions (id, worktree_id, cwd, turn_count) VALUES (?, ?, ?, ?)")
+    .run(id, worktreeId, cwd, initialTurnCount);
+  log("info", "db", `Created managed session ${id} for worktree ${worktreeId} (turn_count=${initialTurnCount})`);
+  return getManagedSessionById(id)!;
+}
+
+/**
+ * Point a worktree's managed session at a (possibly different) session id —
+ * used when the user picks another session to chat with. Resets turn_pid.
+ */
+export function replaceManagedSession(
+  worktreeId: string,
+  id: string,
+  cwd: string,
+  turnCount: number
+): ManagedSession {
+  getDb()
+    .prepare(
+      `INSERT INTO managed_sessions (id, worktree_id, cwd, turn_count) VALUES (?, ?, ?, ?)
+       ON CONFLICT(worktree_id) DO UPDATE SET
+         id = excluded.id,
+         cwd = excluded.cwd,
+         turn_count = excluded.turn_count,
+         turn_pid = NULL,
+         updated_at = datetime('now')`
+    )
+    .run(id, worktreeId, cwd, turnCount);
+  log("info", "db", `Managed session for worktree ${worktreeId} is now ${id}`);
+  return getManagedSession(worktreeId)!;
+}
+
+export function getManagedSession(worktreeId: string): ManagedSession | undefined {
+  return getDb()
+    .prepare("SELECT * FROM managed_sessions WHERE worktree_id = ?")
+    .get(worktreeId) as ManagedSession | undefined;
+}
+
+export function getManagedSessionById(id: string): ManagedSession | undefined {
+  return getDb()
+    .prepare("SELECT * FROM managed_sessions WHERE id = ?")
+    .get(id) as ManagedSession | undefined;
+}
+
+export function getManagedSessions(): ManagedSession[] {
+  return getDb()
+    .prepare("SELECT * FROM managed_sessions ORDER BY updated_at DESC")
+    .all() as ManagedSession[];
+}
+
+export function recordManagedSessionTurn(id: string, pid: number, prompt: string): void {
+  getDb()
+    .prepare(
+      `UPDATE managed_sessions
+       SET turn_pid = ?, last_prompt = ?, turn_count = turn_count + 1, updated_at = datetime('now')
+       WHERE id = ?`
+    )
+    .run(pid, prompt, id);
+}
+
+export function clearManagedSessionTurnPid(id: string): void {
+  getDb()
+    .prepare("UPDATE managed_sessions SET turn_pid = NULL, updated_at = datetime('now') WHERE id = ?")
+    .run(id);
+}
+
+export function removeManagedSession(id: string): void {
+  getDb().prepare("DELETE FROM managed_sessions WHERE id = ?").run(id);
 }
 
 // --- Standalone Sessions ---

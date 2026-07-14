@@ -180,6 +180,28 @@ describe("TUI State Machine", () => {
     expect(lastFrame()!).toContain("Agent Monitor");
   });
 
+  it("dashboard -> chat pane (wide) -> Esc back to detail panel", async () => {
+    await setupDashboard();
+    const { stdin, lastFrame } = render(<App />);
+    await waitForFrame(300);
+    expect(lastFrame()!).toContain("Agent Monitor");
+
+    stdin.write("c");
+    await waitForFrame(300);
+    const chatFrame = lastFrame()!;
+    // Chat replaces the detail panel: dashboard chrome stays visible
+    expect(chatFrame).toContain("Agent Monitor");
+    expect(chatFrame).toContain("Chat — feature/test");
+    expect(chatFrame).toContain("Send");
+    expect(chatFrame).not.toContain("[n]ew");
+
+    stdin.write(ESCAPE);
+    await waitForFrame(300);
+    const backFrame = lastFrame()!;
+    expect(backFrame).not.toContain("Chat — feature/test");
+    expect(backFrame).toContain("[n]ew");
+  });
+
   it("setup wizard -> skip -> exits wizard", async () => {
     const { stdin, lastFrame } = render(<App />);
     await waitForFrame();

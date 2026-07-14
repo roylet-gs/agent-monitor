@@ -30,4 +30,15 @@ export interface StandaloneStatusUpdateMessage {
   updatedAt: string;
 }
 
-export type PubSubMessage = AgentStatusUpdateMessage | GitActivityMessage | StandaloneStatusUpdateMessage;
+export interface ManagedSessionUpdateMessage {
+  type: "managed-session-update";
+  worktreeId: string;
+  sessionId: string;
+  state: "turn-started" | "turn-stopped";
+}
+
+export type PubSubMessage =
+  | AgentStatusUpdateMessage
+  | GitActivityMessage
+  | StandaloneStatusUpdateMessage
+  | ManagedSessionUpdateMessage;

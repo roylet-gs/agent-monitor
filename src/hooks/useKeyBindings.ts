@@ -19,6 +19,7 @@ interface KeyBindingActions {
   onUpdate?: () => void;
   onTerminal: () => void;
   onClaude: () => void;
+  onChat: () => void;
   onQuit: () => void;
   onEscHint: (show: boolean) => void;
 }
@@ -94,6 +95,10 @@ export function useKeyBindings(actions: KeyBindingActions): void {
     }
     if (input === "t") {
       actions.onTerminal();
+      return;
+    }
+    if (input === "c") {
+      actions.onChat();
       return;
     }
     if (input === "u") {

@@ -163,6 +163,23 @@ Track Claude Code agent status across all your worktrees in real time. Status in
 > [!IMPORTANT]
 > Hooks must be installed for real-time agent monitoring. Run `am hooks install` or let the setup wizard handle it. Hooks write to `~/.claude/settings.json` and fire events that Agent Monitor captures.
 
+### Managed Claude Sessions
+
+Beyond monitoring, `am` can *drive* Claude Code: start one headless Claude session per worktree, send it prompts, and watch the conversation — from the TUI chat view (`c` on a worktree) or the CLI.
+
+- `am agent send <target> "prompt"` — send a prompt (starts a session on first use); add `--wait` to print the response
+- `am agent list` — show all managed sessions and whether a turn is running
+- `am agent sessions <target>` — list every Claude session found at the worktree (root and subdirectories)
+- `am agent log <target>` — print the conversation transcript
+- `am agent attach <target>` — resume the same conversation interactively (`claude --resume`)
+- `am agent stop <target>` — stop an in-flight turn
+
+`send` and `log` take `--session <id-or-prefix>` to target a specific session. In the TUI, if several sessions exist at a worktree, pressing `c` opens a picker first (start dir, last activity, last prompt) so you choose which conversation to continue.
+
+On wide terminals (≥100 columns) the chat opens **in place of the detail panel**, keeping the worktree list visible; input focus moves to the chat (highlighted with a cyan border) and the action bar switches to chat keys. `Esc` returns to the detail panel. On narrower terminals the chat takes over the full screen.
+
+Each prompt runs as a detached `claude -p` process writing stream-json to `~/.agent-monitor/sessions/<session-id>.jsonl`, so closing the TUI never kills a running turn. Sessions you start manually at a worktree (e.g. `claude` in a VS Code terminal) are picked up too: the chat view shows their history and prompting from `am` resumes that same conversation. Sessions bill to your normal Claude Code login. Turns run with `--permission-mode acceptEdits` by default (`agentPermissionMode` setting); when an agent needs real interaction, press `Tab` in the chat view (or run `am agent attach`) to open the session in a terminal at that worktree, or `Shift+Tab` to open the worktree in your configured IDE.
+
 ### GitHub Integration
 
 PR status appears inline next to each worktree — `PR #42 ✓`, `(draft)`, or CI status. The detail panel shows the full picture: title, review state, and check results.
@@ -250,6 +267,7 @@ CLI access: `am settings list`, `am settings get <key>`, `am settings set <key> 
 | `j` / `↓`       | Move down                |
 | `k` / `↑`       | Move up                  |
 | `Enter`         | Open in IDE              |
+| `c`             | Chat with Claude session |
 | `n`             | New worktree             |
 | `d`             | Delete selected worktree |
 | `s`             | Settings                 |
@@ -277,6 +295,20 @@ All read commands support `--json` for machine-readable output. `<target>` resol
 | `am worktree info <target>`   | Show detailed worktree info                     | `--repo`, `--json`                                        |
 
 **Short aliases:** `am ls` (list), `am new <branch>` (create), `am open <target>` (open)
+
+</details>
+
+<details>
+<summary><strong>Agent</strong> — <code>am agent</code> (alias: <code>a</code>)</summary>
+
+| Command                          | Description                                              | Flags                        |
+| -------------------------------- | -------------------------------------------------------- | ---------------------------- |
+| `am agent send <target> <prompt>`| Send a prompt to a worktree's Claude session             | `--repo`, `--session`, `--wait`, `--json` |
+| `am agent list`                  | List managed Claude sessions                             | `--json`                     |
+| `am agent sessions <target>`     | List sessions found at a worktree (incl. subdirectories) | `--repo`, `--json`           |
+| `am agent log <target>`          | Show the session transcript                              | `--repo`, `--session`, `--json` |
+| `am agent attach <target>`       | Resume the session interactively in this terminal        | `--repo`, `--force`          |
+| `am agent stop <target>`         | Stop the in-flight turn                                  | `--repo`                     |
 
 </details>
 
@@ -369,6 +401,7 @@ All data is stored in `~/.agent-monitor/`:
 | `scripts/<repo-id>.sh` | Per-repo startup scripts                         |
 | `debug.log`            | Debug log (auto-rotated)                         |
 | `am.sock`              | Unix domain socket for real-time updates         |
+| `sessions/<id>.jsonl`  | Managed Claude session transcripts (stream-json) |
 
 <details>
 <summary><strong>All settings</strong></summary>
@@ -393,6 +426,8 @@ All data is stored in `~/.agent-monitor/`:
 | `linearRefreshOnManual`   | `true`       | Refresh Linear data on manual refresh                     |
 | `linearAutoNickname`      | `true`       | Auto-set worktree nicknames from Linear ticket titles     |
 | `maxLogSizeMb`            | `2`          | Max debug log file size in MB before rotation             |
+| `agentPermissionMode`     | `"acceptEdits"` | Permission mode for managed Claude sessions (`acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, …) |
+| `agentClaudeArgs`         | `""`         | Extra CLI args appended to managed `claude` turns         |
 
 </details>
 

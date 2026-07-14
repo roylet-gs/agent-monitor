@@ -12,9 +12,11 @@ interface ActionBarProps {
   hasLinear?: boolean;
   ideIsTerm?: boolean;
   integrationLoading?: string | null;
+  /** Chat pane has focus — show chat keys instead of dashboard keys. */
+  chatMode?: boolean;
 }
 
-export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm, integrationLoading }: ActionBarProps) {
+export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm, integrationLoading, chatMode }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -33,6 +35,20 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
     );
   }
 
+  if (chatMode) {
+    return (
+      <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
+        <Text>
+          <Text color="yellow">[Enter]</Text> Send
+          <Text color="yellow"> [↑↓]</Text> Scroll
+          <Text color="yellow"> [Tab]</Text> Terminal
+          <Text color="yellow"> [Shift+Tab]</Text> IDE
+          <Text color="yellow"> [Esc]</Text> Back
+        </Text>
+      </Box>
+    );
+  }
+
   return (
     <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
       {integrationLoading && <><Spinner label={integrationLoading} /><Text> </Text></>}
@@ -40,6 +56,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
         <Text>
           <Text color="yellow">[Enter]</Text> Open
           {!ideIsTerm && <><Text color="yellow"> [t]</Text>erminal</>}
+          <Text color="yellow"> [c]</Text>hat
           <Text color="yellow"> [n]</Text>ew
           <Text color="yellow"> [d]</Text>elete
           {(ghPrStatus || linearEnabled) && (
