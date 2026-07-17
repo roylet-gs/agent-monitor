@@ -63,7 +63,7 @@ function ex(overrides: Partial<WorktreeWithStatus>): WorktreeWithStatus {
 }
 
 function agent(status: AgentStatusType, updated_at: string): AgentStatus {
-  return { worktree_id: "x", status, last_response: null, transcript_summary: null, session_id: null, is_open: 0, updated_at };
+  return { worktree_id: "x", status, last_response: null, transcript_summary: null, session_id: null, is_open: 0, updated_at, active_subagents: 0 };
 }
 
 function linear(identifier: string, projectName: string): NonNullable<WorktreeWithStatus["linear_info"]> {

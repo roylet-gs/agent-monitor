@@ -111,6 +111,11 @@ export interface DiscoveredSession {
   lastPrompt: string | null;
 }
 
+/** True when `child` is a strict subdirectory of `parent` (not equal to it). */
+export function isSubdirectory(child: string, parent: string): boolean {
+  return child !== parent && child.startsWith(parent + "/");
+}
+
 /**
  * All Claude sessions started at a worktree or in any of its
  * subdirectories, newest first. Candidate project dirs are matched by
@@ -130,7 +135,7 @@ export function discoverWorktreeSessions(worktreePath: string): DiscoveredSessio
     for (const name of files) {
       const file = join(dir, name);
       const cwd = readTranscriptCwd(file);
-      if (!cwd || (cwd !== worktreePath && !cwd.startsWith(worktreePath + "/"))) continue;
+      if (!cwd || (cwd !== worktreePath && !isSubdirectory(cwd, worktreePath))) continue;
       let mtimeMs = 0;
       try {
         mtimeMs = statSync(file).mtimeMs;

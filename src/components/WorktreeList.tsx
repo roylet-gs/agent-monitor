@@ -30,6 +30,8 @@ function statusColor(status: string | undefined): string {
       return "cyan";
     case "waiting":
       return "yellow";
+    case "delegating":
+      return "magenta";
     case "done":
       return "blueBright";
     default:
@@ -187,7 +189,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
                 <Box flexDirection="column" marginTop={needsBreakAfterGroup ? 1 : 0} marginBottom={!compactView && showSubline && i < groupWorktrees.length - 1 ? 1 : 0} paddingLeft={indent}>
                   <Box gap={1}>
                     <Text>{isSelected ? "▸" : " "}</Text>
-                    {open ? (displayStatus === "executing" || displayStatus === "planning" ? <PulsingDot color={statusColor(displayStatus)} /> : displayStatus === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(displayStatus)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
+                    {open ? (displayStatus === "executing" || displayStatus === "planning" || displayStatus === "delegating" ? <PulsingDot color={statusColor(displayStatus)} /> : displayStatus === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(displayStatus)}>●</Text>) : (wt.has_terminal || wt.open_ide) ? <Text color="white">○</Text> : <Text dimColor>○</Text>}
                     <Text
                       bold={isSelected}
                       color={isSelected ? "cyan" : undefined}
@@ -232,7 +234,7 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               return (
                 <Box key={session.id} gap={1}>
                   <Text>{isSelected ? "▸" : " "}</Text>
-                  {open ? (displayStatus === "executing" || displayStatus === "planning" ? <PulsingDot color={statusColor(displayStatus)} /> : displayStatus === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(displayStatus)}>●</Text>) : <Text dimColor>○</Text>}
+                  {open ? (displayStatus === "executing" || displayStatus === "planning" || displayStatus === "delegating" ? <PulsingDot color={statusColor(displayStatus)} /> : displayStatus === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(displayStatus)}>●</Text>) : <Text dimColor>○</Text>}
                   <Text
                     bold={isSelected}
                     color={isSelected ? "cyan" : undefined}

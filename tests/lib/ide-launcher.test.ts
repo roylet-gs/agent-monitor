@@ -320,6 +320,17 @@ describe("ide-launcher", () => {
       const openCall = mockedExecSync.mock.calls[0][0] as string;
       expect(openCall).toContain("claude --resume abc123");
     });
+
+    it("cd's into the session subdir when resumeCwd is given", async () => {
+      mockedExecSync.mockReturnValue("" as any);
+
+      const { openClaudeInTerminal } = await import("../../src/lib/ide-launcher.js");
+      openClaudeInTerminal("/tmp/worktrees/feat", false, "feat", "abc123", "/tmp/worktrees/feat/packages/api");
+
+      const openCall = mockedExecSync.mock.calls[0][0] as string;
+      expect(openCall).toContain("/tmp/worktrees/feat/packages/api");
+      expect(openCall).toContain("claude --resume abc123");
+    });
   });
 
   describe("copyResumeCommand", () => {
@@ -350,6 +361,17 @@ describe("ide-launcher", () => {
       expect((mockedExecSync.mock.calls[0][1] as any).input).toBe("claude -c");
     });
 
+    it("prefixes `cd \"<subdir>\" &&` when a resume cwd is given", async () => {
+      mockedExecSync.mockReturnValue("" as any);
+
+      const { copyResumeCommand } = await import("../../src/lib/ide-launcher.js");
+      const result = copyResumeCommand("abc123", false, "/tmp/worktrees/feat/packages/api");
+
+      const expected = 'cd "/tmp/worktrees/feat/packages/api" && claude --resume abc123';
+      expect(result).toEqual({ command: expected, copied: true });
+      expect((mockedExecSync.mock.calls[0][1] as any).input).toBe(expected);
+    });
+
     it("returns copied=false when the clipboard tool is unavailable", async () => {
       mockedExecSync.mockImplementationOnce(() => {
         throw new Error("pbcopy: command not found");
@@ -359,6 +381,73 @@ describe("ide-launcher", () => {
       const result = copyResumeCommand("abc123");
 
       expect(result).toEqual({ command: "claude --resume abc123", copied: false });
+    });
+  });
+
+  describe("resolveOpenAction", () => {
+    async function resolve(opts: Parameters<typeof import("../../src/lib/ide-launcher.js").resolveOpenAction>[0]) {
+      const { resolveOpenAction } = await import("../../src/lib/ide-launcher.js");
+      return resolveOpenAction(opts);
+    }
+
+    it("returns plain when resume is disabled", async () => {
+      expect(
+        await resolve({ resumeLastSession: false, alreadyOpen: false, ide: "vscode", resumeId: "abc", continueSession: true })
+      ).toEqual({ kind: "plain" });
+    });
+
+    it("returns plain when an agent is already active (editor), skipping the copy/popup", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: true, ide: "cursor", resumeId: "abc", continueSession: true })
+      ).toEqual({ kind: "plain" });
+    });
+
+    it("returns plain when an agent is already active (terminal), skipping resume", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: true, ide: "terminal", resumeId: "abc", continueSession: true })
+      ).toEqual({ kind: "plain" });
+    });
+
+    it("returns plain for an editor when there is no session to resume (no popup)", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "vscode", resumeId: undefined, continueSession: false })
+      ).toEqual({ kind: "plain" });
+    });
+
+    it("returns copy-and-open for an editor with a discovered session id", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "vscode", resumeId: "abc123", continueSession: false })
+      ).toEqual({ kind: "copy-and-open", resumeId: "abc123", continueSession: false });
+    });
+
+    it("returns copy-and-open for an editor when only continueSession is set", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "cursor", resumeId: undefined, continueSession: true })
+      ).toEqual({ kind: "copy-and-open", resumeId: undefined, continueSession: true });
+    });
+
+    it("returns terminal-claude in terminal mode with a session", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "terminal", resumeId: "abc123", continueSession: false })
+      ).toEqual({ kind: "terminal-claude", resumeId: "abc123", continueSession: false });
+    });
+
+    it("returns terminal-claude in terminal mode even with no session (launches fresh claude)", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "terminal", resumeId: undefined, continueSession: false })
+      ).toEqual({ kind: "terminal-claude", resumeId: undefined, continueSession: false });
+    });
+
+    it("forwards resumeCwd into copy-and-open", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "vscode", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" })
+      ).toEqual({ kind: "copy-and-open", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" });
+    });
+
+    it("forwards resumeCwd into terminal-claude", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "terminal", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" })
+      ).toEqual({ kind: "terminal-claude", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" });
     });
   });
 });

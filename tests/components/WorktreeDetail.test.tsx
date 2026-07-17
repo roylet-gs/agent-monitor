@@ -1,8 +1,55 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
+import { render as inkRender, Box } from "ink";
+import { EventEmitter } from "node:events";
 import { WorktreeDetail } from "../../src/components/WorktreeDetail.js";
 import type { WorktreeWithStatus, StandaloneSession } from "../../src/lib/types.js";
+
+// Strip ANSI escapes so we can inspect rendered text.
+const ANSI = new RegExp(String.fromCharCode(27) + "\\[[0-9;?]*[a-zA-Z]", "g");
+const stripAnsi = (s: string) => s.replace(ANSI, "");
+
+// Display width of a string (emoji/CJK aware), matching what a terminal draws.
+// Deliberately not string-width: we count any pictographic/wide codepoint as 2
+// so the assertion catches Ink's cli-truncate emoji miscount.
+function displayWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0)!;
+    const wide =
+      /\p{Extended_Pictographic}/u.test(ch) ||
+      (cp >= 0x1100 && // rough East-Asian-wide ranges
+        (cp <= 0x115f || (cp >= 0x2e80 && cp <= 0xa4cf) || (cp >= 0xac00 && cp <= 0xd7a3) ||
+          (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0x1f300)));
+    w += wide ? 2 : 1;
+  }
+  return w;
+}
+
+// Render two bordered panels side by side at a real terminal width and return
+// the content frame lines. ink-testing-library hardcodes columns=100, so we use
+// Ink's own render with a fake stdout to exercise a faithful wide terminal.
+function renderTwoPanelAt(columns: number, wt: WorktreeWithStatus): string[] {
+  class FakeStdout extends EventEmitter {
+    columns = columns;
+    rows = 40;
+    frames: string[] = [];
+    isTTY = true;
+    write = (f: string) => void this.frames.push(f);
+  }
+  const out = new FakeStdout();
+  const { unmount } = inkRender(
+    <Box>
+      <Box width={30} flexShrink={0} borderStyle="single" />
+      <WorktreeDetail worktree={wt} />
+    </Box>,
+    { stdout: out as never, patchConsole: false },
+  );
+  const frame = out.frames.filter((f) => f.includes("Detail")).pop() ?? "";
+  unmount();
+  return stripAnsi(frame).split("\n").filter((l) => l.length > 0);
+}
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
@@ -277,6 +324,33 @@ describe("WorktreeDetail", () => {
     expect(frame).toContain("No active session");
     expect(frame).toContain("Done with task");
     expect(frame).toContain("/tmp/standalone-project");
+  });
+
+  // Regression for the "vertical lines break when the description is too long"
+  // bug. A long "Last Response" containing an emoji (✅) used to render one
+  // column too wide — Ink's truncate-end (cli-truncate) miscounts emoji display
+  // width — so the line wrapped in the terminal and broke the panel borders.
+  // normalizeSummary now strips emoji, so every rendered row is exactly the
+  // terminal width and the borders stay aligned.
+  it.each([120, 140, 185])("keeps borders aligned with a long emoji response at %i cols", (cols) => {
+    const wt = makeWorktree({
+      agent_status: {
+        worktree_id: "wt-1",
+        status: "done",
+        last_response:
+          "CI passed. ✅ Done — PR [#115](https://github.com/roylet-gs/agent-monitor/pull/115) is green 🎉 test check: pass (36s). Everything from the feature branch is merged and deployed 🚀 to production now",
+        transcript_summary: null,
+        session_id: null,
+        is_open: 1,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    const lines = renderTwoPanelAt(cols, wt);
+    // Every row (borders included) must be exactly the terminal width in
+    // display columns — any row wider than `cols` would wrap and break borders.
+    for (const line of lines) {
+      expect(displayWidth(line)).toBe(cols);
+    }
   });
 
   it("standalone session takes priority over worktree when both provided", () => {

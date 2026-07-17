@@ -150,13 +150,14 @@ By default (`resumeLastSession` setting), opening a worktree from the dashboard 
 
 Track Claude Code agent status across all your worktrees in real time. Status indicators:
 
-| Status    | Indicator  | Meaning                                 |
-| --------- | ---------- | --------------------------------------- |
-| Executing | `●` green  | Agent is running tools or writing code  |
-| Planning  | `●` cyan   | Agent is thinking / planning next steps |
-| Waiting   | `●` yellow | Agent is waiting for user input         |
-| Done      | `●` blue   | Agent finished its task                 |
-| Idle      | `◌` gray   | No active agent session                 |
+| Status     | Indicator   | Meaning                                             |
+| ---------- | ----------- | --------------------------------------------------- |
+| Executing  | `●` green   | Agent is running tools or writing code              |
+| Planning   | `●` cyan    | Agent is thinking / planning next steps             |
+| Waiting    | `●` yellow  | Agent is waiting for user input                     |
+| Delegating | `●` magenta | Main turn ended but background subagents still running |
+| Done       | `●` blue    | Agent finished its task                             |
+| Idle       | `◌` gray    | No active agent session                             |
 
 <p align="center">
   <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-standalone-session.png" alt="Standalone agent session monitoring" width="800">

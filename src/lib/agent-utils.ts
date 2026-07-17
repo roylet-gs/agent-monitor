@@ -18,7 +18,7 @@ export function getDisplayStatus(agentStatus: AgentStatus | null | undefined): A
   // "waiting" so the user knows it needs attention. This is display-time only —
   // the DB status is preserved and resumes correctly when events arrive.
   if (
-    (agentStatus.status === "executing" || agentStatus.status === "planning") &&
+    (agentStatus.status === "executing" || agentStatus.status === "planning" || agentStatus.status === "delegating") &&
     Date.now() - new Date(agentStatus.updated_at + "Z").getTime() > STALE_THRESHOLD_MS
   ) {
     return "waiting";
@@ -28,7 +28,7 @@ export function getDisplayStatus(agentStatus: AgentStatus | null | undefined): A
 
 export function getDisplayStatusStandalone(session: StandaloneSession): AgentStatusType {
   if (
-    (session.status === "executing" || session.status === "planning") &&
+    (session.status === "executing" || session.status === "planning" || session.status === "delegating") &&
     Date.now() - new Date(session.updated_at + "Z").getTime() > STALE_THRESHOLD_MS
   ) {
     return "waiting";
@@ -49,17 +49,38 @@ export function isEffectivelyOpenStandalone(session: StandaloneSession): boolean
 
 // Flattens a markdown-ish transcript summary into a single line of plain text
 // suitable for Ink's truncate-end rendering. Strips common markdown syntax
-// (headings, bold/italic/code, list/blockquote markers) and collapses all
-// whitespace (including newlines) into single spaces.
+// (headings, bold/italic/code, list/blockquote markers, links) and emoji, then
+// collapses all whitespace (including newlines) into single spaces.
+//
+// Two of these steps exist specifically to keep the detail panel's single-line
+// render from overflowing its border (which wraps the bordered box and breaks
+// the vertical panel separators):
+//   - Links are reduced to their label so long URLs don't survive as content.
+//   - Emoji are removed because Ink's truncation (cli-truncate) miscounts their
+//     display width: each emoji retained in a truncated line makes the rendered
+//     line one column too wide, so it wraps in the terminal and breaks the
+//     borders. Width-1 glyphs (✓, ✗, →) and CJK are left intact — those
+//     truncate correctly.
+// A pictographic base optionally followed by variation selectors / skin-tone
+// modifiers, and any number of ZWJ-joined pictographics (e.g. 👨‍👩‍👧). ️ =
+// variation selector-16, ‍ = zero-width joiner.
+const EMOJI_MOD = "(?:\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])*";
+const EMOJI = new RegExp(`\\p{Extended_Pictographic}${EMOJI_MOD}(?:\\u200D\\p{Extended_Pictographic}${EMOJI_MOD})*`, "gu");
+// Regional-indicator letters that compose flag emoji (🇬🇧).
+const REGIONAL_INDICATOR = /[\u{1F1E6}-\u{1F1FF}]/gu;
+
 export function normalizeSummary(text: string, maxChars = 200): string {
   return text
     .replace(/^\s*#{1,6}\s+/gm, "")
     .replace(/^\s*>\s+/gm, "")
     .replace(/^\s*[-*+]\s+/gm, "")
     .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/__(.+?)__/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
+    .replace(EMOJI, "")
+    .replace(REGIONAL_INDICATOR, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxChars);

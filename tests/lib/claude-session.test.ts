@@ -363,4 +363,23 @@ describe("claude-session", () => {
       expect(db.getManagedSessions()).toHaveLength(0);
     });
   });
+
+  describe("isSubdirectory", () => {
+    it("is true for a strict subdirectory", () => {
+      expect(cs.isSubdirectory("/wt/sub", "/wt")).toBe(true);
+      expect(cs.isSubdirectory("/wt/a/b", "/wt")).toBe(true);
+    });
+
+    it("is false for the same directory", () => {
+      expect(cs.isSubdirectory("/wt", "/wt")).toBe(false);
+    });
+
+    it("is false for a sibling with a shared prefix", () => {
+      expect(cs.isSubdirectory("/wt-bak/x", "/wt")).toBe(false);
+    });
+
+    it("is false for an unrelated path", () => {
+      expect(cs.isSubdirectory("/other", "/wt")).toBe(false);
+    });
+  });
 });

@@ -24,10 +24,11 @@ export interface AgentStatus {
   transcript_summary: string | null;
   session_id: string | null;
   is_open: number;
+  active_subagents: number;
   updated_at: string;
 }
 
-export type AgentStatusType = "none" | "idle" | "executing" | "planning" | "waiting" | "done";
+export type AgentStatusType = "none" | "idle" | "executing" | "planning" | "waiting" | "delegating" | "done";
 
 export interface PrInfo {
   number: number;
@@ -242,6 +243,7 @@ export interface StandaloneSession {
   last_response: string | null;
   transcript_summary: string | null;
   is_open: number; // 0 or 1
+  active_subagents: number;
   created_at: string;
   updated_at: string;
 }

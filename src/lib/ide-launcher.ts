@@ -280,9 +280,14 @@ export function openClaudeInTerminal(
   worktreePath: string,
   continueSession: boolean,
   title?: string,
-  resumeSessionId?: string
+  resumeSessionId?: string,
+  resumeCwd?: string
 ): string {
-  const escapedPath = worktreePath.replace(/"/g, '\\"');
+  // `cd` into the session's start dir when it's a subdir of the worktree —
+  // `claude --resume` resolves within the current dir's project. Falls back to
+  // the worktree root for root-level or fresh sessions.
+  const cdPath = resumeCwd ?? worktreePath;
+  const escapedPath = cdPath.replace(/"/g, '\\"');
   // A managed session id takes priority: resume that exact conversation.
   const claudeCmd = buildClaudeCommand(resumeSessionId, continueSession);
   const app = detectTerminalApp();
@@ -351,13 +356,56 @@ export function openInIde(worktreePath: string, ide: Settings["ide"], title?: st
 /**
  * Build the claude launch command with the same priority everywhere: resume an
  * exact session id, else continue the most-recent session, else start fresh.
+ * When `cdDir` is given (a session's start subdirectory), prefix `cd "<dir>" &&`
+ * so the command resumes from the right project dir — `claude --resume` resolves
+ * within the current working directory's project.
  */
-function buildClaudeCommand(resumeSessionId?: string, continueSession?: boolean): string {
-  return resumeSessionId
+function buildClaudeCommand(
+  resumeSessionId?: string,
+  continueSession?: boolean,
+  cdDir?: string
+): string {
+  const cmd = resumeSessionId
     ? `claude --resume ${resumeSessionId}`
     : continueSession
       ? "claude -c"
       : "claude";
+  return cdDir ? `cd "${cdDir.replace(/"/g, '\\"')}" && ${cmd}` : cmd;
+}
+
+/**
+ * What the dashboard Open action should do for a worktree, given the resume
+ * setting, whether an agent is already active there, the IDE, and any session
+ * to resume. Pure so it can be unit-tested independently of the TUI.
+ *
+ * - "plain": just open the IDE, no resume. Used when resume is disabled, when an
+ *   agent is already open/active (it's visible — resuming again is noise), or in
+ *   editor modes when there is no session to resume (so no clipboard/popup).
+ * - "terminal-claude": terminal IDE mode — the opened terminal itself runs claude
+ *   (resume / continue / fresh).
+ * - "copy-and-open": editor mode with a session to resume — copy the claude
+ *   command, show the popup, then open the editor.
+ */
+export type OpenAction =
+  | { kind: "plain" }
+  | { kind: "terminal-claude"; resumeId?: string; continueSession: boolean; resumeCwd?: string }
+  | { kind: "copy-and-open"; resumeId?: string; continueSession: boolean; resumeCwd?: string };
+
+export function resolveOpenAction(opts: {
+  resumeLastSession: boolean;
+  alreadyOpen: boolean;
+  ide: Settings["ide"];
+  resumeId?: string;
+  continueSession: boolean;
+  /** The resumed session's start dir, set only when it's a strict subdir of the worktree root. */
+  resumeCwd?: string;
+}): OpenAction {
+  const { resumeLastSession, alreadyOpen, ide, resumeId, continueSession, resumeCwd } = opts;
+  if (!resumeLastSession || alreadyOpen) return { kind: "plain" };
+  if (ide === "terminal") return { kind: "terminal-claude", resumeId, continueSession, resumeCwd };
+  const hasSession = !!resumeId || continueSession;
+  if (!hasSession) return { kind: "plain" };
+  return { kind: "copy-and-open", resumeId, continueSession, resumeCwd };
 }
 
 /**
@@ -396,9 +444,10 @@ export function copyToClipboard(text: string): boolean {
  */
 export function copyResumeCommand(
   resumeSessionId?: string,
-  continueSession?: boolean
+  continueSession?: boolean,
+  resumeCwd?: string
 ): { command: string; copied: boolean } {
-  const command = buildClaudeCommand(resumeSessionId, continueSession);
+  const command = buildClaudeCommand(resumeSessionId, continueSession, resumeCwd);
   const copied = copyToClipboard(command);
   if (copied) {
     log("info", "ide", `Copied '${command}' to clipboard`);

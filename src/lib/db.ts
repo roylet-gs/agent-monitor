@@ -117,6 +117,21 @@ function initSchema(db: Database.Database): void {
     log("info", "db", "Migrated agent_status: added is_open column");
   }
 
+  // Migration: add active_subagents column if missing (tracks outstanding
+  // background subagents so a stopped main turn still reads as "delegating")
+  try {
+    db.prepare("SELECT active_subagents FROM agent_status LIMIT 0").run();
+  } catch {
+    db.exec("ALTER TABLE agent_status ADD COLUMN active_subagents INTEGER NOT NULL DEFAULT 0");
+    log("info", "db", "Migrated agent_status: added active_subagents column");
+  }
+  try {
+    db.prepare("SELECT active_subagents FROM standalone_sessions LIMIT 0").run();
+  } catch {
+    db.exec("ALTER TABLE standalone_sessions ADD COLUMN active_subagents INTEGER NOT NULL DEFAULT 0");
+    log("info", "db", "Migrated standalone_sessions: added active_subagents column");
+  }
+
   // Migration: add nickname_source column if missing
   try {
     db.prepare("SELECT nickname_source FROM worktrees LIMIT 0").run();
@@ -304,6 +319,21 @@ export function touchAgentStatusTimestamp(worktreeId: string): void {
     .run(worktreeId);
 }
 
+// Set the outstanding-subagent count for a worktree (clamped at 0). Kept separate
+// from upsertAgentStatus so the counter persists even when a redundant status
+// write is skipped. Upserts a row if one doesn't exist yet.
+export function setActiveSubagents(worktreeId: string, count: number): void {
+  getDb()
+    .prepare(
+      `INSERT INTO agent_status (worktree_id, active_subagents, updated_at)
+       VALUES (?, MAX(?, 0), datetime('now'))
+       ON CONFLICT(worktree_id) DO UPDATE SET
+         active_subagents = MAX(?, 0),
+         updated_at = datetime('now')`
+    )
+    .run(worktreeId, count, count);
+}
+
 // --- Managed Sessions ---
 
 export function createManagedSession(
@@ -424,6 +454,21 @@ export function touchStandaloneSessionTimestamp(path: string): void {
   getDb()
     .prepare("UPDATE standalone_sessions SET updated_at = datetime('now') WHERE path = ?")
     .run(path);
+}
+
+// Set the outstanding-subagent count for a standalone session (clamped at 0).
+// Upserts a row (with defaults) if one doesn't exist yet.
+export function setStandaloneActiveSubagents(path: string, count: number): void {
+  const id = randomUUID();
+  getDb()
+    .prepare(
+      `INSERT INTO standalone_sessions (id, path, active_subagents, updated_at)
+       VALUES (?, ?, MAX(?, 0), datetime('now'))
+       ON CONFLICT(path) DO UPDATE SET
+         active_subagents = MAX(?, 0),
+         updated_at = datetime('now')`
+    )
+    .run(id, path, count, count);
 }
 
 export function removeStandaloneSession(id: string): void {
