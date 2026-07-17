@@ -24,6 +24,19 @@ test("groups worktrees under a Linear project header", async ({ page }) => {
   await tui.screenshot("linear-project-grouping");
 });
 
+test("shows the [p]roject action when the selected worktree has a Linear project", async ({ page }) => {
+  const tui = new TuiPage(page);
+  await tui.goto();
+  await tui.waitForText("main", 10_000);
+  // Wait for the Linear fetch so the selected worktree carries its project.
+  await tui.waitForText("Dashboard Revamp", 15_000);
+
+  // The action bar exposes [p]roject once a project URL is available.
+  await tui.waitForText("[p]roject", 5_000);
+
+  await tui.screenshot("linear-project-action");
+});
+
 test("selection still traverses worktree rows with project headers present", async ({ page }) => {
   const tui = new TuiPage(page);
   await tui.goto();
