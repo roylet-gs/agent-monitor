@@ -144,6 +144,8 @@ Key commands:
 - `am ls` — list all worktrees
 - `am open <target>` — open in your configured IDE
 
+By default (`resumeLastSession` setting), opening a worktree from the dashboard (`Enter`) also helps you **resume its most recent Claude session**. In Terminal IDE mode the opened terminal runs `claude --resume` directly; in VS Code / Cursor the editor opens and the `claude --resume` command is **copied to your clipboard** so you can paste it into the editor's terminal (confirmed with a popup in the dashboard). Turn it off with `am settings set resumeLastSession false`.
+
 ### Agent Monitoring
 
 Track Claude Code agent status across all your worktrees in real time. Status indicators:
@@ -243,6 +245,7 @@ CLI access: `am settings list`, `am settings get <key>`, `am settings set <key> 
 ```json
 {
   "ide": "cursor",
+  "resumeLastSession": true,
   "defaultBranchPrefix": "feature/",
   "defaultBaseBranch": "main",
   "pollingIntervalMs": 30000,

@@ -13,6 +13,7 @@ import { SETTINGS_PATH } from "../lib/paths.js";
 type SettingsField =
   | "openSettingsJson"
   | "ide"
+  | "resumeLastSession"
   | "prefix"
   | "baseBranch"
   | "polling"
@@ -42,6 +43,7 @@ type SettingsField =
 const FIELDS: SettingsField[] = [
   "openSettingsJson",
   "ide",
+  "resumeLastSession",
   "prefix",
   "baseBranch",
   "autoSync",
@@ -72,6 +74,7 @@ const FIELDS: SettingsField[] = [
 const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   openSettingsJson: "Open settings.json in your editor for manual editing",
   ide: "Which editor/IDE to open worktrees in",
+  resumeLastSession: "When opening a worktree, resume its last Claude session — runs claude --resume in Terminal mode, or copies the command to your clipboard for VS Code/Cursor",
   prefix: "Branch name prefix when creating new worktrees (e.g. feature/, fix/)",
   baseBranch: "Default base branch for new worktrees",
   autoSync: "Automatically sync worktree status from git on startup",
@@ -301,6 +304,11 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "resumeLastSession" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, resumeLastSession: !s.resumeLastSession }));
+      return;
+    }
+
     if (activeField === "autoSync" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, autoSyncOnStartup: !s.autoSyncOnStartup }));
       return;
@@ -485,6 +493,14 @@ export function SettingsPanel({
               </Text>
             </Text>
           ))}
+        </Box>
+        <Box>
+          <Text bold={activeField === "resumeLastSession"}>
+            {activeField === "resumeLastSession" ? "▸" : " "} Resume Last Session:{" "}
+          </Text>
+          <Text color={current.resumeLastSession ? "green" : "gray"}>
+            [{current.resumeLastSession ? "✓" : " "}]
+          </Text>
         </Box>
         <Box>
           <Text bold={activeField === "prefix"}>

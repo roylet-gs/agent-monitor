@@ -41,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxLogSizeMb: 2,
   agentPermissionMode: "acceptEdits",
   agentClaudeArgs: "",
+  resumeLastSession: true,
 };
 
 export function loadSettings(): Settings {

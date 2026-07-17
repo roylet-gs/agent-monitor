@@ -28,6 +28,17 @@ test("capture settings screen screenshot", async ({ page }) => {
   await tui.screenshot("baseline-settings");
 });
 
+test("settings shows Resume Last Session toggle", async ({ page }) => {
+  const tui = new TuiPage(page);
+  await tui.goto();
+  await tui.waitForText("main", 10_000);
+
+  await tui.sendKey("s");
+  await tui.waitForText("Resume Last Session");
+
+  await tui.screenshot("resume-last-session-setting");
+});
+
 test("capture dashboard with PR data screenshot", async ({ page }) => {
   await setupMock({
     gh: {
