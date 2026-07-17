@@ -52,6 +52,15 @@ describe("settings", () => {
       expect(result.defaultBranchPrefix).toBe("feature/");
     });
 
+    it("defaults resumeLastSession to true (incl. existing users missing the key)", () => {
+      // Fresh install
+      expect(settings.DEFAULT_SETTINGS.resumeLastSession).toBe(true);
+      // Existing settings file without the new key still gets the default
+      mkdirSync(paths.APP_DIR, { recursive: true });
+      writeFileSync(paths.SETTINGS_PATH, JSON.stringify({ ide: "vscode", setupCompleted: true }));
+      expect(settings.loadSettings().resumeLastSession).toBe(true);
+    });
+
     it("merges saved settings over defaults", () => {
       mkdirSync(paths.APP_DIR, { recursive: true });
       writeFileSync(paths.SETTINGS_PATH, JSON.stringify({ ide: "vscode", pollingIntervalMs: 5000 }));

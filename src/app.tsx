@@ -55,7 +55,7 @@ type CreateMode =
   | { kind: "delete-recreate" };
 import { syncWorktrees } from "./lib/sync.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "./lib/hooks-installer.js";
-import { openInIde, openClaudeInTerminal, openTerminal, focusTerminal } from "./lib/ide-launcher.js";
+import { openInIde, openClaudeInTerminal, copyResumeCommand, openTerminal, focusTerminal } from "./lib/ide-launcher.js";
 import { killClaudeAtPath } from "./lib/process.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
@@ -82,6 +82,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
   const [pendingBranch, setPendingBranch] = useState<{
@@ -315,8 +316,42 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         setError(result.error ?? "Cannot open worktree");
         return;
       }
-      const windowId = openInIde(wt.path, settings.ide, wt.custom_name ?? wt.branch);
-      // Track if a terminal was opened (IDE = terminal) so subsequent Enter presses focus it
+      const title = wt.custom_name ?? wt.branch;
+
+      // When resumeLastSession is on, opening also resumes the worktree's most
+      // recent Claude session. discoverWorktreeSessions is mtime-sorted, so [0] is
+      // the last-active session (managed, interactive, or a subdirectory one).
+      const resumeId = settings.resumeLastSession
+        ? discoverWorktreeSessions(wt.path)[0]?.id
+        : undefined;
+      const continueSession = !!wt.agent_status?.session_id;
+      log("debug", "ide", `Open: ide=${settings.ide} resume=${settings.resumeLastSession} sessionId=${resumeId ?? "none"} continue=${continueSession}`);
+
+      let windowId: string | undefined;
+      if (!settings.resumeLastSession) {
+        // Plain open (current behaviour).
+        windowId = openInIde(wt.path, settings.ide, title);
+      } else if (settings.ide === "terminal") {
+        // Terminal mode: the opened terminal itself runs `claude --resume`.
+        windowId = openClaudeInTerminal(wt.path, continueSession, title, resumeId);
+      } else {
+        // VSCode/Cursor: copy the claude command and show the confirmation popup
+        // first, pause briefly so the user actually sees it, THEN open the editor
+        // (which steals focus). Copying to the clipboard lets the user paste it into
+        // the editor's own terminal.
+        const { command, copied } = copyResumeCommand(resumeId, continueSession);
+        setNotice(
+          copied
+            ? `✓ Copied to clipboard — paste to resume:\n${command}\n\nDisable this in Settings (Resume Last Session).`
+            : `Could not copy. Run in the terminal:\n${command}\n\nDisable this in Settings (Resume Last Session).`
+        );
+        // Slight delay so the popup is visible before focus moves to the editor.
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        openInIde(wt.path, settings.ide, title);
+      }
+
+      // Track if a terminal was opened (IDE = terminal, or the editor fallback) so
+      // subsequent Enter presses focus it
       if (windowId !== undefined) {
         setTerminalOpenedIds((prev) => {
           const next = new Set(prev);
@@ -1043,6 +1078,14 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [error]);
 
+  // Clear the notice (e.g. "copied to clipboard") after a few seconds
+  useEffect(() => {
+    if (notice) {
+      const timer = setTimeout(() => setNotice(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [notice]);
+
   // On wide terminals the chat replaces the detail panel inside the
   // dashboard; on narrow ones it takes over the whole screen.
   const { columns } = useTerminalSize();
@@ -1064,6 +1107,22 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       {error && (
         <Box paddingX={1}>
           <Text color="red">Error: {error}</Text>
+        </Box>
+      )}
+
+      {notice && !error && (
+        <Box justifyContent="center" paddingY={1}>
+          <Box
+            borderStyle="round"
+            borderColor="green"
+            paddingX={2}
+            flexDirection="column"
+            alignItems="center"
+          >
+            <Text color="green" bold>
+              {notice}
+            </Text>
+          </Box>
         </Box>
       )}
 

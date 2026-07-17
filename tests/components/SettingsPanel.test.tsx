@@ -66,6 +66,15 @@ describe("SettingsPanel", () => {
     expect(DEFAULT_SETTINGS.linearGroupByProject).toBe(true);
   });
 
+  it("shows the Resume Last Session toggle, on by default", () => {
+    const { lastFrame } = render(<SettingsPanel {...defaultProps} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Resume Last Session");
+    // default is on → rendered as a checked box
+    expect(DEFAULT_SETTINGS.resumeLastSession).toBe(true);
+    expect(frame).toContain("Resume Last Session: [✓]");
+  });
+
   it("shows navigation hints", () => {
     const { lastFrame } = render(<SettingsPanel {...defaultProps} />);
     const frame = lastFrame()!;

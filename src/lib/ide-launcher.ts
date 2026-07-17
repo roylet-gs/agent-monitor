@@ -284,11 +284,7 @@ export function openClaudeInTerminal(
 ): string {
   const escapedPath = worktreePath.replace(/"/g, '\\"');
   // A managed session id takes priority: resume that exact conversation.
-  const claudeCmd = resumeSessionId
-    ? `claude --resume ${resumeSessionId}`
-    : continueSession
-      ? "claude -c"
-      : "claude";
+  const claudeCmd = buildClaudeCommand(resumeSessionId, continueSession);
   const app = detectTerminalApp();
   const windowId = generateWindowId();
   const windowTitle = makeWindowTitle(title, worktreePath, windowId);
@@ -350,4 +346,62 @@ export function openInIde(worktreePath: string, ide: Settings["ide"], title?: st
     log("error", "ide", `Failed to open ${worktreePath} in ${ide}: ${err}`);
     throw new Error(`Failed to open in ${ide}. Is it installed and in PATH?`);
   }
+}
+
+/**
+ * Build the claude launch command with the same priority everywhere: resume an
+ * exact session id, else continue the most-recent session, else start fresh.
+ */
+function buildClaudeCommand(resumeSessionId?: string, continueSession?: boolean): string {
+  return resumeSessionId
+    ? `claude --resume ${resumeSessionId}`
+    : continueSession
+      ? "claude -c"
+      : "claude";
+}
+
+/**
+ * Copy text to the system clipboard via the platform's CLI tool (no npm dependency).
+ * macOS uses pbcopy; Windows uses clip; Linux falls back through wl-copy, xclip, and
+ * xsel. The text is piped verbatim (no trailing newline is added by us). Returns
+ * false — rather than throwing — when no clipboard tool is available.
+ */
+export function copyToClipboard(text: string): boolean {
+  const candidates =
+    process.platform === "darwin"
+      ? ["pbcopy"]
+      : process.platform === "win32"
+        ? ["clip"]
+        : ["wl-copy", "xclip -selection clipboard", "xsel --clipboard --input"];
+
+  for (const cmd of candidates) {
+    try {
+      execSync(cmd, { input: text, stdio: ["pipe", "ignore", "ignore"] });
+      return true;
+    } catch {
+      // Try the next candidate (e.g. wl-copy missing on X11).
+    }
+  }
+  log("warn", "ide", `Failed to copy to clipboard: no working tool of [${candidates.join(", ")}]`);
+  return false;
+}
+
+/**
+ * Build the claude resume command and copy it to the clipboard so the user can paste
+ * it into their editor's own terminal. The editor itself is opened separately (via
+ * openInIde) so the caller can show a confirmation popup and pause before focus moves
+ * to the editor. We deliberately do NOT drive the integrated terminal via keystrokes —
+ * that needs macOS Accessibility permission and fails silently (osascript error 1002)
+ * without it. Returns the command that was copied and whether the copy succeeded.
+ */
+export function copyResumeCommand(
+  resumeSessionId?: string,
+  continueSession?: boolean
+): { command: string; copied: boolean } {
+  const command = buildClaudeCommand(resumeSessionId, continueSession);
+  const copied = copyToClipboard(command);
+  if (copied) {
+    log("info", "ide", `Copied '${command}' to clipboard`);
+  }
+  return { command, copied };
 }

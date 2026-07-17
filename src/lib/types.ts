@@ -143,6 +143,7 @@ export interface Settings {
   maxLogSizeMb: number;
   agentPermissionMode: AgentPermissionMode;
   agentClaudeArgs: string;
+  resumeLastSession: boolean;
   setupCompleted?: boolean;
   lastSeenVersion?: string;
   lastUpdateCheck?: number;

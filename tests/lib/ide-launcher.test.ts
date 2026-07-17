@@ -310,5 +310,55 @@ describe("ide-launcher", () => {
       const openCall = mockedExecSync.mock.calls[0][0] as string;
       expect(openCall).toContain("claude -c");
     });
+
+    it("uses claude --resume <id> when a session id is given", async () => {
+      mockedExecSync.mockReturnValue("" as any);
+
+      const { openClaudeInTerminal } = await import("../../src/lib/ide-launcher.js");
+      openClaudeInTerminal("/tmp/worktrees/feat", true, "feat", "abc123");
+
+      const openCall = mockedExecSync.mock.calls[0][0] as string;
+      expect(openCall).toContain("claude --resume abc123");
+    });
+  });
+
+  describe("copyResumeCommand", () => {
+    it("copies the resume command to the clipboard via pbcopy", async () => {
+      mockedExecSync.mockReturnValue("" as any);
+
+      const { copyResumeCommand } = await import("../../src/lib/ide-launcher.js");
+      const result = copyResumeCommand("abc123");
+
+      expect(result).toEqual({ command: "claude --resume abc123", copied: true });
+
+      // Copied via pbcopy, piped as stdin (no editor launch, no keystroke automation)
+      const copyCall = mockedExecSync.mock.calls[0];
+      expect(copyCall[0]).toBe("pbcopy");
+      expect((copyCall[1] as any).input).toBe("claude --resume abc123");
+      const calls = mockedExecSync.mock.calls.map((c) => c[0] as string);
+      expect(calls.some((c) => c.includes("keystroke"))).toBe(false);
+      expect(calls.some((c) => c.includes("cursor") || c.includes("code"))).toBe(false);
+    });
+
+    it("copies `claude -c` when only a hook-known session exists (no resume id)", async () => {
+      mockedExecSync.mockReturnValue("" as any);
+
+      const { copyResumeCommand } = await import("../../src/lib/ide-launcher.js");
+      const result = copyResumeCommand(undefined, true);
+
+      expect(result.command).toBe("claude -c");
+      expect((mockedExecSync.mock.calls[0][1] as any).input).toBe("claude -c");
+    });
+
+    it("returns copied=false when the clipboard tool is unavailable", async () => {
+      mockedExecSync.mockImplementationOnce(() => {
+        throw new Error("pbcopy: command not found");
+      });
+
+      const { copyResumeCommand } = await import("../../src/lib/ide-launcher.js");
+      const result = copyResumeCommand("abc123");
+
+      expect(result).toEqual({ command: "claude --resume abc123", copied: false });
+    });
   });
 });
