@@ -122,6 +122,40 @@ describe("WorktreeDetail", () => {
     expect(lastFrame()!).toContain("Done with task");
   });
 
+  it("shows the full session id when set", () => {
+    const wt = makeWorktree({
+      agent_status: {
+        worktree_id: "wt-1",
+        status: "executing",
+        last_response: null,
+        transcript_summary: null,
+        session_id: "3f2a91c8-7b4d-4e0a-9c1f-8d2e5a6b7c90",
+        is_open: 1,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Session");
+    expect(frame).toContain("3f2a91c8-7b4d-4e0a-9c1f-8d2e5a6b7c90");
+  });
+
+  it("hides the Session row when session id is null", () => {
+    const wt = makeWorktree({
+      agent_status: {
+        worktree_id: "wt-1",
+        status: "executing",
+        last_response: null,
+        transcript_summary: null,
+        session_id: null,
+        is_open: 1,
+        updated_at: new Date().toISOString(),
+      },
+    });
+    const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+    expect(lastFrame()!).not.toContain("Session");
+  });
+
   it("shows Cursor open when open_ide is cursor", () => {
     const wt = makeWorktree({ open_ide: "cursor" });
     const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
@@ -303,6 +337,8 @@ describe("WorktreeDetail", () => {
     expect(frame).toContain("/tmp/standalone-project");
     expect(frame).toContain("Executing");
     expect(frame).toContain("Working on refactor");
+    expect(frame).toContain("Session");
+    expect(frame).toContain("sess-1");
   });
 
   it("shows standalone session with no active session when closed", () => {

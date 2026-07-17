@@ -26,6 +26,12 @@ npx tsx e2e/seed-standalone.ts
 # Enable Linear with a dummy key so the mock-api can serve fixture data
 echo '{"setupCompleted":true,"hideMainBranch":false,"linearEnabled":true,"linearApiKey":"lin_api_mock"}' > "$AM_DATA_DIR/settings.json"
 
+# Seed a Claude session id on the main worktree via a hook event so the detail
+# panel's "Session" row renders. UserPromptSubmit maps to "executing" and does
+# not touch the active_subagents counter; the status --set below overrides the
+# status to "delegating" while COALESCE preserves this session_id.
+echo '{"hook_event_name":"UserPromptSubmit","session_id":"3f2a91c8-7b4d-4e0a-9c1f-8d2e5a6b7c90"}' | npx tsx src/cli.tsx hook-event --worktree /work || true
+
 # Seed the "delegating" agent status on the main worktree so the TUI shows the
 # magenta pulsing dot / "Delegating" label (main turn stopped, subagents running).
 # This is set at startup so getDisplayStatus keeps it fresh (not stale).

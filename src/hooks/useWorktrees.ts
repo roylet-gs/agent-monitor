@@ -281,6 +281,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         id: wt.id, branch: wt.branch, custom_name: wt.custom_name, is_main: wt.is_main,
         status: wt.agent_status?.status,
         is_open: wt.agent_status?.is_open,
+        session_id: wt.agent_status?.session_id,
         updated_at: wt.agent_status?.updated_at,
         summary: wt.agent_status?.transcript_summary,
         response: wt.agent_status?.last_response,
