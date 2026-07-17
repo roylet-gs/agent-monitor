@@ -18,7 +18,7 @@ export function getDisplayStatus(agentStatus: AgentStatus | null | undefined): A
   // "waiting" so the user knows it needs attention. This is display-time only —
   // the DB status is preserved and resumes correctly when events arrive.
   if (
-    (agentStatus.status === "executing" || agentStatus.status === "planning") &&
+    (agentStatus.status === "executing" || agentStatus.status === "planning" || agentStatus.status === "delegating") &&
     Date.now() - new Date(agentStatus.updated_at + "Z").getTime() > STALE_THRESHOLD_MS
   ) {
     return "waiting";
@@ -28,7 +28,7 @@ export function getDisplayStatus(agentStatus: AgentStatus | null | undefined): A
 
 export function getDisplayStatusStandalone(session: StandaloneSession): AgentStatusType {
   if (
-    (session.status === "executing" || session.status === "planning") &&
+    (session.status === "executing" || session.status === "planning" || session.status === "delegating") &&
     Date.now() - new Date(session.updated_at + "Z").getTime() > STALE_THRESHOLD_MS
   ) {
     return "waiting";

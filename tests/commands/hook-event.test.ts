@@ -100,6 +100,33 @@ describe("handleStandaloneSession", () => {
     const session = db.getStandaloneSessionByPath("/tmp/standalone-project");
     expect(session).toBeUndefined();
   });
+
+  it("tracks active_subagents and reports delegating while background agents run", async () => {
+    await handleHookEvent("/tmp/standalone-project", "UserPromptSubmit"); // executing, count 0
+    await handleHookEvent("/tmp/standalone-project", "SubagentStart"); // count 1
+    await handleHookEvent("/tmp/standalone-project", "SubagentStart"); // count 2
+
+    let session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.active_subagents).toBe(2);
+
+    // Main turn stops while 2 subagents still running → delegating, not idle/done
+    await handleHookEvent("/tmp/standalone-project", "Stop");
+    session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.status).toBe("delegating");
+    expect(session!.active_subagents).toBe(2);
+
+    // First subagent finishes → still delegating
+    await handleHookEvent("/tmp/standalone-project", "SubagentStop");
+    session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.active_subagents).toBe(1);
+    expect(session!.status).toBe("delegating");
+
+    // Last subagent finishes → all work done
+    await handleHookEvent("/tmp/standalone-project", "SubagentStop");
+    session = db.getStandaloneSessionByPath("/tmp/standalone-project");
+    expect(session!.active_subagents).toBe(0);
+    expect(session!.status).toBe("done");
+  });
 });
 
 describe("mapEventToStatus", () => {
@@ -423,6 +450,101 @@ describe("mapEventToStatus", () => {
   // Unknown events
   it("unknown event -> idle", () => {
     expect(mapEventToStatus({ event: "SomethingElse" })).toBe("idle");
+  });
+
+  // Background subagents outstanding — main turn stopped but work continues
+  it("Stop with 1 subagent outstanding -> delegating (instead of idle)", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "executing", 1)).toBe("delegating");
+  });
+
+  it("Stop in plan mode with subagents outstanding -> delegating (instead of waiting)", () => {
+    expect(
+      mapEventToStatus({ event: "Stop", permission_mode: "plan" } as any, "planning", 2)
+    ).toBe("delegating");
+  });
+
+  it("Stop with stop_hook_active still wins over subagents -> waiting", () => {
+    expect(mapEventToStatus({ event: "Stop", stop_hook_active: true }, "executing", 1)).toBe("waiting");
+  });
+
+  it("Notification idle_prompt with subagents outstanding -> delegating", () => {
+    expect(
+      mapEventToStatus({ event: "Notification", notification_type: "idle_prompt" }, "delegating", 2)
+    ).toBe("delegating");
+  });
+
+  it("permission prompt with subagents outstanding still -> waiting (needs user)", () => {
+    expect(
+      mapEventToStatus({ event: "Notification", notification_type: "permission_prompt" }, "delegating", 1)
+    ).toBe("waiting");
+  });
+
+  it("PermissionRequest with subagents outstanding still -> waiting", () => {
+    expect(mapEventToStatus({ event: "PermissionRequest" }, "delegating", 1)).toBe("waiting");
+  });
+
+  // delegating transition-out
+  it("SubagentStop while delegating with count still >0 -> delegating", () => {
+    expect(mapEventToStatus({ event: "SubagentStop" }, "delegating", 1)).toBe("delegating");
+  });
+
+  it("SubagentStop while delegating with count 0 -> done (all subagents finished)", () => {
+    expect(mapEventToStatus({ event: "SubagentStop" }, "delegating", 0)).toBe("done");
+  });
+
+  it("SubagentStart while delegating -> delegating", () => {
+    expect(mapEventToStatus({ event: "SubagentStart" }, "delegating", 2)).toBe("delegating");
+  });
+
+  it("Stop while delegating with subagents still running -> delegating", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "delegating", 1)).toBe("delegating");
+  });
+
+  it("Stop while delegating with count 0 -> done", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "delegating", 0)).toBe("done");
+  });
+
+  it("UserPromptSubmit while delegating -> executing (main agent active again)", () => {
+    expect(mapEventToStatus({ event: "UserPromptSubmit" }, "delegating", 1)).toBe("executing");
+  });
+
+  it("PreToolUse while delegating -> executing (main agent working)", () => {
+    expect(mapEventToStatus({ event: "PreToolUse", tool_name: "Read" }, "delegating", 1)).toBe("executing");
+  });
+
+  it("Stop with 0 subagents behaves as before (executing -> done)", () => {
+    expect(mapEventToStatus({ event: "Stop" }, "executing", 0)).toBe("done");
+  });
+});
+
+describe("computeSubagentCount", () => {
+  let computeSubagentCount: typeof import("../../src/commands/hook-event.js").computeSubagentCount;
+
+  beforeEach(async () => {
+    ({ computeSubagentCount } = await import("../../src/commands/hook-event.js"));
+  });
+
+  it("SubagentStart increments", () => {
+    expect(computeSubagentCount({ event: "SubagentStart" }, 0)).toBe(1);
+    expect(computeSubagentCount({ event: "SubagentStart" }, 2)).toBe(3);
+  });
+
+  it("SubagentStop decrements", () => {
+    expect(computeSubagentCount({ event: "SubagentStop" }, 2)).toBe(1);
+  });
+
+  it("SubagentStop floors at 0", () => {
+    expect(computeSubagentCount({ event: "SubagentStop" }, 0)).toBe(0);
+  });
+
+  it("SessionStart / SessionEnd reset to 0", () => {
+    expect(computeSubagentCount({ event: "SessionStart" }, 5)).toBe(0);
+    expect(computeSubagentCount({ event: "SessionEnd" }, 5)).toBe(0);
+  });
+
+  it("other events leave the count unchanged", () => {
+    expect(computeSubagentCount({ event: "Stop" }, 3)).toBe(3);
+    expect(computeSubagentCount({ event: "PreToolUse", tool_name: "Read" }, 3)).toBe(3);
   });
 });
 
