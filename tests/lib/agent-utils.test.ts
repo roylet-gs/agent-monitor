@@ -191,13 +191,41 @@ describe("normalizeSummary", () => {
     expect(normalizeSummary("line1\n\n\nline2")).toBe("line1 line2");
   });
 
-  it("preserves emoji characters", () => {
-    expect(normalizeSummary("typecheck ✅, lint ✅")).toBe("typecheck ✅, lint ✅");
+  // Emoji are removed: Ink's truncate-end (cli-truncate) miscounts their
+  // display width, so a retained emoji makes a truncated line overflow the
+  // panel by a column and wraps/breaks the borders. See normalizeSummary docs.
+  it("strips emoji, including flags and ZWJ sequences", () => {
+    expect(normalizeSummary("typecheck ✅ lint ✅ done")).toBe("typecheck lint done");
+    expect(normalizeSummary("shipped 🚀 party 🎉")).toBe("shipped party");
+    expect(normalizeSummary("flag 🇬🇧 family 👨‍👩‍👧‍👦 thumb 👍🏽 ok")).toBe("flag family thumb ok");
+  });
+
+  it("keeps width-1 glyphs and CJK that truncate correctly", () => {
+    expect(normalizeSummary("checks ✓ ✗ arrow → 中文")).toBe("checks ✓ ✗ arrow → 中文");
+  });
+
+  it("leaves no pictographic emoji that could overflow the panel width", () => {
+    const out = normalizeSummary("CI 🚀 ✅ done 🎉 all green ⚠️ note ❌ nope");
+    expect(out).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 
   it("respects the maxChars cap", () => {
     const long = "a".repeat(500);
     expect(normalizeSummary(long, 50)).toHaveLength(50);
+  });
+
+  it("reduces markdown links to their label, dropping the URL", () => {
+    expect(
+      normalizeSummary("PR [#115](https://github.com/roylet-gs/agent-monitor/pull/115) is green"),
+    ).toBe("PR #115 is green");
+  });
+
+  it("strips a long URL so no unbreakable token survives", () => {
+    const result = normalizeSummary(
+      "See [the pull request](https://github.com/roylet-gs/agent-monitor/pull/115/files#diff-abcdef0123456789) now",
+    );
+    expect(result).toBe("See the pull request now");
+    expect(result).not.toContain("https://");
   });
 
   it("handles the full multiline markdown case from the bug report", () => {
@@ -208,6 +236,6 @@ describe("normalizeSummary", () => {
     expect(result).not.toContain("##");
     expect(result).toContain("Summary");
     expect(result).toContain("Validate");
-    expect(result).toContain("✅");
+    expect(result).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 });
