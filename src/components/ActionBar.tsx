@@ -10,13 +10,14 @@ interface ActionBarProps {
   linearEnabled?: boolean;
   hasPr?: boolean;
   hasLinear?: boolean;
+  hasLinearProject?: boolean;
   ideIsTerm?: boolean;
   integrationLoading?: string | null;
   /** Chat pane has focus — show chat keys instead of dashboard keys. */
   chatMode?: boolean;
 }
 
-export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, ideIsTerm, integrationLoading, chatMode }: ActionBarProps) {
+export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, hasLinearProject, ideIsTerm, integrationLoading, chatMode }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -64,6 +65,9 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           )}
           {linearEnabled && (
             hasLinear ? <><Text color="yellow"> [l]</Text>inear</> : <Text dimColor> [l]inear</Text>
+          )}
+          {linearEnabled && (
+            hasLinearProject ? <><Text color="yellow"> [p]</Text>roject</> : <Text dimColor> [p]roject</Text>
           )}
           <Text color="yellow"> [r]</Text>efresh
           <Text color="yellow"> [w]</Text>atch
