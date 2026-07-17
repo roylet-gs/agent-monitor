@@ -1075,6 +1075,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
+    onOpenLinearProject: () => {
+      const wt = flatWorktrees[selectedIndex];
+      const projectUrl = wt?.linear_info?.project?.url;
+      if (projectUrl) {
+        let url = projectUrl;
+        if (settings.linearUseDesktopApp) {
+          url = url.replace("https://linear.app/", "linear://");
+        }
+        import("open").then((mod) => mod.default(url)).catch(() => {});
+      }
+    },
     onToggleLogs: () => setShowLogs((v) => !v),
     onUpdate: updateInfo?.updateAvailable
       ? () => {

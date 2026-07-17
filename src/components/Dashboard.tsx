@@ -79,7 +79,7 @@ export const Dashboard = React.memo(function Dashboard({
         {showDetail && (chatPane ?? <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} showPrStatus={showPrStatus} showLinearTicket={showLinearTicket} showGitAheadBehind={showGitAheadBehind} showLastCommit={showLastCommit} />)}
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
-      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} chatMode={!!chatPane && showDetail} />
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} hasLinearProject={!!selectedWorktree?.linear_info?.project?.url} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} chatMode={!!chatPane && showDetail} />
     </Box>
   );
 });

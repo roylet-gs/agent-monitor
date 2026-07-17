@@ -25,6 +25,19 @@ test("shows the linked Linear ticket without a project section header", async ({
   await tui.screenshot("linear-ticket-no-grouping");
 });
 
+test("shows the [p]roject action when the selected worktree has a Linear project", async ({ page }) => {
+  const tui = new TuiPage(page);
+  await tui.goto();
+  await tui.waitForText("main", 10_000);
+  // Wait for the Linear fetch so the selected worktree carries its project.
+  await tui.waitForText("Dashboard Revamp", 15_000);
+
+  // The action bar exposes [p]roject once a project URL is available.
+  await tui.waitForText("[p]roject", 5_000);
+
+  await tui.screenshot("linear-project-action");
+});
+
 test("selection traverses worktree rows", async ({ page }) => {
   const tui = new TuiPage(page);
   await tui.goto();

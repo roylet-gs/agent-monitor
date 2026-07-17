@@ -96,6 +96,29 @@ describe("ActionBar", () => {
     expect(frame).toContain("inear");
   });
 
+  it("dims project action when linearEnabled but no Linear project", () => {
+    const { lastFrame } = render(
+      <ActionBar busy={null} hasWorktrees={true} escHint={false} linearEnabled={true} hasLinearProject={false} />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("[p]roject");
+  });
+
+  it("highlights project action when linearEnabled and has Linear project", () => {
+    const { lastFrame } = render(
+      <ActionBar busy={null} hasWorktrees={true} escHint={false} linearEnabled={true} hasLinearProject={true} />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("roject");
+  });
+
+  it("hides project action when linear is not enabled", () => {
+    const { lastFrame } = render(
+      <ActionBar busy={null} hasWorktrees={true} escHint={false} linearEnabled={false} hasLinearProject={true} />
+    );
+    expect(lastFrame()!).not.toContain("roject");
+  });
+
   it("shows terminal action when hasWorktrees and ideIsTerm is false", () => {
     const { lastFrame } = render(
       <ActionBar busy={null} hasWorktrees={true} escHint={false} ideIsTerm={false} />
