@@ -320,6 +320,17 @@ describe("ide-launcher", () => {
       const openCall = mockedExecSync.mock.calls[0][0] as string;
       expect(openCall).toContain("claude --resume abc123");
     });
+
+    it("cd's into the session subdir when resumeCwd is given", async () => {
+      mockedExecSync.mockReturnValue("" as any);
+
+      const { openClaudeInTerminal } = await import("../../src/lib/ide-launcher.js");
+      openClaudeInTerminal("/tmp/worktrees/feat", false, "feat", "abc123", "/tmp/worktrees/feat/packages/api");
+
+      const openCall = mockedExecSync.mock.calls[0][0] as string;
+      expect(openCall).toContain("/tmp/worktrees/feat/packages/api");
+      expect(openCall).toContain("claude --resume abc123");
+    });
   });
 
   describe("copyResumeCommand", () => {
@@ -348,6 +359,17 @@ describe("ide-launcher", () => {
 
       expect(result.command).toBe("claude -c");
       expect((mockedExecSync.mock.calls[0][1] as any).input).toBe("claude -c");
+    });
+
+    it("prefixes `cd \"<subdir>\" &&` when a resume cwd is given", async () => {
+      mockedExecSync.mockReturnValue("" as any);
+
+      const { copyResumeCommand } = await import("../../src/lib/ide-launcher.js");
+      const result = copyResumeCommand("abc123", false, "/tmp/worktrees/feat/packages/api");
+
+      const expected = 'cd "/tmp/worktrees/feat/packages/api" && claude --resume abc123';
+      expect(result).toEqual({ command: expected, copied: true });
+      expect((mockedExecSync.mock.calls[0][1] as any).input).toBe(expected);
     });
 
     it("returns copied=false when the clipboard tool is unavailable", async () => {
@@ -414,6 +436,18 @@ describe("ide-launcher", () => {
       expect(
         await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "terminal", resumeId: undefined, continueSession: false })
       ).toEqual({ kind: "terminal-claude", resumeId: undefined, continueSession: false });
+    });
+
+    it("forwards resumeCwd into copy-and-open", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "vscode", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" })
+      ).toEqual({ kind: "copy-and-open", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" });
+    });
+
+    it("forwards resumeCwd into terminal-claude", async () => {
+      expect(
+        await resolve({ resumeLastSession: true, alreadyOpen: false, ide: "terminal", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" })
+      ).toEqual({ kind: "terminal-claude", resumeId: "abc123", continueSession: false, resumeCwd: "/wt/sub" });
     });
   });
 });

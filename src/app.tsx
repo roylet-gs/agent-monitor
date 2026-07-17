@@ -14,7 +14,7 @@ import { RunScriptPrompt } from "./components/RunScriptPrompt.js";
 import { CreatingWorktree, type StepInfo } from "./components/CreatingWorktree.js";
 import { ChatView } from "./components/ChatView.js";
 import { SessionPicker } from "./components/SessionPicker.js";
-import { discoverWorktreeSessions, type DiscoveredSession } from "./lib/claude-session.js";
+import { discoverWorktreeSessions, isSubdirectory, type DiscoveredSession } from "./lib/claude-session.js";
 import { isEffectivelyOpen } from "./lib/agent-utils.js";
 import { ProgressSteps } from "./components/ProgressSteps.js";
 import { useDaemon } from "./hooks/useDaemon.js";
@@ -328,9 +328,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       // actually resume.
       const alreadyOpen = isEffectivelyOpen(wt.agent_status);
       const shouldResume = settings.resumeLastSession && !alreadyOpen;
-      const resumeId = shouldResume
-        ? discoverWorktreeSessions(wt.path)[0]?.id
-        : undefined;
+      const session = shouldResume ? discoverWorktreeSessions(wt.path)[0] : undefined;
+      const resumeId = session?.id;
+      // Only carry a cd target when the session started in a subdir of the worktree
+      // root — at the root the editor/terminal already opens there.
+      const resumeCwd =
+        session && isSubdirectory(session.cwd, wt.path) ? session.cwd : undefined;
       const continueSession = !!wt.agent_status?.session_id;
       const action = resolveOpenAction({
         resumeLastSession: settings.resumeLastSession,
@@ -338,8 +341,9 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         ide: settings.ide,
         resumeId,
         continueSession,
+        resumeCwd,
       });
-      log("debug", "ide", `Open: ide=${settings.ide} resume=${settings.resumeLastSession} alreadyOpen=${alreadyOpen} sessionId=${resumeId ?? "none"} continue=${continueSession} action=${action.kind}`);
+      log("debug", "ide", `Open: ide=${settings.ide} resume=${settings.resumeLastSession} alreadyOpen=${alreadyOpen} sessionId=${resumeId ?? "none"} resumeCwd=${resumeCwd ?? "none"} continue=${continueSession} action=${action.kind}`);
 
       let windowId: string | undefined;
       if (action.kind === "plain") {
@@ -348,13 +352,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         windowId = openInIde(wt.path, settings.ide, title);
       } else if (action.kind === "terminal-claude") {
         // Terminal mode: the opened terminal itself runs `claude` (resume/continue/fresh).
-        windowId = openClaudeInTerminal(wt.path, action.continueSession, title, action.resumeId);
+        windowId = openClaudeInTerminal(wt.path, action.continueSession, title, action.resumeId, action.resumeCwd);
       } else {
         // VSCode/Cursor with a session to resume: copy the claude command and show
         // the confirmation popup first, pause briefly so the user actually sees it,
         // THEN open the editor (which steals focus). Copying to the clipboard lets
         // the user paste it into the editor's own terminal.
-        const { command, copied } = copyResumeCommand(action.resumeId, action.continueSession);
+        const { command, copied } = copyResumeCommand(action.resumeId, action.continueSession, action.resumeCwd);
         setNotice(
           copied
             ? `✓ Copied to clipboard — paste to resume:\n${command}\n\nDisable this in Settings (Resume Last Session).`
