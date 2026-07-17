@@ -3,13 +3,12 @@ import { getWorktrees, getAgentStatuses, updateWorktreeCustomName, clearLinearNi
 import { getGitStatus, getLastCommit } from "../lib/git.js";
 import { fetchAllPrInfo } from "../lib/github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "../lib/linear.js";
-import { isEffectivelyOpen } from "../lib/agent-utils.js";
-import { buildGroups, type RepoWorktrees } from "../lib/grouping.js";
+import { buildGroups, applyWorktreeFilters, type RepoWorktrees } from "../lib/grouping.js";
 import { log } from "../lib/logger.js";
 import { syncWorktrees } from "../lib/sync.js";
 import { getTerminalPaths, getIdePaths } from "../lib/process.js";
 import { realpathSync } from "fs";
-import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository } from "../lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository, WorktreeSortCriterion } from "../lib/types.js";
 
 export interface WorktreeHookConfig {
   repositories: Repository[];
@@ -23,7 +22,10 @@ export interface WorktreeHookConfig {
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
-  linearGroupByProject: boolean;
+  worktreeSort: WorktreeSortCriterion[];
+  hideMergedClosedPrs: boolean;
+  hideIdleDoneAgents: boolean;
+  hideWithoutLinearTicket: boolean;
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
@@ -46,7 +48,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
     ghRefreshOnManual,
     linearRefreshOnManual,
     linearAutoNickname,
-    linearGroupByProject,
+    worktreeSort,
+    hideMergedClosedPrs,
+    hideIdleDoneAgents,
+    hideWithoutLinearTicket,
   } = config;
 
   const [data, setData] = useState<{ groups: WorktreeGroup[]; flatWorktrees: WorktreeWithStatus[] }>({ groups: [], flatWorktrees: [] });
@@ -58,8 +63,6 @@ export function useWorktrees(config: WorktreeHookConfig): {
   // Keep refs for values that refresh needs, so it always reads the latest
   const reposRef = useRef(repositories);
   reposRef.current = repositories;
-  const hideMainRef = useRef(hideMainBranch);
-  hideMainRef.current = hideMainBranch;
   const ghPrStatusRef = useRef(ghPrStatus);
   ghPrStatusRef.current = ghPrStatus;
   const linearEnabledRef = useRef(linearEnabled);
@@ -72,8 +75,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
   linearAutoNicknameRef.current = linearAutoNickname;
   const linearApiKeyRef = useRef(linearApiKey);
   linearApiKeyRef.current = linearApiKey;
-  const linearGroupByProjectRef = useRef(linearGroupByProject);
-  linearGroupByProjectRef.current = linearGroupByProject;
+  const worktreeSortRef = useRef(worktreeSort);
+  worktreeSortRef.current = worktreeSort;
+  const filtersRef = useRef({ hideMainBranch, hideMergedClosedPrs, hideIdleDoneAgents, hideWithoutLinearTicket });
+  filtersRef.current = { hideMainBranch, hideMergedClosedPrs, hideIdleDoneAgents, hideWithoutLinearTicket };
 
   // Generation counter: stale refresh calls check this before setting state
   const genRef = useRef(0);
@@ -170,7 +175,6 @@ export function useWorktrees(config: WorktreeHookConfig): {
   const refresh = useCallback(async (forceIntegrations = false) => {
     const myGen = ++genRef.current;
     const repos = reposRef.current;
-    const shouldHideMain = hideMainRef.current;
     const shouldFetchPr = ghPrStatusRef.current;
     const shouldFetchLinear = linearEnabledRef.current;
 
@@ -261,22 +265,14 @@ export function useWorktrees(config: WorktreeHookConfig): {
         // Bail if a newer refresh started while we were enriching
         if (myGen !== genRef.current) return;
 
-        const filtered = shouldHideMain
-          ? enriched.filter(
-              (wt) =>
-                !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")) ||
-                isEffectivelyOpen(wt.agent_status),
-            )
-          : enriched;
+        const filtered = applyWorktreeFilters(enriched, filtersRef.current);
 
         perRepo.push({ repo, worktrees: filtered });
       }
 
       // Sorting (incl. Linear ticket clustering) and project-major bucketing
       // both live in buildGroups, shared with the daemon.
-      const { groups: newGroups, flatWorktrees: allFlat } = buildGroups(perRepo, {
-        groupByProject: linearGroupByProjectRef.current && shouldFetchLinear,
-      });
+      const { groups: newGroups, flatWorktrees: allFlat } = buildGroups(perRepo, worktreeSortRef.current);
 
       // Final staleness check before committing state
       if (myGen !== genRef.current) return;
@@ -286,6 +282,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         status: wt.agent_status?.status,
         is_open: wt.agent_status?.is_open,
         session_id: wt.agent_status?.session_id,
+        updated_at: wt.agent_status?.updated_at,
         summary: wt.agent_status?.transcript_summary,
         response: wt.agent_status?.last_response,
         ahead: wt.git_status?.ahead, behind: wt.git_status?.behind,

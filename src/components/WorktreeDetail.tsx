@@ -9,6 +9,10 @@ import type { WorktreeWithStatus, StandaloneSession } from "../lib/types.js";
 interface WorktreeDetailProps {
   worktree: WorktreeWithStatus | null;
   standaloneSession?: StandaloneSession | null;
+  showPrStatus?: boolean;
+  showLinearTicket?: boolean;
+  showGitAheadBehind?: boolean;
+  showLastCommit?: boolean;
 }
 
 function statusColor(status: string | undefined): string {
@@ -49,7 +53,7 @@ function statusLabel(status: string | undefined): string {
   }
 }
 
-export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, standaloneSession }: WorktreeDetailProps) {
+export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, standaloneSession, showPrStatus = true, showLinearTicket = true, showGitAheadBehind = true, showLastCommit = true }: WorktreeDetailProps) {
   if (standaloneSession) {
     return <StandaloneDetail session={standaloneSession} />;
   }
@@ -127,7 +131,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
         )}
 
         {/* Pull Request */}
-        {worktree.pr_info && (() => {
+        {showPrStatus && worktree.pr_info && (() => {
           const { label, color } = getPrStatusLabel(worktree.pr_info);
           const pr = worktree.pr_info;
           const checks = pr.checksStatus !== "none" ? (() => {
@@ -156,7 +160,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
         })()}
 
         {/* Linear Ticket */}
-        {worktree.linear_info && (
+        {showLinearTicket && worktree.linear_info && (
           <Box flexDirection="column">
             <Text>
               <Text bold>Linear </Text>
@@ -188,10 +192,10 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
           ) : (
             <Text dimColor>{worktree.branch}</Text>
           )}
-          {worktree.last_commit && (
+          {showLastCommit && worktree.last_commit && (
             <Text dimColor>{worktree.last_commit.message} ({worktree.last_commit.relative_time})</Text>
           )}
-          {worktree.git_status && (
+          {showGitAheadBehind && worktree.git_status && (
             <Text>
               <Text color="green">↑{worktree.git_status.ahead}</Text>{" "}
               <Text color="red">↓{worktree.git_status.behind}</Text>

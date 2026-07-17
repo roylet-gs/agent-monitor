@@ -16,6 +16,10 @@ interface WorktreeListProps {
   unseenIds: Set<string>;
   compactView: boolean;
   fillWidth?: boolean;
+  showPrStatus?: boolean;
+  showLinearTicket?: boolean;
+  /** When true (sorting by Linear project first), show project cluster headers. */
+  groupByProject?: boolean;
 }
 
 function statusColor(status: string | undefined): string {
@@ -66,7 +70,7 @@ function buildLinearGroups(flatWorktrees: WorktreeWithStatus[]): Map<string, { t
   return counts;
 }
 
-export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView, fillWidth }: WorktreeListProps) {
+export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView, fillWidth, showPrStatus = true, showLinearTicket = true, groupByProject = false }: WorktreeListProps) {
   const linearGroups = React.useMemo(() => buildLinearGroups(flatWorktrees), [flatWorktrees]);
 
   if (flatWorktrees.length === 0 && standaloneSessions.length === 0) {
@@ -85,18 +89,8 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
     );
   }
 
-  // A repo can appear once per project section plus once in the trailing
-  // no-project section; headers are decided per section, not globally.
-  const projectRepoCounts = new Map<string, number>();
-  let noProjectGroupCount = 0;
-  for (const g of groups) {
-    if (g.project?.id) {
-      projectRepoCounts.set(g.project.id, (projectRepoCounts.get(g.project.id) ?? 0) + 1);
-    } else {
-      noProjectGroupCount++;
-    }
-  }
-  const hasProjectSections = projectRepoCounts.size > 0;
+  // Repo headers only appear when more than one repo is shown.
+  const showRepoHeaders = groups.length > 1;
   let flatIdx = 0;
 
   return (
@@ -112,18 +106,12 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
           const groupWorktrees = group.worktrees;
           const startIdx = flatIdx;
 
-          const prevGroup = groups[groupIdx - 1];
-          const isNewProject = !!group.project && group.project.id !== prevGroup?.project?.id;
-          // Blank-line break between the last project section and the ungrouped remainder
-          const isFirstNoProject = hasProjectSections && !group.project && !!prevGroup?.project;
-          const showRepoHeader = group.project
-            ? (projectRepoCounts.get(group.project.id) ?? 0) > 1
-            : noProjectGroupCount > 1;
-
           // Track which Linear group headers have been emitted within this repo group
           const emittedLinearHeaders = new Set<string>();
 
           let lastWasInLinearGroup = false;
+          // Track the current Linear project run so we can label project clusters
+          let prevProjectId: string | null = null;
 
           const renderedItems = groupWorktrees.map((wt, i) => {
             const currentFlatIdx = startIdx + i;
@@ -136,6 +124,20 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
             const isInLinearGroup = linearId ? linearGroups.has(linearId) : false;
             const needsBreakAfterGroup = !isInLinearGroup && lastWasInLinearGroup;
             lastWasInLinearGroup = isInLinearGroup;
+
+            // When sorting by Linear project first, worktrees cluster by project;
+            // emit a project header at the start of each project run.
+            const projectId = wt.linear_info?.project?.id ?? null;
+            let projectHeader: React.ReactNode = null;
+            if (groupByProject && projectId && projectId !== prevProjectId) {
+              const proj = wt.linear_info!.project!;
+              projectHeader = (
+                <Box key={`proj-header-${projectId}`} marginTop={i > 0 ? 1 : 0}>
+                  <Text bold color={proj.color ?? undefined} dimColor={!proj.color}>═ {proj.name} ═</Text>
+                </Box>
+              );
+            }
+            prevProjectId = projectId;
 
             // Grouped worktrees show branch name (title is in the header)
             const displayName = isInLinearGroup ? wt.branch : (wt.custom_name ?? wt.branch);
@@ -165,23 +167,24 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
             }
 
             // Hide inline Linear badge when it's already shown in the group header
-            if (wt.linear_info && !isInLinearGroup) {
+            if (showLinearTicket && wt.linear_info && !isInLinearGroup) {
               inlineMeta.push(
                 <Text key="linear" color={getLinearStatusColor(wt.linear_info.state.type)}>{wt.linear_info.identifier}</Text>
               );
             }
 
-            if (wt.pr_info) {
+            if (showPrStatus && wt.pr_info) {
               const { label, color } = getPrStatusLabel(wt.pr_info);
               inlineMeta.push(
                 <Text key="pr" color={color} dimColor>{label}</Text>
               );
             }
 
-            const indent = isInLinearGroup ? 1 : 0;
+            const indent = isInLinearGroup ? 1 : (groupByProject && projectId ? 1 : 0);
 
             return (
               <React.Fragment key={wt.id}>
+                {projectHeader}
                 {linearHeader}
                 <Box flexDirection="column" marginTop={needsBreakAfterGroup ? 1 : 0} marginBottom={!compactView && showSubline && i < groupWorktrees.length - 1 ? 1 : 0} paddingLeft={indent}>
                   <Box gap={1}>
@@ -209,16 +212,9 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
 
           flatIdx += groupWorktrees.length;
 
-          const hasSectionHeader = isNewProject || isFirstNoProject || showRepoHeader;
-
           return (
-            <Box key={`${group.project?.id ?? "no-project"}:${group.repo.id}`} flexDirection="column" marginTop={hasSectionHeader && groupIdx > 0 ? 1 : 0}>
-              {isNewProject && group.project && (
-                group.project.color
-                  ? <Text bold color={group.project.color}>═ {group.project.name} ═</Text>
-                  : <Text bold dimColor>═ {group.project.name} ═</Text>
-              )}
-              {showRepoHeader && (
+            <Box key={group.repo.id} flexDirection="column" marginTop={showRepoHeaders && groupIdx > 0 ? 1 : 0}>
+              {showRepoHeaders && (
                 <Text dimColor>── {group.repo.name} ───</Text>
               )}
               {renderedItems}

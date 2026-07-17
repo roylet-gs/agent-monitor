@@ -68,7 +68,10 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     ghRefreshOnManual: settings.ghRefreshOnManual,
     linearRefreshOnManual: settings.linearRefreshOnManual,
     linearAutoNickname: settings.linearAutoNickname,
-    linearGroupByProject: settings.linearGroupByProject,
+    worktreeSort: settings.worktreeSort,
+    hideMergedClosedPrs: settings.hideMergedClosedPrs,
+    hideIdleDoneAgents: settings.hideIdleDoneAgents,
+    hideWithoutLinearTicket: settings.hideWithoutLinearTicket,
   };
 
   const fallbackWorktrees = useWorktrees(worktreeConfig);
@@ -119,7 +122,10 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       prev.linearApiKey !== settings.linearApiKey ||
       prev.hideMainBranch !== settings.hideMainBranch ||
       prev.linearAutoNickname !== settings.linearAutoNickname ||
-      prev.linearGroupByProject !== settings.linearGroupByProject
+      prev.hideMergedClosedPrs !== settings.hideMergedClosedPrs ||
+      prev.hideIdleDoneAgents !== settings.hideIdleDoneAgents ||
+      prev.hideWithoutLinearTicket !== settings.hideWithoutLinearTicket ||
+      JSON.stringify(prev.worktreeSort) !== JSON.stringify(settings.worktreeSort)
     )) {
       clientRef.current?.configReload();
     }
@@ -146,6 +152,7 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
             status: wt.agent_status?.status,
             is_open: wt.agent_status?.is_open,
             session_id: wt.agent_status?.session_id,
+            updated_at: wt.agent_status?.updated_at,
             summary: wt.agent_status?.transcript_summary,
             response: wt.agent_status?.last_response,
             ahead: wt.git_status?.ahead, behind: wt.git_status?.behind,

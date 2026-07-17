@@ -10,6 +10,17 @@ export function settingsSet(key: string, value: string): void {
     process.exit(1);
   }
 
+  // The sort list is an ordered array of objects that can't be expressed on the
+  // command line. Point users at the places that can edit it.
+  if (key === "worktreeSort") {
+    console.error(
+      "worktreeSort is a list and can't be set from the CLI.\n" +
+        "Edit it in the TUI (Settings → Sorting & Display → Sort Order) or\n" +
+        "run `am` and use the \"Open settings.json\" action to edit it directly."
+    );
+    process.exit(1);
+  }
+
   // Type-coerce based on the default value type
   const defaultVal = DEFAULT_SETTINGS[key as keyof Settings];
   let coerced: unknown;

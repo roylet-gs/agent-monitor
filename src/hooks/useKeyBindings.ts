@@ -15,6 +15,7 @@ interface KeyBindingActions {
   onRefresh: () => void;
   onOpenPr: () => void;
   onOpenLinear: () => void;
+  onOpenLinearProject: () => void;
   onToggleLogs: () => void;
   onUpdate?: () => void;
   onTerminal: () => void;
@@ -87,6 +88,10 @@ export function useKeyBindings(actions: KeyBindingActions): void {
     }
     if (input === "l") {
       actions.onOpenLinear();
+      return;
+    }
+    if (input === "p") {
+      actions.onOpenLinearProject();
       return;
     }
     if (input === "w") {

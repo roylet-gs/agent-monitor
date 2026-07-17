@@ -59,11 +59,11 @@ describe("SettingsPanel", () => {
     expect(lastFrame()!).toContain("my-repo");
   });
 
-  it("shows the Group by Project toggle", () => {
+  it("shows the Sorting & Display section with the Sort Order row", () => {
     const { lastFrame } = render(<SettingsPanel {...defaultProps} />);
-    expect(lastFrame()!).toContain("Group by Project");
-    // default is on
-    expect(DEFAULT_SETTINGS.linearGroupByProject).toBe(true);
+    const frame = lastFrame()!;
+    expect(frame).toContain("Sorting & Display");
+    expect(frame).toContain("Sort Order:");
   });
 
   it("shows the Resume Last Session toggle, on by default", () => {
@@ -116,6 +116,49 @@ describe("SettingsPanel", () => {
     // First field is openSettingsJson, press Enter
     stdin.write("\r");
     expect(openFileInEditor).toHaveBeenCalled();
+  });
+
+  it("opens the full-page sort editor and reorders via grab-to-move", async () => {
+    const onSave = vi.fn();
+    const { stdin, lastFrame } = render(<SettingsPanel {...defaultProps} onSave={onSave} />);
+    await waitForFrame();
+
+    // Navigate down to the Sort Order field. The two audio-sound fields are
+    // skipped while audio notifications are off, so this takes 12 presses.
+    const DOWN = ESCAPE + "[B";
+    for (let i = 0; i < 12; i++) {
+      stdin.write(DOWN);
+      await waitForFrame(10);
+    }
+    expect(lastFrame()!).toContain("▸ Sort Order");
+
+    // Enter opens the dedicated editor page: criteria list + example preview.
+    stdin.write("\r");
+    await waitForFrame();
+    const editorFrame = lastFrame()!;
+    expect(editorFrame).toContain("Edit Sort Order");
+    expect(editorFrame).toContain("Dedicated vs main");
+    expect(editorFrame).toContain("Example");
+    expect(editorFrame).toContain("Grab to move");
+
+    // Grab the first criterion (isMain), move it down, drop it.
+    stdin.write("\r"); // grab
+    await waitForFrame();
+    stdin.write(DOWN); // move item down
+    await waitForFrame();
+    stdin.write("\r"); // drop
+    await waitForFrame();
+
+    stdin.write(ESCAPE); // back to Settings
+    await waitForFrame();
+    stdin.write(ESCAPE); // save & close
+    await waitForFrame();
+
+    expect(onSave).toHaveBeenCalled();
+    const saved = onSave.mock.calls[0][0];
+    // isMain moved below linearTicket
+    expect(saved.worktreeSort[0].key).toBe("linearTicket");
+    expect(saved.worktreeSort[1].key).toBe("isMain");
   });
 
 });

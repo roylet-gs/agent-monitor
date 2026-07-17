@@ -1075,6 +1075,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         import("open").then((mod) => mod.default(url)).catch(() => {});
       }
     },
+    onOpenLinearProject: () => {
+      const wt = flatWorktrees[selectedIndex];
+      const projectUrl = wt?.linear_info?.project?.url;
+      if (projectUrl) {
+        let url = projectUrl;
+        if (settings.linearUseDesktopApp) {
+          url = url.replace("https://linear.app/", "linear://");
+        }
+        import("open").then((mod) => mod.default(url)).catch(() => {});
+      }
+    },
     onToggleLogs: () => setShowLogs((v) => !v),
     onUpdate: updateInfo?.updateAvailable
       ? () => {
@@ -1352,6 +1363,11 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           updateInfo={updateInfo}
           ghPrStatus={settings.ghPrStatus}
           linearEnabled={settings.linearEnabled}
+          showPrStatus={settings.showPrStatus}
+          showLinearTicket={settings.showLinearTicket}
+          showGitAheadBehind={settings.showGitAheadBehind}
+          showLastCommit={settings.showLastCommit}
+          groupByProject={settings.linearEnabled && settings.worktreeSort.find((c) => c.enabled)?.key === "linearProject"}
           ideIsTerm={settings.ide === "terminal"}
           integrationLoading={integrationLoading}
           chatPane={mode === "chat" ? chatNode ?? undefined : undefined}
