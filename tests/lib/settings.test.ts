@@ -77,6 +77,17 @@ describe("settings", () => {
       const result = settings.loadSettings();
       expect(result.ide).toBe("cursor");
     });
+
+    it("defaults worktreeSort to the built-in criteria list", () => {
+      mkdirSync(paths.APP_DIR, { recursive: true });
+      writeFileSync(paths.SETTINGS_PATH, JSON.stringify({ ide: "vscode", setupCompleted: true }));
+      const sort = settings.loadSettings().worktreeSort;
+      expect(sort).toEqual(settings.DEFAULT_SETTINGS.worktreeSort);
+      // legacy default order: dedicated first, ticket cluster, newest first
+      expect(sort.filter((c) => c.enabled).map((c) => c.key)).toEqual([
+        "isMain", "linearTicket", "createdAt",
+      ]);
+    });
   });
 
   describe("saveSettings", () => {

@@ -9,6 +9,7 @@ import type { Settings, Repository } from "../lib/types.js";
 import { homedir } from "os";
 import { hasStartupScript, openScriptInEditor, openFileInEditor, removeStartupScript } from "../lib/scripts.js";
 import { SETTINGS_PATH } from "../lib/paths.js";
+import { SortEditor, SORT_KEY_LABELS } from "./SortEditor.js";
 
 type SettingsField =
   | "openSettingsJson"
@@ -20,6 +21,14 @@ type SettingsField =
   | "autoSync"
   | "compactView"
   | "hideMainBranch"
+  | "worktreeSort"
+  | "hideMergedClosedPrs"
+  | "hideIdleDoneAgents"
+  | "hideWithoutLinearTicket"
+  | "showPrStatus"
+  | "showLinearTicket"
+  | "showGitAheadBehind"
+  | "showLastCommit"
   | "audioNotifications"
   | "audioWaitingSound"
   | "audioDoneSound"
@@ -34,7 +43,6 @@ type SettingsField =
   | "linearPolling"
   | "linearRefreshOnManual"
   | "linearAutoNickname"
-  | "linearGroupByProject"
   | "repos"
   | "checkForUpdates"
   | "resetSettings"
@@ -55,6 +63,14 @@ const FIELDS: SettingsField[] = [
   "polling",
   "logLevel",
   "maxLogSize",
+  "worktreeSort",
+  "hideMergedClosedPrs",
+  "hideIdleDoneAgents",
+  "hideWithoutLinearTicket",
+  "showPrStatus",
+  "showLinearTicket",
+  "showGitAheadBehind",
+  "showLastCommit",
   "ghPrStatus",
   "ghPolling",
   "ghRefreshOnManual",
@@ -64,7 +80,6 @@ const FIELDS: SettingsField[] = [
   "linearPolling",
   "linearRefreshOnManual",
   "linearAutoNickname",
-  "linearGroupByProject",
   "repos",
   "checkForUpdates",
   "resetSettings",
@@ -80,6 +95,14 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   autoSync: "Automatically sync worktree status from git on startup",
   compactView: "Show worktrees in a compact single-line format",
   hideMainBranch: "Hide the main/master branch from the worktree list",
+  worktreeSort: "Order worktrees by a prioritized list of criteria. Enter opens a full-page editor with a live example preview where you can reorder, enable/disable, and flip direction.",
+  hideMergedClosedPrs: "Hide worktrees whose PR is merged or closed (unless the agent session is open)",
+  hideIdleDoneAgents: "Hide worktrees whose agent is idle, done, or has no status (unless the session is open)",
+  hideWithoutLinearTicket: "Hide worktrees that have no linked Linear ticket (unless the session is open)",
+  showPrStatus: "Show the GitHub PR/CI badge on each worktree (fetching is controlled separately under GitHub)",
+  showLinearTicket: "Show the Linear ticket badge on each worktree (fetching is controlled separately under Linear)",
+  showGitAheadBehind: "Show git ahead/behind/dirty counts in the worktree detail panel",
+  showLastCommit: "Show the last commit message in the worktree detail panel",
   audioNotifications: "Play a sound when an agent is waiting or done",
   audioWaitingSound: "Sound to play when an agent needs attention",
   audioDoneSound: "Sound to play when an agent finishes",
@@ -95,7 +118,6 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   linearPolling: "How often to fetch Linear ticket status (minimum 10s)",
   linearRefreshOnManual: "Include Linear tickets when manually refreshing",
   linearAutoNickname: "Auto-set worktree nicknames from Linear ticket titles",
-  linearGroupByProject: "Group worktrees by Linear project on the dashboard",
   repos: "Monitored repositories and their startup scripts",
   checkForUpdates: "Check if a newer version of agent-monitor is available",
   resetSettings: "Reset all settings to their default values",
@@ -133,6 +155,8 @@ export function SettingsPanel({
   const [repoIndex, setRepoIndex] = useState(0);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
+  // When true, the full-screen SortEditor page replaces the settings list.
+  const [sortEditing, setSortEditing] = useState(false);
   const [linearVerify, setLinearVerify] = useState<"idle" | "checking" | "ok" | "error">("idle");
   const [linearVerifyMsg, setLinearVerifyMsg] = useState("");
   const [confirming, setConfirming] = useState<"resetSettings" | "factoryReset" | null>(null);
@@ -159,6 +183,14 @@ export function SettingsPanel({
   };
 
   const activeField = FIELDS[fieldIndex];
+
+  // Compact one-line summary of the active sort criteria for the settings row.
+  const enabledSort = current.worktreeSort.filter((c) => c.enabled);
+  const sortSummary =
+    enabledSort.length === 0
+      ? "none"
+      : SORT_KEY_LABELS[enabledSort[0].key] +
+        (enabledSort.length > 1 ? ` +${enabledSort.length - 1} more` : "");
 
   const startEditing = () => {
     if (activeField === "prefix") {
@@ -245,6 +277,9 @@ export function SettingsPanel({
       return;
     }
 
+    // The SortEditor page owns all input while it is open (its own useInput).
+    if (sortEditing) return;
+
     if (key.escape) {
       onSave(current);
       onClose();
@@ -324,6 +359,46 @@ export function SettingsPanel({
       return;
     }
 
+    if (activeField === "worktreeSort" && key.return) {
+      setSortEditing(true);
+      return;
+    }
+
+    if (activeField === "hideMergedClosedPrs" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, hideMergedClosedPrs: !s.hideMergedClosedPrs }));
+      return;
+    }
+
+    if (activeField === "hideIdleDoneAgents" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, hideIdleDoneAgents: !s.hideIdleDoneAgents }));
+      return;
+    }
+
+    if (activeField === "hideWithoutLinearTicket" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, hideWithoutLinearTicket: !s.hideWithoutLinearTicket }));
+      return;
+    }
+
+    if (activeField === "showPrStatus" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, showPrStatus: !s.showPrStatus }));
+      return;
+    }
+
+    if (activeField === "showLinearTicket" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, showLinearTicket: !s.showLinearTicket }));
+      return;
+    }
+
+    if (activeField === "showGitAheadBehind" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, showGitAheadBehind: !s.showGitAheadBehind }));
+      return;
+    }
+
+    if (activeField === "showLastCommit" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, showLastCommit: !s.showLastCommit }));
+      return;
+    }
+
     if (activeField === "audioNotifications" && (key.return || input === " ")) {
       setCurrent((s) => {
         const next = !s.audioNotifications;
@@ -374,10 +449,6 @@ export function SettingsPanel({
       return;
     }
 
-    if (activeField === "linearGroupByProject" && (key.return || input === " ")) {
-      setCurrent((s) => ({ ...s, linearGroupByProject: !s.linearGroupByProject }));
-      return;
-    }
     if (activeField === "linearAutoNickname" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, linearAutoNickname: !s.linearAutoNickname }));
       return;
@@ -459,6 +530,18 @@ export function SettingsPanel({
       <Text dimColor> {"─".repeat(2)}</Text>
     </Box>
   );
+
+  // Editing the sort order takes over the whole panel with its own page.
+  if (sortEditing) {
+    return (
+      <SortEditor
+        criteria={current.worktreeSort}
+        onChange={(worktreeSort) => setCurrent((s) => ({ ...s, worktreeSort }))}
+        onClose={() => setSortEditing(false)}
+        linearEnabled={current.linearEnabled}
+      />
+    );
+  }
 
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1}>
@@ -639,6 +722,74 @@ export function SettingsPanel({
           )}
         </Box>
 
+        {/* === Sorting & Display Section === */}
+        {renderSectionHeader("Sorting & Display")}
+        <Box>
+          <Text bold={activeField === "worktreeSort"}>
+            {activeField === "worktreeSort" ? "▸" : " "} Sort Order:{" "}
+          </Text>
+          <Text>{sortSummary}</Text>
+          {activeField === "worktreeSort" && (
+            <Text dimColor> (Enter to edit)</Text>
+          )}
+        </Box>
+        <Box>
+          <Text bold={activeField === "hideMergedClosedPrs"}>
+            {activeField === "hideMergedClosedPrs" ? "▸" : " "} Hide Merged/Closed PRs:{" "}
+          </Text>
+          <Text color={current.hideMergedClosedPrs ? "green" : "gray"}>
+            [{current.hideMergedClosedPrs ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "hideIdleDoneAgents"}>
+            {activeField === "hideIdleDoneAgents" ? "▸" : " "} Hide Idle/Done Agents:{" "}
+          </Text>
+          <Text color={current.hideIdleDoneAgents ? "green" : "gray"}>
+            [{current.hideIdleDoneAgents ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "hideWithoutLinearTicket"}>
+            {activeField === "hideWithoutLinearTicket" ? "▸" : " "} Hide Without Linear Ticket:{" "}
+          </Text>
+          <Text color={current.hideWithoutLinearTicket ? "green" : "gray"}>
+            [{current.hideWithoutLinearTicket ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "showPrStatus"}>
+            {activeField === "showPrStatus" ? "▸" : " "} Show PR Status:{" "}
+          </Text>
+          <Text color={current.showPrStatus ? "green" : "gray"}>
+            [{current.showPrStatus ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "showLinearTicket"}>
+            {activeField === "showLinearTicket" ? "▸" : " "} Show Linear Ticket:{" "}
+          </Text>
+          <Text color={current.showLinearTicket ? "green" : "gray"}>
+            [{current.showLinearTicket ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "showGitAheadBehind"}>
+            {activeField === "showGitAheadBehind" ? "▸" : " "} Show Git Ahead/Behind:{" "}
+          </Text>
+          <Text color={current.showGitAheadBehind ? "green" : "gray"}>
+            [{current.showGitAheadBehind ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "showLastCommit"}>
+            {activeField === "showLastCommit" ? "▸" : " "} Show Last Commit:{" "}
+          </Text>
+          <Text color={current.showLastCommit ? "green" : "gray"}>
+            [{current.showLastCommit ? "✓" : " "}]
+          </Text>
+        </Box>
+
         {/* === GitHub Section === */}
         {renderSectionHeader("GitHub")}
         <Box>
@@ -749,15 +900,6 @@ export function SettingsPanel({
           </Text>
           <Text color={current.linearAutoNickname ? "green" : "gray"}>
             [{current.linearAutoNickname ? "✓" : " "}]
-          </Text>
-        </Box>
-
-        <Box>
-          <Text bold={activeField === "linearGroupByProject"}>
-            {activeField === "linearGroupByProject" ? "▸" : " "} Group by Project:{" "}
-          </Text>
-          <Text color={current.linearGroupByProject ? "green" : "gray"}>
-            [{current.linearGroupByProject ? "✓" : " "}]
           </Text>
         </Box>
 

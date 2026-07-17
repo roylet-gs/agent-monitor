@@ -1,27 +1,28 @@
 import { test, expect } from "@playwright/test";
-import { TuiPage } from "./helpers/tui-page.js";
-import { resetMock } from "./helpers/mock-api-client.js";
+import { TuiPage } from "./helpers/tui-page";
+import { resetMock } from "./helpers/mock-api-client";
 
 test.beforeEach(async () => {
   await resetMock();
 });
 
-// The default linear-issue fixture links every branch to ticket ENG-123 in
-// project "Dashboard Revamp", so the dashboard groups the seeded worktree
-// under a project header.
-test("groups worktrees under a Linear project header", async ({ page }) => {
+// The default linear-issue fixture links the seeded branch to ticket ENG-123.
+// Project grouping was removed — worktrees show their ticket inline and are
+// ordered by the sort criteria (clustering by ticket/project happens through
+// the sort order, not a separate project section).
+test("shows the linked Linear ticket without a project section header", async ({ page }) => {
   const tui = new TuiPage(page);
   await tui.goto();
   await tui.waitForText("main", 10_000);
 
-  // Wait for the initial Linear fetch to land and the project header to render
-  await tui.waitForText("Dashboard Revamp", 15_000);
+  // Wait for the Linear fetch to land; the ticket identifier renders on the row.
+  await tui.waitForText("ENG-123", 15_000);
 
   const text = await tui.getScreenText();
-  // Project header renders above the worktree row
-  expect(text.indexOf("Dashboard Revamp")).toBeLessThan(text.indexOf("ENG-123"));
+  // No project-section banner (═ Project ═) is rendered anymore.
+  expect(text).not.toContain("═");
 
-  await tui.screenshot("linear-project-grouping");
+  await tui.screenshot("linear-ticket-no-grouping");
 });
 
 test("shows the [p]roject action when the selected worktree has a Linear project", async ({ page }) => {
@@ -37,17 +38,14 @@ test("shows the [p]roject action when the selected worktree has a Linear project
   await tui.screenshot("linear-project-action");
 });
 
-test("selection still traverses worktree rows with project headers present", async ({ page }) => {
+test("selection traverses worktree rows", async ({ page }) => {
   const tui = new TuiPage(page);
   await tui.goto();
   await tui.waitForText("main", 10_000);
-  await tui.waitForText("Dashboard Revamp", 15_000);
+  await tui.waitForText("ENG-123", 15_000);
 
-  // j/k moves the ▸ marker across rows only; headers are not selectable.
   await tui.sendKey("j");
   await tui.sendKey("k");
   const text = await tui.getScreenText();
   expect(text).toContain("▸");
-
-  await tui.screenshot("linear-project-grouping-selection");
 });

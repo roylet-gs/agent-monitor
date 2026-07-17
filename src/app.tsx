@@ -1363,6 +1363,11 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           updateInfo={updateInfo}
           ghPrStatus={settings.ghPrStatus}
           linearEnabled={settings.linearEnabled}
+          showPrStatus={settings.showPrStatus}
+          showLinearTicket={settings.showLinearTicket}
+          showGitAheadBehind={settings.showGitAheadBehind}
+          showLastCommit={settings.showLastCommit}
+          groupByProject={settings.linearEnabled && settings.worktreeSort.find((c) => c.enabled)?.key === "linearProject"}
           ideIsTerm={settings.ide === "terminal"}
           integrationLoading={integrationLoading}
           chatPane={mode === "chat" ? chatNode ?? undefined : undefined}

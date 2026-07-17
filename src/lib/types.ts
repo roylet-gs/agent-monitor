@@ -69,8 +69,6 @@ export interface LinearInfo {
 export interface WorktreeGroup {
   repo: Repository;
   worktrees: WorktreeWithStatus[];
-  // Linear project this bucket belongs to; absent/null for the ungrouped section
-  project?: LinearProject | null;
 }
 
 export interface WorktreeWithStatus extends Worktree {
@@ -119,6 +117,27 @@ export type AgentPermissionMode =
   | "dontAsk"
   | "plan";
 
+// Customizable worktree ordering. Each key maps to an ascending comparator in
+// the SORT_REGISTRY (src/lib/grouping.ts); direction flips it. The dashboard
+// walks the enabled criteria in order and the first non-zero comparison wins.
+export type WorktreeSortKey =
+  | "isMain" // dedicated worktrees before the main/master branch
+  | "repo" // group worktrees by their repository (repo sections ordered by name)
+  | "linearTicket" // cluster worktrees sharing a Linear ticket (ticketless last)
+  | "linearProject" // by Linear project name (projectless last)
+  | "agentStatus" // active agents first (executing > planning > waiting > ...)
+  | "lastActivity" // by agent_status.updated_at recency
+  | "createdAt" // by worktree creation time
+  | "branchName" // alphabetical by branch
+  | "prStatus" // PRs needing attention first (failing/changes/pending > ...)
+  | "gitDirty"; // worktrees with uncommitted changes first
+
+export interface WorktreeSortCriterion {
+  key: WorktreeSortKey;
+  direction: "asc" | "desc";
+  enabled: boolean;
+}
+
 export interface Settings {
   ide: "cursor" | "vscode" | "terminal";
   defaultBranchPrefix: string;
@@ -140,7 +159,18 @@ export interface Settings {
   ghRefreshOnManual: boolean;
   linearRefreshOnManual: boolean;
   linearAutoNickname: boolean;
-  linearGroupByProject: boolean;
+  // --- Worktree sorting & display ---
+  worktreeSort: WorktreeSortCriterion[];
+  // Filters (which worktrees appear). hideMainBranch (above) is also a filter.
+  hideMergedClosedPrs: boolean;
+  hideIdleDoneAgents: boolean;
+  hideWithoutLinearTicket: boolean;
+  // Display fields (which per-row info renders). Independent of the gh/linear
+  // fetch toggles — you can keep fetching (e.g. to sort) while hiding a badge.
+  showPrStatus: boolean;
+  showLinearTicket: boolean;
+  showGitAheadBehind: boolean;
+  showLastCommit: boolean;
   maxLogSizeMb: number;
   agentPermissionMode: AgentPermissionMode;
   agentClaudeArgs: string;
