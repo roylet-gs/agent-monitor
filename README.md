@@ -204,7 +204,7 @@ Requires the `gh` CLI to be installed and authenticated.
 
 Branch names containing Linear ticket identifiers (e.g., `feature/LIN-521-auth-flow`) are automatically linked to their tickets. The dashboard shows ticket status and priority in the detail panel.
 
-When tickets belong to a Linear project, the dashboard groups worktrees by project (highest level), then repository, then ticket — so related work across multiple repos reads as one unit. Worktrees without a project render below the project sections in the regular per-repo layout. Disable with `am settings set linearGroupByProject false`.
+To cluster related work together — e.g. all worktrees for the same Linear project, ticket, or repository — enable the corresponding criterion in **Settings → Sorting & Display → Sort Order** (put "Linear project", "Linear ticket", or "Repository" at the top). Sorting handles the grouping, so there's no separate grouping toggle. When "Linear project" is the top criterion, the dashboard shows a `═ Project ═` header above each project cluster.
 
 <p align="center">
   <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-linear-ticket.png" alt="Linear ticket integration" width="800">
@@ -430,7 +430,14 @@ All data is stored in `~/.agent-monitor/`:
 | `linearUseDesktopApp`     | `false`      | Open Linear links in desktop app                          |
 | `linearRefreshOnManual`   | `true`       | Refresh Linear data on manual refresh                     |
 | `linearAutoNickname`      | `true`       | Auto-set worktree nicknames from Linear ticket titles     |
-| `linearGroupByProject`    | `true`       | Group worktrees by Linear project on the dashboard        |
+| `worktreeSort`            | (see below)  | Ordered list of sort criteria; edit in the TUI (Settings → Sorting & Display) or settings.json, not the CLI |
+| `hideMergedClosedPrs`     | `false`      | Hide worktrees whose PR is merged/closed                  |
+| `hideIdleDoneAgents`      | `false`      | Hide worktrees whose agent is idle/done/none              |
+| `hideWithoutLinearTicket` | `false`      | Hide worktrees with no linked Linear ticket               |
+| `showPrStatus`            | `true`       | Show the PR/CI badge on each worktree                     |
+| `showLinearTicket`        | `true`       | Show the Linear ticket badge on each worktree             |
+| `showGitAheadBehind`      | `true`       | Show git ahead/behind/dirty counts in the detail panel    |
+| `showLastCommit`          | `true`       | Show the last commit in the detail panel                  |
 | `maxLogSizeMb`            | `2`          | Max debug log file size in MB before rotation             |
 | `agentPermissionMode`     | `"acceptEdits"` | Permission mode for managed Claude sessions (`acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, …) |
 | `agentClaudeArgs`         | `""`         | Extra CLI args appended to managed `claude` turns         |

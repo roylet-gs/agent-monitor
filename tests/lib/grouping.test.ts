@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { buildGroups, compareWorktrees, type RepoWorktrees } from "../../src/lib/grouping.js";
+import { DEFAULT_SETTINGS } from "../../src/lib/settings.js";
 import type { LinearProject, Repository, WorktreeWithStatus } from "../../src/lib/types.js";
+
+const SORT = DEFAULT_SETTINGS.worktreeSort;
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
@@ -53,7 +56,6 @@ function makeLinear(identifier: string, project: LinearProject | null = null) {
 }
 
 const PROJ_A: LinearProject = { id: "proj-a", name: "Alpha", color: "#5e6ad2" };
-const PROJ_B: LinearProject = { id: "proj-b", name: "Beta" };
 
 describe("compareWorktrees", () => {
   it("sorts dedicated worktrees before main, clusters tickets, newest first", () => {
@@ -68,22 +70,18 @@ describe("compareWorktrees", () => {
 });
 
 describe("buildGroups", () => {
-  it("reproduces legacy per-repo layout when groupByProject is false", () => {
+  it("produces one group per repo, sorted by the criteria", () => {
     const repo = makeRepo();
     const wt1 = makeWorktree({ id: "wt-1", created_at: "2024-01-02" });
     const wt2 = makeWorktree({ id: "wt-2", created_at: "2024-01-01" });
-    const { groups, flatWorktrees } = buildGroups(
-      [{ repo, worktrees: [wt2, wt1] }],
-      { groupByProject: false }
-    );
+    const { groups, flatWorktrees } = buildGroups([{ repo, worktrees: [wt2, wt1] }], SORT);
     expect(groups).toHaveLength(1);
-    expect(groups[0].project).toBeUndefined();
-    expect(groups[0].worktrees.map((w) => w.id)).toEqual(["wt-1", "wt-2"]);
+    expect(groups[0].worktrees.map((w) => w.id)).toEqual(["wt-1", "wt-2"]); // newest first
     expect(flatWorktrees.map((w) => w.id)).toEqual(["wt-1", "wt-2"]);
   });
 
-  it("keeps an empty group for a single repo (legacy rule)", () => {
-    const { groups } = buildGroups([{ repo: makeRepo(), worktrees: [] }], { groupByProject: false });
+  it("keeps an empty group for a single repo", () => {
+    const { groups } = buildGroups([{ repo: makeRepo(), worktrees: [] }], SORT);
     expect(groups).toHaveLength(1);
     expect(groups[0].worktrees).toEqual([]);
   });
@@ -93,112 +91,91 @@ describe("buildGroups", () => {
       { repo: makeRepo({ id: "r1" }), worktrees: [] },
       { repo: makeRepo({ id: "r2" }), worktrees: [makeWorktree({ id: "wt-1", repo_id: "r2" })] },
     ];
-    const { groups } = buildGroups(perRepo, { groupByProject: false });
+    const { groups } = buildGroups(perRepo, SORT);
     expect(groups).toHaveLength(1);
     expect(groups[0].repo.id).toBe("r2");
   });
 
-  it("buckets worktrees under their project, remainder trailing", () => {
-    const repo = makeRepo();
-    const inProject = makeWorktree({ id: "in-proj", linear_info: makeLinear("ENG-1", PROJ_A) });
-    const noProject = makeWorktree({ id: "no-proj", linear_info: makeLinear("ENG-2") });
-    const noTicket = makeWorktree({ id: "no-ticket" });
-
-    const { groups, flatWorktrees } = buildGroups(
-      [{ repo, worktrees: [noTicket, inProject, noProject] }],
-      { groupByProject: true }
-    );
-
-    expect(groups).toHaveLength(2);
-    expect(groups[0].project).toEqual(PROJ_A);
-    expect(groups[0].worktrees.map((w) => w.id)).toEqual(["in-proj"]);
-    expect(groups[1].project).toBeUndefined();
-    expect(groups[1].worktrees.map((w) => w.id)).toEqual(["no-proj", "no-ticket"]);
-    // flat mirrors group order
-    expect(flatWorktrees.map((w) => w.id)).toEqual(["in-proj", "no-proj", "no-ticket"]);
-  });
-
-  it("creates a project section even for a single worktree", () => {
-    const repo = makeRepo();
-    const wt = makeWorktree({ id: "only", linear_info: makeLinear("ENG-1", PROJ_A) });
-    const { groups } = buildGroups([{ repo, worktrees: [wt] }], { groupByProject: true });
-    expect(groups).toHaveLength(1);
-    expect(groups[0].project?.id).toBe("proj-a");
-  });
-
-  it("orders project sections by name and repos in input order within a project", () => {
+  it("preserves repo input order across multiple repos", () => {
     const r1 = makeRepo({ id: "r1", name: "repo-one" });
     const r2 = makeRepo({ id: "r2", name: "repo-two" });
-    const b1 = makeWorktree({ id: "b1", repo_id: "r1", linear_info: makeLinear("ENG-2", PROJ_B) });
-    const a1 = makeWorktree({ id: "a1", repo_id: "r1", linear_info: makeLinear("ENG-1", PROJ_A) });
-    const a2 = makeWorktree({ id: "a2", repo_id: "r2", linear_info: makeLinear("ENG-1", PROJ_A) });
-
-    const { groups, flatWorktrees } = buildGroups(
-      [
-        { repo: r1, worktrees: [b1, a1] },
-        { repo: r2, worktrees: [a2] },
-      ],
-      { groupByProject: true }
-    );
-
-    // Alpha (2 repo buckets in repo order) then Beta
-    expect(groups.map((g) => [g.project?.name, g.repo.id])).toEqual([
-      ["Alpha", "r1"],
-      ["Alpha", "r2"],
-      ["Beta", "r1"],
-    ]);
-    expect(flatWorktrees.map((w) => w.id)).toEqual(["a1", "a2", "b1"]);
-  });
-
-  it("clusters a cross-repo ticket under one project as separate repo buckets", () => {
-    const r1 = makeRepo({ id: "r1" });
-    const r2 = makeRepo({ id: "r2" });
-    const wt1 = makeWorktree({ id: "wt1", repo_id: "r1", linear_info: makeLinear("ENG-1", PROJ_A) });
-    const wt2 = makeWorktree({ id: "wt2", repo_id: "r2", linear_info: makeLinear("ENG-1", PROJ_A) });
-
     const { groups } = buildGroups(
       [
-        { repo: r1, worktrees: [wt1] },
-        { repo: r2, worktrees: [wt2] },
+        { repo: r1, worktrees: [makeWorktree({ id: "a", repo_id: "r1" })] },
+        { repo: r2, worktrees: [makeWorktree({ id: "b", repo_id: "r2" })] },
       ],
-      { groupByProject: true }
+      SORT
     );
-    expect(groups).toHaveLength(2);
-    expect(groups.every((g) => g.project?.id === "proj-a")).toBe(true);
+    expect(groups.map((g) => g.repo.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("orders repo sections by name when a repo criterion is enabled", () => {
+    const web = makeRepo({ id: "r-web", name: "web-app" });
+    const api = makeRepo({ id: "r-api", name: "agent-monitor" });
+    const perRepo: RepoWorktrees[] = [
+      { repo: web, worktrees: [makeWorktree({ id: "w", repo_id: "r-web" })] },
+      { repo: api, worktrees: [makeWorktree({ id: "a", repo_id: "r-api" })] },
+    ];
+    const repoAsc = [
+      { key: "repo" as const, direction: "asc" as const, enabled: true },
+      ...SORT,
+    ];
+    const { groups } = buildGroups(perRepo, repoAsc);
+    // agent-monitor sorts before web-app despite input order
+    expect(groups.map((g) => g.repo.name)).toEqual(["agent-monitor", "web-app"]);
+
+    const repoDesc = [
+      { key: "repo" as const, direction: "desc" as const, enabled: true },
+      ...SORT,
+    ];
+    const { groups: desc } = buildGroups(perRepo, repoDesc);
+    expect(desc.map((g) => g.repo.name)).toEqual(["web-app", "agent-monitor"]);
+  });
+
+  it("keeps repo sections in input order when repo is not a criterion", () => {
+    const web = makeRepo({ id: "r-web", name: "web-app" });
+    const api = makeRepo({ id: "r-api", name: "agent-monitor" });
+    const perRepo: RepoWorktrees[] = [
+      { repo: web, worktrees: [makeWorktree({ id: "w", repo_id: "r-web" })] },
+      { repo: api, worktrees: [makeWorktree({ id: "a", repo_id: "r-api" })] },
+    ];
+    const { groups } = buildGroups(perRepo, SORT);
+    expect(groups.map((g) => g.repo.name)).toEqual(["web-app", "agent-monitor"]);
+  });
+
+  it("clusters worktrees sharing a Linear ticket adjacently via the sort", () => {
+    const repo = makeRepo();
+    const a = makeWorktree({ id: "a", linear_info: makeLinear("ENG-1", PROJ_A), created_at: "2024-01-01" });
+    const b = makeWorktree({ id: "b", linear_info: makeLinear("ENG-1", PROJ_A), created_at: "2024-01-02" });
+    const other = makeWorktree({ id: "other", linear_info: makeLinear("ENG-2"), created_at: "2024-01-03" });
+    const { flatWorktrees } = buildGroups([{ repo, worktrees: [other, a, b] }], SORT);
+    // ENG-1 pair adjacent (newest first within the ticket), then ENG-2
+    expect(flatWorktrees.map((w) => w.id)).toEqual(["b", "a", "other"]);
+  });
+
+  it("clusters by Linear project when a linearProject criterion is enabled first", () => {
+    const repo = makeRepo();
+    const projB: LinearProject = { id: "proj-b", name: "Beta" };
+    const a = makeWorktree({ id: "a", linear_info: makeLinear("ENG-9", PROJ_A) });
+    const b = makeWorktree({ id: "b", linear_info: makeLinear("BUG-1", projB) });
+    const a2 = makeWorktree({ id: "a2", linear_info: makeLinear("ENG-1", PROJ_A) });
+    const criteria = [{ key: "linearProject" as const, direction: "asc" as const, enabled: true }];
+    const { flatWorktrees } = buildGroups([{ repo, worktrees: [b, a, a2] }], criteria);
+    // Alpha worktrees grouped before Beta — grouping "for free" via sort
+    expect(flatWorktrees.map((w) => w.linear_info?.project?.name)).toEqual(["Alpha", "Alpha", "Beta"]);
   });
 
   it("flat order always equals concatenated group order", () => {
     const r1 = makeRepo({ id: "r1" });
     const r2 = makeRepo({ id: "r2" });
-    const wts1 = [
-      makeWorktree({ id: "w1", repo_id: "r1", linear_info: makeLinear("ENG-1", PROJ_A) }),
-      makeWorktree({ id: "w2", repo_id: "r1", is_main: 1 }),
-      makeWorktree({ id: "w3", repo_id: "r1", linear_info: makeLinear("ENG-3", PROJ_B) }),
-    ];
-    const wts2 = [
-      makeWorktree({ id: "w4", repo_id: "r2" }),
-      makeWorktree({ id: "w5", repo_id: "r2", linear_info: makeLinear("ENG-1", PROJ_A) }),
-    ];
     const { groups, flatWorktrees } = buildGroups(
       [
-        { repo: r1, worktrees: wts1 },
-        { repo: r2, worktrees: wts2 },
+        { repo: r1, worktrees: [makeWorktree({ id: "w1", repo_id: "r1" }), makeWorktree({ id: "w2", repo_id: "r1", is_main: 1 })] },
+        { repo: r2, worktrees: [makeWorktree({ id: "w3", repo_id: "r2" })] },
       ],
-      { groupByProject: true }
+      SORT
     );
     expect(flatWorktrees).toEqual(groups.flatMap((g) => g.worktrees));
-    expect(flatWorktrees).toHaveLength(5);
-  });
-
-  it("keeps the single-repo empty-group rule only when nothing rendered above", () => {
-    const repo = makeRepo();
-    const wt = makeWorktree({ id: "only", linear_info: makeLinear("ENG-1", PROJ_A) });
-    // All worktrees consumed by the project section -> no empty trailing group
-    const { groups } = buildGroups([{ repo, worktrees: [wt] }], { groupByProject: true });
-    expect(groups).toHaveLength(1);
-    // No worktrees at all -> keep the empty group so the dashboard shows the repo
-    const empty = buildGroups([{ repo, worktrees: [] }], { groupByProject: true });
-    expect(empty.groups).toHaveLength(1);
-    expect(empty.groups[0].worktrees).toEqual([]);
+    expect(flatWorktrees).toHaveLength(3);
   });
 });

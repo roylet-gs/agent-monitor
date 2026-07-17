@@ -17,8 +17,8 @@ import { getGitStatus, getLastCommit } from "./git.js";
 import { fetchAllPrInfo } from "./github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
 import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
-import { isEffectivelyOpen, isEffectivelyOpenStandalone } from "./agent-utils.js";
-import { buildGroups, type RepoWorktrees } from "./grouping.js";
+import { isEffectivelyOpenStandalone } from "./agent-utils.js";
+import { buildGroups, applyWorktreeFilters, type RepoWorktrees } from "./grouping.js";
 import { syncWorktrees } from "./sync.js";
 import { realpathSync } from "fs";
 import type { PubSubMessage } from "./pubsub-types.js";
@@ -384,7 +384,6 @@ async function doRefresh(requestId: string | null, includeIntegrations: boolean)
 }
 
 async function buildData(): Promise<DaemonData> {
-  const hideMain = settings.hideMainBranch;
   const perRepo: RepoWorktrees[] = [];
 
   // Async terminal/IDE detection
@@ -441,22 +440,19 @@ async function buildData(): Promise<DaemonData> {
       })
     );
 
-    const filtered = hideMain
-      ? enriched.filter(
-          (wt) =>
-            !(wt.is_main === 1 && (wt.branch === "main" || wt.branch === "master")) ||
-            isEffectivelyOpen(wt.agent_status),
-        )
-      : enriched;
+    const filtered = applyWorktreeFilters(enriched, {
+      hideMainBranch: settings.hideMainBranch,
+      hideMergedClosedPrs: settings.hideMergedClosedPrs,
+      hideIdleDoneAgents: settings.hideIdleDoneAgents,
+      hideWithoutLinearTicket: settings.hideWithoutLinearTicket,
+    });
 
     perRepo.push({ repo, worktrees: filtered });
   }
 
-  // Shared with useWorktrees: sorting (incl. Linear ticket clustering) and
-  // project-major bucketing.
-  const { groups: newGroups, flatWorktrees: allFlat } = buildGroups(perRepo, {
-    groupByProject: settings.linearGroupByProject && settings.linearEnabled,
-  });
+  // Shared with useWorktrees: filtering and sorting (incl. Linear ticket/
+  // project clustering via the sort order) both live in grouping.ts.
+  const { groups: newGroups, flatWorktrees: allFlat } = buildGroups(perRepo, settings.worktreeSort);
 
   // Standalone sessions
   const allSessions = getStandaloneSessions();
