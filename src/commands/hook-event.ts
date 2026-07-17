@@ -1,4 +1,4 @@
-import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, getStandaloneSessionByPath, upsertStandaloneSession, touchAgentStatusTimestamp, touchStandaloneSessionTimestamp } from "../lib/db.js";
+import { getWorktreeByPath, getAgentStatus, upsertAgentStatus, getStandaloneSessionByPath, upsertStandaloneSession, touchAgentStatusTimestamp, touchStandaloneSessionTimestamp, setActiveSubagents, setStandaloneActiveSubagents } from "../lib/db.js";
 import { getWorktreeRoot } from "../lib/git.js";
 import { log } from "../lib/logger.js";
 import { publishMessage } from "../lib/pubsub-client.js";
@@ -49,8 +49,18 @@ export async function handleHookEvent(
   // Fetch current status before mapping so Stop can check if agent was active
   const current = getAgentStatus(worktree.id);
 
+  // Maintain the outstanding-subagent counter. This is bookkeeping independent of
+  // the status mapping (it must run even when the status write is later skipped or
+  // guarded), so persist it up front.
+  const currentCount = current?.active_subagents ?? 0;
+  const activeSubagents = computeSubagentCount(payload, currentCount);
+  if (activeSubagents !== currentCount) {
+    setActiveSubagents(worktree.id, activeSubagents);
+    log("debug", "hook-event", `Subagent count for ${worktreePath}: ${currentCount} -> ${activeSubagents} (${payload.event})`);
+  }
+
   // Map event to status
-  const status = mapEventToStatus(payload, current?.status);
+  const status = mapEventToStatus(payload, current?.status, activeSubagents);
   const sessionId = payload.session_id ?? null;
   const lastResponse = extractLastResponse(payload);
   const transcriptSummary = payload.transcript_summary ?? null;
@@ -104,7 +114,15 @@ export async function handleHookEvent(
 
 async function handleStandaloneSession(path: string, payload: HookEvent): Promise<void> {
   const existing = getStandaloneSessionByPath(path);
-  const status = mapEventToStatus(payload, existing?.status);
+
+  const currentCount = existing?.active_subagents ?? 0;
+  const activeSubagents = computeSubagentCount(payload, currentCount);
+  if (activeSubagents !== currentCount) {
+    setStandaloneActiveSubagents(path, activeSubagents);
+    log("debug", "hook-event", `Subagent count for standalone ${path}: ${currentCount} -> ${activeSubagents} (${payload.event})`);
+  }
+
+  const status = mapEventToStatus(payload, existing?.status, activeSubagents);
   const sessionId = payload.session_id ?? null;
   const lastResponse = extractLastResponse(payload);
   const transcriptSummary = payload.transcript_summary ?? null;
@@ -149,7 +167,23 @@ function extractLastResponse(event: HookEvent): string | null {
   return null;
 }
 
-export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusType | null): AgentStatusType | null {
+// Derive the new outstanding-subagent count from an incoming event.
+// SubagentStart/Stop increment/decrement (floored at 0); session boundaries reset.
+export function computeSubagentCount(event: HookEvent, currentCount: number): number {
+  switch (event.event) {
+    case "SubagentStart":
+      return currentCount + 1;
+    case "SubagentStop":
+      return Math.max(currentCount - 1, 0);
+    case "SessionStart":
+    case "SessionEnd":
+      return 0;
+    default:
+      return currentCount;
+  }
+}
+
+export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusType | null, activeSubagents = 0): AgentStatusType | null {
   // Guard: protect "done" status from late-arriving events.
   // Background subagents fire SubagentStop minutes after the parent session's
   // Stop event, which would incorrectly overwrite "done" back to "executing".
@@ -163,9 +197,29 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
     }
   }
 
+  // While delegating (main turn ended but background subagents are still running),
+  // resolve subagent lifecycle events against the live count. Any other event
+  // (user prompt, main-agent tool use, permission prompt) falls through to the
+  // normal logic below — the main agent is active again.
+  if (currentStatus === "delegating") {
+    if (event.event === "SubagentStart") return "delegating";
+    if (event.event === "SubagentStop") return activeSubagents > 0 ? "delegating" : "done";
+    if (event.event === "Stop") {
+      if (event.stop_hook_active) return "waiting";
+      return activeSubagents > 0 ? "delegating" : "done";
+    }
+  }
+
   // Stop/Notification waiting cases take priority
   if (event.event === "Stop") {
     if (event.stop_hook_active) return "waiting";
+
+    // Background subagents are still running even though the main turn ended —
+    // the worktree is still doing work, not waiting on the user.
+    if (activeSubagents > 0) {
+      log("debug", "hook-event", `Stop with ${activeSubagents} subagent(s) outstanding → delegating (was ${currentStatus ?? "none"})`);
+      return "delegating";
+    }
 
     // Preserve waiting state — Stop fires after AskUserQuestion/ExitPlanMode
     // but Claude is still waiting for user input
@@ -204,6 +258,8 @@ export function mapEventToStatus(event: HookEvent, currentStatus?: AgentStatusTy
         log("debug", "hook-event", `idle_prompt after done → preserving done status`);
         return null;
       }
+      // Background subagents still running → still working, not waiting on user
+      if (activeSubagents > 0) return "delegating";
       return "waiting";
     }
     return null;

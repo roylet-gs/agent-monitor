@@ -19,6 +19,8 @@ function statusColor(status: string | undefined): string {
       return "cyan";
     case "waiting":
       return "yellow";
+    case "delegating":
+      return "magenta";
     case "done":
       return "blueBright";
     default:
@@ -34,6 +36,8 @@ function statusLabel(status: string | undefined): string {
       return "Planning";
     case "waiting":
       return "Waiting";
+    case "delegating":
+      return "Delegating";
     case "idle":
       return "Idle";
     case "done":
@@ -68,7 +72,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
 
   const status = getDisplayStatus(worktree.agent_status);
   const open = isEffectivelyOpen(worktree.agent_status);
-  const isActive = status === "executing" || status === "planning";
+  const isActive = status === "executing" || status === "planning" || status === "delegating";
 
   // Contextual response: show transcript_summary as "Task" when active, last_response as "Last Response" when idle
   const responseText = isActive
@@ -91,7 +95,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
           <Text bold>Claude </Text>
           {open ? (
             <>
-              {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(status)}>●</Text>}
+              {status === "executing" || status === "planning" || status === "delegating" ? <PulsingDot color={statusColor(status)} /> : status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(status)}>●</Text>}
               <Text> {statusLabel(status)}</Text>
             </>
           ) : (worktree.has_terminal || worktree.open_ide) ? (
@@ -199,7 +203,7 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
 function StandaloneDetail({ session }: { session: StandaloneSession }) {
   const status = getDisplayStatusStandalone(session);
   const open = !!session.is_open;
-  const isActive = status === "executing" || status === "planning";
+  const isActive = status === "executing" || status === "planning" || status === "delegating";
 
   const responseText = isActive
     ? (session.transcript_summary ?? session.last_response)
@@ -220,7 +224,7 @@ function StandaloneDetail({ session }: { session: StandaloneSession }) {
           <Text bold>Claude </Text>
           {open ? (
             <>
-              {status === "executing" || status === "planning" ? <PulsingDot color={statusColor(status)} /> : status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(status)}>●</Text>}
+              {status === "executing" || status === "planning" || status === "delegating" ? <PulsingDot color={statusColor(status)} /> : status === "done" ? <Text color={statusColor("done")}>✓</Text> : <Text color={statusColor(status)}>●</Text>}
               <Text> {statusLabel(status)}</Text>
             </>
           ) : (

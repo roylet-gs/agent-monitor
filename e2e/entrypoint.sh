@@ -26,5 +26,10 @@ npx tsx e2e/seed-standalone.ts
 # Enable Linear with a dummy key so the mock-api can serve fixture data
 echo '{"setupCompleted":true,"hideMainBranch":false,"linearEnabled":true,"linearApiKey":"lin_api_mock"}' > "$AM_DATA_DIR/settings.json"
 
+# Seed the "delegating" agent status on the main worktree so the TUI shows the
+# magenta pulsing dot / "Delegating" label (main turn stopped, subagents running).
+# This is set at startup so getDisplayStatus keeps it fresh (not stale).
+npx tsx src/cli.tsx status --worktree /work --set delegating || true
+
 # Start ttyd serving the TUI
 exec ttyd -p 7681 --writable npx tsx src/cli.tsx
