@@ -73,9 +73,13 @@ export async function handleHookEvent(
 
   // Skip redundant DB write + pub/sub if status hasn't changed and there's no new content
   const currentIsOpen = current ? !!current.is_open : false;
-  if (current && current.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
+  const sessionChanged = sessionId !== null && sessionId !== current?.session_id;
+  if (current && current.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary && !sessionChanged) {
     touchAgentStatusTimestamp(worktree.id);
     return;
+  }
+  if (sessionChanged && current?.session_id) {
+    log("debug", "hook-event", `Session changed for ${worktreePath}: ${current.session_id} -> ${sessionId}`);
   }
 
   upsertAgentStatus(worktree.id, status, sessionId, lastResponse, transcriptSummary, isOpen);
@@ -135,7 +139,8 @@ async function handleStandaloneSession(path: string, payload: HookEvent): Promis
 
   // Skip redundant write
   const currentIsOpen = existing ? !!existing.is_open : false;
-  if (existing && existing.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary) {
+  const sessionChanged = sessionId !== null && sessionId !== existing?.session_id;
+  if (existing && existing.status === status && currentIsOpen === isOpen && !lastResponse && !transcriptSummary && !sessionChanged) {
     touchStandaloneSessionTimestamp(path);
     return;
   }

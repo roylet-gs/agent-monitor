@@ -129,6 +129,54 @@ describe("handleStandaloneSession", () => {
   });
 });
 
+describe("session id updates", () => {
+  let handleHookEvent: typeof import("../../src/commands/hook-event.js").handleHookEvent;
+  let db: typeof import("../../src/lib/db.js");
+
+  // Feed a payload through the real stdin-reading path: readStdin attaches its
+  // listeners synchronously, so emitting data/end right after the call works.
+  function sendEvent(path: string, payload: Record<string, unknown>): Promise<void> {
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    const done = handleHookEvent(path);
+    process.stdin.emit("data", JSON.stringify(payload));
+    process.stdin.emit("end");
+    return done;
+  }
+
+  beforeEach(async () => {
+    db = await import("../../src/lib/db.js");
+    ({ handleHookEvent } = await import("../../src/commands/hook-event.js"));
+  });
+
+  it("worktree: a new session id is written even when status is unchanged", async () => {
+    const repo = db.addRepository("/tmp/sess-repo", "sess-repo");
+    const wt = db.upsertWorktree(repo.id, "/tmp/sess-repo", "main", "main", true);
+
+    await sendEvent("/tmp/sess-repo", { hook_event_name: "UserPromptSubmit", session_id: "sess-a" });
+    expect(db.getAgentStatus(wt.id)!.session_id).toBe("sess-a");
+
+    // Same status (executing), no response/summary — previously skipped as redundant
+    await sendEvent("/tmp/sess-repo", { hook_event_name: "UserPromptSubmit", session_id: "sess-b" });
+    expect(db.getAgentStatus(wt.id)!.session_id).toBe("sess-b");
+  });
+
+  it("standalone: a new session id is written even when status is unchanged", async () => {
+    const path = "/tmp/standalone-sess-change";
+    await sendEvent(path, { hook_event_name: "UserPromptSubmit", session_id: "sess-a" });
+    expect(db.getStandaloneSessionByPath(path)!.session_id).toBe("sess-a");
+
+    await sendEvent(path, { hook_event_name: "UserPromptSubmit", session_id: "sess-b" });
+    expect(db.getStandaloneSessionByPath(path)!.session_id).toBe("sess-b");
+  });
+
+  it("event without a session id keeps the existing one", async () => {
+    const path = "/tmp/standalone-sess-keep";
+    await sendEvent(path, { hook_event_name: "UserPromptSubmit", session_id: "sess-a" });
+    await sendEvent(path, { hook_event_name: "PreToolUse", tool_name: "Read" });
+    expect(db.getStandaloneSessionByPath(path)!.session_id).toBe("sess-a");
+  });
+});
+
 describe("mapEventToStatus", () => {
   let mapEventToStatus: typeof import("../../src/commands/hook-event.js").mapEventToStatus;
 

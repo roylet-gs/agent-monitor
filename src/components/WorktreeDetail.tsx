@@ -108,6 +108,14 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
           )}
         </Box>
 
+        {/* Claude Session ID */}
+        {worktree.agent_status?.session_id && (
+          <Box flexDirection="column">
+            <Text bold>Session</Text>
+            <Text dimColor wrap="truncate-end">{worktree.agent_status.session_id}</Text>
+          </Box>
+        )}
+
         {/* Contextual Response */}
         {responseText && (
           <Box flexDirection="column">
@@ -238,6 +246,13 @@ function StandaloneDetail({ session }: { session: StandaloneSession }) {
             <Text wrap="truncate-end">
               {normalizeSummary(responseText)}
             </Text>
+          </Box>
+        )}
+
+        {session.session_id && (
+          <Box flexDirection="column">
+            <Text bold>Session</Text>
+            <Text dimColor wrap="truncate-end">{session.session_id}</Text>
           </Box>
         )}
 

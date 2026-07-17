@@ -122,7 +122,7 @@ You can re-run the wizard anytime with `am setup`, or verify your setup with `am
 
 ### Dashboard
 
-The main view is a two-pane layout: worktrees grouped by repository on the left, with a detail panel on the right showing agent status, PR info, and Linear ticket data for the selected worktree.
+The main view is a two-pane layout: worktrees grouped by repository on the left, with a detail panel on the right showing agent status, the Claude session id (usable with `claude --resume <id>`), PR info, and Linear ticket data for the selected worktree.
 
 <p align="center">
   <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-dashboard.png" alt="Agent Monitor dashboard" width="800">
