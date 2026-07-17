@@ -361,6 +361,39 @@ function buildClaudeCommand(resumeSessionId?: string, continueSession?: boolean)
 }
 
 /**
+ * What the dashboard Open action should do for a worktree, given the resume
+ * setting, whether an agent is already active there, the IDE, and any session
+ * to resume. Pure so it can be unit-tested independently of the TUI.
+ *
+ * - "plain": just open the IDE, no resume. Used when resume is disabled, when an
+ *   agent is already open/active (it's visible — resuming again is noise), or in
+ *   editor modes when there is no session to resume (so no clipboard/popup).
+ * - "terminal-claude": terminal IDE mode — the opened terminal itself runs claude
+ *   (resume / continue / fresh).
+ * - "copy-and-open": editor mode with a session to resume — copy the claude
+ *   command, show the popup, then open the editor.
+ */
+export type OpenAction =
+  | { kind: "plain" }
+  | { kind: "terminal-claude"; resumeId?: string; continueSession: boolean }
+  | { kind: "copy-and-open"; resumeId?: string; continueSession: boolean };
+
+export function resolveOpenAction(opts: {
+  resumeLastSession: boolean;
+  alreadyOpen: boolean;
+  ide: Settings["ide"];
+  resumeId?: string;
+  continueSession: boolean;
+}): OpenAction {
+  const { resumeLastSession, alreadyOpen, ide, resumeId, continueSession } = opts;
+  if (!resumeLastSession || alreadyOpen) return { kind: "plain" };
+  if (ide === "terminal") return { kind: "terminal-claude", resumeId, continueSession };
+  const hasSession = !!resumeId || continueSession;
+  if (!hasSession) return { kind: "plain" };
+  return { kind: "copy-and-open", resumeId, continueSession };
+}
+
+/**
  * Copy text to the system clipboard via the platform's CLI tool (no npm dependency).
  * macOS uses pbcopy; Windows uses clip; Linux falls back through wl-copy, xclip, and
  * xsel. The text is piped verbatim (no trailing newline is added by us). Returns
