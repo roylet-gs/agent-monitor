@@ -1,6 +1,10 @@
 import { execFile, execFileSync } from "child_process";
+import { createRequire } from "module";
 import { log } from "./logger.js";
+import { getVersion } from "./version.js";
 import type { PrInfo } from "./types.js";
+
+const require = createRequire(import.meta.url);
 
 interface GhPrResult {
   number: number;
@@ -301,4 +305,54 @@ export function isGhAvailable(): boolean {
   } catch {
     return false;
   }
+}
+
+const OWN_REPO_FALLBACK = "roylet-gs/agent-monitor";
+
+/**
+ * Derive the app's own GitHub repo slug (`owner/name`) from package.json's
+ * `repository.url`, so "suggest a feature" issues always land on the
+ * agent-monitor repo regardless of which worktree is selected. Falls back to a
+ * hardcoded slug if the field is missing or unparseable.
+ */
+export function getOwnRepoSlug(): string {
+  try {
+    const pkg = require("../../package.json");
+    const url: string | undefined =
+      typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url;
+    if (url) {
+      const match = url.match(/github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+      if (match) return match[1];
+    }
+  } catch (err) {
+    log("warn", "github", `failed to derive own repo slug: ${String(err)}`);
+  }
+  return OWN_REPO_FALLBACK;
+}
+
+/**
+ * File a feature request as a GitHub issue on the app's own repo via
+ * `gh issue create --repo <slug>`. Appends an environment footer to the body.
+ * Returns the new issue URL (printed to stdout by gh). Errors propagate.
+ */
+export async function createFeatureRequest(title: string, body: string): Promise<string> {
+  const slug = getOwnRepoSlug();
+  const footer = [
+    "",
+    "---",
+    "_Submitted from agent-monitor_",
+    `- am version: ${getVersion()}`,
+    `- platform: ${process.platform}`,
+    `- node: ${process.version}`,
+  ].join("\n");
+  const fullBody = `${body.trim()}${footer}`;
+
+  const stdout = await execGh(
+    ["issue", "create", "--repo", slug, "--title", title, "--body", fullBody],
+    process.cwd(),
+    15000
+  );
+  const url = stdout.trim();
+  log("info", "github", `feature request created on ${slug}: ${url}`);
+  return url;
 }

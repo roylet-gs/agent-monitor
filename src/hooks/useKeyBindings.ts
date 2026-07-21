@@ -12,6 +12,7 @@ interface KeyBindingActions {
   onNew: () => void;
   onDelete: () => void;
   onSettings: () => void;
+  onSuggest: () => void;
   onRefresh: () => void;
   onOpenPr: () => void;
   onOpenLinear: () => void;
@@ -76,6 +77,10 @@ export function useKeyBindings(actions: KeyBindingActions): void {
     }
     if (input === "s") {
       actions.onSettings();
+      return;
+    }
+    if (input === "f") {
+      actions.onSuggest();
       return;
     }
     if (input === "r") {
