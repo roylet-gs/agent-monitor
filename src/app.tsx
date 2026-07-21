@@ -60,6 +60,7 @@ import { openInIde, openClaudeInTerminal, copyResumeCommand, openTerminal, focus
 import { killClaudeAtPath } from "./lib/process.js";
 import { hasStartupScript, getScriptPath } from "./lib/scripts.js";
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, isFirstRun } from "./lib/settings.js";
+import { checkWorktreeLimit } from "./lib/worktree-limit.js";
 import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { playSound } from "./lib/audio.js";
@@ -84,6 +85,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeColor, setNoticeColor] = useState<"green" | "yellow">("green");
   const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
   const [pendingBranch, setPendingBranch] = useState<{
@@ -359,6 +361,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         // THEN open the editor (which steals focus). Copying to the clipboard lets
         // the user paste it into the editor's own terminal.
         const { command, copied } = copyResumeCommand(action.resumeId, action.continueSession, action.resumeCwd);
+        setNoticeColor("green");
         setNotice(
           copied
             ? `✓ Copied to clipboard — paste to resume:\n${command}\n\nDisable this in Settings (Resume Last Session).`
@@ -475,6 +478,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     ) => {
       const targetRepo = repo ?? createTargetRepo ?? activeRepo;
       if (!targetRepo) return;
+
+      // Backstop: enforce the optional per-repo worktree cap. The UI entry
+      // points (onNew / handlePickRepoForCreate) also check so the form never
+      // opens, but this guards any future caller.
+      const limitMsg = checkWorktreeLimit(settings, targetRepo.id, targetRepo.name);
+      if (limitMsg) {
+        setMode("dashboard");
+        setNoticeColor("yellow");
+        setNotice(limitMsg);
+        return;
+      }
 
       const hasScript = hasStartupScript(targetRepo.id);
 
@@ -966,10 +980,17 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // Handle repo pick for create-worktree flow
   const handlePickRepoForCreate = useCallback(
     (repo: Repository) => {
+      const limitMsg = checkWorktreeLimit(settings, repo.id, repo.name);
+      if (limitMsg) {
+        setMode("dashboard");
+        setNoticeColor("yellow");
+        setNotice(limitMsg);
+        return;
+      }
       setCreateTargetRepo(repo);
       setMode("new-worktree");
     },
-    []
+    [settings]
   );
 
   // Handle settings save
@@ -1023,11 +1044,21 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     onEnter: handleOpen,
     onNew: () => {
       if (repositories.length > 1) {
-        // Show repo picker first, then chain into new-worktree
+        // Show repo picker first, then chain into new-worktree. The per-repo
+        // limit is enforced after the repo is picked (handlePickRepoForCreate).
         setCreateTargetRepo(null);
         setMode("repo-select");
       } else {
-        setCreateTargetRepo(repositories[0] ?? null);
+        const repo = repositories[0] ?? null;
+        if (repo) {
+          const limitMsg = checkWorktreeLimit(settings, repo.id, repo.name);
+          if (limitMsg) {
+            setNoticeColor("yellow");
+            setNotice(limitMsg);
+            return;
+          }
+        }
+        setCreateTargetRepo(repo);
         setMode("new-worktree");
       }
     },
@@ -1111,7 +1142,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // Clear the notice (e.g. "copied to clipboard") after a few seconds
   useEffect(() => {
     if (notice) {
-      const timer = setTimeout(() => setNotice(null), 5000);
+      const timer = setTimeout(() => setNotice(null), 8000);
       return () => clearTimeout(timer);
     }
   }, [notice]);
@@ -1144,12 +1175,12 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         <Box justifyContent="center" paddingY={1}>
           <Box
             borderStyle="round"
-            borderColor="green"
+            borderColor={noticeColor}
             paddingX={2}
             flexDirection="column"
             alignItems="center"
           >
-            <Text color="green" bold>
+            <Text color={noticeColor} bold>
               {notice}
             </Text>
           </Box>
