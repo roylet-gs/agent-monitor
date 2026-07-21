@@ -72,6 +72,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     hideMergedClosedPrs: settings.hideMergedClosedPrs,
     hideIdleDoneAgents: settings.hideIdleDoneAgents,
     hideWithoutLinearTicket: settings.hideWithoutLinearTicket,
+    showRunningProcesses: fallbackMode ? settings.showRunningProcesses : false,
+    runningProcessFilter: settings.runningProcessFilter,
   };
 
   const fallbackWorktrees = useWorktrees(worktreeConfig);
@@ -125,6 +127,8 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       prev.hideMergedClosedPrs !== settings.hideMergedClosedPrs ||
       prev.hideIdleDoneAgents !== settings.hideIdleDoneAgents ||
       prev.hideWithoutLinearTicket !== settings.hideWithoutLinearTicket ||
+      prev.showRunningProcesses !== settings.showRunningProcesses ||
+      prev.runningProcessFilter !== settings.runningProcessFilter ||
       JSON.stringify(prev.worktreeSort) !== JSON.stringify(settings.worktreeSort)
     )) {
       clientRef.current?.configReload();
@@ -159,6 +163,7 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
             dirty: wt.git_status?.dirty,
             commit_msg: wt.last_commit?.message, commit_time: wt.last_commit?.relative_time,
             has_terminal: wt.has_terminal, open_ide: wt.open_ide,
+            procs: wt.running_processes.map(p => p.pid).join(","),
             pr: wt.pr_info?.number, pr_state: wt.pr_info?.state, checks: wt.pr_info?.checksStatus,
             active_check: wt.pr_info?.activeCheckUrl, checks_waiting: wt.pr_info?.checksWaiting,
             linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,

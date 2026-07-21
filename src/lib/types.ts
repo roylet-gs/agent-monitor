@@ -79,6 +79,16 @@ export interface WorktreeWithStatus extends Worktree {
   linear_info: LinearInfo | null;
   has_terminal: boolean;
   open_ide: "cursor" | "vscode" | null;
+  // Long-running processes (dev servers, etc.) detected with their cwd at the
+  // worktree root. Always an array; empty when none found or the feature is off.
+  running_processes: RunningProcess[];
+}
+
+// A process detected running with its working directory at a worktree root.
+// `command` is a friendly label derived from the full command line (e.g. "pnpm dev").
+export interface RunningProcess {
+  pid: number;
+  command: string;
 }
 
 export interface GitStatus {
@@ -171,6 +181,11 @@ export interface Settings {
   showLinearTicket: boolean;
   showGitAheadBehind: boolean;
   showLastCommit: boolean;
+  // Detect and show long-running processes (dev servers, etc.) per worktree.
+  showRunningProcesses: boolean;
+  // Optional "track this process" filter: when non-empty, only processes whose
+  // full command line contains this (case-insensitive substring) are shown.
+  runningProcessFilter: string;
   // Optional per-repo cap on dedicated worktrees (excludes the main checkout).
   // When enabled and reached, creating a new worktree is hard-blocked.
   worktreeLimitEnabled: boolean;

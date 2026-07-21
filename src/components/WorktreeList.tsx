@@ -18,6 +18,7 @@ interface WorktreeListProps {
   fillWidth?: boolean;
   showPrStatus?: boolean;
   showLinearTicket?: boolean;
+  showRunningProcesses?: boolean;
   /** When true (sorting by Linear project first), show project cluster headers. */
   groupByProject?: boolean;
 }
@@ -70,7 +71,7 @@ function buildLinearGroups(flatWorktrees: WorktreeWithStatus[]): Map<string, { t
   return counts;
 }
 
-export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView, fillWidth, showPrStatus = true, showLinearTicket = true, groupByProject = false }: WorktreeListProps) {
+export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorktrees, standaloneSessions, standaloneStartIndex, selectedIndex, unseenIds, compactView, fillWidth, showPrStatus = true, showLinearTicket = true, showRunningProcesses = false, groupByProject = false }: WorktreeListProps) {
   const linearGroups = React.useMemo(() => buildLinearGroups(flatWorktrees), [flatWorktrees]);
 
   if (flatWorktrees.length === 0 && standaloneSessions.length === 0) {
@@ -177,6 +178,12 @@ export const WorktreeList = React.memo(function WorktreeList({ groups, flatWorkt
               const { label, color } = getPrStatusLabel(wt.pr_info);
               inlineMeta.push(
                 <Text key="pr" color={color} dimColor>{label}</Text>
+              );
+            }
+
+            if (showRunningProcesses && wt.running_processes.length > 0) {
+              inlineMeta.push(
+                <Text key="procs" color="green">▶{wt.running_processes.length}</Text>
               );
             }
 

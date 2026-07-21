@@ -58,6 +58,7 @@ function ex(overrides: Partial<WorktreeWithStatus>): WorktreeWithStatus {
     linear_info: null,
     has_terminal: false,
     open_ide: null,
+    running_processes: [],
     ...overrides,
   };
 }

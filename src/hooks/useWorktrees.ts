@@ -6,9 +6,9 @@ import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInf
 import { buildGroups, applyWorktreeFilters, type RepoWorktrees } from "../lib/grouping.js";
 import { log } from "../lib/logger.js";
 import { syncWorktrees } from "../lib/sync.js";
-import { getTerminalPaths, getIdePaths } from "../lib/process.js";
+import { getTerminalPaths, getIdePaths, getWorktreeProcesses, processesForWorktree } from "../lib/process.js";
 import { realpathSync } from "fs";
-import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository, WorktreeSortCriterion } from "../lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository, WorktreeSortCriterion, RunningProcess } from "../lib/types.js";
 
 export interface WorktreeHookConfig {
   repositories: Repository[];
@@ -26,6 +26,8 @@ export interface WorktreeHookConfig {
   hideMergedClosedPrs: boolean;
   hideIdleDoneAgents: boolean;
   hideWithoutLinearTicket: boolean;
+  showRunningProcesses: boolean;
+  runningProcessFilter: string;
 }
 
 export function useWorktrees(config: WorktreeHookConfig): {
@@ -52,6 +54,8 @@ export function useWorktrees(config: WorktreeHookConfig): {
     hideMergedClosedPrs,
     hideIdleDoneAgents,
     hideWithoutLinearTicket,
+    showRunningProcesses,
+    runningProcessFilter,
   } = config;
 
   const [data, setData] = useState<{ groups: WorktreeGroup[]; flatWorktrees: WorktreeWithStatus[] }>({ groups: [], flatWorktrees: [] });
@@ -77,6 +81,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
   linearApiKeyRef.current = linearApiKey;
   const worktreeSortRef = useRef(worktreeSort);
   worktreeSortRef.current = worktreeSort;
+  const showRunningProcessesRef = useRef(showRunningProcesses);
+  showRunningProcessesRef.current = showRunningProcesses;
+  const runningProcessFilterRef = useRef(runningProcessFilter);
+  runningProcessFilterRef.current = runningProcessFilter;
   const filtersRef = useRef({ hideMainBranch, hideMergedClosedPrs, hideIdleDoneAgents, hideWithoutLinearTicket });
   filtersRef.current = { hideMainBranch, hideMergedClosedPrs, hideIdleDoneAgents, hideWithoutLinearTicket };
 
@@ -214,6 +222,19 @@ export function useWorktrees(config: WorktreeHookConfig): {
       const terminalPaths = getTerminalPaths();
       const idePaths = getIdePaths();
 
+      // Optional running sub-process scan + all worktree real paths (for
+      // subtree attribution). Skipped entirely when the feature is off.
+      const showProcs = showRunningProcessesRef.current;
+      const procMap = showProcs ? getWorktreeProcesses(runningProcessFilterRef.current) : new Map<string, RunningProcess[]>();
+      const allWorktreeRealPaths: string[] = [];
+      if (showProcs) {
+        for (const repo of repos) {
+          for (const wt of getWorktrees(repo.id)) {
+            try { allWorktreeRealPaths.push(realpathSync(wt.path)); } catch { /* unresolved */ }
+          }
+        }
+      }
+
       for (const repo of repos) {
         const dbWorktrees = getWorktrees(repo.id);
         const statuses = getAgentStatuses(repo.id);
@@ -233,10 +254,12 @@ export function useWorktrees(config: WorktreeHookConfig): {
 
             let has_terminal = false;
             let open_ide: "cursor" | "vscode" | null = null;
+            let running_processes: RunningProcess[] = [];
             try {
               const realPath = realpathSync(wt.path);
               has_terminal = terminalPaths.has(realPath);
               open_ide = idePaths.get(realPath) ?? null;
+              if (showProcs) running_processes = processesForWorktree(procMap, realPath, allWorktreeRealPaths);
             } catch {
               // path doesn't exist or can't be resolved
             }
@@ -248,6 +271,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
               last_commit,
               has_terminal,
               open_ide,
+              running_processes,
               pr_info: (() => {
                 const ghPr = prCacheRef.current.get(`${repo.id}:${wt.branch}`);
                 if (ghPr) return ghPr;
@@ -289,6 +313,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
         dirty: wt.git_status?.dirty,
         commit_msg: wt.last_commit?.message, commit_time: wt.last_commit?.relative_time,
         has_terminal: wt.has_terminal, open_ide: wt.open_ide,
+        procs: wt.running_processes.map(p => p.pid).join(","),
         pr: wt.pr_info?.number, pr_state: wt.pr_info?.state, checks: wt.pr_info?.checksStatus,
         active_check: wt.pr_info?.activeCheckUrl, checks_waiting: wt.pr_info?.checksWaiting,
         linear: wt.linear_info?.identifier, linear_state: wt.linear_info?.state?.type,
@@ -315,6 +340,12 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const timer = setInterval(() => refresh(false), pollingIntervalMs);
     return () => clearInterval(timer);
   }, [pollingIntervalMs]);
+
+  // Re-scan immediately when the running-process toggle or filter changes so
+  // the list reflects the new criteria without waiting for the next poll.
+  useEffect(() => {
+    refresh(false);
+  }, [showRunningProcesses, runningProcessFilter]);
 
   // GitHub PR polling loop
   useEffect(() => {

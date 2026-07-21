@@ -13,6 +13,14 @@ interface WorktreeDetailProps {
   showLinearTicket?: boolean;
   showGitAheadBehind?: boolean;
   showLastCommit?: boolean;
+  showRunningProcesses?: boolean;
+}
+
+// Collapse identical command labels into "cmd" / "cmd ×N" for a tidy list.
+function summarizeProcesses(procs: { command: string }[]): string[] {
+  const counts = new Map<string, number>();
+  for (const p of procs) counts.set(p.command, (counts.get(p.command) ?? 0) + 1);
+  return [...counts.entries()].map(([cmd, n]) => (n > 1 ? `${cmd} ×${n}` : cmd));
 }
 
 function statusColor(status: string | undefined): string {
@@ -53,7 +61,7 @@ function statusLabel(status: string | undefined): string {
   }
 }
 
-export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, standaloneSession, showPrStatus = true, showLinearTicket = true, showGitAheadBehind = true, showLastCommit = true }: WorktreeDetailProps) {
+export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, standaloneSession, showPrStatus = true, showLinearTicket = true, showGitAheadBehind = true, showLastCommit = true, showRunningProcesses = false }: WorktreeDetailProps) {
   if (standaloneSession) {
     return <StandaloneDetail session={standaloneSession} />;
   }
@@ -111,6 +119,16 @@ export const WorktreeDetail = React.memo(function WorktreeDetail({ worktree, sta
             <Text dimColor>○ No active session</Text>
           )}
         </Box>
+
+        {/* Running sub-processes (dev servers, etc.) */}
+        {showRunningProcesses && worktree.running_processes.length > 0 && (
+          <Box flexDirection="column">
+            <Text bold>Processes</Text>
+            {summarizeProcesses(worktree.running_processes).map((label, i) => (
+              <Text key={i} color="green" wrap="truncate-end">▶ {label}</Text>
+            ))}
+          </Box>
+        )}
 
         {/* Claude Session ID */}
         {worktree.agent_status?.session_id && (

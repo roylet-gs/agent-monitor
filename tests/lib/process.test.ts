@@ -18,7 +18,17 @@ vi.mock("fs", () => ({
   realpathSync: (p: string) => mockRealpathSync(p),
 }));
 
-import { getTerminalPaths, getIdePaths, isTerminalOpenAt, killClaudeAtPath } from "../../src/lib/process.js";
+import {
+  getTerminalPaths,
+  getIdePaths,
+  isTerminalOpenAt,
+  killClaudeAtPath,
+  parsePsArgs,
+  friendlyCommandLabel,
+  parseWorktreeProcesses,
+  processesForWorktree,
+} from "../../src/lib/process.js";
+import type { RunningProcess } from "../../src/lib/types.js";
 
 const originalProcessKill = process.kill;
 const mockProcessKill = vi.fn(() => true);
@@ -217,6 +227,144 @@ describe("killClaudeAtPath", () => {
     const killed = killClaudeAtPath("/Users/dev/symlink-project");
     expect(killed).toBe(1);
     expect(mockRealpathSync).toHaveBeenCalledWith("/Users/dev/symlink-project");
+  });
+});
+
+describe("parsePsArgs", () => {
+  it("maps pid to full command line", () => {
+    const map = parsePsArgs("  1234 node /repo/.bin/vite\n 5678 pnpm dev\n");
+    expect(map.get(1234)).toBe("node /repo/.bin/vite");
+    expect(map.get(5678)).toBe("pnpm dev");
+  });
+
+  it("handles a pid with no args", () => {
+    const map = parsePsArgs("1234\n");
+    expect(map.get(1234)).toBe("");
+  });
+
+  it("skips blank lines and non-numeric pids", () => {
+    const map = parsePsArgs("\n  \nnotapid foo\n42 real\n");
+    expect(map.has(42)).toBe(true);
+    expect(map.size).toBe(1);
+  });
+});
+
+describe("friendlyCommandLabel", () => {
+  it("strips a leading node interpreter and basenames the tool", () => {
+    expect(friendlyCommandLabel("node /repo/node_modules/.bin/vite", "node")).toBe("vite");
+  });
+
+  it("keeps a subcommand after the tool", () => {
+    expect(friendlyCommandLabel("/opt/homebrew/bin/node /repo/.bin/pnpm dev", "node")).toBe("pnpm dev");
+  });
+
+  it("leaves a non-interpreter command intact (basenamed)", () => {
+    expect(friendlyCommandLabel("npm run dev", "npm")).toBe("npm run dev");
+  });
+
+  it("falls back to the lsof comm when args are empty", () => {
+    expect(friendlyCommandLabel("", "node")).toBe("node");
+  });
+
+  it("truncates very long labels", () => {
+    const label = friendlyCommandLabel("someverylongtoolname " + "x".repeat(80), "x");
+    expect(label.length).toBeLessThanOrEqual(40);
+    expect(label.endsWith("…")).toBe(true);
+  });
+});
+
+describe("parseWorktreeProcesses", () => {
+  // lsof -d cwd -Fpcn field output: p<pid>, c<comm>, f<fd>, n<cwd path>
+  const lsof = [
+    "p1000", "cnode", "fcwd", "n/wt/a",       // dev server -> keep
+    "p1001", "czsh", "fcwd", "n/wt/a",        // shell -> drop
+    "p1002", "cnode", "fcwd", "n/wt/b",       // claude -> drop
+    "p1003", "cnode", "fcwd", "n/other",      // not a worktree cwd (kept in map, attributed elsewhere)
+    "p1004", "cpython3", "fcwd", "n/wt/a",    // python server -> keep
+  ].join("\n") + "\n";
+
+  const psArgs = new Map<number, string>([
+    [1000, "node /wt/a/node_modules/.bin/vite"],
+    [1001, "-zsh"],
+    [1002, "node /Users/dev/.claude/local/claude --resume abc"],
+    [1003, "node /other/server.js"],
+    [1004, "python3 -m http.server"],
+  ]);
+
+  it("keeps non-shell/non-claude processes and derives labels", () => {
+    const map = parseWorktreeProcesses(lsof, psArgs);
+    const a = map.get("/wt/a") ?? [];
+    expect(a.map((p) => p.command).sort()).toEqual(["python3 -m http.server", "vite"]);
+    expect(a.find((p) => p.command === "vite")?.pid).toBe(1000);
+  });
+
+  it("excludes shells", () => {
+    const map = parseWorktreeProcesses(lsof, psArgs);
+    const a = map.get("/wt/a") ?? [];
+    expect(a.some((p) => p.pid === 1001)).toBe(false);
+  });
+
+  it("excludes the claude agent", () => {
+    const map = parseWorktreeProcesses(lsof, psArgs);
+    expect(map.has("/wt/b")).toBe(false);
+  });
+
+  it("honors excludePids", () => {
+    const map = parseWorktreeProcesses(lsof, psArgs, new Set([1000]));
+    const a = map.get("/wt/a") ?? [];
+    expect(a.some((p) => p.pid === 1000)).toBe(false);
+    expect(a.some((p) => p.pid === 1004)).toBe(true);
+  });
+
+  it("keeps only processes matching a filter (case-insensitive, full command)", () => {
+    const map = parseWorktreeProcesses(lsof, psArgs, new Set(), "VITE");
+    const a = map.get("/wt/a") ?? [];
+    expect(a.map((p) => p.pid)).toEqual([1000]); // only the vite process
+  });
+
+  it("matches against the full command line, not just the label", () => {
+    // "http.server" appears in pid 1004's args but not its friendly label
+    const map = parseWorktreeProcesses(lsof, psArgs, new Set(), "http.server");
+    const a = map.get("/wt/a") ?? [];
+    expect(a.map((p) => p.pid)).toEqual([1004]);
+  });
+
+  it("returns nothing when the filter matches no process", () => {
+    const map = parseWorktreeProcesses(lsof, psArgs, new Set(), "nomatch");
+    expect(map.size).toBe(0);
+  });
+
+  it("treats a blank/whitespace filter as no filter", () => {
+    const map = parseWorktreeProcesses(lsof, psArgs, new Set(), "   ");
+    const a = map.get("/wt/a") ?? [];
+    expect(a.length).toBe(2);
+  });
+});
+
+describe("processesForWorktree", () => {
+  const procMap = new Map<string, RunningProcess[]>([
+    ["/wt/main", [{ pid: 1, command: "vite" }]],
+    ["/wt/main/apps/api", [{ pid: 2, command: "pnpm dev" }]],           // subdir of main
+    ["/wt/main/.claude/worktrees/feat", [{ pid: 3, command: "next" }]], // nested worktree root
+    ["/wt/main/.claude/worktrees/feat/apps/web", [{ pid: 4, command: "webpack" }]], // subdir of nested
+    ["/unrelated", [{ pid: 5, command: "server" }]],
+  ]);
+  const roots = ["/wt/main", "/wt/main/.claude/worktrees/feat"];
+
+  it("attributes root and subdirectory processes to the worktree (monorepo)", () => {
+    const procs = processesForWorktree(procMap, "/wt/main", roots);
+    // pid 1 (root) and pid 2 (subdir) belong to main; nested worktree's do NOT
+    expect(procs.map((p) => p.pid).sort()).toEqual([1, 2]);
+  });
+
+  it("attributes nested-worktree processes to the most-specific root only", () => {
+    const procs = processesForWorktree(procMap, "/wt/main/.claude/worktrees/feat", roots);
+    expect(procs.map((p) => p.pid).sort()).toEqual([3, 4]);
+  });
+
+  it("returns empty when no process is under the worktree", () => {
+    const procs = processesForWorktree(procMap, "/nope", roots);
+    expect(procs).toEqual([]);
   });
 });
 
