@@ -443,6 +443,8 @@ All data is stored in `~/.agent-monitor/`:
 | `showLinearTicket`        | `true`       | Show the Linear ticket badge on each worktree             |
 | `showGitAheadBehind`      | `true`       | Show git ahead/behind/dirty counts in the detail panel    |
 | `showLastCommit`          | `true`       | Show the last commit in the detail panel                  |
+| `showRunningProcesses`    | `false`      | Detect long-running processes (dev servers, etc.) per worktree and show them in the list (`▶N`) and detail panel |
+| `runningProcessFilter`    | `""`         | Track only processes whose command line contains this text (case-insensitive substring); blank shows all |
 | `maxLogSizeMb`            | `2`          | Max debug log file size in MB before rotation             |
 | `agentPermissionMode`     | `"acceptEdits"` | Permission mode for managed Claude sessions (`acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, …) |
 | `agentClaudeArgs`         | `""`         | Extra CLI args appended to managed `claude` turns         |

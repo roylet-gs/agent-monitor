@@ -1398,6 +1398,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           showLinearTicket={settings.showLinearTicket}
           showGitAheadBehind={settings.showGitAheadBehind}
           showLastCommit={settings.showLastCommit}
+          showRunningProcesses={settings.showRunningProcesses}
           groupByProject={settings.linearEnabled && settings.worktreeSort.find((c) => c.enabled)?.key === "linearProject"}
           ideIsTerm={settings.ide === "terminal"}
           integrationLoading={integrationLoading}

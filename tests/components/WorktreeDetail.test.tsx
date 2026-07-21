@@ -72,6 +72,9 @@ function makeWorktree(overrides: Partial<WorktreeWithStatus> = {}): WorktreeWith
     last_commit: null,
     pr_info: null,
     linear_info: null,
+    has_terminal: false,
+    open_ide: null,
+    running_processes: [],
     ...overrides,
   };
 }
@@ -408,5 +411,52 @@ describe("WorktreeDetail", () => {
     const frame = lastFrame()!;
     // Should show standalone path, not worktree branch
     expect(frame).toContain("/tmp/standalone-project");
+  });
+
+  describe("running processes", () => {
+    it("lists running processes when showRunningProcesses is on", () => {
+      const wt = makeWorktree({
+        running_processes: [
+          { pid: 1, command: "pnpm dev" },
+          { pid: 2, command: "vite" },
+        ],
+      });
+      const { lastFrame } = render(
+        <WorktreeDetail worktree={wt} showRunningProcesses />
+      );
+      const frame = lastFrame()!;
+      expect(frame).toContain("Processes");
+      expect(frame).toContain("pnpm dev");
+      expect(frame).toContain("vite");
+    });
+
+    it("collapses duplicate commands with a count", () => {
+      const wt = makeWorktree({
+        running_processes: [
+          { pid: 1, command: "pnpm dev" },
+          { pid: 2, command: "pnpm dev" },
+        ],
+      });
+      const { lastFrame } = render(
+        <WorktreeDetail worktree={wt} showRunningProcesses />
+      );
+      expect(lastFrame()!).toContain("pnpm dev ×2");
+    });
+
+    it("hides the Processes section when the feature is off", () => {
+      const wt = makeWorktree({
+        running_processes: [{ pid: 1, command: "pnpm dev" }],
+      });
+      const { lastFrame } = render(<WorktreeDetail worktree={wt} />);
+      expect(lastFrame()!).not.toContain("Processes");
+    });
+
+    it("hides the Processes section when there are no processes", () => {
+      const wt = makeWorktree({ running_processes: [] });
+      const { lastFrame } = render(
+        <WorktreeDetail worktree={wt} showRunningProcesses />
+      );
+      expect(lastFrame()!).not.toContain("Processes");
+    });
   });
 });

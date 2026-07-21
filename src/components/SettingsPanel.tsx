@@ -31,6 +31,8 @@ type SettingsField =
   | "showLinearTicket"
   | "showGitAheadBehind"
   | "showLastCommit"
+  | "showRunningProcesses"
+  | "runningProcessFilter"
   | "audioNotifications"
   | "audioWaitingSound"
   | "audioDoneSound"
@@ -75,6 +77,8 @@ const FIELDS: SettingsField[] = [
   "showLinearTicket",
   "showGitAheadBehind",
   "showLastCommit",
+  "showRunningProcesses",
+  "runningProcessFilter",
   "ghPrStatus",
   "ghPolling",
   "ghRefreshOnManual",
@@ -109,6 +113,8 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   showLinearTicket: "Show the Linear ticket badge on each worktree (fetching is controlled separately under Linear)",
   showGitAheadBehind: "Show git ahead/behind/dirty counts in the worktree detail panel",
   showLastCommit: "Show the last commit message in the worktree detail panel",
+  showRunningProcesses: "Detect long-running processes (dev servers, etc.) running in each worktree and show them in the list (▶ count) and detail panel. Adds an lsof/ps scan each poll cycle when enabled.",
+  runningProcessFilter: "Track only processes whose command line contains this text (case-insensitive), e.g. \"dev\" or \"vite\". Leave blank to show all detected processes.",
   audioNotifications: "Play a sound when an agent is waiting or done",
   audioWaitingSound: "Sound to play when an agent needs attention",
   audioDoneSound: "Sound to play when an agent finishes",
@@ -234,6 +240,9 @@ export function SettingsPanel({
     } else if (activeField === "maxWorktrees") {
       setEditValue(String(current.maxWorktrees));
       setEditing(true);
+    } else if (activeField === "runningProcessFilter") {
+      setEditValue(current.runningProcessFilter);
+      setEditing(true);
     }
   };
 
@@ -270,6 +279,8 @@ export function SettingsPanel({
       if (!isNaN(n) && n >= 1) {
         setCurrent((s) => ({ ...s, maxWorktrees: n }));
       }
+    } else if (activeField === "runningProcessFilter") {
+      setCurrent((s) => ({ ...s, runningProcessFilter: editValue.trim() }));
     }
     setEditing(false);
   };
@@ -345,7 +356,8 @@ export function SettingsPanel({
         activeField === "linearApiKey" ||
         activeField === "linearPolling" ||
         activeField === "maxLogSize" ||
-        activeField === "maxWorktrees") &&
+        activeField === "maxWorktrees" ||
+        activeField === "runningProcessFilter") &&
       key.return
     ) {
       startEditing();
@@ -426,6 +438,11 @@ export function SettingsPanel({
 
     if (activeField === "showLastCommit" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, showLastCommit: !s.showLastCommit }));
+      return;
+    }
+
+    if (activeField === "showRunningProcesses" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, showRunningProcesses: !s.showRunningProcesses }));
       return;
     }
 
@@ -844,6 +861,31 @@ export function SettingsPanel({
           <Text color={current.showLastCommit ? "green" : "gray"}>
             [{current.showLastCommit ? "✓" : " "}]
           </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "showRunningProcesses"}>
+            {activeField === "showRunningProcesses" ? "▸" : " "} Show Running Processes:{" "}
+          </Text>
+          <Text color={current.showRunningProcesses ? "green" : "gray"}>
+            [{current.showRunningProcesses ? "✓" : " "}]
+          </Text>
+        </Box>
+        <Box>
+          <Text bold={activeField === "runningProcessFilter"}>
+            {activeField === "runningProcessFilter" ? "▸" : " "} Track Process Filter:{" "}
+          </Text>
+          {editing && activeField === "runningProcessFilter" ? (
+            <TextInput
+              value={editValue}
+              onChange={setEditValue}
+              onSubmit={commitEdit}
+            />
+          ) : (
+            <Text>
+              <Text dimColor>{current.runningProcessFilter || "(all)"}</Text>
+              {activeField === "runningProcessFilter" && <Text dimColor> (Enter to edit)</Text>}
+            </Text>
+          )}
         </Box>
 
         {/* === GitHub Section === */}

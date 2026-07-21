@@ -30,6 +30,7 @@ interface DashboardProps {
   showLinearTicket?: boolean;
   showGitAheadBehind?: boolean;
   showLastCommit?: boolean;
+  showRunningProcesses?: boolean;
   groupByProject?: boolean;
   ideIsTerm?: boolean;
   integrationLoading?: string | null;
@@ -57,6 +58,7 @@ export const Dashboard = React.memo(function Dashboard({
   showLinearTicket = true,
   showGitAheadBehind = true,
   showLastCommit = true,
+  showRunningProcesses = false,
   groupByProject = false,
   ideIsTerm,
   integrationLoading,
@@ -75,8 +77,8 @@ export const Dashboard = React.memo(function Dashboard({
     <Box flexDirection="column" flexGrow={1}>
       <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={new Set(groups.map((g) => g.repo.id)).size} standaloneCount={standaloneSessions.length} version={version} updateInfo={updateInfo} />
       <Box flexGrow={1}>
-        <WorktreeList groups={groups} flatWorktrees={flatWorktrees} standaloneSessions={standaloneSessions} standaloneStartIndex={flatWorktrees.length} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} fillWidth={!showDetail} showPrStatus={showPrStatus} showLinearTicket={showLinearTicket} groupByProject={groupByProject} />
-        {showDetail && (chatPane ?? <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} showPrStatus={showPrStatus} showLinearTicket={showLinearTicket} showGitAheadBehind={showGitAheadBehind} showLastCommit={showLastCommit} />)}
+        <WorktreeList groups={groups} flatWorktrees={flatWorktrees} standaloneSessions={standaloneSessions} standaloneStartIndex={flatWorktrees.length} selectedIndex={selectedIndex} unseenIds={unseenIds} compactView={compactView} fillWidth={!showDetail} showPrStatus={showPrStatus} showLinearTicket={showLinearTicket} showRunningProcesses={showRunningProcesses} groupByProject={groupByProject} />
+        {showDetail && (chatPane ?? <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} showPrStatus={showPrStatus} showLinearTicket={showLinearTicket} showGitAheadBehind={showGitAheadBehind} showLastCommit={showLastCommit} showRunningProcesses={showRunningProcesses} />)}
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
       <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} hasLinearProject={!!selectedWorktree?.linear_info?.project?.url} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} chatMode={!!chatPane && showDetail} />

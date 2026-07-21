@@ -25,6 +25,9 @@ function makeWorktree(overrides: Partial<WorktreeWithStatus> = {}): WorktreeWith
     last_commit: null,
     pr_info: null,
     linear_info: null,
+    has_terminal: false,
+    open_ide: null,
+    running_processes: [],
     ...overrides,
   };
 }
@@ -238,6 +241,48 @@ describe("WorktreeList", () => {
     );
     // Should show white ○ (not dim) when IDE is open
     expect(lastFrame()!).toContain("○");
+  });
+
+  it("shows ▶N indicator when running processes are present and enabled", () => {
+    const wt = makeWorktree({
+      running_processes: [
+        { pid: 1, command: "pnpm dev" },
+        { pid: 2, command: "vite" },
+      ],
+    });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+        showRunningProcesses
+      />
+    );
+    expect(lastFrame()!).toContain("▶2");
+  });
+
+  it("hides the ▶ indicator when showRunningProcesses is off", () => {
+    const wt = makeWorktree({ running_processes: [{ pid: 1, command: "pnpm dev" }] });
+    const group: WorktreeGroup = { repo: makeRepo(), worktrees: [wt] };
+
+    const { lastFrame } = render(
+      <WorktreeList
+        groups={[group]}
+        flatWorktrees={[wt]}
+        selectedIndex={0}
+        standaloneSessions={[]}
+        standaloneStartIndex={0}
+        unseenIds={new Set()}
+        compactView={false}
+      />
+    );
+    expect(lastFrame()!).not.toContain("▶");
   });
 
   it("shows custom name with branch underneath", () => {

@@ -16,7 +16,7 @@ import { getDb, getRepositories, getWorktrees, getAgentStatuses, getStandaloneSe
 import { getGitStatus, getLastCommit } from "./git.js";
 import { fetchAllPrInfo } from "./github.js";
 import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
-import { getTerminalPathsAsync, getIdePathsAsync } from "./process.js";
+import { getTerminalPathsAsync, getIdePathsAsync, getWorktreeProcessesAsync, processesForWorktree } from "./process.js";
 import { isEffectivelyOpenStandalone } from "./agent-utils.js";
 import { buildGroups, applyWorktreeFilters, type RepoWorktrees } from "./grouping.js";
 import { syncWorktrees } from "./sync.js";
@@ -29,7 +29,7 @@ import type {
   AgentUpdatePassthroughMessage,
   DaemonToTuiMessage,
 } from "./daemon-types.js";
-import type { WorktreeGroup, WorktreeWithStatus, PrInfo, LinearInfo, Repository, Settings, StandaloneSession } from "./types.js";
+import type { WorktreeGroup, WorktreeWithStatus, PrInfo, LinearInfo, Repository, Settings, StandaloneSession, RunningProcess } from "./types.js";
 import { getVersion } from "./version.js";
 
 // --- State ---
@@ -386,11 +386,23 @@ async function doRefresh(requestId: string | null, includeIntegrations: boolean)
 async function buildData(): Promise<DaemonData> {
   const perRepo: RepoWorktrees[] = [];
 
-  // Async terminal/IDE detection
-  const [terminalPaths, idePaths] = await Promise.all([
+  // Async terminal/IDE detection (+ optional running sub-process scan)
+  const showProcs = settings.showRunningProcesses;
+  const [terminalPaths, idePaths, procMap] = await Promise.all([
     getTerminalPathsAsync(),
     getIdePathsAsync(),
+    showProcs ? getWorktreeProcessesAsync(settings.runningProcessFilter) : Promise.resolve(new Map()),
   ]);
+
+  // All monitored worktree real paths, for subtree process attribution.
+  const allWorktreeRealPaths: string[] = [];
+  if (showProcs) {
+    for (const repo of repositories) {
+      for (const wt of getWorktrees(repo.id)) {
+        try { allWorktreeRealPaths.push(realpathSync(wt.path)); } catch { /* unresolved */ }
+      }
+    }
+  }
 
   for (const repo of repositories) {
     const dbWorktrees = getWorktrees(repo.id);
@@ -411,10 +423,12 @@ async function buildData(): Promise<DaemonData> {
 
         let has_terminal = false;
         let open_ide: "cursor" | "vscode" | null = null;
+        let running_processes: RunningProcess[] = [];
         try {
           const realPath = realpathSync(wt.path);
           has_terminal = terminalPaths.has(realPath);
           open_ide = idePaths.get(realPath) ?? null;
+          if (showProcs) running_processes = processesForWorktree(procMap, realPath, allWorktreeRealPaths);
         } catch {
           // path doesn't exist or can't be resolved
         }
@@ -426,6 +440,7 @@ async function buildData(): Promise<DaemonData> {
           last_commit,
           has_terminal,
           open_ide,
+          running_processes,
           pr_info: (() => {
             const ghPr = prCache.get(`${repo.id}:${wt.branch}`);
             if (ghPr) return ghPr;
