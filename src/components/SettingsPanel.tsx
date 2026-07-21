@@ -21,6 +21,8 @@ type SettingsField =
   | "autoSync"
   | "compactView"
   | "hideMainBranch"
+  | "worktreeLimitEnabled"
+  | "maxWorktrees"
   | "worktreeSort"
   | "hideMergedClosedPrs"
   | "hideIdleDoneAgents"
@@ -57,6 +59,8 @@ const FIELDS: SettingsField[] = [
   "autoSync",
   "compactView",
   "hideMainBranch",
+  "worktreeLimitEnabled",
+  "maxWorktrees",
   "audioNotifications",
   "audioWaitingSound",
   "audioDoneSound",
@@ -95,6 +99,8 @@ const FIELD_DESCRIPTIONS: Record<SettingsField, string> = {
   autoSync: "Automatically sync worktree status from git on startup",
   compactView: "Show worktrees in a compact single-line format",
   hideMainBranch: "Hide the main/master branch from the worktree list",
+  worktreeLimitEnabled: "Cap the number of dedicated worktrees per repo. When the cap is reached, creating a new worktree is blocked until you complete or delete one — a nudge to finish tasks before starting new ones.",
+  maxWorktrees: "Maximum dedicated worktrees allowed per repo when the limit is enabled (excludes the main checkout, minimum 1)",
   worktreeSort: "Order worktrees by a prioritized list of criteria. Enter opens a full-page editor with a live example preview where you can reorder, enable/disable, and flip direction.",
   hideMergedClosedPrs: "Hide worktrees whose PR is merged or closed (unless the agent session is open)",
   hideIdleDoneAgents: "Hide worktrees whose agent is idle, done, or has no status (unless the session is open)",
@@ -184,6 +190,17 @@ export function SettingsPanel({
 
   const activeField = FIELDS[fieldIndex];
 
+  // Rows hidden by a parent toggle are skipped during navigation.
+  const isFieldSkipped = (field: SettingsField): boolean => {
+    if (!current.audioNotifications && (field === "audioWaitingSound" || field === "audioDoneSound")) {
+      return true;
+    }
+    if (!current.worktreeLimitEnabled && field === "maxWorktrees") {
+      return true;
+    }
+    return false;
+  };
+
   // Compact one-line summary of the active sort criteria for the settings row.
   const enabledSort = current.worktreeSort.filter((c) => c.enabled);
   const sortSummary =
@@ -213,6 +230,9 @@ export function SettingsPanel({
       setEditing(true);
     } else if (activeField === "maxLogSize") {
       setEditValue(String(current.maxLogSizeMb));
+      setEditing(true);
+    } else if (activeField === "maxWorktrees") {
+      setEditValue(String(current.maxWorktrees));
       setEditing(true);
     }
   };
@@ -244,6 +264,11 @@ export function SettingsPanel({
       const mb = parseFloat(editValue);
       if (!isNaN(mb) && mb >= 1) {
         setCurrent((s) => ({ ...s, maxLogSizeMb: Math.round(mb) }));
+      }
+    } else if (activeField === "maxWorktrees") {
+      const n = parseInt(editValue, 10);
+      if (!isNaN(n) && n >= 1) {
+        setCurrent((s) => ({ ...s, maxWorktrees: n }));
       }
     }
     setEditing(false);
@@ -289,9 +314,9 @@ export function SettingsPanel({
     if (key.tab || key.downArrow) {
       setFieldIndex((i) => {
         let next = Math.min(FIELDS.length - 1, i + 1);
-        // Skip sound selectors when audio is disabled
-        while (next < FIELDS.length - 1 && !current.audioNotifications &&
-          (FIELDS[next] === "audioWaitingSound" || FIELDS[next] === "audioDoneSound")) {
+        // Skip conditionally-hidden rows: sound selectors when audio is off,
+        // and the worktree limit value when the limit is off.
+        while (next < FIELDS.length - 1 && isFieldSkipped(FIELDS[next]!)) {
           next++;
         }
         return next;
@@ -302,9 +327,8 @@ export function SettingsPanel({
     if (key.upArrow) {
       setFieldIndex((i) => {
         let next = Math.max(0, i - 1);
-        // Skip sound selectors when audio is disabled
-        while (next > 0 && !current.audioNotifications &&
-          (FIELDS[next] === "audioWaitingSound" || FIELDS[next] === "audioDoneSound")) {
+        // Skip conditionally-hidden rows (see down-arrow handler).
+        while (next > 0 && isFieldSkipped(FIELDS[next]!)) {
           next--;
         }
         return next;
@@ -320,7 +344,8 @@ export function SettingsPanel({
         activeField === "ghPolling" ||
         activeField === "linearApiKey" ||
         activeField === "linearPolling" ||
-        activeField === "maxLogSize") &&
+        activeField === "maxLogSize" ||
+        activeField === "maxWorktrees") &&
       key.return
     ) {
       startEditing();
@@ -356,6 +381,11 @@ export function SettingsPanel({
 
     if (activeField === "hideMainBranch" && (key.return || input === " ")) {
       setCurrent((s) => ({ ...s, hideMainBranch: !s.hideMainBranch }));
+      return;
+    }
+
+    if (activeField === "worktreeLimitEnabled" && (key.return || input === " ")) {
+      setCurrent((s) => ({ ...s, worktreeLimitEnabled: !s.worktreeLimitEnabled }));
       return;
     }
 
@@ -644,6 +674,32 @@ export function SettingsPanel({
             [{current.hideMainBranch ? "✓" : " "}]
           </Text>
         </Box>
+        {/* Worktree Limit */}
+        <Box>
+          <Text bold={activeField === "worktreeLimitEnabled"}>
+            {activeField === "worktreeLimitEnabled" ? "▸" : " "} Limit Worktrees:{" "}
+          </Text>
+          <Text color={current.worktreeLimitEnabled ? "green" : "gray"}>
+            [{current.worktreeLimitEnabled ? "✓" : " "}]
+          </Text>
+        </Box>
+        {current.worktreeLimitEnabled && (
+          <Box>
+            <Text bold={activeField === "maxWorktrees"}>
+              {activeField === "maxWorktrees" ? "▸" : " "}   Max Worktrees / Repo:{" "}
+            </Text>
+            {editing && activeField === "maxWorktrees" ? (
+              <TextInput value={editValue} onChange={setEditValue} onSubmit={commitEdit} />
+            ) : (
+              <Text>
+                {current.maxWorktrees}
+                {activeField === "maxWorktrees" && (
+                  <Text dimColor> (Enter to edit, min 1)</Text>
+                )}
+              </Text>
+            )}
+          </Box>
+        )}
         <Box>
           <Text bold={activeField === "audioNotifications"}>
             {activeField === "audioNotifications" ? "▸" : " "} Audio Notifications:{" "}

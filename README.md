@@ -253,6 +253,8 @@ CLI access: `am settings list`, `am settings get <key>`, `am settings set <key> 
   "autoSyncOnStartup": true,
   "compactView": false,
   "hideMainBranch": true,
+  "worktreeLimitEnabled": false,
+  "maxWorktrees": 5,
   "ghPrStatus": true,
   "ghPollingIntervalMs": 180000,
   "logLevel": "info",
@@ -421,6 +423,8 @@ All data is stored in `~/.agent-monitor/`:
 | `autoSyncOnStartup`       | `true`       | Sync git state when dashboard launches                    |
 | `compactView`             | `false`      | Use compact worktree list layout                          |
 | `hideMainBranch`          | `true`       | Hide main/master branch from worktree list                |
+| `worktreeLimitEnabled`    | `false`      | Cap dedicated worktrees per repo; blocks new creation when reached |
+| `maxWorktrees`            | `5`          | Max dedicated worktrees per repo (excludes main) when the limit is enabled |
 | `ghPrStatus`              | `true`       | Enable GitHub PR status                                   |
 | `ghPollingIntervalMs`     | `180000`     | GitHub PR polling interval (ms)                           |
 | `ghRefreshOnManual`       | `true`       | Refresh GitHub data on manual refresh                     |

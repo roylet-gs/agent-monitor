@@ -123,10 +123,11 @@ describe("SettingsPanel", () => {
     const { stdin, lastFrame } = render(<SettingsPanel {...defaultProps} onSave={onSave} />);
     await waitForFrame();
 
-    // Navigate down to the Sort Order field. The two audio-sound fields are
-    // skipped while audio notifications are off, so this takes 12 presses.
+    // Navigate down to the Sort Order field. The two audio-sound fields and the
+    // Max Worktrees field are skipped while their parent toggles are off, so
+    // this takes 13 presses (Limit Worktrees is navigable; its value row is not).
     const DOWN = ESCAPE + "[B";
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 13; i++) {
       stdin.write(DOWN);
       await waitForFrame(10);
     }

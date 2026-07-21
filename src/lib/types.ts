@@ -171,6 +171,10 @@ export interface Settings {
   showLinearTicket: boolean;
   showGitAheadBehind: boolean;
   showLastCommit: boolean;
+  // Optional per-repo cap on dedicated worktrees (excludes the main checkout).
+  // When enabled and reached, creating a new worktree is hard-blocked.
+  worktreeLimitEnabled: boolean;
+  maxWorktrees: number;
   maxLogSizeMb: number;
   agentPermissionMode: AgentPermissionMode;
   agentClaudeArgs: string;

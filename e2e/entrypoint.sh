@@ -23,8 +23,13 @@ npx tsx src/cli.tsx repo add /work
 npx tsx e2e/seed-standalone.ts
 
 # Skip setup wizard and show main branch (it's the only worktree in the container)
-# Enable Linear with a dummy key so the mock-api can serve fixture data
-echo '{"setupCompleted":true,"hideMainBranch":false,"linearEnabled":true,"linearApiKey":"lin_api_mock"}' > "$AM_DATA_DIR/settings.json"
+# Enable Linear with a dummy key so the mock-api can serve fixture data.
+# maxWorktrees is pre-set to 1 with the limit DISABLED — harmless for every spec
+# (checkWorktreeLimit short-circuits while worktreeLimitEnabled is false, and no
+# extra worktree is seeded, so no index-sensitive spec is affected). The
+# worktree-limit spec creates one worktree at runtime, then toggles the limit on
+# to reach the 1/1 cap and capture the "limit reached" popup.
+echo '{"setupCompleted":true,"hideMainBranch":false,"linearEnabled":true,"linearApiKey":"lin_api_mock","worktreeLimitEnabled":false,"maxWorktrees":1}' > "$AM_DATA_DIR/settings.json"
 
 # Seed a Claude session id on the main worktree via a hook event so the detail
 # panel's "Session" row renders. UserPromptSubmit maps to "executing" and does

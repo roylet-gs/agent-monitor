@@ -13,7 +13,9 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      // Taller viewport → more xterm rows so the full-height Settings panel
+      // fits without Ink overwriting lines (the default 720px clips it).
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 1080 } },
     },
   ],
 });

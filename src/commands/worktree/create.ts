@@ -10,6 +10,8 @@ import {
 } from "../../lib/git.js";
 import { syncWorktrees } from "../../lib/sync.js";
 import { resolveRepo } from "../../lib/resolve.js";
+import { loadSettings } from "../../lib/settings.js";
+import { checkWorktreeLimit } from "../../lib/worktree-limit.js";
 import { installGlobalHooks, isGlobalHooksInstalled } from "../../lib/hooks-installer.js";
 import { outputJson } from "../../lib/output.js";
 
@@ -26,6 +28,12 @@ export async function worktreeCreate(
   }
 ): Promise<void> {
   const repo = resolveRepo(opts.repo);
+
+  const limitMsg = checkWorktreeLimit(loadSettings(), repo.id, repo.name);
+  if (limitMsg) {
+    console.error(limitMsg);
+    process.exit(1);
+  }
 
   const [localExists, remoteExists] = await Promise.all([
     localBranchExists(repo.path, branch),

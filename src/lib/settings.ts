@@ -58,6 +58,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showLinearTicket: true,
   showGitAheadBehind: true,
   showLastCommit: true,
+  worktreeLimitEnabled: false,
+  maxWorktrees: 5,
   maxLogSizeMb: 2,
   agentPermissionMode: "acceptEdits",
   agentClaudeArgs: "",

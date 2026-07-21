@@ -33,9 +33,13 @@ test("Sort Order opens the dedicated editor page with an example preview", async
   await tui.sendKey("s");
   await tui.waitForText("Sorting & Display", 10_000);
 
-  // Move the selection down to the Sort Order field (audio-sound fields are
-  // skipped while audio is off), then Enter to open the editor page.
-  for (let i = 0; i < 12; i++) {
+  // Move the selection down to the Sort Order field, then Enter to open the
+  // editor. Scan for the active-row marker (▸) rather than a fixed keypress
+  // count so this is robust to conditionally-shown rows (e.g. the Max Worktrees
+  // value row, which becomes navigable when the worktree limit is enabled by an
+  // earlier spec that shares this container's settings).
+  for (let i = 0; i < 25; i++) {
+    if ((await tui.getScreenText()).includes("▸ Sort Order")) break;
     await tui.sendKey("ArrowDown");
   }
   await tui.sendKey("Enter");
