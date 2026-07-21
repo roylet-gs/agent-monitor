@@ -6,6 +6,7 @@ import { useTerminalSize } from "./hooks/useTerminalSize.js";
 import { FolderBrowser } from "./components/FolderBrowser.js";
 import { RepoSelector } from "./components/RepoSelector.js";
 import { NewWorktreeForm } from "./components/NewWorktreeForm.js";
+import { SuggestFeatureForm } from "./components/SuggestFeatureForm.js";
 import { DeleteConfirm, type DeleteOptions } from "./components/DeleteConfirm.js";
 import { StandaloneDeleteConfirm } from "./components/StandaloneDeleteConfirm.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
@@ -65,6 +66,7 @@ import { useUpdateCheck } from "./hooks/useUpdateCheck.js";
 import { log } from "./lib/logger.js";
 import { playSound } from "./lib/audio.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
+import { createFeatureRequest, isGhAvailable } from "./lib/github.js";
 import { SetupWizard } from "./components/SetupWizard.js";
 import type { AgentStatusType, AppMode, Repository, Settings } from "./lib/types.js";
 
@@ -85,7 +87,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [noticeColor, setNoticeColor] = useState<"green" | "yellow">("green");
+  const [noticeColor, setNoticeColor] = useState<"green" | "yellow" | "red">("green");
   const [showLogs, setShowLogs] = useState(watch ?? false);
   const [escHint, setEscHint] = useState(false);
   const [pendingBranch, setPendingBranch] = useState<{
@@ -451,6 +453,30 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       await doCreateWorktree(branchName, customName, { kind: "fresh" }, repo, baseBranch);
     },
     [activeRepo, createTargetRepo]
+  );
+
+  const handleSuggest = useCallback(
+    async (title: string, description: string) => {
+      setMode("dashboard");
+      if (!isGhAvailable()) {
+        setNoticeColor("red");
+        setNotice("GitHub CLI (gh) not found. Install it to submit feature requests.");
+        return;
+      }
+      setBusy("Submitting feature request...");
+      try {
+        const url = await createFeatureRequest(title, description);
+        setNoticeColor("green");
+        setNotice(`Feature request submitted: ${url}`);
+      } catch (err) {
+        log("warn", "app", `feature request failed: ${String(err)}`);
+        setNoticeColor("red");
+        setNotice(`Failed to submit feature request: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setBusy(null);
+      }
+    },
+    []
   );
 
   // Helper to update a single step in the creation steps array
@@ -1071,6 +1097,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
       }
     },
     onSettings: () => setMode("settings"),
+    onSuggest: () => setMode("suggest-feature"),
     onRefresh: async () => {
       // Phase 1: fast local refresh with cached integration data
       setBusy("Syncing worktrees...");
@@ -1239,6 +1266,13 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
             setCreateTargetRepo(null);
             setMode("dashboard");
           }}
+        />
+      )}
+
+      {mode === "suggest-feature" && (
+        <SuggestFeatureForm
+          onSubmit={handleSuggest}
+          onCancel={() => setMode("dashboard")}
         />
       )}
 

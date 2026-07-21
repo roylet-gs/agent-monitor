@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getPrStatusLabel, deriveChecksStatus, shouldSkipPrFetch } from "../../src/lib/github.js";
+import { getPrStatusLabel, deriveChecksStatus, shouldSkipPrFetch, getOwnRepoSlug } from "../../src/lib/github.js";
 import type { PrInfo } from "../../src/lib/types.js";
 
 function makePr(overrides: Partial<PrInfo> = {}): PrInfo {
@@ -194,5 +194,11 @@ describe("shouldSkipPrFetch", () => {
 
   it("returns false for merged PR with failing checks", () => {
     expect(shouldSkipPrFetch(makePr({ state: "MERGED", checksStatus: "failing" }))).toBe(false);
+  });
+});
+
+describe("getOwnRepoSlug", () => {
+  it("derives owner/name from the app's package.json repository url", () => {
+    expect(getOwnRepoSlug()).toBe("roylet-gs/agent-monitor");
   });
 });

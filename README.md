@@ -279,6 +279,7 @@ CLI access: `am settings list`, `am settings get <key>`, `am settings set <key> 
 | `n`             | New worktree             |
 | `d`             | Delete selected worktree |
 | `s`             | Settings                 |
+| `f`             | Suggest a feature (files a GitHub issue) |
 | `r`             | Refresh / sync all repos |
 | `g`             | Open PR in browser       |
 | `l`             | Open Linear ticket       |

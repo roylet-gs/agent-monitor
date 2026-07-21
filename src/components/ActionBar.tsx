@@ -72,6 +72,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           <Text color="yellow"> [r]</Text>efresh
           <Text color="yellow"> [w]</Text>atch
           <Text color="yellow"> [s]</Text>ettings
+          <Text color="yellow"> [f]</Text>eature
           <Text color="yellow"> [q]</Text>uit
         </Text>
       ) : (
@@ -79,6 +80,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           <Text color="yellow">[n]</Text>ew
           <Text color="yellow"> [r]</Text>efresh
           <Text color="yellow"> [s]</Text>ettings
+          <Text color="yellow"> [f]</Text>eature
           <Text color="yellow"> [q]</Text>uit
         </Text>
       )}

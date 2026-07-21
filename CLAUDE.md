@@ -26,7 +26,7 @@ Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket
 
 ### State Machine
 `src/app.tsx` is the root component managing an `AppMode` string union that controls rendering:
-`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings` → `chat` (per-worktree Claude session view)
+`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings` → `suggest-feature` (feature-request form) → `chat` (per-worktree Claude session view)
 
 ### Data Flow
 1. **Agent status in:** Claude Code fires hook events → `am hook-event --worktree $CLAUDE_PROJECT_DIR` receives JSON on stdin → writes to SQLite via `src/commands/hook-event.ts` → publishes to Unix domain socket for instant TUI update. `mapEventToStatus` maps events to an `AgentStatusType` (`idle`/`executing`/`planning`/`waiting`/`delegating`/`done`). To handle Claude Code's background-subagents feature, `hook-event.ts` keeps a live `active_subagents` counter on `agent_status` (`+1` on `SubagentStart`, `−1` floored at 0 on `SubagentStop`, reset on session boundaries): when a `Stop`/`idle_prompt` fires while the counter is `> 0`, the worktree reports **`delegating`** (background agents still running) instead of `waiting`/`done`, and transitions to `done` once the last subagent stops.
