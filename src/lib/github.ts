@@ -26,14 +26,44 @@ const GH_PR_FIELDS = "number,title,url,state,isDraft,reviewDecision,headRefName,
 
 function execGh(args: string[], cwd: string, timeout = 5000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("gh", args, { cwd, timeout }, (err, stdout) => {
+    execFile("gh", args, { cwd, timeout }, (err, stdout, stderr) => {
       if (err) {
+        // execFile does not attach stderr to the error; callers need it to
+        // tell an authoritative HTTP 404 apart from network/auth failures.
+        (err as Error & { stderr?: string }).stderr = stderr;
         reject(err);
       } else {
         resolve(stdout);
       }
     });
   });
+}
+
+// Authoritative branch check via the GitHub API. Uses HTTPS with gh's cached
+// token, so it typically answers in well under a second where ls-remote's SSH
+// handshake can take several. Returns null when gh can't give an answer
+// (gh missing, offline, origin not on GitHub) so callers can fall back to git.
+export async function ghBranchExists(
+  repoPath: string,
+  branch: string,
+  timeoutMs = 5000
+): Promise<boolean | null> {
+  try {
+    const out = await execGh(
+      ["api", `repos/{owner}/{repo}/git/ref/heads/${branch}`, "--jq", ".ref"],
+      repoPath,
+      timeoutMs
+    );
+    return out.trim() === `refs/heads/${branch}`;
+  } catch (err: unknown) {
+    const stderr = (err as { stderr?: string })?.stderr ?? "";
+    if (stderr.includes("HTTP 404")) {
+      log("debug", "github", `gh branch check: ${branch} not on origin (404)`);
+      return false;
+    }
+    log("debug", "github", `gh branch check inconclusive for ${branch}: ${err}`);
+    return null;
+  }
 }
 
 // --- Per-repo exponential backoff state ---

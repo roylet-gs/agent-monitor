@@ -1,6 +1,15 @@
-import { describe, it, expect } from "vitest";
-import { getPrStatusLabel, deriveChecksStatus, shouldSkipPrFetch, getOwnRepoSlug } from "../../src/lib/github.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { getPrStatusLabel, deriveChecksStatus, shouldSkipPrFetch, getOwnRepoSlug, ghBranchExists } from "../../src/lib/github.js";
 import type { PrInfo } from "../../src/lib/types.js";
+
+const mockExecFile = vi.fn();
+vi.mock("child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("child_process")>();
+  return {
+    ...actual,
+    execFile: (...args: unknown[]) => mockExecFile(...args),
+  };
+});
 
 function makePr(overrides: Partial<PrInfo> = {}): PrInfo {
   return {
@@ -200,5 +209,55 @@ describe("shouldSkipPrFetch", () => {
 describe("getOwnRepoSlug", () => {
   it("derives owner/name from the app's package.json repository url", () => {
     expect(getOwnRepoSlug()).toBe("roylet-gs/agent-monitor");
+  });
+});
+
+describe("ghBranchExists", () => {
+  type ExecFileCallback = (err: Error | null, stdout: string, stderr: string) => void;
+
+  const ghReturns = (stdout: string) => {
+    mockExecFile.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        cb(null, stdout, "");
+      }
+    );
+  };
+
+  const ghFails = (stderr: string) => {
+    mockExecFile.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        cb(new Error("gh exited 1"), "", stderr);
+      }
+    );
+  };
+
+  beforeEach(() => {
+    mockExecFile.mockReset();
+  });
+
+  it("returns true when the API returns the exact ref", async () => {
+    ghReturns("refs/heads/feature/connect-848\n");
+    expect(await ghBranchExists("/repo", "feature/connect-848")).toBe(true);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "gh",
+      ["api", "repos/{owner}/{repo}/git/ref/heads/feature/connect-848", "--jq", ".ref"],
+      expect.objectContaining({ cwd: "/repo" }),
+      expect.any(Function)
+    );
+  });
+
+  it("returns false on HTTP 404 (authoritative no)", async () => {
+    ghFails("gh: Not Found (HTTP 404)");
+    expect(await ghBranchExists("/repo", "feature/nope")).toBe(false);
+  });
+
+  it("returns null on other failures (offline, no gh, non-GitHub origin)", async () => {
+    ghFails("error connecting to api.github.com");
+    expect(await ghBranchExists("/repo", "feature/x")).toBe(null);
+  });
+
+  it("returns false when the API answers with a different ref", async () => {
+    ghReturns("null\n");
+    expect(await ghBranchExists("/repo", "feature/x")).toBe(false);
   });
 });

@@ -10,7 +10,7 @@ vi.mock("../../src/lib/logger.js", () => ({
 
 const mockCreateWorktree = vi.fn();
 const mockLocalBranchExists = vi.fn();
-const mockLsRemoteBranch = vi.fn();
+const mockRemoteBranchProbe = vi.fn();
 const mockGetMainBranch = vi.fn();
 const mockFetchBranch = vi.fn();
 const mockFetchAndResetBranch = vi.fn();
@@ -21,7 +21,7 @@ vi.mock("../../src/lib/git.js", () => ({
   isGitRepo: vi.fn(() => false),
   createWorktree: (...args: unknown[]) => mockCreateWorktree(...args),
   localBranchExists: (...args: unknown[]) => mockLocalBranchExists(...args),
-  lsRemoteBranch: (...args: unknown[]) => mockLsRemoteBranch(...args),
+  remoteBranchProbe: (...args: unknown[]) => mockRemoteBranchProbe(...args),
   getMainBranch: (...args: unknown[]) => mockGetMainBranch(...args),
   fetchBranch: (...args: unknown[]) => mockFetchBranch(...args),
   fetchAndResetBranch: (...args: unknown[]) => mockFetchAndResetBranch(...args),
@@ -52,7 +52,7 @@ describe("worktree create", () => {
     spy = captureConsole();
     mockCreateWorktree.mockReset().mockResolvedValue("/tmp/repo/.worktrees/feat");
     mockLocalBranchExists.mockReset().mockResolvedValue(false);
-    mockLsRemoteBranch.mockReset().mockResolvedValue(false);
+    mockRemoteBranchProbe.mockReset().mockResolvedValue(false);
     mockGetMainBranch.mockReset().mockResolvedValue("main");
     mockFetchBranch.mockReset().mockResolvedValue(undefined);
     mockFetchAndResetBranch.mockReset().mockResolvedValue(true);
@@ -94,7 +94,7 @@ describe("worktree create", () => {
 
   it("exits when branch exists remotely with hint about --track / --no-track", async () => {
     db.addRepository("/tmp/repo", "repo");
-    mockLsRemoteBranch.mockResolvedValue(true);
+    mockRemoteBranchProbe.mockResolvedValue(true);
     await expect(
       worktreeCreate("feature/test", { repo: "/tmp/repo" })
     ).rejects.toThrow(ProcessExitError);
@@ -114,7 +114,7 @@ describe("worktree create", () => {
 
   it("--track creates new local branch tracking origin when local is absent", async () => {
     db.addRepository("/tmp/repo", "repo");
-    mockLsRemoteBranch.mockResolvedValue(true);
+    mockRemoteBranchProbe.mockResolvedValue(true);
     mockLocalBranchExists.mockResolvedValue(false);
     await worktreeCreate("feature/test", { repo: "/tmp/repo", track: true });
     const args = mockCreateWorktree.mock.calls[0];
@@ -124,7 +124,7 @@ describe("worktree create", () => {
 
   it("--track resets and reuses existing local branch when both exist", async () => {
     db.addRepository("/tmp/repo", "repo");
-    mockLsRemoteBranch.mockResolvedValue(true);
+    mockRemoteBranchProbe.mockResolvedValue(true);
     mockLocalBranchExists.mockResolvedValue(true);
     await worktreeCreate("feature/test", { repo: "/tmp/repo", track: true });
     const args = mockCreateWorktree.mock.calls[0];
@@ -134,7 +134,7 @@ describe("worktree create", () => {
 
   it("--track errors when remote branch is absent", async () => {
     db.addRepository("/tmp/repo", "repo");
-    mockLsRemoteBranch.mockResolvedValue(false);
+    mockRemoteBranchProbe.mockResolvedValue(false);
     await expect(
       worktreeCreate("feature/test", { repo: "/tmp/repo", track: true })
     ).rejects.toThrow(ProcessExitError);
@@ -144,7 +144,7 @@ describe("worktree create", () => {
   it("--no-track creates a disconnected branch from base, deleting local first if needed", async () => {
     db.addRepository("/tmp/repo", "repo");
     mockLocalBranchExists.mockResolvedValue(true);
-    mockLsRemoteBranch.mockResolvedValue(true);
+    mockRemoteBranchProbe.mockResolvedValue(true);
     mockRemoteBranchExists.mockResolvedValue(true); // base branch has a remote tracking ref
     await worktreeCreate("feature/test", { repo: "/tmp/repo", noTrack: true });
     expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/repo", "feature/test", true);

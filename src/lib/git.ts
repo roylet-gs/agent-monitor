@@ -1,8 +1,9 @@
 import { simpleGit, type SimpleGit } from "simple-git";
-import { execSync } from "child_process";
+import { execSync, execFile } from "child_process";
 import { existsSync, readFileSync, rmSync } from "fs";
 import { basename, join, resolve } from "path";
 import { log } from "./logger.js";
+import { ghBranchExists } from "./github.js";
 import type { GitStatus, CommitInfo } from "./types.js";
 
 export function getGit(cwd: string): SimpleGit {
@@ -288,22 +289,30 @@ export async function remoteBranchExists(repoPath: string, branch: string): Prom
 export async function lsRemoteBranch(
   repoPath: string,
   branch: string,
-  timeoutMs = 3000
+  // An SSH handshake to github.com alone can take >3s, so keep this generous.
+  timeoutMs = 8000
 ): Promise<boolean> {
   const args = ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`];
   try {
-    const output = execSync(`git ${args.map((a) => JSON.stringify(a)).join(" ")}`, {
-      cwd: repoPath,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: timeoutMs,
+    // execFile (not execSync) so live UI checks don't block the event loop
+    // while ls-remote waits on the network.
+    const output = await new Promise<string>((resolvePromise, rejectPromise) => {
+      execFile(
+        "git",
+        args,
+        { cwd: repoPath, encoding: "utf-8", timeout: timeoutMs },
+        (err, stdout) => {
+          if (err) rejectPromise(err);
+          else resolvePromise(stdout);
+        }
+      );
     });
     return output.trim().length > 0;
   } catch (err: unknown) {
-    const e = err as { status?: number; signal?: string; code?: string };
+    const e = err as { code?: number | string; signal?: string };
     // `ls-remote --exit-code` returns 2 when no matching ref found — that's
     // an authoritative "no", not a failure.
-    if (e?.status === 2) return false;
+    if (e?.code === 2) return false;
     log(
       "warn",
       "git",
@@ -311,6 +320,26 @@ export async function lsRemoteBranch(
     );
     return remoteBranchExists(repoPath, branch);
   }
+}
+
+// Combined remote check: race `git ls-remote` (SSH, can be slow) against the
+// GitHub API via gh (HTTPS, usually sub-second). The first "yes" wins
+// immediately; otherwise wait for both and OR them, so a timeout or failure
+// on one path can't produce a false "not on origin".
+export async function remoteBranchProbe(repoPath: string, branch: string): Promise<boolean> {
+  const checks: Promise<boolean | null>[] = [
+    lsRemoteBranch(repoPath, branch).catch(() => false),
+    ghBranchExists(repoPath, branch).catch(() => null),
+  ];
+  return new Promise((resolve) => {
+    let pending = checks.length;
+    for (const check of checks) {
+      check.then((result) => {
+        if (result === true) resolve(true);
+        else if (--pending === 0) resolve(false);
+      });
+    }
+  });
 }
 
 export async function deleteBranch(repoPath: string, branch: string, force = false): Promise<void> {
