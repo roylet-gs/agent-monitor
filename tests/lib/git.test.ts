@@ -14,8 +14,10 @@ vi.mock("simple-git", () => ({
 }));
 
 const mockExecSync = vi.fn();
+const mockExecFile = vi.fn();
 vi.mock("child_process", () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
+  execFile: (...args: unknown[]) => mockExecFile(...args),
 }));
 
 const mockExistsSync = vi.fn();
@@ -25,6 +27,11 @@ vi.mock("fs", () => ({
   existsSync: (...args: unknown[]) => mockExistsSync(...args),
   readFileSync: (...args: unknown[]) => mockReadFileSync(...args),
   rmSync: (...args: unknown[]) => mockRmSync(...args),
+}));
+
+const mockGhBranchExists = vi.fn();
+vi.mock("../../src/lib/github.js", () => ({
+  ghBranchExists: (...args: unknown[]) => mockGhBranchExists(...args),
 }));
 
 describe("listWorktrees", () => {
@@ -281,36 +288,52 @@ describe("localBranchExists", () => {
 describe("lsRemoteBranch", () => {
   let lsRemoteBranch: typeof import("../../src/lib/git.js").lsRemoteBranch;
 
+  type ExecFileCallback = (err: Error | null, stdout: string) => void;
+
+  const execFileSucceeds = (stdout: string) => {
+    mockExecFile.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        cb(null, stdout);
+      }
+    );
+  };
+
+  const execFileFails = (message: string, code: number) => {
+    mockExecFile.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        const err = new Error(message) as Error & { code?: number };
+        err.code = code;
+        cb(err, "");
+      }
+    );
+  };
+
   beforeEach(async () => {
     vi.resetModules();
     mockRaw.mockReset();
-    mockExecSync.mockReset();
+    mockExecFile.mockReset();
     const git = await import("../../src/lib/git.js");
     lsRemoteBranch = git.lsRemoteBranch;
   });
 
   it("returns true when ls-remote prints a matching ref", async () => {
-    mockExecSync.mockReturnValueOnce(
-      "abc123\trefs/heads/feat/x\n"
-    );
+    execFileSucceeds("abc123\trefs/heads/feat/x\n");
     expect(await lsRemoteBranch("/repo", "feat/x")).toBe(true);
+    expect(mockExecFile).toHaveBeenCalledWith(
+      "git",
+      ["ls-remote", "--exit-code", "--heads", "origin", "refs/heads/feat/x"],
+      expect.objectContaining({ cwd: "/repo" }),
+      expect.any(Function)
+    );
   });
 
   it("returns false when ls-remote --exit-code returns 2 (no match)", async () => {
-    mockExecSync.mockImplementationOnce(() => {
-      const err = new Error("no match") as Error & { status?: number };
-      err.status = 2;
-      throw err;
-    });
+    execFileFails("no match", 2);
     expect(await lsRemoteBranch("/repo", "feat/missing")).toBe(false);
   });
 
   it("falls back to cached remote-tracking ref on network failure", async () => {
-    mockExecSync.mockImplementationOnce(() => {
-      const err = new Error("could not resolve host") as Error & { status?: number };
-      err.status = 128;
-      throw err;
-    });
+    execFileFails("could not resolve host", 128);
     // remoteBranchExists fallback succeeds
     mockRaw.mockResolvedValueOnce("");
     expect(await lsRemoteBranch("/repo", "feat/cached")).toBe(true);
@@ -322,13 +345,77 @@ describe("lsRemoteBranch", () => {
   });
 
   it("returns false when fallback also has no cached ref", async () => {
-    mockExecSync.mockImplementationOnce(() => {
-      const err = new Error("origin not configured") as Error & { status?: number };
-      err.status = 128;
-      throw err;
-    });
+    execFileFails("origin not configured", 128);
     mockRaw.mockRejectedValueOnce(new Error("not a ref"));
     expect(await lsRemoteBranch("/repo", "feat/nope")).toBe(false);
+  });
+});
+
+describe("remoteBranchProbe", () => {
+  let remoteBranchProbe: typeof import("../../src/lib/git.js").remoteBranchProbe;
+
+  type ExecFileCallback = (err: Error | null, stdout: string) => void;
+
+  const lsRemoteSucceeds = (stdout: string) => {
+    mockExecFile.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        cb(null, stdout);
+      }
+    );
+  };
+
+  const lsRemoteFails = (message: string, code: number) => {
+    mockExecFile.mockImplementationOnce(
+      (_cmd: string, _args: string[], _opts: unknown, cb: ExecFileCallback) => {
+        const err = new Error(message) as Error & { code?: number };
+        err.code = code;
+        cb(err, "");
+      }
+    );
+  };
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockRaw.mockReset();
+    mockExecFile.mockReset();
+    mockGhBranchExists.mockReset();
+    const git = await import("../../src/lib/git.js");
+    remoteBranchProbe = git.remoteBranchProbe;
+  });
+
+  it("returns true when ls-remote finds the branch and gh is inconclusive", async () => {
+    lsRemoteSucceeds("abc123\trefs/heads/feat/x\n");
+    mockGhBranchExists.mockResolvedValue(null);
+    expect(await remoteBranchProbe("/repo", "feat/x")).toBe(true);
+  });
+
+  it("returns true via gh when ls-remote times out and no cached ref exists", async () => {
+    // The bug this fixes: a slow SSH handshake kills ls-remote, the cached-ref
+    // fallback says no, but the branch really is on origin (gh confirms).
+    lsRemoteFails("timed out", 143);
+    mockRaw.mockRejectedValueOnce(new Error("not a ref"));
+    mockGhBranchExists.mockResolvedValue(true);
+    expect(await remoteBranchProbe("/repo", "feat/slow-network")).toBe(true);
+  });
+
+  it("resolves true from gh without waiting for a hung ls-remote", async () => {
+    mockExecFile.mockImplementationOnce(() => {
+      /* ls-remote never calls back */
+    });
+    mockGhBranchExists.mockResolvedValue(true);
+    expect(await remoteBranchProbe("/repo", "feat/fast-gh")).toBe(true);
+  });
+
+  it("returns false when both agree the branch is missing", async () => {
+    lsRemoteFails("no match", 2);
+    mockGhBranchExists.mockResolvedValue(false);
+    expect(await remoteBranchProbe("/repo", "feat/missing")).toBe(false);
+  });
+
+  it("returns false when ls-remote says no and gh rejects", async () => {
+    lsRemoteFails("no match", 2);
+    mockGhBranchExists.mockRejectedValue(new Error("gh exploded"));
+    expect(await remoteBranchProbe("/repo", "feat/missing")).toBe(false);
   });
 });
 

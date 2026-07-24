@@ -25,6 +25,8 @@ vi.mock("../../src/lib/git.js", () => ({
   fetchBranch: vi.fn().mockResolvedValue(undefined),
   ensureBranchForOpen: vi.fn().mockResolvedValue(undefined),
   remoteBranchExists: vi.fn().mockResolvedValue(true),
+  localBranchExists: vi.fn().mockResolvedValue(false),
+  remoteBranchProbe: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("../../src/lib/github.js", () => ({
@@ -162,6 +164,23 @@ describe("TUI State Machine", () => {
     stdin.write(ESCAPE);
     await waitForFrame();
     expect(lastFrame()!).toContain("Agent Monitor");
+  });
+
+  it("new worktree form shows live remote indicator when branch exists on origin", async () => {
+    const git = await import("../../src/lib/git.js");
+    vi.mocked(git.remoteBranchProbe).mockResolvedValue(true);
+    await setupDashboard();
+    const { stdin, lastFrame } = render(<App />);
+    await waitForFrame();
+
+    stdin.write("n");
+    await waitForFrame();
+    expect(lastFrame()!).toContain("New Worktree");
+
+    stdin.write("x");
+    // Default debounce is 400ms; wait for the check to fire and resolve.
+    await waitForFrame(700);
+    expect(lastFrame()!).toContain("✓ exists on origin");
   });
 
   it("dashboard -> delete confirm -> cancel back to dashboard", async () => {

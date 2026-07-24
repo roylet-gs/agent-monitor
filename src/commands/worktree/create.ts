@@ -1,7 +1,7 @@
 import {
   createWorktree,
   localBranchExists,
-  lsRemoteBranch,
+  remoteBranchProbe,
   getMainBranch,
   fetchBranch,
   fetchAndResetBranch,
@@ -37,7 +37,7 @@ export async function worktreeCreate(
 
   const [localExists, remoteExists] = await Promise.all([
     localBranchExists(repo.path, branch),
-    lsRemoteBranch(repo.path, branch),
+    remoteBranchProbe(repo.path, branch),
   ]);
 
   // Validate the chosen mode against current state.

@@ -45,7 +45,7 @@ import {
   remoteBranchExists,
   localBranchExists,
   listWorktrees,
-  lsRemoteBranch,
+  remoteBranchProbe,
   type CreateWorktreeOptions,
 } from "./lib/git.js";
 
@@ -68,7 +68,13 @@ import { playSound } from "./lib/audio.js";
 import { getVersion, isNewVersion } from "./lib/version.js";
 import { createFeatureRequest, isGhAvailable } from "./lib/github.js";
 import { SetupWizard } from "./components/SetupWizard.js";
-import type { AgentStatusType, AppMode, Repository, Settings } from "./lib/types.js";
+import type {
+  AgentStatusType,
+  AppMode,
+  BranchCheckResult,
+  Repository,
+  Settings,
+} from "./lib/types.js";
 
 interface AppProps {
   onRunScript?: (scriptPath: string, cwd: string) => void;
@@ -446,11 +452,28 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
   // Handle create worktree. Existence checks are intentionally NOT done here —
   // the slow `git ls-remote` call is folded into doCreateWorktree's first
   // progress step so the user sees the spinner as soon as they hit Enter.
+  // (The form's live check below is advisory only — it just drives the
+  // inline indicator; doCreateWorktree remains the source of truth.)
   const handleCreate = useCallback(
     async (branchName: string, customName: string, baseBranch: string) => {
       const repo = createTargetRepo ?? activeRepo;
       if (!repo) return;
       await doCreateWorktree(branchName, customName, { kind: "fresh" }, repo, baseBranch);
+    },
+    [activeRepo, createTargetRepo]
+  );
+
+  // Advisory live existence check for the New Worktree form.
+  const checkBranchForForm = useCallback(
+    async (branch: string): Promise<BranchCheckResult> => {
+      const repo = createTargetRepo ?? activeRepo;
+      if (!repo) return { local: false, remote: false };
+      const [local, remote] = await Promise.all([
+        localBranchExists(repo.path, branch),
+        remoteBranchProbe(repo.path, branch),
+      ]);
+      log("debug", "app", `Live branch check ${branch}: local=${local} remote=${remote}`);
+      return { local, remote };
     },
     [activeRepo, createTargetRepo]
   );
@@ -567,7 +590,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           );
           const [localExists, remoteExists] = await Promise.all([
             localBranchExists(targetRepo.path, branchName),
-            lsRemoteBranch(targetRepo.path, branchName),
+            remoteBranchProbe(targetRepo.path, branchName),
           ]);
           const wtDirExists = existsSync(wtDir);
           if (localExists || remoteExists || wtDirExists) {
@@ -643,7 +666,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
             setCreationError(null);
             const [localExists, remoteExists] = await Promise.all([
               localBranchExists(targetRepo.path, branchName),
-              lsRemoteBranch(targetRepo.path, branchName),
+              remoteBranchProbe(targetRepo.path, branchName),
             ]);
             setPendingBranch({
               branch: branchName,
@@ -1261,6 +1284,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
         <NewWorktreeForm
           defaultPrefix={settings.defaultBranchPrefix}
           defaultBaseBranch={settings.defaultBaseBranch}
+          checkBranch={checkBranchForForm}
           onSubmit={handleCreate}
           onCancel={() => {
             setCreateTargetRepo(null);

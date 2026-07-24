@@ -103,6 +103,11 @@ export interface CommitInfo {
   relative_time: string;
 }
 
+export interface BranchCheckResult {
+  local: boolean;
+  remote: boolean;
+}
+
 export type SystemSound =
   | "Basso"
   | "Blow"
