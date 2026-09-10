@@ -2,7 +2,7 @@ import { execFile, execFileSync } from "child_process";
 import { createRequire } from "module";
 import { log } from "./logger.js";
 import { getVersion } from "./version.js";
-import type { PrInfo } from "./types.js";
+import type { FetchResult, PrInfo } from "./types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -87,6 +87,19 @@ function isInBackoff(repoPath: string): boolean {
   return true;
 }
 
+/**
+ * Drop a repo's backoff so the next fetch actually runs. Backoff exists to stop a
+ * *timer* hammering an API that's down; when someone presses refresh they are
+ * explicitly asking for fresh data, and silently skipping that leaves them staring
+ * at a stale dashboard with no way to update it.
+ */
+export function clearPrBackoff(repoPath: string): void {
+  repoBackoff.delete(repoPath);
+  for (const key of [...skipLoggedForRepo]) {
+    if (key === repoPath || key.startsWith(repoPath + ":")) skipLoggedForRepo.delete(key);
+  }
+}
+
 function onGhSuccess(repoPath: string): void {
   const state = repoBackoff.get(repoPath);
   if (state && state.backoffMs > 0) {
@@ -166,18 +179,22 @@ export function shouldSkipPrFetch(cached: PrInfo | null): boolean {
 /**
  * Fetch PR info for a single branch using `gh pr view <branch>`.
  * If prNumber is provided, uses `gh pr view <number>` for a cheaper lookup.
+ *
+ * Distinguishes "this branch has no PR" (`ok: true, value: null`) from "we could not
+ * ask" — offline, in backoff, auth failure (`ok: false`). Callers that cache must only
+ * overwrite on `ok: true`; see `src/lib/integration-cache.ts`.
  */
-export async function fetchPrInfo(
+export async function fetchPrResult(
   repoPath: string,
   branch: string,
   prNumber?: number
-): Promise<PrInfo | null> {
+): Promise<FetchResult<PrInfo>> {
   if (isInBackoff(repoPath)) {
     if (!skipLoggedForRepo.has(repoPath + ":" + branch)) {
       log("debug", "github", `Skipping PR fetch for ${branch} (in backoff)`);
       skipLoggedForRepo.add(repoPath + ":" + branch);
     }
-    return null;
+    return { ok: false, error: "in backoff" };
   }
 
   try {
@@ -194,34 +211,50 @@ export async function fetchPrInfo(
     // Verify the returned PR's head branch matches exactly.
     if (prNumber == null && pr.headRefName !== branch) {
       log("debug", "github", `PR #${pr.number} head branch "${pr.headRefName}" does not match requested branch "${branch}", ignoring`);
-      return null;
+      return { ok: true, value: null };
     }
 
-    return ghResultToPrInfo(pr);
+    return { ok: true, value: ghResultToPrInfo(pr) };
   } catch (err) {
     const msg = String(err);
     // "no pull requests found" is not an API error, just means no PR exists
     if (msg.includes("no pull requests found") || msg.includes("Could not resolve")) {
       onGhSuccess(repoPath);
-      return null;
+      return { ok: true, value: null };
     }
     onGhFailure(repoPath, err);
-    return null;
+    return { ok: false, error: msg };
   }
+}
+
+/**
+ * Convenience wrapper for callers that treat a failed fetch the same as no PR
+ * (the one-shot CLI commands). Anything that caches should use `fetchPrResult`.
+ */
+export async function fetchPrInfo(
+  repoPath: string,
+  branch: string,
+  prNumber?: number
+): Promise<PrInfo | null> {
+  const result = await fetchPrResult(repoPath, branch, prNumber);
+  return result.ok ? result.value : null;
 }
 
 /**
  * Fetch PR info for multiple branches with per-branch `gh pr view` calls.
  * Concurrency-limited to avoid overwhelming the API.
  * prNumberCache maps branch -> known PR number for cheaper lookups.
+ *
+ * Each entry says whether that branch's fetch succeeded, so a caller can keep its
+ * cached PR rather than blanking them all when the network is down.
  */
-export async function fetchAllPrInfo(
+export async function fetchAllPrResults(
   repoPath: string,
   branches: string[],
   prNumberCache?: Map<string, number>,
   prCache?: Map<string, PrInfo | null>
-): Promise<Map<string, PrInfo | null>> {
-  const result = new Map<string, PrInfo | null>();
+): Promise<Map<string, FetchResult<PrInfo>>> {
+  const result = new Map<string, FetchResult<PrInfo>>();
   if (branches.length === 0) return result;
 
   if (isInBackoff(repoPath)) {
@@ -229,7 +262,7 @@ export async function fetchAllPrInfo(
       log("debug", "github", `Skipping all PR fetches for ${repoPath} (in backoff)`);
       skipLoggedForRepo.add(repoPath);
     }
-    for (const b of branches) result.set(b, null);
+    for (const b of branches) result.set(b, { ok: false, error: "in backoff" });
     return result;
   }
 
@@ -253,12 +286,13 @@ export async function fetchAllPrInfo(
     while (i < branchesToFetch.length) {
       const branch = branchesToFetch[i++]!;
       const knownNumber = prNumberCache?.get(branch);
-      const info = await fetchPrInfo(repoPath, branch, knownNumber);
+      const info = await fetchPrResult(repoPath, branch, knownNumber);
       result.set(branch, info);
-      // If we entered backoff during this batch, fill remaining with null
+      // If we entered backoff during this batch, mark the rest as unfetched so
+      // their cached values survive.
       if (isInBackoff(repoPath)) {
         while (i < branchesToFetch.length) {
-          result.set(branchesToFetch[i++]!, null);
+          result.set(branchesToFetch[i++]!, { ok: false, error: "in backoff" });
         }
         return;
       }
@@ -273,6 +307,24 @@ export async function fetchAllPrInfo(
   await Promise.all(workers);
 
   return result;
+}
+
+/**
+ * Convenience wrapper for callers that treat a failed fetch the same as no PR.
+ * Anything that caches should use `fetchAllPrResults`.
+ */
+export async function fetchAllPrInfo(
+  repoPath: string,
+  branches: string[],
+  prNumberCache?: Map<string, number>,
+  prCache?: Map<string, PrInfo | null>
+): Promise<Map<string, PrInfo | null>> {
+  const results = await fetchAllPrResults(repoPath, branches, prNumberCache, prCache);
+  const flattened = new Map<string, PrInfo | null>();
+  for (const [branch, result] of results) {
+    flattened.set(branch, result.ok ? result.value : null);
+  }
+  return flattened;
 }
 
 export function getPrStatusLabel(pr: PrInfo): { label: string; color: string } {

@@ -13,11 +13,13 @@ interface ActionBarProps {
   hasLinearProject?: boolean;
   ideIsTerm?: boolean;
   integrationLoading?: string | null;
+  /** Short "showing cached data" hint, shown when the last fetch failed. */
+  stale?: string | null;
   /** Chat pane has focus — show chat keys instead of dashboard keys. */
   chatMode?: boolean;
 }
 
-export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, hasLinearProject, ideIsTerm, integrationLoading, chatMode }: ActionBarProps) {
+export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, escHint, ghPrStatus, linearEnabled, hasPr, hasLinear, hasLinearProject, ideIsTerm, integrationLoading, stale, chatMode }: ActionBarProps) {
   if (busy) {
     return (
       <Box borderStyle="single" borderTop borderBottom={false} borderLeft={false} borderRight={false} paddingX={1}>
@@ -45,6 +47,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           <Text color="yellow"> [Tab]</Text> Terminal
           <Text color="yellow"> [Shift+Tab]</Text> IDE
           <Text color="yellow"> [Esc]</Text> Back
+          {stale && <Text color="yellow"> {stale}</Text>}
         </Text>
       </Box>
     );
@@ -74,6 +77,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           <Text color="yellow"> [s]</Text>ettings
           <Text color="yellow"> [f]</Text>eature
           <Text color="yellow"> [q]</Text>uit
+          {stale && <Text color="yellow"> {stale}</Text>}
         </Text>
       ) : (
         <Text>
@@ -82,6 +86,7 @@ export const ActionBar = React.memo(function ActionBar({ busy, hasWorktrees, esc
           <Text color="yellow"> [s]</Text>ettings
           <Text color="yellow"> [f]</Text>eature
           <Text color="yellow"> [q]</Text>uit
+          {stale && <Text color="yellow"> {stale}</Text>}
         </Text>
       )}
     </Box>

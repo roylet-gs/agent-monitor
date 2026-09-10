@@ -15,6 +15,8 @@ function loadFixture(name: string): unknown {
 let ghFixture: unknown = loadFixture("gh-pr-open.json");
 let linearFixture: unknown = loadFixture("linear-issue.json");
 let ghVersionResponse = "gh version 2.62.0 (2024-12-05)";
+/** When set, the gh and Linear routes fail as if the network were down. */
+let outage = false;
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -67,6 +69,11 @@ const server = http.createServer(async (req, res) => {
 
     // Handle gh pr view
     if (argsStr.includes("pr") && argsStr.includes("view")) {
+      if (outage) {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("simulated outage");
+        return;
+      }
       if (ghFixture === null) {
         res.writeHead(404, { "Content-Type": "text/plain" });
         res.end("no pull requests found");
@@ -85,6 +92,11 @@ const server = http.createServer(async (req, res) => {
 
   // Fake Linear GraphQL endpoint
   if (url.pathname === "/linear" && req.method === "POST") {
+    if (outage) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "simulated outage" }));
+      return;
+    }
     const body = await readBody(req);
     let parsed: { query?: string };
     try {
@@ -122,6 +134,9 @@ const server = http.createServer(async (req, res) => {
       if (config.ghVersion !== undefined) {
         ghVersionResponse = config.ghVersion;
       }
+      if (config.outage !== undefined) {
+        outage = Boolean(config.outage);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "configured" }));
     } catch (err) {
@@ -136,6 +151,7 @@ const server = http.createServer(async (req, res) => {
     ghFixture = loadFixture("gh-pr-open.json");
     linearFixture = loadFixture("linear-issue.json");
     ghVersionResponse = "gh version 2.62.0 (2024-12-05)";
+    outage = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "reset" }));
     return;

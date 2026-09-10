@@ -139,4 +139,45 @@ describe("ActionBar", () => {
     );
     expect(lastFrame()!).not.toContain("erminal");
   });
+
+  describe("stale hint", () => {
+    it("shows the hint alongside the normal keys", () => {
+      const { lastFrame } = render(
+        <ActionBar busy={null} hasWorktrees={true} escHint={false} stale="⚠ offline — cached" />
+      );
+      const frame = lastFrame()!;
+      expect(frame).toContain("cached");
+      expect(frame).toContain("Open");
+    });
+
+    it("shows the hint when there are no worktrees", () => {
+      const { lastFrame } = render(
+        <ActionBar busy={null} hasWorktrees={false} escHint={false} stale="⚠ offline — cached" />
+      );
+      expect(lastFrame()!).toContain("cached");
+    });
+
+    it("shows the hint in chat mode", () => {
+      const { lastFrame } = render(
+        <ActionBar busy={null} hasWorktrees={true} escHint={false} chatMode={true} stale="⚠ offline — cached" />
+      );
+      const frame = lastFrame()!;
+      expect(frame).toContain("cached");
+      expect(frame).toContain("Send");
+    });
+
+    it("renders nothing extra when data is fresh", () => {
+      const { lastFrame } = render(
+        <ActionBar busy={null} hasWorktrees={true} escHint={false} stale={null} />
+      );
+      expect(lastFrame()!).not.toContain("cached");
+    });
+
+    it("stays out of the way of the busy spinner", () => {
+      const { lastFrame } = render(
+        <ActionBar busy="Creating worktree" hasWorktrees={true} escHint={false} stale="⚠ offline — cached" />
+      );
+      expect(lastFrame()!).not.toContain("cached");
+    });
+  });
 });

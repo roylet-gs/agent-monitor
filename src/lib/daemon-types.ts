@@ -1,4 +1,4 @@
-import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession } from "./types.js";
+import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession, IntegrationHealth } from "./types.js";
 import type { PubSubMessage } from "./pubsub-types.js";
 
 // --- hook-event → Daemon (existing messages, unchanged) ---
@@ -29,6 +29,8 @@ export interface DaemonData {
   groups: WorktreeGroup[];
   flatWorktrees: WorktreeWithStatus[];
   standaloneSessions: StandaloneSession[];
+  /** Whether the last GitHub/Linear fetch succeeded — drives the "cached" hint. */
+  integrationHealth: IntegrationHealth;
 }
 
 export interface RefreshResultMessage {

@@ -32,6 +32,8 @@ vi.mock("../../src/lib/git.js", () => ({
 vi.mock("../../src/lib/github.js", () => ({
   fetchPrInfo: vi.fn().mockResolvedValue(null),
   fetchAllPrInfo: vi.fn().mockResolvedValue(new Map()),
+  fetchPrResult: vi.fn().mockResolvedValue({ ok: true, value: null }),
+  fetchAllPrResults: vi.fn().mockResolvedValue(new Map()),
   getPrStatusLabel: vi.fn(() => ({ label: "In Review", color: "cyan" })),
   isGhAvailable: vi.fn(() => false),
   deriveChecksStatus: vi.fn(() => "none"),
@@ -39,6 +41,9 @@ vi.mock("../../src/lib/github.js", () => ({
 
 vi.mock("../../src/lib/linear.js", () => ({
   fetchLinearInfo: vi.fn().mockResolvedValue(null),
+  fetchLinearResult: vi.fn().mockResolvedValue({ ok: true, value: null }),
+  linearAttachmentMatchesBranch: vi.fn(() => true),
+  linearAttachmentToPrInfo: vi.fn(() => null),
   verifyLinearApiKey: vi.fn().mockResolvedValue({ ok: true }),
   getLinearStatusColor: vi.fn(() => "cyan"),
 }));

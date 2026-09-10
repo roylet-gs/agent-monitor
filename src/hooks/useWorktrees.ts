@@ -1,14 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getWorktrees, getAgentStatuses, updateWorktreeCustomName, clearLinearNicknames } from "../lib/db.js";
 import { getGitStatus, getLastCommit } from "../lib/git.js";
-import { fetchAllPrInfo } from "../lib/github.js";
-import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "../lib/linear.js";
+import {
+  cachedLinearInfo,
+  clearCachedLinear,
+  getIntegrationHealth,
+  hydrateIntegrationCache,
+  integrationFieldsFor,
+  refreshLinearCache,
+  refreshPrCache,
+  type RepoBranches,
+} from "../lib/integration-cache.js";
 import { buildGroups, applyWorktreeFilters, type RepoWorktrees } from "../lib/grouping.js";
 import { log } from "../lib/logger.js";
 import { syncWorktrees } from "../lib/sync.js";
 import { getTerminalPaths, getIdePaths, getWorktreeProcesses, processesForWorktree } from "../lib/process.js";
 import { realpathSync } from "fs";
-import type { WorktreeWithStatus, WorktreeGroup, PrInfo, LinearInfo, Repository, WorktreeSortCriterion, RunningProcess } from "../lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup, IntegrationHealth, Repository, WorktreeSortCriterion, RunningProcess } from "../lib/types.js";
 
 export interface WorktreeHookConfig {
   repositories: Repository[];
@@ -30,9 +38,19 @@ export interface WorktreeHookConfig {
   runningProcessFilter: string;
 }
 
+/** All repos with their worktree branches — the unit both integration fetches take. */
+function buildRepoGroups(repos: Repository[]): RepoBranches[] {
+  return repos.map((repo) => ({
+    repoPath: repo.path,
+    repoId: repo.id,
+    branches: getWorktrees(repo.id).map((wt) => wt.branch),
+  }));
+}
+
 export function useWorktrees(config: WorktreeHookConfig): {
   groups: WorktreeGroup[];
   flatWorktrees: WorktreeWithStatus[];
+  integrationHealth: IntegrationHealth;
   refresh: () => Promise<void>;
   lightRefresh: () => Promise<void>;
   quickRefresh: () => Promise<void>;
@@ -58,11 +76,21 @@ export function useWorktrees(config: WorktreeHookConfig): {
     runningProcessFilter,
   } = config;
 
-  const [data, setData] = useState<{ groups: WorktreeGroup[]; flatWorktrees: WorktreeWithStatus[] }>({ groups: [], flatWorktrees: [] });
-  const prCacheRef = useRef<Map<string, PrInfo | null>>(new Map());
-  const prNumberCacheRef = useRef<Map<string, number>>(new Map());
-  const linearCacheRef = useRef<Map<string, LinearInfo | null>>(new Map());
+  const [data, setData] = useState<{
+    groups: WorktreeGroup[];
+    flatWorktrees: WorktreeWithStatus[];
+    integrationHealth: IntegrationHealth;
+  }>({ groups: [], flatWorktrees: [], integrationHealth: getIntegrationHealth() });
   const prevFingerprintRef = useRef("");
+
+  // Load persisted PR/Linear data before the first render pass. This has to be
+  // synchronous — the first refresh() fires from the [repositories] effect, and a
+  // useEffect would land too late, painting one empty frame (the very symptom the
+  // cache exists to prevent).
+  useState(() => {
+    hydrateIntegrationCache();
+    return null;
+  });
 
   // Keep refs for values that refresh needs, so it always reads the latest
   const reposRef = useRef(repositories);
@@ -92,71 +120,18 @@ export function useWorktrees(config: WorktreeHookConfig): {
   const genRef = useRef(0);
 
   // Store integration functions in refs so refresh can have [] deps
-  const refreshPrInfoRef = useRef<(repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }>) => Promise<void>>(async () => {});
-  const refreshLinearInfoRef = useRef<(branches: string[]) => Promise<void>>(async () => {});
+  const refreshPrInfoRef = useRef<(repoGroups: RepoBranches[], force?: boolean) => Promise<void>>(async () => {});
+  const refreshLinearInfoRef = useRef<(repoGroups: RepoBranches[]) => Promise<void>>(async () => {});
   const autoSetLinearNicknamesRef = useRef<() => void>(() => {});
 
-  // Fetch PR info for all branches, batched by repo, and update cache
-  const refreshPrInfo = useCallback(async (repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }>) => {
-    if (repoGroups.length === 0) return;
-    await Promise.all(
-      repoGroups.map(async ({ repoPath, repoId, branches }) => {
-        if (branches.length === 0) return;
-        // Build per-repo PR number cache from the shared ref
-        const repoPrNumbers = new Map<string, number>();
-        for (const branch of branches) {
-          const num = prNumberCacheRef.current.get(`${repoId}:${branch}`);
-          if (num != null) repoPrNumbers.set(branch, num);
-        }
-        try {
-          // Build per-repo PR cache for smart skip logic
-          const repoPrCache = new Map<string, PrInfo | null>();
-          for (const branch of branches) {
-            const cacheKey = `${repoId}:${branch}`;
-            if (prCacheRef.current.has(cacheKey)) {
-              repoPrCache.set(branch, prCacheRef.current.get(cacheKey)!);
-            }
-          }
-          const prMap = await fetchAllPrInfo(repoPath, branches, repoPrNumbers, repoPrCache);
-          for (const [branch, info] of prMap) {
-            const cacheKey = `${repoId}:${branch}`;
-            // Preserve stale cache when backoff returns null
-            if (info !== null || !prCacheRef.current.has(cacheKey)) {
-              prCacheRef.current.set(cacheKey, info);
-            }
-            // Cache PR number for cheaper subsequent fetches,
-            // but clear it for terminal PRs so next cycle fetches by branch name
-            // (to discover new PRs on the same branch)
-            if (info?.number != null) {
-              if (info.state === "MERGED" || info.state === "CLOSED") {
-                prNumberCacheRef.current.delete(cacheKey);
-              } else {
-                prNumberCacheRef.current.set(cacheKey, info.number);
-              }
-            }
-          }
-        } catch (err) {
-          log("warn", "useWorktrees", `Batch PR fetch failed for repo ${repoId}, keeping stale cache: ${err}`);
-        }
-      })
-    );
+  // Caching, stale-preservation and persistence all live in integration-cache.ts,
+  // shared with the daemon so the two can't diverge.
+  const refreshPrInfo = useCallback(async (repoGroups: RepoBranches[], force = false) => {
+    await refreshPrCache(repoGroups, { force });
   }, []);
 
-  const refreshLinearInfo = useCallback(async (branches: string[]) => {
-    if (branches.length === 0) return;
-    const entries = await Promise.all(
-      branches.map(async (branch) => {
-        try {
-          const info = await fetchLinearInfo(branch, linearApiKeyRef.current);
-          return [branch, info] as const;
-        } catch {
-          return [branch, linearCacheRef.current.get(branch) ?? null] as const;
-        }
-      })
-    );
-    for (const [branch, info] of entries) {
-      linearCacheRef.current.set(branch, info);
-    }
+  const refreshLinearInfo = useCallback(async (repoGroups: RepoBranches[]) => {
+    await refreshLinearCache(repoGroups, linearApiKeyRef.current);
   }, []);
 
   // Auto-set worktree nicknames from Linear ticket titles
@@ -166,7 +141,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
       const dbWorktrees = getWorktrees(repo.id);
       for (const wt of dbWorktrees) {
         if (wt.custom_name) continue;
-        const linearInfo = linearCacheRef.current.get(wt.branch);
+        const linearInfo = cachedLinearInfo(repo.id, wt.branch);
         if (!linearInfo) continue;
         log("info", "useWorktrees", `Auto-setting nickname for ${wt.branch} from Linear: "${linearInfo.title}"`);
         updateWorktreeCustomName(wt.id, linearInfo.title, "linear");
@@ -187,29 +162,19 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const shouldFetchLinear = linearEnabledRef.current;
 
     if (repos.length === 0) {
-      setData((prev) => prev.groups.length === 0 && prev.flatWorktrees.length === 0 ? prev : { groups: [], flatWorktrees: [] });
+      setData((prev) => prev.groups.length === 0 && prev.flatWorktrees.length === 0 ? prev : { ...prev, groups: [], flatWorktrees: [] });
       return;
     }
 
     try {
       // Collect all branches for integration fetches if forced
       if (forceIntegrations) {
-        const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
-        const allBranchNames: string[] = [];
-        for (const repo of repos) {
-          const dbWorktrees = getWorktrees(repo.id);
-          const ghBranches: string[] = [];
-          for (const wt of dbWorktrees) {
-            allBranchNames.push(wt.branch);
-            ghBranches.push(wt.branch);
-          }
-          repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches: ghBranches });
-        }
+        const repoGroups = buildRepoGroups(repos);
         const shouldRefreshPr = shouldFetchPr && ghRefreshOnManualRef.current;
         const shouldRefreshLinear = shouldFetchLinear && linearRefreshOnManualRef.current;
         await Promise.all([
-          shouldRefreshPr ? refreshPrInfoRef.current(repoGroups) : Promise.resolve(),
-          shouldRefreshLinear ? refreshLinearInfoRef.current(allBranchNames) : Promise.resolve(),
+          shouldRefreshPr ? refreshPrInfoRef.current(repoGroups, true) : Promise.resolve(),
+          shouldRefreshLinear ? refreshLinearInfoRef.current(repoGroups) : Promise.resolve(),
         ]);
         autoSetLinearNicknamesRef.current();
         // Bail if a newer refresh started while we were fetching
@@ -272,16 +237,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
               has_terminal,
               open_ide,
               running_processes,
-              pr_info: (() => {
-                const ghPr = prCacheRef.current.get(`${repo.id}:${wt.branch}`);
-                if (ghPr) return ghPr;
-                const linearInfo = linearCacheRef.current.get(wt.branch);
-                if (linearInfo?.prAttachment && linearAttachmentMatchesBranch(linearInfo.prAttachment, wt.branch)) {
-                  return linearAttachmentToPrInfo(linearInfo.prAttachment);
-                }
-                return null;
-              })(),
-              linear_info: linearCacheRef.current.get(wt.branch) ?? null,
+              ...integrationFieldsFor(repo.id, wt.branch),
             };
           })
         );
@@ -301,6 +257,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
       // Final staleness check before committing state
       if (myGen !== genRef.current) return;
 
+      const integrationHealth = getIntegrationHealth();
       const fingerprint = JSON.stringify(allFlat.map(wt => ({
         id: wt.id, branch: wt.branch, custom_name: wt.custom_name, is_main: wt.is_main,
         status: wt.agent_status?.status,
@@ -320,10 +277,13 @@ export function useWorktrees(config: WorktreeHookConfig): {
         linear_pr_url: wt.linear_info?.prAttachment?.url,
         linear_project: wt.linear_info?.project?.id,
         linear_project_name: wt.linear_info?.project?.name,
-      })));
+      })))
+        // Integration health drives the "showing cached data" hint in the action
+        // bar; without it here the flag flips but the render is skipped.
+        + `|gh:${integrationHealth.githubFailing ? 1 : 0}|ln:${integrationHealth.linearFailing ? 1 : 0}`;
       if (fingerprint !== prevFingerprintRef.current) {
         prevFingerprintRef.current = fingerprint;
-        setData({ groups: newGroups, flatWorktrees: allFlat });
+        setData({ groups: newGroups, flatWorktrees: allFlat, integrationHealth });
       }
     } catch (err) {
       log("error", "useWorktrees", `Failed to refresh worktrees: ${err}`);
@@ -352,13 +312,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     if (!ghPrStatus || repositories.length === 0) return;
 
     const doFetch = async () => {
-      const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
-      for (const repo of reposRef.current) {
-        const dbWorktrees = getWorktrees(repo.id);
-        const branches = dbWorktrees.map((wt) => wt.branch);
-        repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
-      }
-      await refreshPrInfoRef.current(repoGroups);
+      await refreshPrInfoRef.current(buildRepoGroups(reposRef.current));
       refresh(false);
     };
 
@@ -393,19 +347,18 @@ export function useWorktrees(config: WorktreeHookConfig): {
     }
   }, [linearEnabled, linearAutoNickname]);
 
+  // Drop cached tickets when Linear is switched off or the key changes, so the
+  // list stops grouping by data the user no longer wants (or can no longer verify).
+  useEffect(() => {
+    if (!linearEnabled) clearCachedLinear();
+  }, [linearEnabled, linearApiKey]);
+
   // Linear polling loop
   useEffect(() => {
     if (!linearEnabled || repositories.length === 0) return;
 
     const doFetch = async () => {
-      const allBranches: string[] = [];
-      for (const repo of reposRef.current) {
-        const dbWorktrees = getWorktrees(repo.id);
-        for (const wt of dbWorktrees) {
-          allBranches.push(wt.branch);
-        }
-      }
-      await refreshLinearInfoRef.current(allBranches);
+      await refreshLinearInfoRef.current(buildRepoGroups(reposRef.current));
       autoSetLinearNicknamesRef.current();
       refresh(false);
     };
@@ -429,17 +382,7 @@ export function useWorktrees(config: WorktreeHookConfig): {
     const shouldFetchLinear = linearEnabledRef.current && linearRefreshOnManualRef.current;
     if (!shouldFetchPr && !shouldFetchLinear) return;
 
-    const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
-    const allBranchNames: string[] = [];
-    for (const repo of repos) {
-      const dbWorktrees = getWorktrees(repo.id);
-      const ghBranches: string[] = [];
-      for (const wt of dbWorktrees) {
-        allBranchNames.push(wt.branch);
-        ghBranches.push(wt.branch);
-      }
-      repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches: ghBranches });
-    }
+    const repoGroups = buildRepoGroups(repos);
 
     // Track which sources are still pending for status reporting
     const pending = new Set<string>();
@@ -456,10 +399,10 @@ export function useWorktrees(config: WorktreeHookConfig): {
 
     await Promise.all([
       shouldFetchPr
-        ? refreshPrInfoRef.current(repoGroups).then(() => { pending.delete("GitHub"); reportStatus(); })
+        ? refreshPrInfoRef.current(repoGroups, true).then(() => { pending.delete("GitHub"); reportStatus(); })
         : Promise.resolve(),
       shouldFetchLinear
-        ? refreshLinearInfoRef.current(allBranchNames).then(() => { pending.delete("Linear"); reportStatus(); })
+        ? refreshLinearInfoRef.current(repoGroups).then(() => { pending.delete("Linear"); reportStatus(); })
         : Promise.resolve(),
     ]);
     autoSetLinearNicknamesRef.current();
@@ -486,5 +429,5 @@ export function useWorktrees(config: WorktreeHookConfig): {
     };
   }, []);
 
-  return { groups: data.groups, flatWorktrees: data.flatWorktrees, refresh: forceRefresh, lightRefresh, quickRefresh, refreshIntegrations };
+  return { groups: data.groups, flatWorktrees: data.flatWorktrees, integrationHealth: data.integrationHealth, refresh: forceRefresh, lightRefresh, quickRefresh, refreshIntegrations };
 }

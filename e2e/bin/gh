@@ -1,19 +1,32 @@
 #!/bin/bash
 # Fake gh CLI that proxies all calls to the mock-api server.
 # This sits on $PATH ahead of any real gh binary.
+#
+# Failure fidelity matters: real gh prints "no pull requests found" only when the
+# API authoritatively says the branch has no PR, and a connection error when it
+# can't reach GitHub at all. am treats those two very differently — the first
+# clears cached PR data, the second keeps it — so the shim must not collapse them.
 
 MOCK_URL="${AM_MOCK_API_URL:-http://mock-api:4100}"
 
-response=$(curl -sf "${MOCK_URL}/gh" \
+body_file=$(mktemp)
+status=$(curl -s -o "$body_file" -w '%{http_code}' "${MOCK_URL}/gh" \
   -H "Content-Type: application/json" \
   -d "$(printf '{"args":%s,"cwd":"%s"}' "$(printf '%s\n' "$@" | jq -R . | jq -s .)" "$(pwd)")" \
   2>/dev/null)
+curl_exit=$?
 
-exit_code=$?
-
-if [ $exit_code -ne 0 ]; then
-  echo "no pull requests found" >&2
+if [ $curl_exit -ne 0 ] || [ -z "$status" ] || [ "$status" -ge 500 ]; then
+  rm -f "$body_file"
+  echo "error connecting to api.github.com" >&2
   exit 1
 fi
 
-echo "$response"
+if [ "$status" = "404" ]; then
+  cat "$body_file" >&2
+  rm -f "$body_file"
+  exit 1
+fi
+
+cat "$body_file"
+rm -f "$body_file"

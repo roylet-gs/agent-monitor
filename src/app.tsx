@@ -162,7 +162,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
     }
   }, [repositories.length > 0 && settings.autoSyncOnStartup]);
 
-  const { groups, flatWorktrees, standaloneSessions, refresh, lightRefresh, quickRefresh, refreshIntegrations } = useDaemon({
+  const { groups, flatWorktrees, standaloneSessions, integrationHealth, refresh, lightRefresh, quickRefresh, refreshIntegrations } = useDaemon({
     repositories,
     settings,
     onAgentUpdate: (msg) => {
@@ -1460,6 +1460,7 @@ export function App({ onRunScript, watch, onUpdate, forceSetup }: AppProps) {
           groupByProject={settings.linearEnabled && settings.worktreeSort.find((c) => c.enabled)?.key === "linearProject"}
           ideIsTerm={settings.ide === "terminal"}
           integrationLoading={integrationLoading}
+          integrationHealth={integrationHealth}
           chatPane={mode === "chat" ? chatNode ?? undefined : undefined}
         />
       )}

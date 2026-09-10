@@ -347,4 +347,54 @@ describe("db", () => {
       expect(db.getStandaloneSessionByPath("/tmp/repo/.worktrees/feat")).toBeUndefined();
     });
   });
+
+  describe("integration cache", () => {
+    it("round-trips a payload", () => {
+      db.setIntegrationCacheEntry("linear", "r1:feature/x", JSON.stringify({ identifier: "ENG-1" }));
+      const rows = db.loadIntegrationCache("linear");
+      expect(JSON.parse(rows.get("r1:feature/x")!.payload!)).toEqual({ identifier: "ENG-1" });
+      expect(rows.get("r1:feature/x")!.fetched_at).toBeTruthy();
+    });
+
+    it("upserts rather than duplicating a key", () => {
+      db.setIntegrationCacheEntry("linear", "r1:feature/x", JSON.stringify({ identifier: "ENG-1" }));
+      db.setIntegrationCacheEntry("linear", "r1:feature/x", JSON.stringify({ identifier: "ENG-2" }));
+      const rows = db.loadIntegrationCache("linear");
+      expect(rows.size).toBe(1);
+      expect(JSON.parse(rows.get("r1:feature/x")!.payload!)).toEqual({ identifier: "ENG-2" });
+    });
+
+    it("stores a null payload as a known absence, distinct from no row", () => {
+      db.setIntegrationCacheEntry("linear", "r1:feature/x", null);
+      const rows = db.loadIntegrationCache("linear");
+      expect(rows.has("r1:feature/x")).toBe(true);
+      expect(rows.get("r1:feature/x")!.payload).toBeNull();
+      expect(rows.has("r1:feature/never-fetched")).toBe(false);
+    });
+
+    it("keeps the two kinds in separate namespaces", () => {
+      db.setIntegrationCacheEntry("pr", "r1:feature/x", JSON.stringify({ number: 1 }));
+      db.setIntegrationCacheEntry("linear", "r1:feature/x", JSON.stringify({ identifier: "ENG-1" }));
+      expect(db.loadIntegrationCache("pr").size).toBe(1);
+      expect(db.loadIntegrationCache("linear").size).toBe(1);
+    });
+
+    it("prunes keys that are no longer valid, keeping the rest", () => {
+      db.setIntegrationCacheEntry("pr", "r1:keep", JSON.stringify({ number: 1 }));
+      db.setIntegrationCacheEntry("pr", "r1:drop", JSON.stringify({ number: 2 }));
+      db.setIntegrationCacheEntry("linear", "r1:drop", JSON.stringify({ identifier: "ENG-1" }));
+
+      expect(db.pruneIntegrationCache("pr", ["r1:keep"])).toBe(1);
+      expect([...db.loadIntegrationCache("pr").keys()]).toEqual(["r1:keep"]);
+      // The other kind is untouched.
+      expect(db.loadIntegrationCache("linear").size).toBe(1);
+    });
+
+    it("clears a whole kind when given no valid keys", () => {
+      db.setIntegrationCacheEntry("linear", "r1:a", null);
+      db.setIntegrationCacheEntry("linear", "r1:b", null);
+      expect(db.pruneIntegrationCache("linear", [])).toBe(2);
+      expect(db.loadIntegrationCache("linear").size).toBe(0);
+    });
+  });
 });
