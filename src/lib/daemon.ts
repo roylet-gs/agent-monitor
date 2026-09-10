@@ -14,8 +14,15 @@ import { initLogger, log } from "./logger.js";
 import { loadSettings } from "./settings.js";
 import { getDb, getRepositories, getWorktrees, getAgentStatuses, getStandaloneSessions, pruneStaleStandaloneSessions, updateWorktreeCustomName, clearLinearNicknames } from "./db.js";
 import { getGitStatus, getLastCommit } from "./git.js";
-import { fetchAllPrInfo } from "./github.js";
-import { fetchLinearInfo, linearAttachmentMatchesBranch, linearAttachmentToPrInfo } from "./linear.js";
+import {
+  cachedLinearInfo,
+  getIntegrationHealth,
+  hydrateIntegrationCache,
+  integrationFieldsFor,
+  refreshLinearCache,
+  refreshPrCache,
+  type RepoBranches,
+} from "./integration-cache.js";
 import { getTerminalPathsAsync, getIdePathsAsync, getWorktreeProcessesAsync, processesForWorktree } from "./process.js";
 import { isEffectivelyOpenStandalone } from "./agent-utils.js";
 import { buildGroups, applyWorktreeFilters, type RepoWorktrees } from "./grouping.js";
@@ -29,18 +36,13 @@ import type {
   AgentUpdatePassthroughMessage,
   DaemonToTuiMessage,
 } from "./daemon-types.js";
-import type { WorktreeGroup, WorktreeWithStatus, PrInfo, LinearInfo, Repository, Settings, StandaloneSession, RunningProcess } from "./types.js";
+import type { WorktreeGroup, WorktreeWithStatus, Repository, Settings, StandaloneSession, RunningProcess } from "./types.js";
 import { getVersion } from "./version.js";
 
 // --- State ---
 
 let settings: Settings;
 let repositories: Repository[];
-
-// Caches (moved from useWorktrees refs)
-const prCache = new Map<string, PrInfo | null>();
-const prNumberCache = new Map<string, number>();
-const linearCache = new Map<string, LinearInfo | null>();
 
 // TUI subscriber connections
 const tuiClients = new Set<net.Socket>();
@@ -260,71 +262,23 @@ function restartPolling(): void {
 
 // --- Integration fetching ---
 
-async function refreshPrInfo(): Promise<void> {
-  const repoGroups: Array<{ repoPath: string; repoId: string; branches: string[] }> = [];
-  for (const repo of repositories) {
-    const dbWorktrees = getWorktrees(repo.id);
-    const branches = dbWorktrees.map((wt) => wt.branch);
-    repoGroups.push({ repoPath: repo.path, repoId: repo.id, branches });
-  }
+/** All repos with their worktree branches — the unit both integration fetches take. */
+function buildRepoGroups(): RepoBranches[] {
+  return repositories.map((repo) => ({
+    repoPath: repo.path,
+    repoId: repo.id,
+    branches: getWorktrees(repo.id).map((wt) => wt.branch),
+  }));
+}
 
-  await Promise.all(
-    repoGroups.map(async ({ repoPath, repoId, branches }) => {
-      if (branches.length === 0) return;
-      const repoPrNumbers = new Map<string, number>();
-      for (const branch of branches) {
-        const num = prNumberCache.get(`${repoId}:${branch}`);
-        if (num != null) repoPrNumbers.set(branch, num);
-      }
-      try {
-        const repoPrCache = new Map<string, PrInfo | null>();
-        for (const branch of branches) {
-          const cacheKey = `${repoId}:${branch}`;
-          if (prCache.has(cacheKey)) {
-            repoPrCache.set(branch, prCache.get(cacheKey)!);
-          }
-        }
-        const prMap = await fetchAllPrInfo(repoPath, branches, repoPrNumbers, repoPrCache);
-        for (const [branch, info] of prMap) {
-          const cacheKey = `${repoId}:${branch}`;
-          if (info !== null || !prCache.has(cacheKey)) {
-            prCache.set(cacheKey, info);
-          }
-          if (info?.number != null) {
-            prNumberCache.set(cacheKey, info.number);
-          }
-        }
-      } catch (err) {
-        log("warn", "daemon", `Batch PR fetch failed for repo ${repoId}: ${err}`);
-      }
-    })
-  );
+// Caching, stale-preservation and persistence all live in integration-cache.ts,
+// shared with useWorktrees so the two can't diverge.
+async function refreshPrInfo(force = false): Promise<void> {
+  await refreshPrCache(buildRepoGroups(), { force });
 }
 
 async function refreshLinearInfoAll(): Promise<void> {
-  const allBranches: string[] = [];
-  for (const repo of repositories) {
-    const dbWorktrees = getWorktrees(repo.id);
-    for (const wt of dbWorktrees) {
-      allBranches.push(wt.branch);
-    }
-  }
-
-  if (allBranches.length === 0) return;
-
-  const entries = await Promise.all(
-    allBranches.map(async (branch) => {
-      try {
-        const info = await fetchLinearInfo(branch, settings.linearApiKey);
-        return [branch, info] as const;
-      } catch {
-        return [branch, linearCache.get(branch) ?? null] as const;
-      }
-    })
-  );
-  for (const [branch, info] of entries) {
-    linearCache.set(branch, info);
-  }
+  await refreshLinearCache(buildRepoGroups(), settings.linearApiKey);
 }
 
 function autoSetLinearNicknames(): void {
@@ -333,7 +287,7 @@ function autoSetLinearNicknames(): void {
     const dbWorktrees = getWorktrees(repo.id);
     for (const wt of dbWorktrees) {
       if (wt.custom_name) continue;
-      const linearInfo = linearCache.get(wt.branch);
+      const linearInfo = cachedLinearInfo(repo.id, wt.branch);
       if (!linearInfo) continue;
       log("info", "daemon", `Auto-setting nickname for ${wt.branch} from Linear: "${linearInfo.title}"`);
       updateWorktreeCustomName(wt.id, linearInfo.title, "linear");
@@ -355,7 +309,9 @@ async function doRefresh(requestId: string | null, includeIntegrations: boolean)
     repositories = getRepositories();
 
     if (includeIntegrations) {
-      const prPromise = settings.ghPrStatus ? refreshPrInfo() : Promise.resolve();
+      // A TUI-requested refresh (requestId set) is user-initiated, so it overrides
+      // the GitHub backoff; the polling timers don't.
+      const prPromise = settings.ghPrStatus ? refreshPrInfo(requestId !== null) : Promise.resolve();
       const linearPromise = settings.linearEnabled ? refreshLinearInfoAll() : Promise.resolve();
       await Promise.all([prPromise, linearPromise]);
       autoSetLinearNicknames();
@@ -441,16 +397,7 @@ async function buildData(): Promise<DaemonData> {
           has_terminal,
           open_ide,
           running_processes,
-          pr_info: (() => {
-            const ghPr = prCache.get(`${repo.id}:${wt.branch}`);
-            if (ghPr) return ghPr;
-            const linearInfo = linearCache.get(wt.branch);
-            if (linearInfo?.prAttachment && linearAttachmentMatchesBranch(linearInfo.prAttachment, wt.branch)) {
-              return linearAttachmentToPrInfo(linearInfo.prAttachment);
-            }
-            return null;
-          })(),
-          linear_info: linearCache.get(wt.branch) ?? null,
+          ...integrationFieldsFor(repo.id, wt.branch),
         };
       })
     );
@@ -479,6 +426,7 @@ async function buildData(): Promise<DaemonData> {
     groups: newGroups,
     flatWorktrees: allFlat,
     standaloneSessions: visibleSessions,
+    integrationHealth: getIntegrationHealth(),
   };
 }
 
@@ -578,6 +526,10 @@ function main(): void {
   // Initialize DB
   getDb();
   repositories = getRepositories();
+
+  // Load persisted PR/Linear data before the first poll, so the first broadcast
+  // after a daemon restart already carries data instead of an empty list.
+  hydrateIntegrationCache();
 
   // Prune stale standalone sessions
   pruneStaleStandaloneSessions();

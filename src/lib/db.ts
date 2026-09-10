@@ -79,6 +79,19 @@ function initSchema(db: Database.Database): void {
     );
   `);
 
+  // Cached GitHub PR / Linear ticket payloads. Written only when a fetch actually
+  // succeeds, so the dashboard keeps showing the last known good data while offline
+  // instead of blanking out (which also collapses ticket/project grouping).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS integration_cache (
+      kind TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      payload TEXT,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (kind, cache_key)
+    );
+  `);
+
   // Migration: drop plan_mode column if present (recreate table without it)
   try {
     db.prepare("SELECT plan_mode FROM agent_status LIMIT 0").run();
@@ -485,6 +498,66 @@ export function pruneStaleStandaloneSessions(maxAgeMs: number = 60 * 60 * 1000):
     .prepare("DELETE FROM standalone_sessions WHERE is_open = 0 AND updated_at < ?")
     .run(cutoff);
   return result.changes;
+}
+
+// --- Integration cache (GitHub PR / Linear ticket payloads) ---
+
+export type IntegrationCacheKind = "pr" | "linear";
+
+export interface IntegrationCacheRow {
+  /** JSON-encoded PrInfo/LinearInfo, or null for a fetch that found nothing. */
+  payload: string | null;
+  fetched_at: string;
+}
+
+export function loadIntegrationCache(
+  kind: IntegrationCacheKind
+): Map<string, IntegrationCacheRow> {
+  const rows = getDb()
+    .prepare("SELECT cache_key, payload, fetched_at FROM integration_cache WHERE kind = ?")
+    .all(kind) as Array<{ cache_key: string; payload: string | null; fetched_at: string }>;
+  const map = new Map<string, IntegrationCacheRow>();
+  for (const row of rows) {
+    map.set(row.cache_key, { payload: row.payload, fetched_at: row.fetched_at });
+  }
+  return map;
+}
+
+/**
+ * Record the result of a *successful* fetch. `payload` is null when the fetch
+ * succeeded but found nothing — that is a real answer and clears any previous value.
+ * A failed fetch must not call this at all.
+ */
+export function setIntegrationCacheEntry(
+  kind: IntegrationCacheKind,
+  cacheKey: string,
+  payload: string | null
+): void {
+  getDb()
+    .prepare(
+      `INSERT INTO integration_cache (kind, cache_key, payload) VALUES (?, ?, ?)
+       ON CONFLICT(kind, cache_key) DO UPDATE SET
+         payload = excluded.payload,
+         fetched_at = datetime('now')`
+    )
+    .run(kind, cacheKey, payload);
+}
+
+/** Drop cached rows whose key no longer corresponds to a known worktree. */
+export function pruneIntegrationCache(
+  kind: IntegrationCacheKind,
+  validKeys: string[]
+): number {
+  const db = getDb();
+  if (validKeys.length === 0) {
+    return db.prepare("DELETE FROM integration_cache WHERE kind = ?").run(kind).changes;
+  }
+  const placeholders = validKeys.map(() => "?").join(",");
+  return db
+    .prepare(
+      `DELETE FROM integration_cache WHERE kind = ? AND cache_key NOT IN (${placeholders})`
+    )
+    .run(kind, ...validKeys).changes;
 }
 
 export function closeDb(): void {

@@ -7,6 +7,8 @@ interface MockSetupConfig {
   linear?: unknown;
   /** gh --version response string. */
   ghVersion?: string;
+  /** Make the gh and Linear routes fail, as if the network were down. */
+  outage?: boolean;
 }
 
 /** Configure mock-api fixtures for the current test. */

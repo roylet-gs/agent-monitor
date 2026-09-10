@@ -30,6 +30,24 @@ export interface AgentStatus {
 
 export type AgentStatusType = "none" | "idle" | "executing" | "planning" | "waiting" | "delegating" | "done";
 
+/**
+ * Result of an external fetch, distinguishing "fetched successfully, and there is
+ * nothing" (`ok: true, value: null`) from "could not fetch" (`ok: false`). Callers
+ * that cache results must only overwrite a cached entry on `ok: true`, otherwise a
+ * transient network failure wipes good data.
+ */
+export type FetchResult<T> =
+  | { ok: true; value: T | null }
+  | { ok: false; error: string };
+
+/** Whether the last fetch attempt against each external integration succeeded. */
+export interface IntegrationHealth {
+  githubFailing: boolean;
+  linearFailing: boolean;
+  lastGithubError: string | null;
+  lastLinearError: string | null;
+}
+
 export interface PrInfo {
   number: number;
   title: string;

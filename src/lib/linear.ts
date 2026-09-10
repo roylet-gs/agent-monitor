@@ -1,9 +1,28 @@
 import http from "node:http";
 import https from "node:https";
 import { log } from "./logger.js";
-import type { LinearInfo, PrInfo } from "./types.js";
+import type { FetchResult, LinearInfo, PrInfo } from "./types.js";
 
 const LINEAR_API_URL = process.env.AM_LINEAR_API_URL || "https://api.linear.app/graphql";
+
+/** A non-2xx response. Carries the body so callers can surface Linear's own message. */
+class HttpStatusError extends Error {
+  constructor(readonly status: number, readonly body: string) {
+    super(`HTTP ${status}: ${body.slice(0, 200)}`);
+    this.name = "HttpStatusError";
+  }
+}
+
+/** Pull the GraphQL error message out of a response body, if there is one. */
+function graphqlMessage(body: string): string | null {
+  try {
+    const parsed = JSON.parse(body);
+    const msg = parsed?.errors?.[0]?.message;
+    return typeof msg === "string" ? msg : null;
+  } catch {
+    return null;
+  }
+}
 
 function httpPost(
   url: string,
@@ -29,7 +48,16 @@ function httpPost(
       (res) => {
         let data = "";
         res.on("data", (chunk: Buffer) => (data += chunk.toString()));
-        res.on("end", () => resolve(data));
+        res.on("end", () => {
+          // A non-2xx body must not be parsed as a valid "no ticket" answer —
+          // callers rely on a rejection to tell failure apart from absence.
+          const status = res.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            reject(new HttpStatusError(status, data));
+            return;
+          }
+          resolve(data);
+        });
       }
     );
     req.on("error", reject);
@@ -44,10 +72,15 @@ function httpPost(
 
 const seenPrAttachments = new Set<string>();
 
-export async function fetchLinearInfo(
+/**
+ * Fetch a branch's Linear ticket, distinguishing "no ticket for this branch" from
+ * "the fetch failed". Callers that cache the result must only overwrite their cache
+ * on `ok: true` — see `src/lib/integration-cache.ts`.
+ */
+export async function fetchLinearResult(
   branch: string,
   apiKey: string
-): Promise<LinearInfo | null> {
+): Promise<FetchResult<LinearInfo>> {
   const query = `
     query($branch: String!) {
       issueVcsBranchSearch(branchName: $branch) {
@@ -78,8 +111,15 @@ export async function fetchLinearInfo(
     );
 
     const json = JSON.parse(raw);
+    // GraphQL reports auth/rate-limit/query problems in a 200 body; those are
+    // failures, not "this branch has no ticket".
+    if (Array.isArray(json?.errors) && json.errors.length > 0) {
+      const msg = json.errors[0]?.message ?? "unknown GraphQL error";
+      log("warn", "linear", `Linear API error for ${branch}: ${msg}`);
+      return { ok: false, error: String(msg) };
+    }
     const issue = json?.data?.issueVcsBranchSearch;
-    if (!issue) return null;
+    if (!issue) return { ok: true, value: null };
 
     // Find first GitHub PR attachment for metadata inspection
     const attachments: Array<{ url: string; title: string; sourceType: string; metadata: Record<string, unknown> }> =
@@ -93,21 +133,36 @@ export async function fetchLinearInfo(
     }
 
     return {
-      identifier: issue.identifier,
-      title: issue.title,
-      url: issue.url,
-      state: issue.state,
-      priorityLabel: issue.priorityLabel,
-      assignee: issue.assignee?.name ?? null,
-      project: issue.project ?? null,
-      prAttachment: prAttachment
-        ? { url: prAttachment.url, title: prAttachment.title, metadata: prAttachment.metadata }
-        : null,
+      ok: true,
+      value: {
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+        state: issue.state,
+        priorityLabel: issue.priorityLabel,
+        assignee: issue.assignee?.name ?? null,
+        project: issue.project ?? null,
+        prAttachment: prAttachment
+          ? { url: prAttachment.url, title: prAttachment.title, metadata: prAttachment.metadata }
+          : null,
+      },
     };
   } catch (err) {
-    log("debug", "linear", `Failed to fetch Linear info for ${branch}: ${err}`);
-    return null;
+    log("warn", "linear", `Failed to fetch Linear info for ${branch}: ${err}`);
+    return { ok: false, error: String(err) };
   }
+}
+
+/**
+ * Convenience wrapper for callers that treat a failed fetch the same as no ticket
+ * (the one-shot CLI commands). Anything that caches should use `fetchLinearResult`.
+ */
+export async function fetchLinearInfo(
+  branch: string,
+  apiKey: string
+): Promise<LinearInfo | null> {
+  const result = await fetchLinearResult(branch, apiKey);
+  return result.ok ? result.value : null;
 }
 
 export async function verifyLinearApiKey(apiKey: string): Promise<{ ok: boolean; name?: string; error?: string }> {
@@ -124,6 +179,11 @@ export async function verifyLinearApiKey(apiKey: string): Promise<{ ok: boolean;
     const msg = json?.errors?.[0]?.message ?? "Invalid API key";
     return { ok: false, error: msg };
   } catch (err) {
+    // Linear answers a bad key with a 401 whose body carries the real message —
+    // prefer that over the bare status line.
+    if (err instanceof HttpStatusError) {
+      return { ok: false, error: graphqlMessage(err.body) ?? `HTTP ${err.status}` };
+    }
     return { ok: false, error: String(err) };
   }
 }

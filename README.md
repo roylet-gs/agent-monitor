@@ -128,7 +128,7 @@ The main view is a two-pane layout: worktrees grouped by repository on the left,
   <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-dashboard.png" alt="Agent Monitor dashboard" width="800">
 </p>
 
-The dashboard auto-refreshes: agent status updates are pushed instantly via a Unix domain socket, while GitHub and Linear data polls on a configurable interval.
+The dashboard auto-refreshes: agent status updates are pushed instantly via a Unix domain socket, while GitHub and Linear data polls on a configurable interval. That GitHub and Linear data is cached on disk, so it survives restarts and stays on screen when you're offline — a `⚠ offline — cached` hint appears in the action bar when the last fetch failed, and cached values are only replaced once a fetch succeeds.
 
 ### Worktree Management
 
@@ -204,6 +204,8 @@ Requires the `gh` CLI to be installed and authenticated.
 ### Linear Integration
 
 Branch names containing Linear ticket identifiers (e.g., `feature/LIN-521-auth-flow`) are automatically linked to their tickets. The dashboard shows ticket status and priority in the detail panel.
+
+Ticket data is cached, so the clustering below stays intact when you lose your connection instead of collapsing into an unsorted list.
 
 To cluster related work together — e.g. all worktrees for the same Linear project, ticket, or repository — enable the corresponding criterion in **Settings → Sorting & Display → Sort Order** (put "Linear project", "Linear ticket", or "Repository" at the top). Sorting handles the grouping, so there's no separate grouping toggle. When "Linear project" is the top criterion, the dashboard shows a `═ Project ═` header above each project cluster.
 
@@ -406,7 +408,7 @@ All data is stored in `~/.agent-monitor/`:
 | File                   | Purpose                                          |
 | ---------------------- | ------------------------------------------------ |
 | `settings.json`        | User preferences                                 |
-| `agent-monitor.db`     | SQLite database (worktrees, repos, agent status) |
+| `agent-monitor.db`     | SQLite database (worktrees, repos, agent status, cached GitHub/Linear data) |
 | `scripts/<repo-id>.sh` | Per-repo startup scripts                         |
 | `debug.log`            | Debug log (auto-rotated)                         |
 | `am.sock`              | Unix domain socket for real-time updates         |
@@ -530,6 +532,12 @@ am logs --module hooks          # Filter by module
 - Verify the API key is set: `am settings get linearApiKey`
 - Ensure `linearEnabled` is `true`: `am settings set linearEnabled true`
 - Branch names must contain a Linear identifier (e.g., `LIN-521`)
+
+**`⚠ offline — cached` in the action bar**
+
+- The last GitHub or Linear fetch failed, so the dashboard is showing the last data it successfully fetched. Everything on screen is real, just not necessarily current.
+- Usual causes: no network, an expired API key, or rate limiting. Check `am doctor` and `~/.agent-monitor/debug.log`.
+- The hint clears itself on the next successful fetch — press `r` once you're back online.
 
 **Database issues**
 

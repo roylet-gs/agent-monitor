@@ -9,9 +9,17 @@ import { useWorktrees, type WorktreeHookConfig } from "./useWorktrees.js";
 import { useStandaloneSessions } from "./useStandaloneSessions.js";
 import { usePubSub } from "./usePubSub.js";
 import { log } from "../lib/logger.js";
-import type { DaemonToTuiMessage } from "../lib/daemon-types.js";
+import type { DaemonData, DaemonToTuiMessage } from "../lib/daemon-types.js";
 import type { PubSubMessage } from "../lib/pubsub-types.js";
-import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession, Repository, Settings } from "../lib/types.js";
+import type { WorktreeGroup, WorktreeWithStatus, StandaloneSession, IntegrationHealth, Repository, Settings } from "../lib/types.js";
+
+/** Assumed-good health until the daemon reports otherwise. */
+const HEALTHY: IntegrationHealth = {
+  githubFailing: false,
+  linearFailing: false,
+  lastGithubError: null,
+  lastLinearError: null,
+};
 
 export interface DaemonHookConfig {
   repositories: Repository[];
@@ -23,6 +31,7 @@ export interface DaemonHookResult {
   groups: WorktreeGroup[];
   flatWorktrees: WorktreeWithStatus[];
   standaloneSessions: StandaloneSession[];
+  integrationHealth: IntegrationHealth;
   refresh: () => Promise<void>;
   lightRefresh: () => Promise<void>;
   quickRefresh: () => Promise<void>;
@@ -37,11 +46,12 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
   const { repositories, settings, onAgentUpdate } = config;
 
   // --- Daemon mode state ---
-  const [daemonData, setDaemonData] = useState<{
-    groups: WorktreeGroup[];
-    flatWorktrees: WorktreeWithStatus[];
-    standaloneSessions: StandaloneSession[];
-  }>({ groups: [], flatWorktrees: [], standaloneSessions: [] });
+  const [daemonData, setDaemonData] = useState<DaemonData>({
+    groups: [],
+    flatWorktrees: [],
+    standaloneSessions: [],
+    integrationHealth: HEALTHY,
+  });
 
   const [connected, setConnected] = useState(false);
   // Start in fallback mode so useWorktrees loads data immediately.
@@ -174,7 +184,10 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
             id: s.id, path: s.path, status: s.status, is_open: s.is_open,
             session_id: s.session_id, last_response: s.last_response,
             transcript_summary: s.transcript_summary, updated_at: s.updated_at,
-          })));
+          })))
+            // The action bar's "showing cached data" hint reads this, so it has to
+            // take part in the render-skip check.
+            + `|gh:${newData.integrationHealth?.githubFailing ? 1 : 0}|ln:${newData.integrationHealth?.linearFailing ? 1 : 0}`;
 
           if (fingerprint !== prevFingerprintRef.current) {
             prevFingerprintRef.current = fingerprint;
@@ -264,6 +277,7 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
       groups: daemonData.groups,
       flatWorktrees: daemonData.flatWorktrees,
       standaloneSessions: daemonData.standaloneSessions,
+      integrationHealth: daemonData.integrationHealth ?? HEALTHY,
       refresh,
       lightRefresh,
       quickRefresh,
@@ -276,6 +290,7 @@ export function useDaemon(config: DaemonHookConfig): DaemonHookResult {
     groups: fallbackWorktrees.groups,
     flatWorktrees: fallbackWorktrees.flatWorktrees,
     standaloneSessions: fallbackStandalone.sessions,
+    integrationHealth: fallbackWorktrees.integrationHealth,
     refresh,
     lightRefresh,
     quickRefresh,

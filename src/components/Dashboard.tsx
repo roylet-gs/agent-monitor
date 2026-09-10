@@ -6,7 +6,20 @@ import { WorktreeDetail } from "./WorktreeDetail.js";
 import { ActionBar } from "./ActionBar.js";
 import { LogPanel } from "./LogPanel.js";
 import { useTerminalSize } from "../hooks/useTerminalSize.js";
-import type { WorktreeWithStatus, WorktreeGroup, StandaloneSession } from "../lib/types.js";
+import type { WorktreeWithStatus, WorktreeGroup, StandaloneSession, IntegrationHealth } from "../lib/types.js";
+
+/**
+ * One short hint saying the dashboard is showing data it couldn't refresh, so a
+ * green check or a ticket header isn't mistaken for current.
+ */
+function staleHint(health?: IntegrationHealth | null): string | null {
+  if (!health) return null;
+  const { githubFailing, linearFailing } = health;
+  if (githubFailing && linearFailing) return "⚠ offline — cached";
+  if (linearFailing) return "⚠ Linear offline — cached";
+  if (githubFailing) return "⚠ GitHub offline — cached";
+  return null;
+}
 
 export const DETAIL_PANEL_MIN_COLS = 100;
 
@@ -34,6 +47,7 @@ interface DashboardProps {
   groupByProject?: boolean;
   ideIsTerm?: boolean;
   integrationLoading?: string | null;
+  integrationHealth?: IntegrationHealth | null;
   /** When set (wide terminals), rendered in place of the detail panel with chat keys in the action bar. */
   chatPane?: React.ReactNode;
 }
@@ -62,6 +76,7 @@ export const Dashboard = React.memo(function Dashboard({
   groupByProject = false,
   ideIsTerm,
   integrationLoading,
+  integrationHealth,
   chatPane,
 }: DashboardProps) {
   const isStandaloneSelected = selectedIndex >= flatWorktrees.length;
@@ -73,6 +88,8 @@ export const Dashboard = React.memo(function Dashboard({
   const { columns } = useTerminalSize();
   const showDetail = columns >= DETAIL_PANEL_MIN_COLS;
 
+  const staleLabel = staleHint(integrationHealth);
+
   return (
     <Box flexDirection="column" flexGrow={1}>
       <StatusBar repoName={repoName} worktreeCount={flatWorktrees.length} repoCount={new Set(groups.map((g) => g.repo.id)).size} standaloneCount={standaloneSessions.length} version={version} updateInfo={updateInfo} />
@@ -81,7 +98,7 @@ export const Dashboard = React.memo(function Dashboard({
         {showDetail && (chatPane ?? <WorktreeDetail worktree={selectedWorktree} standaloneSession={selectedStandalone} showPrStatus={showPrStatus} showLinearTicket={showLinearTicket} showGitAheadBehind={showGitAheadBehind} showLastCommit={showLastCommit} showRunningProcesses={showRunningProcesses} />)}
       </Box>
       {showLogs && <LogPanel height={Math.max(5, Math.floor(terminalRows / 3))} />}
-      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} hasLinearProject={!!selectedWorktree?.linear_info?.project?.url} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} chatMode={!!chatPane && showDetail} />
+      <ActionBar busy={busy} hasWorktrees={flatWorktrees.length > 0 || standaloneSessions.length > 0} escHint={escHint} ghPrStatus={ghPrStatus} linearEnabled={linearEnabled} hasPr={!!selectedWorktree?.pr_info} hasLinear={!!selectedWorktree?.linear_info} hasLinearProject={!!selectedWorktree?.linear_info?.project?.url} ideIsTerm={ideIsTerm} integrationLoading={integrationLoading} stale={staleLabel} chatMode={!!chatPane && showDetail} />
     </Box>
   );
 });

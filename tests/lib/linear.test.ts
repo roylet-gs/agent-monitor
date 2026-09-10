@@ -112,3 +112,129 @@ describe("fetchLinearInfo", () => {
     expect(info?.project).toBeNull();
   });
 });
+
+/**
+ * A cached ticket must only be cleared by an authoritative "there is no ticket".
+ * Everything else — HTTP errors, GraphQL errors, a dead socket, junk bodies — has to
+ * report failure so the caller keeps what it already had.
+ */
+describe("fetchLinearResult", () => {
+  let server: http.Server | null = null;
+
+  afterEach(async () => {
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = null;
+    }
+    delete process.env.AM_LINEAR_API_URL;
+    vi.resetModules();
+  });
+
+  async function serveRaw(handler: http.RequestListener) {
+    server = http.createServer(handler);
+    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const { port } = server!.address() as AddressInfo;
+    process.env.AM_LINEAR_API_URL = `http://127.0.0.1:${port}/graphql`;
+    vi.resetModules();
+    return (await import("../../src/lib/linear.js")).fetchLinearResult;
+  }
+
+  function serveJson(status: number, body: unknown): http.RequestListener {
+    return (_req, res) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+  }
+
+  const issue = {
+    identifier: "ENG-1",
+    title: "Ticket",
+    url: "https://linear.app/team/issue/ENG-1",
+    state: { name: "In Progress", color: "#0ea5e9", type: "started" },
+    priorityLabel: "High",
+    assignee: null,
+    attachments: { nodes: [] },
+  };
+
+  it("reports success with the ticket when one exists", async () => {
+    const fetchLinearResult = await serveRaw(
+      serveJson(200, { data: { issueVcsBranchSearch: issue } })
+    );
+    const result = await fetchLinearResult("feature/x", "key");
+    expect(result).toMatchObject({ ok: true });
+    expect(result.ok && result.value?.identifier).toBe("ENG-1");
+  });
+
+  it("reports success with a null value when the branch genuinely has no ticket", async () => {
+    const fetchLinearResult = await serveRaw(
+      serveJson(200, { data: { issueVcsBranchSearch: null } })
+    );
+    expect(await fetchLinearResult("feature/x", "key")).toEqual({ ok: true, value: null });
+  });
+
+  it("reports failure on a 500, rather than pretending there is no ticket", async () => {
+    const fetchLinearResult = await serveRaw(serveJson(500, { message: "boom" }));
+    const result = await fetchLinearResult("feature/x", "key");
+    expect(result.ok).toBe(false);
+  });
+
+  it("reports failure on a 401", async () => {
+    const fetchLinearResult = await serveRaw(serveJson(401, { message: "unauthorized" }));
+    const result = await fetchLinearResult("feature/x", "key");
+    expect(result.ok).toBe(false);
+  });
+
+  it("reports failure when a 200 body carries GraphQL errors", async () => {
+    const fetchLinearResult = await serveRaw(
+      serveJson(200, { errors: [{ message: "authentication failed" }] })
+    );
+    const result = await fetchLinearResult("feature/x", "key");
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toContain("authentication failed");
+  });
+
+  it("reports failure on an unparseable body", async () => {
+    const fetchLinearResult = await serveRaw((_req, res) => res.end("not json"));
+    const result = await fetchLinearResult("feature/x", "key");
+    expect(result.ok).toBe(false);
+  });
+
+  it("reports failure when the host is unreachable", async () => {
+    // Bind to grab a free port, then close it so the connection is refused.
+    const dead = http.createServer(() => {});
+    await new Promise<void>((resolve) => dead.listen(0, resolve));
+    const { port } = dead.address() as AddressInfo;
+    await new Promise<void>((resolve) => dead.close(() => resolve()));
+
+    process.env.AM_LINEAR_API_URL = `http://127.0.0.1:${port}/graphql`;
+    vi.resetModules();
+    const { fetchLinearResult } = await import("../../src/lib/linear.js");
+    const result = await fetchLinearResult("feature/x", "key");
+    expect(result.ok).toBe(false);
+  });
+
+  it("surfaces Linear's own message when the key is rejected", async () => {
+    await serveRaw(serveJson(401, { errors: [{ message: "Authentication failed" }] }));
+    const { verifyLinearApiKey } = await import("../../src/lib/linear.js");
+    expect(await verifyLinearApiKey("bad-key")).toEqual({
+      ok: false,
+      error: "Authentication failed",
+    });
+  });
+
+  it("falls back to the status line when a rejection has no GraphQL message", async () => {
+    await serveRaw((_req, res) => {
+      res.writeHead(502, { "Content-Type": "text/plain" });
+      res.end("bad gateway");
+    });
+    const { verifyLinearApiKey } = await import("../../src/lib/linear.js");
+    expect(await verifyLinearApiKey("key")).toEqual({ ok: false, error: "HTTP 502" });
+  });
+
+  it("keeps fetchLinearInfo lossy for the one-shot CLI callers", async () => {
+    const fetchLinearResultForServer = await serveRaw(serveJson(500, { message: "boom" }));
+    expect((await fetchLinearResultForServer("feature/x", "key")).ok).toBe(false);
+    const { fetchLinearInfo } = await import("../../src/lib/linear.js");
+    expect(await fetchLinearInfo("feature/x", "key")).toBeNull();
+  });
+});

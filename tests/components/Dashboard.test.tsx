@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render } from "ink-testing-library";
 import { Text } from "ink";
 import { Dashboard } from "../../src/components/Dashboard.js";
+import type { IntegrationHealth } from "../../src/lib/types.js";
 
 vi.mock("../../src/lib/logger.js", () => ({
   log: vi.fn(),
@@ -47,5 +48,57 @@ describe("Dashboard chat pane", () => {
     expect(frame).toContain("[Esc]");
     // dashboard-only hints are replaced
     expect(frame).not.toContain("[n]ew");
+  });
+});
+
+describe("Dashboard cached-data hint", () => {
+  const health = (over: Partial<IntegrationHealth> = {}): IntegrationHealth => ({
+    githubFailing: false,
+    linearFailing: false,
+    lastGithubError: null,
+    lastLinearError: null,
+    ...over,
+  });
+
+  it("says nothing when both integrations are healthy", () => {
+    const { lastFrame } = render(<Dashboard {...BASE_PROPS} integrationHealth={health()} />);
+    expect(lastFrame()!).not.toContain("cached");
+  });
+
+  it("names Linear when only Linear is failing", () => {
+    const { lastFrame } = render(
+      <Dashboard {...BASE_PROPS} integrationHealth={health({ linearFailing: true })} />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("Linear offline");
+    expect(frame).not.toContain("GitHub offline");
+  });
+
+  it("names GitHub when only GitHub is failing", () => {
+    const { lastFrame } = render(
+      <Dashboard {...BASE_PROPS} integrationHealth={health({ githubFailing: true })} />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("GitHub offline");
+    expect(frame).not.toContain("Linear offline");
+  });
+
+  it("names neither when both are failing", () => {
+    const { lastFrame } = render(
+      <Dashboard
+        {...BASE_PROPS}
+        integrationHealth={health({ githubFailing: true, linearFailing: true })}
+      />
+    );
+    const frame = lastFrame()!;
+    expect(frame).toContain("offline");
+    expect(frame).toContain("cached");
+    expect(frame).not.toContain("GitHub offline");
+    expect(frame).not.toContain("Linear offline");
+  });
+
+  it("says nothing when health is unknown", () => {
+    const { lastFrame } = render(<Dashboard {...BASE_PROPS} integrationHealth={null} />);
+    expect(lastFrame()!).not.toContain("cached");
   });
 });
