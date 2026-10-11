@@ -1,0 +1,18 @@
+[package]
+name = "am-hook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "am-hook"
+path = "src/main.rs"
+
+[dependencies]
+am-core.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

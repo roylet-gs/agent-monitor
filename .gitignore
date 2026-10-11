@@ -13,3 +13,4 @@ tests/e2e/tmp/
 
 # Playwright MCP local state
 .playwright-mcp/
+target/
