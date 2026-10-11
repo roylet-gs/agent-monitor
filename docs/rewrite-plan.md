@@ -1,15 +1,29 @@
 # Rewrite plan: `am` in Rust
 
-Status: **Phase 0 built, pending rollout** (2026-10-11).
+Status: **Phase 0 live, Phase 1 functionally complete** (2026-10-11).
 
 Phase 0 progress:
 - [x] Cargo workspace, `am-core` (paths, logger, migrations, status rules), `am-hook` binary
 - [x] Subagent tracking by `agent_id` (`subagents` table, schema v2), mirrored into `active_subagents` for the TS TUI
 - [x] TS hooks installer prefers the native binary; re-install upgrades in place
 - [x] Benchmark: native **2.5–9 ms / 3.4 MB** vs TS `am hook-event` **249 ms mean (146–703 ms) / 102 MB** (hyperfine, copy of the real DB)
-- [ ] Switch live hooks (`cargo install --path crates/am-hook` + `am hooks install` from this branch)
+- [x] Switch live hooks (`cargo install --path crates/am-hook` + `am hooks install` from this branch) — live hook events measured at ~2.7 ms
 - [ ] Run with `AM_HOOK_CAPTURE=1` for a day and check the real payloads (subagent fields on Notification/PermissionRequest, SubagentStop multiplicity)
 - [ ] Ship the binary in the npm package (per-platform optional deps) — folded into Phase 4 distribution work
+
+Phase 1 progress:
+- [x] `am-tui` read-only dashboard: `[1] Worktrees` + `[2] Subagents` panes, context line, status bar, help, 4 themes, insta snapshot tests
+- [x] Collector: `PRAGMA data_version` change detection (~200 ms reaction to hooks, no socket needed), targeted git refresh, 2-spawn git status
+- [x] `procscan`: native libc/`/proc` scan (~2.2 ms) — terminal + VS Code detection verified live
+- [x] `integrations`: one `gh api graphql` per repo, batched Linear, per-source circuit breakers, shared cache. Live: 20 branches in 7.6 s (GitHub) / 0.6 s (Linear) on a background thread
+- [x] Ported sort/grouping (36 tests); `delegating` now ranks as active in both apps
+- [ ] Nerd Font glyph set (setting exists, not yet implemented)
+- [ ] Docker E2E against the Rust binary (Phase 3)
+
+Bugs found in the TS app while porting (fixed in Rust; TS left as is unless noted):
+- Commit statuses (`StatusContext`) count as pending forever → PRs stuck on ◌
+- Only the first 100 checks were considered → PRs with failing checks beyond 100 showed ✓
+- `delegating` sorted with no-agent rows (fixed in TS too)
 
 ## Why
 

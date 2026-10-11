@@ -13,9 +13,10 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use am_core::model::{CommitInfo, GitStatus, Ide, RunningProcess, Worktree, WorktreeView};
+use am_core::integrations::{Integrations, RepoBranches};
+use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Worktree, WorktreeView};
 use am_core::settings::Settings;
-use am_core::{db, debug, gitinfo, grouping, procscan, warn};
+use am_core::{db, debug, gitinfo, grouping, info, procscan, warn};
 use rusqlite::Connection;
 
 use crate::app::{Health, Snapshot};
@@ -32,9 +33,18 @@ enum Cmd {
     Quit,
 }
 
+type Fields = HashMap<(String, String), (Option<PrInfo>, Option<LinearInfo>)>;
+
+/// Sent by the integrations thread after hydrating and after every refresh.
+struct IntegrationUpdate {
+    fields: Fields,
+    health: Health,
+}
+
 pub struct Collector {
     rx: Receiver<Snapshot>,
     cmd: Sender<Cmd>,
+    int_cmd: Sender<Cmd>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -42,6 +52,13 @@ impl Collector {
     pub fn spawn(settings: Settings) -> Collector {
         let (tx, rx) = mpsc::channel();
         let (cmd, cmd_rx) = mpsc::channel();
+        let (int_tx, int_rx) = mpsc::channel();
+        let (int_cmd, int_cmd_rx) = mpsc::channel();
+        let int_settings = settings.clone();
+        std::thread::Builder::new()
+            .name("integrations".into())
+            .spawn(move || run_integrations(int_settings, int_cmd_rx, int_tx))
+            .expect("spawn integrations");
         let handle = std::thread::Builder::new()
             .name("collector".into())
             .spawn(move || {
@@ -52,10 +69,10 @@ impl Collector {
                         return;
                     }
                 };
-                Worker::new(settings, conn, tx).run(cmd_rx);
+                Worker::new(settings, conn, tx, int_rx).run(cmd_rx);
             })
             .expect("spawn collector");
-        Collector { rx, cmd, handle: Some(handle) }
+        Collector { rx, cmd, int_cmd, handle: Some(handle) }
     }
 
     pub fn try_recv(&self) -> Option<Snapshot> {
@@ -65,9 +82,13 @@ impl Collector {
 
     pub fn refresh(&self, force: bool) {
         let _ = self.cmd.send(Cmd::Refresh { force });
+        let _ = self.int_cmd.send(Cmd::Refresh { force });
     }
 
     pub fn shutdown(mut self) {
+        // The integrations thread may be mid-`gh` call; it exits on its next
+        // loop and holds nothing that needs flushing, so it is not joined.
+        let _ = self.int_cmd.send(Cmd::Quit);
         let _ = self.cmd.send(Cmd::Quit);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
@@ -92,6 +113,9 @@ struct Worker {
     settings: Settings,
     conn: Connection,
     tx: Sender<Snapshot>,
+    integrations: Receiver<IntegrationUpdate>,
+    fields: Fields,
+    health: Health,
     git: HashMap<String, GitData>,
     procs: HashMap<String, ProcData>,
     last_procs: Option<Instant>,
@@ -102,11 +126,14 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(settings: Settings, conn: Connection, tx: Sender<Snapshot>) -> Worker {
+    fn new(settings: Settings, conn: Connection, tx: Sender<Snapshot>, integrations: Receiver<IntegrationUpdate>) -> Worker {
         Worker {
             settings,
             conn,
             tx,
+            integrations,
+            fields: HashMap::new(),
+            health: Health::default(),
             git: HashMap::new(),
             procs: HashMap::new(),
             last_procs: None,
@@ -138,8 +165,14 @@ impl Worker {
     fn cycle(&mut self, force: bool) -> rusqlite::Result<()> {
         let full_due = force || self.last_full.is_none_or(|t| t.elapsed() >= self.poll_interval());
         let procs_due = self.last_procs.is_none_or(|t| t.elapsed() >= PROCESS_INTERVAL);
+        let mut ints_changed = false;
+        while let Ok(u) = self.integrations.try_recv() {
+            self.fields = u.fields;
+            self.health = u.health;
+            ints_changed = true;
+        }
         let dv = db::data_version(&self.conn)?;
-        if !full_due && !procs_due && dv == self.data_version {
+        if !full_due && !procs_due && !ints_changed && dv == self.data_version {
             return Ok(());
         }
         self.data_version = dv;
@@ -183,12 +216,14 @@ impl Worker {
             .map(|w| {
                 let g = self.git.get(&w.id).cloned().unwrap_or_default();
                 let p = self.procs.get(&w.id).cloned().unwrap_or_default();
+                let (pr, linear) =
+                    self.fields.get(&(w.repo_id.clone(), w.branch.clone())).cloned().unwrap_or_default();
                 WorktreeView {
                     agent: agents.get(&w.id).cloned(),
                     git: g.status,
                     last_commit: g.commit,
-                    pr: None,
-                    linear: None,
+                    pr,
+                    linear,
                     has_terminal: p.has_terminal,
                     open_ide: p.open_ide,
                     running_processes: p.running,
@@ -200,7 +235,7 @@ impl Worker {
         let repos = db::repositories(&self.conn)?;
         let groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
         let subagents = db::subagents(&self.conn, None, RECENT_SUBAGENT_MINUTES)?;
-        let snapshot = Snapshot { groups, subagents, health: Health::default() };
+        let snapshot = Snapshot { groups, subagents, health: self.health.clone() };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());
             self.last_sent = Some(snapshot);
@@ -247,4 +282,82 @@ fn collect_git(worktrees: &[&Worktree]) -> Vec<(String, GitData)> {
             .collect();
         handles.into_iter().filter_map(|h| h.join().ok()).collect()
     })
+}
+
+/// Owns GitHub/Linear fetching. `gh` can take seconds, so it lives on its own
+/// thread and hands the collector a ready-made field map. Cached values are
+/// sent before the first fetch, so PR badges and tickets appear immediately
+/// (and survive being offline).
+fn run_integrations(settings: Settings, cmds: Receiver<Cmd>, tx: Sender<IntegrationUpdate>) {
+    let conn = match db::open() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("integrations", "Cannot open database: {e}");
+            return;
+        }
+    };
+    let mut ints = Integrations::new();
+    ints.hydrate(&conn);
+    let gh_every = Duration::from_millis(settings.gh_polling_interval_ms.max(30_000));
+    let linear_every = Duration::from_millis(settings.linear_polling_interval_ms.max(30_000));
+    let linear_on = settings.linear_enabled && !settings.linear_api_key.is_empty();
+    let (mut last_gh, mut last_linear): (Option<Instant>, Option<Instant>) = (None, None);
+    let mut known_branches: Vec<(String, String)> = Vec::new();
+    let mut first = true;
+
+    loop {
+        let mut force = false;
+        match cmds.recv_timeout(Duration::from_secs(1)) {
+            Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
+            Ok(Cmd::Refresh { force: f }) => force = f,
+            Err(RecvTimeoutError::Timeout) => {}
+        }
+        let Ok(repos) = db::repositories(&conn) else { continue };
+        let Ok(worktrees) = db::worktrees(&conn) else { continue };
+        let groups: Vec<RepoBranches> = repos
+            .iter()
+            .map(|r| {
+                let branches = worktrees.iter().filter(|w| w.repo_id == r.id).map(|w| w.branch.clone()).collect();
+                RepoBranches::new(r.id.clone(), r.path.clone(), branches)
+            })
+            .collect();
+        let mut branches: Vec<(String, String)> = worktrees.iter().map(|w| (w.repo_id.clone(), w.branch.clone())).collect();
+        branches.sort();
+        // A new worktree should get its PR/ticket now, not in three minutes.
+        let new_branches = !first && branches != known_branches;
+
+        let gh_due = settings.gh_pr_status
+            && ((force && settings.gh_refresh_on_manual) || new_branches || last_gh.is_none_or(|t| t.elapsed() >= gh_every));
+        let linear_due = linear_on
+            && ((force && settings.linear_refresh_on_manual) || new_branches || last_linear.is_none_or(|t| t.elapsed() >= linear_every));
+
+        if !(gh_due || linear_due || first || new_branches) {
+            continue;
+        }
+        if first {
+            // Publish what's cached before the (slow) first fetch.
+            let _ = tx.send(update(&ints, &branches));
+            first = false;
+        }
+        if gh_due {
+            let started = Instant::now();
+            let outcome = ints.refresh_github(&conn, &groups, force);
+            info!("integrations", "github refresh: {outcome:?} in {:?}", started.elapsed());
+            last_gh = Some(Instant::now());
+        }
+        if linear_due {
+            let started = Instant::now();
+            let outcome = ints.refresh_linear(&conn, &settings.linear_api_key, &groups, force);
+            info!("integrations", "linear refresh: {outcome:?} in {:?}", started.elapsed());
+            last_linear = Some(Instant::now());
+        }
+        known_branches = branches.clone();
+        let _ = tx.send(update(&ints, &branches));
+    }
+}
+
+fn update(ints: &Integrations, branches: &[(String, String)]) -> IntegrationUpdate {
+    let fields = branches.iter().map(|(r, b)| ((r.clone(), b.clone()), ints.fields_for(r, b))).collect();
+    let h = ints.health();
+    IntegrationUpdate { fields, health: Health { github_failing: h.github_failing, linear_failing: h.linear_failing } }
 }
