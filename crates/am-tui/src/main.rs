@@ -94,6 +94,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
         while let Ok(msg) = launch_rx.try_recv() {
             match msg {
                 launcher::Msg::Popup(p) => {
+                    if matches!(app.modal, Some(modals::Modal::Busy(_))) {
+                        app.modal = None;
+                    }
                     app.popup = Some(p);
                     popup_since = Some(Instant::now());
                 }
@@ -212,6 +215,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             Action::Create(repo, req) => ops::create(app.settings.clone(), *repo, *req, launch_tx.clone()),
                             Action::Delete(v, delete_branch) => ops::delete(*v, delete_branch, launch_tx.clone()),
                             Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
+                            Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
                             Action::InstallHooks => {
                                 let r = am_core::hooks_installer::install_global_hooks()
                                     .map(|bin| bin.map(|b| b.display().to_string()))

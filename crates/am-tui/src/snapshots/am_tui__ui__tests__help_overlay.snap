@@ -13,12 +13,12 @@ expression: "render(&app, 100, 20)"
 │         │               w  toggle log pane                                             │         │
 │         │           n / d  new worktree / delete worktree                              │         │
 │         │               A  add repository                                              │         │
+│         │               f  suggest a feature (files a GitHub issue)                    │         │
 │         │               s  settings                                                    │         │
 │         │       tab  1  2  switch pane                                                 │         │
 │         │               a  subagents: this worktree ↔ all                              │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
 │         │               ?  toggle help                                                 │         │
-│         │          q  esc  quit                                                        │         │
-╰─────────│                                                                              │· a: all ╯
- feature/r│● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │0c5e7f2a-1
+╰─────────│          q  esc  quit                                                        │· a: all ╯
+ feature/r│                                                                              │0c5e7f2a-1
  WORKTREES╰──────────────────────────────────────────────────────────────────────────────╯p  q quit

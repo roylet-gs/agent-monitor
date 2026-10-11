@@ -299,6 +299,30 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             }
             ("Add repository".into(), theme.border_focus, "tab complete  ⏎ add  esc cancel", lines)
         }
+        Modal::Suggest { title, body, on_body, error } => {
+            let row = |label: &str, value: &str, active: bool, placeholder: &str| {
+                Line::from(vec![
+                    Span::styled(if active { "▌" } else { " " }, theme.bold(theme.border_focus)),
+                    Span::styled(format!("{label:<13}"), if active { theme.bold(theme.text) } else { theme.faint() }),
+                    if value.is_empty() && !active {
+                        Span::styled(placeholder.to_string(), theme.faint())
+                    } else {
+                        Span::raw(format!("{value}{}", if active { "▏" } else { "" }))
+                    },
+                ])
+            };
+            let mut lines = vec![
+                Line::styled("Opens an issue on roylet-gs/agent-monitor via gh.", theme.faint()),
+                Line::raw(""),
+                row("Title", title, !*on_body, "(required)"),
+                row("Description", body, *on_body, "(optional)"),
+            ];
+            if let Some(e) = error {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
+            }
+            ("Suggest a feature".into(), theme.border_focus, "tab next field  ⏎ submit  esc cancel", lines)
+        }
         Modal::RunScript { repo_id, .. } => {
             let path = am_core::worktrees::script_path(repo_id);
             (
@@ -866,6 +890,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("w", "toggle log pane"),
         ("n / d", "new worktree / delete worktree"),
         ("A", "add repository"),
+        ("f", "suggest a feature (files a GitHub issue)"),
         ("s", "settings"),
         ("tab  1  2", "switch pane"),
         ("a", "subagents: this worktree ↔ all"),

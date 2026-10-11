@@ -68,6 +68,7 @@ pub enum Action {
     RemoveStandalone(String),
     AddRepo(String),
     InstallHooks,
+    Suggest { title: String, body: String },
 }
 
 pub struct App {
@@ -289,6 +290,10 @@ impl App {
                     self.modal = Some(crate::modals::Modal::Busy(format!("Deleting {}…", view.worktree.display_name())));
                     Action::Delete(view, delete_branch)
                 }
+                Effect::Suggest { title, body } => {
+                    self.modal = Some(crate::modals::Modal::Busy("Filing feature request…".into()));
+                    Action::Suggest { title, body }
+                }
                 Effect::AddRepo(path) => {
                     self.modal = Some(crate::modals::Modal::Busy(format!("Adding {path}…")));
                     Action::AddRepo(path)
@@ -369,6 +374,9 @@ impl App {
                         self.modal = Some(crate::modals::Modal::delete(v));
                     }
                 }
+            }
+            Key::Char('f') => {
+                self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
             Key::Char('A') => self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None }),
             Key::Char('s') => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
