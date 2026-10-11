@@ -65,11 +65,15 @@ function buildHookEntry(event: string, nativeBin: string | null): HookMatcher {
   const managedFlag = isManaged ? " --managed" : "";
   // The native binary reads stdin itself, so it doesn't need the `cat |` shim.
   const invocation = nativeBin ? `"${nativeBin}" hook-event` : "cat | am hook-event";
+  // Older releases only recognise hooks containing the literal `am hook-event`;
+  // without it they re-add a TS handler that races the native one. The trailing
+  // shell comment keeps them seeing the native hook as already installed.
+  const compat = nativeBin ? " # am hook-event (native)" : "";
   return {
     hooks: [
       {
         type: "command",
-        command: `${invocation} --worktree "$CLAUDE_PROJECT_DIR" --event ${event}${managedFlag}`,
+        command: `${invocation} --worktree "$CLAUDE_PROJECT_DIR" --event ${event}${managedFlag}${compat}`,
         timeout: isManaged ? 300000 : 5000,
       },
     ],

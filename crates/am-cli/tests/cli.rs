@@ -313,10 +313,10 @@ fn hooks_install_status_uninstall() {
     assert_eq!(stop[0]["hooks"][0]["command"], "echo mine");
     assert_eq!(
         stop[1]["hooks"][0]["command"],
-        format!("\"{}\" hook-event --worktree \"$CLAUDE_PROJECT_DIR\" --event Stop", fake_hook.display())
+        format!("\"{}\" hook-event --worktree \"$CLAUDE_PROJECT_DIR\" --event Stop # am hook-event (native)", fake_hook.display())
     );
     let perm = &hooks["PermissionRequest"][0]["hooks"][0];
-    assert!(perm["command"].as_str().unwrap().ends_with("--event PermissionRequest --managed"));
+    assert!(perm["command"].as_str().unwrap().contains("--event PermissionRequest --managed"));
     assert_eq!(perm["timeout"], 300_000);
 
     // Idempotent.

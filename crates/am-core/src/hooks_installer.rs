@@ -84,6 +84,9 @@ pub fn find_native_hook_binary() -> Option<PathBuf> {
     candidates.into_iter().find(|c| is_executable(c))
 }
 
+/// Appended to native hook commands; see `build_hook_entry`.
+pub const NATIVE_COMPAT_SUFFIX: &str = " # am hook-event (native)";
+
 pub fn build_hook_entry(event: &str, native_bin: Option<&Path>) -> Value {
     let managed = MANAGED_HOOK_EVENTS.contains(&event);
     let managed_flag = if managed { " --managed" } else { "" };
@@ -92,10 +95,15 @@ pub fn build_hook_entry(event: &str, native_bin: Option<&Path>) -> Value {
         Some(bin) => format!("\"{}\" hook-event", bin.display()),
         None => "cat | am hook-event".to_string(),
     };
+    // Old TS releases (≤1.0.95) only recognise their hooks by the literal
+    // text `am hook-event`; without it they think hooks are missing and add a
+    // second, TS handler that races this one and overwrites `delegating`.
+    // A trailing shell comment keeps them seeing the native hook as "ours".
+    let compat = if native_bin.is_some() { NATIVE_COMPAT_SUFFIX } else { "" };
     json!({
         "hooks": [{
             "type": "command",
-            "command": format!("{invocation} --worktree \"$CLAUDE_PROJECT_DIR\" --event {event}{managed_flag}"),
+            "command": format!("{invocation} --worktree \"$CLAUDE_PROJECT_DIR\" --event {event}{managed_flag}{compat}"),
             "timeout": if managed { 300_000 } else { 5_000 },
         }]
     })
@@ -221,7 +229,7 @@ mod tests {
         let e = build_hook_entry("PermissionRequest", Some(Path::new("/bin/am-hook")));
         assert_eq!(
             e["hooks"][0]["command"],
-            "\"/bin/am-hook\" hook-event --worktree \"$CLAUDE_PROJECT_DIR\" --event PermissionRequest --managed"
+            "\"/bin/am-hook\" hook-event --worktree \"$CLAUDE_PROJECT_DIR\" --event PermissionRequest --managed # am hook-event (native)"
         );
         assert_eq!(e["hooks"][0]["timeout"], 300_000);
         let e = build_hook_entry("Stop", None);

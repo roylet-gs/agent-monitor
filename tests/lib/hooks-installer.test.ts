@@ -183,7 +183,9 @@ describe("hooks-installer native binary", () => {
     const { installGlobalHooks, isGlobalHooksInstalled } = await import("../../src/lib/hooks-installer.js");
     installGlobalHooks();
     const cmd: string = readHooks().PreToolUse[0].hooks[0].command;
-    expect(cmd).toBe(`"${fakeBin}" hook-event --worktree "$CLAUDE_PROJECT_DIR" --event PreToolUse`);
+    expect(cmd).toBe(`"${fakeBin}" hook-event --worktree "$CLAUDE_PROJECT_DIR" --event PreToolUse # am hook-event (native)`);
+    // Old releases detect hooks by this literal; it must stay in the command.
+    expect(cmd).toContain("am hook-event");
     expect(isGlobalHooksInstalled()).toBe(true);
   });
 

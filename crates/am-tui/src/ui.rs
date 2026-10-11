@@ -584,9 +584,8 @@ fn worktree_line<'a>(
         right.push(Span::styled(pad(&ticket_text(v), cols.ticket), theme.fg(theme.blue)));
     }
     if cols.pr > 0 {
-        let (text, style) = pr_text(v);
         right.push(Span::raw(" "));
-        right.push(Span::styled(pad(&text, cols.pr), style.map(|c| theme.fg(c(theme))).unwrap_or_default()));
+        right.extend(pr_spans(v, theme, cols.pr));
     }
     if cols.git > 0 {
         right.push(Span::raw(" "));
@@ -659,23 +658,51 @@ type ColorPick = fn(&Theme) -> ratatui::style::Color;
 
 fn pr_text(v: &WorktreeView) -> (String, Option<ColorPick>) {
     let Some(pr) = &v.pr else { return (String::new(), None) };
-    let checks = match pr.checks_status {
+    let merged = if pr.state == "MERGED" { "⇡" } else { "" };
+    (format!("#{}{}{merged}", pr.number, checks_glyph(pr.checks_status)), Some(pr_color(pr)))
+}
+
+fn checks_glyph(c: ChecksStatus) -> &'static str {
+    match c {
         ChecksStatus::Passing => "✓",
         ChecksStatus::Failing => "✗",
         ChecksStatus::Pending => "◌",
         ChecksStatus::None => "",
-    };
-    let color: ColorPick = match (pr.state.as_str(), pr.is_draft, pr.checks_status) {
-        ("MERGED", ..) => |t| t.magenta,
-        ("CLOSED", ..) => |t| t.faint,
-        (_, true, _) => |t| t.faint,
-        (_, _, ChecksStatus::Failing) => |t| t.red,
-        (_, _, ChecksStatus::Pending) => |t| t.yellow,
+    }
+}
+
+/// Failing checks are red even on a draft: a red PR is the thing to notice.
+fn pr_color(pr: &am_core::model::PrInfo) -> ColorPick {
+    match (pr.state.as_str(), pr.checks_status) {
+        ("MERGED", _) => |t| t.magenta,
+        ("CLOSED", _) => |t| t.faint,
+        (_, ChecksStatus::Failing) => |t| t.red,
+        _ if pr.is_draft => |t| t.faint,
+        (_, ChecksStatus::Pending) => |t| t.yellow,
         _ if pr.review_decision == "CHANGES_REQUESTED" => |t| t.yellow,
         _ => |t| t.green,
+    }
+}
+
+/// PR cell: number in the state colour, checks glyph always in its own
+/// colour (green ✓ / red ✗ / yellow ◌) so CI is readable on drafts too.
+fn pr_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>> {
+    let Some(pr) = &v.pr else { return vec![Span::raw(" ".repeat(width))] };
+    let (text, _) = pr_text(v);
+    let num = format!("#{}", pr.number);
+    let glyph = checks_glyph(pr.checks_status);
+    let rest = &text[num.len() + glyph.len()..];
+    let gcolor = match pr.checks_status {
+        ChecksStatus::Passing => theme.green,
+        ChecksStatus::Failing => theme.red,
+        ChecksStatus::Pending => theme.yellow,
+        ChecksStatus::None => theme.faint,
     };
-    let merged = if pr.state == "MERGED" { "⇡" } else { "" };
-    (format!("#{}{checks}{merged}", pr.number), Some(color))
+    vec![
+        Span::styled(num, theme.fg(pr_color(pr)(theme))),
+        Span::styled(glyph, theme.fg(gcolor)),
+        Span::styled(pad(rest, width.saturating_sub(text.width() - rest.width())), theme.fg(theme.magenta)),
+    ]
 }
 
 fn git_text(v: &WorktreeView) -> String {
@@ -1238,6 +1265,24 @@ mod tests {
         let mut app = fixture();
         app.on_key(Key::Char('d'));
         insta::assert_snapshot!(render(&app, 100, 16));
+    }
+
+    #[test]
+    fn failing_pr_is_red_even_as_a_draft() {
+        let theme = Theme::by_name("ansi");
+        let mut v = fixture().flat[0].clone();
+        let pr = v.pr.as_mut().unwrap();
+        pr.is_draft = true;
+        pr.checks_status = ChecksStatus::Failing;
+        let spans = pr_spans(&v, &theme, 8);
+        assert_eq!(spans[0].content, "#127");
+        assert_eq!(spans[0].style.fg, Some(theme.red));
+        assert_eq!(spans[1].content, "✗");
+        assert_eq!(spans[1].style.fg, Some(theme.red));
+        v.pr.as_mut().unwrap().checks_status = ChecksStatus::Passing;
+        let spans = pr_spans(&v, &theme, 8);
+        assert_eq!(spans[0].style.fg, Some(theme.faint), "passing draft stays dim");
+        assert_eq!(spans[1].style.fg, Some(theme.green));
     }
 
     #[test]
