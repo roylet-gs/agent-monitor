@@ -3,7 +3,7 @@
 //!   am-hook hook-event --worktree <path> [--event <name>] [--managed]
 //!
 //! The handling lives in the library ([`am_hook::run_hook_event`]) so that
-//! `am-rs hook-event` runs exactly the same code.
+//! `am hook-event` runs exactly the same code.
 
 fn main() {
     let mut args = std::env::args().skip(1);

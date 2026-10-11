@@ -1,0 +1,27 @@
+{
+  "name": "@roylet-gs/agent-monitor",
+  "version": "0.0.0",
+  "description": "Terminal dashboard for Claude Code agents across git worktrees",
+  "bin": {
+    "am": "bin/am.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/roylet-gs/agent-monitor.git"
+  },
+  "files": [
+    "bin/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "optionalDependencies": {
+    "@roylet-gs/agent-monitor-darwin-arm64": "0.0.0",
+    "@roylet-gs/agent-monitor-darwin-x64": "0.0.0",
+    "@roylet-gs/agent-monitor-linux-arm64": "0.0.0",
+    "@roylet-gs/agent-monitor-linux-x64": "0.0.0"
+  }
+}

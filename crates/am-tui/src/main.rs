@@ -59,12 +59,16 @@ fn main() -> io::Result<()> {
 
 
     let collector = data::Collector::spawn(settings.clone());
-    let first_run = setup::needed(&settings);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
+    let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
+    let show_log = args.iter().any(|a| a == "--log");
     let ide = settings.ide.clone();
     let mut app = App::new(settings);
     if first_run {
         app.setup = Some(setup::Setup::new(Vec::new(), &ide));
     }
+    app.show_log = show_log;
 
     // ratatui::init enables raw mode + alt screen and installs a panic hook
     // that restores the terminal before printing the panic.

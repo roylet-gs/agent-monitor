@@ -1,125 +1,191 @@
 # Agent Status Mapping
 
+How Claude Code hook events become a worktree's agent status. The rules live in `crates/am-core/src/status.rs` (`map_event_to_status`, unit-tested there); the hook handler that applies them is `crates/am-hook/src/lib.rs`.
+
 ## Status Types
 
-| Status      | Meaning                                                                                                                                                                                                   |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `none`      | Session not running, no Claude session linked                                                                                                                                                             |
-| `idle`      | Session ended / session is not asking any questions or waiting on any active user input                                                                                                                   |
-| `executing` | Claude is actively running tools or generating                                                                                                                                                            |
-| `planning`  | Claude is in plan mode (`permission_mode=plan`)                                                                                                                                                           |
-| `waiting`   | Claude is waiting for user input and has not completed its task                                                                                                                                           |
-| `done`      | Claude finished a task and requires no more user input (this is slightly different from idle as done means Claude did some work and is now done while idle means Claude has done nothing yet and is idle) |
+| Status       | Glyph | Meaning |
+| ------------ | ----- | ------- |
+| *(none)*     | `·`   | No Claude session has reported for this worktree |
+| `idle`       | `○`   | Session started or ended, or a turn ended without doing work; not waiting on the user |
+| `executing`  | `●`   | Claude is running tools or generating |
+| `planning`   | `◇`   | Claude is in plan mode (`permission_mode=plan`) |
+| `waiting`    | `◐`   | Claude needs the user (permission prompt, question, plan approval) and hasn't finished its task |
+| `delegating` | `◆`   | The main turn has ended but background subagents are still running |
+| `done`       | `✓`   | Claude did work and finished; nothing needed from the user. Unlike `idle`, `done` means a turn actually executed |
+
+## Processing Order (per hook event)
+
+1. **Resolve the owner.** Walk up from `--worktree` to the directory containing `.git`. If it matches a tracked worktree, update `agent_status`; otherwise track it as a standalone session (`standalone_sessions`, shown under "Other sessions").
+2. **Subagent bookkeeping** (always, even if the status won't change; see [Subagent Tracking](#subagent-tracking)).
+3. **Count running subagents** for the owner *after* step 2. This `running` count is an input to the rules below, and is mirrored into `active_subagents` for 1.x compatibility.
+4. **Map the event** with `map_event_to_status(event, current, running)`. `None` means "leave the status alone".
+5. **Write.** If the status, `is_open` and `session_id` are unchanged and there's no new message, only `updated_at` is touched. Otherwise the row is upserted. `is_open` is false only after `SessionEnd`. `last_response` comes from `last_assistant_message` (main-agent events only, not subagent lifecycle) or a `Notification`'s `message`. Events from inside a subagent never write `session_id` or `last_response`.
+
+## Event Origin
+
+Claude Code tags tool events fired *inside* a subagent with `agent_id` / `agent_type`. am classifies each event by origin:
+
+- **Main agent:** no `agent_id`.
+- **Subagent lifecycle:** `SubagentStart` / `SubagentStop`. They carry `agent_id` but describe the subagent from the parent's side, so they count as main-agent events for status purposes.
+- **From a subagent:** any other event with a non-empty `agent_id` (its `PreToolUse`, `PostToolUse`, `Notification`, …).
+
+**Events from a subagent never move the parent's status**, with one exception. If the subagent needs the user, the worktree becomes `waiting`. "Needs the user" means:
+- `PermissionRequest`
+- `Notification` with `notification_type` `permission_prompt` or `elicitation_dialog`
+- `PreToolUse` with `permission_prompt: true`
+
+Everything else from a subagent → no change (it only updates that subagent's row).
 
 ## Done Status Protection
 
-The `done` status is protected from late-arriving events. Background subagents (`SubagentStop`) can fire minutes after the parent session's `Stop` event, which would incorrectly overwrite `done` back to `executing`.
+`done` is protected from late events. Background subagents can stop minutes after the parent's `Stop`, and informational events would otherwise drag `done` back to `executing` or `waiting`.
 
-**Only these events may transition out of `done`:**
-- `UserPromptSubmit` — user started a new task
-- `SessionStart` / `SessionEnd` — session lifecycle
-- `Stop` / `StopFailure` — new turn ending or failed turn
+**When the current status is `done`, only these events are evaluated:**
 
-**All other events are ignored when status is `done`:**
-- `SubagentStart`, `SubagentStop` — late background subagent completions
-- `PreToolUse`, `PostToolUse` — stale tool events
-- `Notification`, `PermissionRequest` — informational events
+| Event | Why |
+| ----- | --- |
+| `UserPromptSubmit` | User started a new task |
+| `SessionStart` / `SessionEnd` | Session lifecycle |
+| `Stop` / `StopFailure` | A new turn ended or failed |
+| `PreToolUse` / `PostToolUse` (main agent) | Claude Code starts a new main turn **without** `UserPromptSubmit` when a background task notifies it, so main-agent tool activity is allowed through |
+| `SubagentStart` with `running > 0` | A finished session's subagent was resumed (e.g. via SendMessage) → **`delegating`** directly |
 
-## Event -> Status Mapping (`mapEventToStatus`)
+**Everything else is ignored while `done`:** `SubagentStop`, `SubagentStart` when no subagent is running, `Notification` (including `idle_prompt` and permission prompts), `PermissionRequest`, and any other event. Subagent-origin events are already filtered out before this check.
+
+## Delegating
+
+While the status is `delegating` (the main turn ended with subagents still running):
+
+| Event | Condition | Result |
+| ----- | --------- | ------ |
+| `SubagentStart` / `SubagentStop` | `running > 0` | `delegating` |
+| `SubagentStart` / `SubagentStop` | `running == 0` (the last one stopped) | `done` |
+| `Stop` | `stop_hook_active: true` | `waiting` |
+| `Stop` | `running > 0` | `delegating` |
+| `Stop` | `running == 0` | `done` |
+| anything else | | falls through to the general rules below |
+
+## Event → Status Mapping (general rules)
+
+Applied in this order; the first match wins.
 
 ### Stop
 
-| Condition                                                      | Result    |
-| -------------------------------------------------------------- | --------- |
-| `stop_hook_active: true`                                       | `waiting` |
-| `currentStatus === "waiting"`                                  | `waiting` |
-| `permission_mode === "plan"` or `currentStatus === "planning"` | `waiting` |
-| `currentStatus === "executing"`                                | `done`    |
-| Fallback                                                       | `idle`    |
+| Condition | Result |
+| --------- | ------ |
+| `stop_hook_active: true` | `waiting` |
+| `running > 0` | `delegating` |
+| current status is `waiting` | `waiting` |
+| `permission_mode == "plan"` or current status is `planning` | `waiting` |
+| current status is `executing` | `done` |
+| Fallback | `idle` |
 
 ### StopFailure
 
 | Condition | Result |
 | --------- | ------ |
-| Always    | `idle` |
+| Always | `idle` |
 
 ### Notification
 
-| Condition                                                             | Result             |
-| --------------------------------------------------------------------- | ------------------ |
-| `notification_type === "permission_prompt"` or `"elicitation_dialog"` | `waiting`          |
-| `notification_type === "idle_prompt"` and `currentStatus !== "done"`  | `waiting`          |
-| `notification_type === "idle_prompt"` and `currentStatus === "done"`  | No change (`null`) |
-| Other notification types                                              | No change (`null`) |
+| Condition | Result |
+| --------- | ------ |
+| `notification_type` is `permission_prompt` or `elicitation_dialog` | `waiting` |
+| `idle_prompt` and current status is `done` | No change |
+| `idle_prompt` and `running > 0` | `delegating` |
+| `idle_prompt` otherwise | `waiting` |
+| Other notification types | No change |
 
 ### PermissionRequest
 
-| Condition | Result    |
-| --------- | --------- |
-| Always    | `waiting` |
+| Condition | Result |
+| --------- | ------ |
+| Always | `waiting` |
 
 ### SessionStart / SessionEnd
 
 | Condition | Result |
 | --------- | ------ |
-| Always    | `idle` |
+| Always | `idle` (`SessionEnd` also sets `is_open = false`) |
 
 ### UserPromptSubmit
 
-| Condition                    | Result      |
-| ---------------------------- | ----------- |
-| `permission_mode === "plan"` | `planning`  |
-| Otherwise                    | `executing` |
+| Condition | Result |
+| --------- | ------ |
+| `permission_mode == "plan"` | `planning` |
+| Otherwise | `executing` |
 
 ### Tool-specific
 
-| Tool / Condition                               | Result     |
-| ---------------------------------------------- | ---------- |
-| `AskUserQuestion`                              | `waiting`  |
-| `ExitPlanMode`                                 | `waiting`  |
-| `EnterPlanMode`                                | `planning` |
-| `PreToolUse` with `permission_prompt === true` | `waiting`  |
+| Tool / Condition | Result |
+| ---------------- | ------ |
+| `tool_name` is `AskUserQuestion` | `waiting` |
+| `tool_name` is `ExitPlanMode` | `waiting` |
+| `tool_name` is `EnterPlanMode` | `planning` |
+| `PreToolUse` with `permission_prompt: true` | `waiting` |
 
 ### Plan mode passthrough
 
-| Condition                                                | Result     |
-| -------------------------------------------------------- | ---------- |
-| `permission_mode === "plan"` (any remaining event)       | `planning` |
-| Tool/subagent event while `currentStatus === "planning"` | `planning` |
+| Condition | Result |
+| --------- | ------ |
+| `permission_mode == "plan"` (any remaining event) | `planning` |
 
-### Tool / Subagent activity
+### Tool / subagent activity
 
-| Condition                                                       | Result      |
-| --------------------------------------------------------------- | ----------- |
-| `PreToolUse` / `PostToolUse` / `SubagentStart` / `SubagentStop` | `executing` |
+| Condition | Result |
+| --------- | ------ |
+| `PreToolUse` / `PostToolUse` / `SubagentStart` / `SubagentStop`, current status `planning` | `planning` |
+| `PreToolUse` / `PostToolUse` / `SubagentStart` / `SubagentStop`, otherwise | `executing` |
 
 ### Fallback
 
-| Condition       | Result |
-| --------------- | ------ |
+| Condition | Result |
+| --------- | ------ |
 | No rule matched | `idle` |
 
-## Display-time Override (`getDisplayStatus`)
+## Subagent Tracking
 
-| Condition                                                   | Displayed As |
-| ----------------------------------------------------------- | ------------ |
-| `executing` or `planning` with no event for 5+ minutes      | `waiting`    |
-| Everything else                                             | As stored    |
+Subagents are tracked individually in the `subagents` table, keyed by `(session_id, agent_id)`, instead of the 1.x `+1`/`−1` counter. The counter could be driven to 0 by duplicate or internal `SubagentStop`s while real subagents were still running, and a subagent's own `PreToolUse` could overwrite `delegating` with `executing`.
 
-This is a display-time safety net only. The DB status is preserved and resumes correctly when events arrive. The 5-minute threshold catches sessions where Claude crashed without firing a `Stop` event.
+| Event | Effect on the `subagents` table |
+| ----- | ------------------------------- |
+| `SubagentStart` | Upsert the row as `running` (also when a finished subagent is resumed) |
+| `SubagentStop` | Mark it `done` with `ended_at`, transcript path and last message (truncated to 500 chars). Repeats are idempotent; a stop for an unknown id creates a finished row |
+| `PreToolUse` from a subagent | Record the tool name and a one-line summary of its input (Bash description or command, file path, search pattern, URL, …), bump the tool count, keep it `running` (a missed `SubagentStart` is recovered here) |
+| `PostToolUse` from a subagent | Keeps it alive (refreshes `updated_at`) |
+| `SessionStart` | Close running subagents of *other* sessions for this owner (they can't still be running) |
+| `SessionEnd` | Close running subagents of this session |
+
+Rules:
+
+- **Internal agents are ignored.** Agents with an empty `agent_type` (prompt suggestions, `/btw`, …) aren't user-visible work and never count as running.
+- **Stale protection.** A `running` row only counts if it was updated within the last **2 hours**, so a missed `SubagentStop` (crash, killed session) can't pin a worktree on `delegating` forever.
+- **Descriptions.** On the first event for a subagent, am reads Claude Code's `<session>/subagents/agent-<id>.meta.json` (next to the subagent transcript) for the Agent tool's `description` and `agentType`. This is best effort, since the file is undocumented.
+- **Running count** = running, non-stale rows for the owner. The dashboard shows it as `◆ N subagents` next to the worktree name, and it is the `running` input to the rules above.
+
+## Open Sessions
+
+`is_open` is true from the first event until `SessionEnd`. For filtering ("never hide a row with a live session"), for listing standalone sessions under "Other sessions", and for deciding whether `Enter` should resume a session, a session counts as **effectively open** only if `is_open` is set and it isn't `idle` with no events for **10 minutes**.
+
+There is no display-time status override: the dashboard shows the stored status as is.
 
 ## Subscribed Hook Events
 
-| Event              | Purpose                                         |
-| ------------------ | ----------------------------------------------- |
-| `PreToolUse`       | Track tool execution start                      |
-| `PostToolUse`      | Track tool execution end                        |
-| `Stop`             | Turn completed                                  |
-| `StopFailure`      | Turn failed (API error)                         |
-| `Notification`     | Permission prompts, idle prompts                |
-| `SessionStart`     | Session opened                                  |
-| `SessionEnd`       | Session closed                                  |
-| `UserPromptSubmit` | User started a new task                         |
-| `SubagentStart`    | Subagent spawned                                |
-| `SubagentStop`     | Subagent completed                              |
-| `PermissionRequest`| Claude Code 2.x managed permission prompt       |
+Installed into `~/.claude/settings.json` by `am hooks install`, each as `"<path>/am-hook" hook-event --worktree "$CLAUDE_PROJECT_DIR" --event <Event>`:
+
+| Event | Purpose |
+| ----- | ------- |
+| `PreToolUse` | Tool execution start (main agent or subagent) |
+| `PostToolUse` | Tool execution end |
+| `Stop` | Turn completed |
+| `StopFailure` | Turn failed (API error) |
+| `Notification` | Permission prompts, elicitation dialogs, idle prompts |
+| `SessionStart` | Session opened |
+| `SessionEnd` | Session closed |
+| `UserPromptSubmit` | User started a new task |
+| `SubagentStart` | Subagent spawned or resumed |
+| `SubagentStop` | Subagent completed |
+| `PermissionRequest` | Claude Code 2.x managed permission prompt (installed with `--managed`) |
+
+Set `AM_HOOK_CAPTURE=1` in Claude Code's environment to save the latest raw payload per event and origin to `~/.agent-monitor/hook-captures/<Event>-<main|subagent>.json`, which is useful for checking which fields Claude Code actually sends.

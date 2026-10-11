@@ -1,17 +1,20 @@
-# npm packaging for the native binaries (Phase 4 — not active yet)
+# Release packaging
 
-Plan (esbuild/biome pattern), applied at cut-over:
+Everything here is assembled by `.github/workflows/publish.yml` on each merge
+to `main`; nothing in this directory is published as-is.
 
-- `@roylet-gs/agent-monitor` keeps its name and `am` bin. Its `bin/am.js` is a
-  tiny launcher that resolves the platform package below and `exec`s the
-  native `am` (falls back to a clear error if the optional dep is missing).
-- One package per platform, published from the `release-native` artifacts,
-  each with `os`/`cpu` fields so npm installs only the matching one:
-  `@roylet-gs/agent-monitor-darwin-arm64`, `-darwin-x64`, `-linux-x64`,
-  `-linux-arm64`. Each contains `bin/am`, `bin/am-tui`, `bin/am-hook`.
-- These are listed in the main package's `optionalDependencies`.
-- Claude Code hooks point at the absolute path of `am-hook` (written by
-  `am hooks install`), so the Node launcher is never on the per-event path.
+- `agent-monitor/` — the `@roylet-gs/agent-monitor` package: a tiny Node
+  launcher (`bin/am.js`) that execs the native `am` from the matching
+  platform package. Its version and `optionalDependencies` versions are set
+  by CI.
+- `platform/package.json` — template for the per-platform packages
+  (`@roylet-gs/agent-monitor-{darwin,linux}-{arm64,x64}`), each holding
+  `bin/am`, `bin/am-tui` and `bin/am-hook`. `os`/`cpu` make npm install only
+  the one that matches.
 
-Homebrew (`roylet-gs/homebrew-tap`, needs creating) gets a formula that
-downloads the same release tarballs; see `homebrew/agent-monitor.rb`.
+Claude Code hooks point at `am-hook` by absolute path (`am hooks install`),
+so the Node launcher is never on the per-event hot path.
+
+Homebrew: `agent-monitor.rb.tmpl` is rendered into `Formula/agent-monitor.rb`
+at the repo root by the same workflow (version + tarball checksums), so the
+repo itself is the tap.

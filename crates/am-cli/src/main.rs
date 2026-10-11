@@ -1,4 +1,4 @@
-//! `am-rs` — the native `am` CLI (becomes `am` at cut-over). Port of
+//! `am` — the native CLI. Port of
 //! `src/cli.tsx` + `src/commands/**`: same command names, aliases, flags,
 //! output formats and exit codes. With no subcommand it execs `am-tui`.
 //!
@@ -28,7 +28,7 @@ pub fn fail_stdout(msg: &str) -> ! {
 #[derive(Parser)]
 #[command(
     name = "am",
-    bin_name = "am-rs",
+    bin_name = "am",
     version,
     about = "Agent Monitor — TUI dashboard for git worktrees & Claude Code agents"
 )]
@@ -399,7 +399,7 @@ fn main() {
             clear: a.clear,
         }),
         Some(Cmd::Status { worktree, set }) => status::run(&worktree, set.as_deref()),
-        // Normally caught by the fast path above (e.g. reached via `am-rs --watch hook-event`).
+        // Normally caught by the fast path above (e.g. reached via `am --watch hook-event`).
         Some(Cmd::HookEvent { worktree, event, managed: _ }) => am_hook::run_hook_event(&worktree, event.as_deref()),
     }
 }

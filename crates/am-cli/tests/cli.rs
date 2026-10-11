@@ -1,4 +1,4 @@
-//! Integration tests for `am-rs`: run the real binary against an isolated
+//! Integration tests for `am`: run the real binary against an isolated
 //! `AM_DATA_DIR` and a temp `HOME` (never the real ~/.agent-monitor or
 //! ~/.claude), with fake `gh`/editor binaries first on `PATH`. Ported from
 //! the applicable `tests/commands/*.test.ts`.
@@ -72,7 +72,7 @@ impl Env {
     }
 
     fn command(&self, args: &[&str], cwd: Option<&Path>) -> Command {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_am-rs"));
+        let mut c = Command::new(env!("CARGO_BIN_EXE_am"));
         c.args(args)
             .env("AM_DATA_DIR", self.data())
             .env("HOME", self.home())
@@ -103,7 +103,7 @@ impl Env {
 
     fn ok(&self, args: &[&str]) -> Out {
         let o = self.run(args);
-        assert_eq!(o.code, 0, "am-rs {args:?} failed: {}{}", o.stdout, o.stderr);
+        assert_eq!(o.code, 0, "am {args:?} failed: {}{}", o.stdout, o.stderr);
         o
     }
 
@@ -344,7 +344,7 @@ fn hooks_install_prefers_am_hook_next_to_the_binary() {
     let v: Value =
         serde_json::from_str(&std::fs::read_to_string(env.home().join(".claude/settings.json")).unwrap()).unwrap();
     let cmd = v["hooks"]["Stop"][0]["hooks"][0]["command"].as_str().unwrap().to_string();
-    let sibling = Path::new(env!("CARGO_BIN_EXE_am-rs")).with_file_name("am-hook");
+    let sibling = Path::new(env!("CARGO_BIN_EXE_am")).with_file_name("am-hook");
     if sibling.exists() {
         assert!(cmd.starts_with(&format!("\"{}\" hook-event", sibling.display())), "{cmd}");
     } else {

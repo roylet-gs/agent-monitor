@@ -1,87 +1,163 @@
-name: Publish to GitHub Packages
+# On every merge to main: build the native binaries for each platform, attach
+# them to a GitHub Release, publish the npm packages to GitHub Packages, and
+# regenerate the Homebrew formula (this repo is the tap). The version is the
+# workspace version from Cargo.toml, or the next patch past what's published.
+name: Publish
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   test:
-    # Skip runs triggered by the version bump commit
-    if: "!startsWith(github.event.head_commit.message, 'chore: bump version')"
+    # Skip the release commit this workflow pushes itself.
+    if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     uses: ./.github/workflows/ci.yml
 
-  publish:
+  version:
     needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: "@roylet-gs"
+      - id: v
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LOCAL=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          PUBLISHED=$(npm view @roylet-gs/agent-monitor version 2>/dev/null || echo 0.0.0)
+          NEXT=$(node -e '
+            const [l, p] = process.argv.slice(1).map(v => v.split(".").map(Number));
+            const gt = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+            console.log((gt(l, p) > 0 ? l : [p[0], p[1], p[2] + 1]).join("."));
+          ' "$LOCAL" "$PUBLISHED")
+          echo "Cargo.toml: $LOCAL, published: $PUBLISHED, releasing: $NEXT"
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest, platform: darwin-arm64 }
+          - { target: x86_64-apple-darwin, os: macos-latest, platform: darwin-x64 }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, platform: linux-x64 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, platform: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Stamp version
+        run: perl -0pi -e 's/^version = "[^"]*"/version = "$ENV{VERSION}"/m' Cargo.toml
+      - run: cargo build --release --target ${{ matrix.target }} -p am-cli -p am-tui -p am-hook
+      - name: Package
+        run: |
+          name="agent-monitor-v$VERSION-${{ matrix.platform }}"
+          mkdir -p "$name"
+          for b in am am-tui am-hook; do cp "target/${{ matrix.target }}/release/$b" "$name/"; done
+          "$name/am" --version
+          tar -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: agent-monitor-v*.tar.gz
+
+  publish:
+    needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
           registry-url: https://npm.pkg.github.com
+          scope: "@roylet-gs"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-
-      - name: Generate release notes
+      - name: GitHub Release
         run: |
-          LAST_BUMP=$(git log --format=%H --grep="^chore: bump version" -1)
-          if [ -n "$LAST_BUMP" ]; then
-            git log ${LAST_BUMP}..HEAD \
-              --format='%h%x09%s' \
-              --no-merges \
-              --invert-grep --grep="^chore:" --grep="^Updated docs" \
-            | jq -R -s '[split("\n")[] | select(length > 0) | split("\t") | {hash: .[0], message: .[1:] | join("\t")}]' > release-notes.json
-          else
-            echo '[]' > release-notes.json
-          fi
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          gh release create "v$VERSION" dist/*.tar.gz dist/SHA256SUMS \
+            --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes
 
-      - name: Configure git
+      - name: Publish platform packages
         run: |
+          for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64; do
+            os=${platform%-*}; cpu=${platform#*-}
+            dir="out/$platform"; mkdir -p "$dir/bin"
+            # tar keeps the executable bits (artifacts don't).
+            tar -xzf "dist/agent-monitor-v$VERSION-$platform.tar.gz" -C "$dir/bin" --strip-components=1
+            node -e '
+              const fs = require("fs");
+              const [tmpl, out, platform, os, cpu, version] = process.argv.slice(1);
+              const pkg = JSON.parse(fs.readFileSync(tmpl, "utf8"));
+              pkg.name = pkg.name.replace("PLATFORM", platform);
+              pkg.description = pkg.description.replace("PLATFORM", platform);
+              Object.assign(pkg, { version, os: [os], cpu: [cpu] });
+              fs.writeFileSync(out, JSON.stringify(pkg, null, 2) + "\n");
+            ' npm/platform/package.json "$dir/package.json" "$platform" "$os" "$cpu" "$VERSION"
+            (cd "$dir" && npm publish)
+          done
+
+      - name: Publish @roylet-gs/agent-monitor
+        run: |
+          cp -r npm/agent-monitor out/main
+          node -e '
+            const fs = require("fs");
+            const [file, version] = process.argv.slice(1);
+            const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+            pkg.version = version;
+            for (const k of Object.keys(pkg.optionalDependencies)) pkg.optionalDependencies[k] = version;
+            fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
+          ' out/main/package.json "$VERSION"
+          (cd out/main && npm publish)
+
+      - name: Homebrew formula + version bump
+        run: |
+          sha() { cut -d' ' -f1 < <(sha256sum "dist/agent-monitor-v$VERSION-$1.tar.gz"); }
+          mkdir -p Formula
+          sed -e "s/VERSION/$VERSION/g" \
+              -e "s/SHA256_DARWIN_ARM64/$(sha darwin-arm64)/" \
+              -e "s/SHA256_DARWIN_X64/$(sha darwin-x64)/" \
+              -e "s/SHA256_LINUX_ARM64/$(sha linux-arm64)/" \
+              -e "s/SHA256_LINUX_X64/$(sha linux-x64)/" \
+              npm/agent-monitor.rb.tmpl > Formula/agent-monitor.rb
+          perl -0pi -e 's/^version = "[^"]*"/version = "$ENV{VERSION}"/m' Cargo.toml
+          cargo update --workspace
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Bump patch version past any published version
-        run: |
-          LOCAL_VERSION=$(node -p "require('./package.json').version")
-          # Get the latest version from the registry (returns empty if none published)
-          PUBLISHED=$(npm view @roylet-gs/agent-monitor version 2>/dev/null || echo "0.0.0")
-          echo "Local: $LOCAL_VERSION, Published: $PUBLISHED"
-          # Bump once from local
-          npm version patch --no-git-tag-version
-          NEW_VERSION=$(node -p "require('./package.json').version")
-          # If the bumped version is still <= published, set version to published and bump again
-          NEEDS_EXTRA_BUMP=$(node -e "const [a,b]=['$NEW_VERSION','$PUBLISHED'].map(v=>v.split('.').map(Number));process.exit(a[0]<b[0]||(a[0]===b[0]&&a[1]<b[1])||(a[0]===b[0]&&a[1]===b[1]&&a[2]<=b[2])?0:1)" && echo yes || echo no)
-          if [ "$NEEDS_EXTRA_BUMP" = "yes" ]; then
-            echo "Bumped version $NEW_VERSION already exists, bumping past $PUBLISHED"
-            npm version "$PUBLISHED" --no-git-tag-version --allow-same-version
-            npm version patch --no-git-tag-version
-            NEW_VERSION=$(node -p "require('./package.json').version")
-          fi
-          echo "Will publish: $NEW_VERSION"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to GitHub Packages
-        run: pnpm publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push version bump
-        run: |
-          git add package.json
-          VERSION=$(node -p "require('./package.json').version")
-          git commit -m "chore: bump version to $VERSION"
+          git add Formula/agent-monitor.rb Cargo.toml Cargo.lock
+          git commit -m "chore: release v$VERSION"
           git push

@@ -1,4 +1,4 @@
-//! Hook-event handling shared by the `am-hook` binary and `am-rs hook-event`.
+//! Hook-event handling shared by the `am-hook` binary and `am hook-event`.
 //!
 //! Claude Code runs this on every hook event (at least twice per tool call),
 //! so it must start fast: no runtime, no TUI code, one SQLite connection.
@@ -6,15 +6,14 @@
 //!
 //!   am-hook hook-event --worktree <path> [--event <name>] [--managed]
 
-use std::io::{IsTerminal, Read, Write};
-use std::os::unix::net::UnixStream;
+use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use am_core::db::{self, Owner, StatusUpdate, SubagentKey};
-use am_core::status::{self, HookEvent, Status};
+use am_core::status::{self, HookEvent};
 use am_core::{debug, info, paths, settings, warn};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 const MODULE: &str = "hook-event";
 
@@ -107,14 +106,12 @@ fn handle(worktree_arg: &str, ev: &HookEvent) -> rusqlite::Result<()> {
     let current_status = current.as_ref().and_then(|c| c.status);
 
     // --- Subagent bookkeeping (independent of whether the status changes) ---
-    let subagents_changed = track_subagents(&conn, &owner, ev)?;
+    // The TUI watches the DB (PRAGMA data_version), so no socket notify is needed.
+    track_subagents(&conn, &owner, ev)?;
     let running = db::running_subagents(&conn, &owner)?;
     if current.as_ref().map(|c| c.active_subagents) != Some(running as i64) {
         db::set_active_subagents(&conn, &owner, running)?;
         debug!(MODULE, "Running subagents for {root_str}: {running}");
-    }
-    if subagents_changed {
-        publish(&json!({ "type": "subagent-update", "owner": owner_json(&owner), "running": running }));
     }
 
     let Some(new_status) = status::map_event_to_status(ev, current_status, running) else {
@@ -158,15 +155,6 @@ fn handle(worktree_arg: &str, ev: &HookEvent) -> rusqlite::Result<()> {
         },
     )?;
     info!(MODULE, "Updated status for {root_str}: {} (was {:?}, subagents={running})", new_status.as_str(), current_status);
-    publish_status(&owner, new_status, session_id, last_response, ev.transcript_summary.as_deref(), is_open);
-
-    if ev.is("PostToolUse") && !ev.from_subagent() {
-        let cmd = ev.tool_input.as_ref().and_then(|t| t.get("command")).and_then(Value::as_str).unwrap_or("");
-        if let (Some(activity), Owner::Worktree { id, repo_id, branch }) = (status::detect_git_activity(cmd), &owner) {
-            info!(MODULE, "Detected git activity: {activity} for {root_str}");
-            publish(&json!({ "type": "git-activity", "worktreeId": id, "repoId": repo_id, "branch": branch, "activity": activity }));
-        }
-    }
 
     if ev.is("Stop") || ev.is("SessionEnd") {
         db::checkpoint_passive(&conn);
@@ -254,46 +242,6 @@ fn enrich_from_meta(conn: &rusqlite::Connection, key: &SubagentKey, ev: &HookEve
 fn worktree_root(start: &Path) -> Option<PathBuf> {
     let start = start.canonicalize().ok()?;
     start.ancestors().find(|p| p.join(".git").exists()).map(Path::to_path_buf)
-}
-
-fn owner_json(owner: &Owner) -> Value {
-    match owner {
-        Owner::Worktree { id, .. } => json!({ "worktreeId": id }),
-        Owner::Standalone { path } => json!({ "sessionPath": path }),
-    }
-}
-
-fn publish_status(owner: &Owner, status: Status, session_id: Option<&str>, last_response: Option<&str>, summary: Option<&str>, is_open: bool) {
-    let now = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default();
-    let mut msg = json!({
-        "status": status.as_str(),
-        "sessionId": session_id,
-        "lastResponse": last_response,
-        "transcriptSummary": summary,
-        "isOpen": is_open,
-        "updatedAt": now,
-    });
-    match owner {
-        Owner::Worktree { id, .. } => {
-            msg["type"] = "agent-status-update".into();
-            msg["worktreeId"] = id.as_str().into();
-        }
-        Owner::Standalone { path } => {
-            msg["type"] = "standalone-status-update".into();
-            msg["sessionPath"] = path.as_str().into();
-        }
-    }
-    publish(&msg);
-}
-
-/// Fire-and-forget notify of the TUI over the Unix socket. SQLite is the
-/// source of truth; a missing or busy socket is not an error.
-fn publish(msg: &Value) {
-    let Ok(mut stream) = UnixStream::connect(paths::socket_path()) else { return };
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(200)));
-    let mut line = msg.to_string();
-    line.push('\n');
-    let _ = stream.write_all(line.as_bytes());
 }
 
 /// `AM_HOOK_CAPTURE=1` saves raw payloads (one file per event name, newest

@@ -20,36 +20,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 # ============================================================
-# Stage: app — the real TUI served via ttyd
-# ============================================================
-FROM base AS app
-
-# Install ttyd (auto-detect architecture)
-ARG TTYD_VERSION=1.7.7
-RUN ARCH=$(uname -m) \
-  && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ARCH}" -o /usr/local/bin/ttyd \
-  && chmod +x /usr/local/bin/ttyd
-
-COPY --from=deps /work/node_modules ./node_modules
-COPY package.json pnpm-lock.yaml tsconfig.json ./
-COPY src/ ./src/
-
-# Install fake gh on PATH
-COPY e2e/bin/gh /usr/local/bin/gh
-RUN chmod +x /usr/local/bin/gh
-
-COPY e2e/seed-standalone.ts ./e2e/seed-standalone.ts
-COPY e2e/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-ENV AM_DATA_DIR=/tmp/am-e2e
-ENV AM_MOCK_API_URL=http://mock-api:4100
-
-EXPOSE 7681
-ENTRYPOINT ["/entrypoint.sh"]
-
-# ============================================================
-# Stage: rust-build — compile the native binaries (am-tui, am-rs, am-hook)
+# Stage: rust-build — compile the native binaries (am-tui, am, am-hook)
 # ============================================================
 # bookworm to match the runtime stage's glibc.
 FROM docker.io/library/rust:1-slim-bookworm AS rust-build
@@ -72,12 +43,12 @@ RUN --mount=type=cache,id=am-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=am-cargo-target,target=/src/target \
     cargo build --release --locked -p am-tui -p am-cli -p am-hook \
   && mkdir -p /out \
-  && cp target/release/am-tui target/release/am-rs target/release/am-hook /out/
+  && cp target/release/am-tui target/release/am target/release/am-hook /out/
 
 # ============================================================
-# Stage: app-rust — the native TUI (am-tui) served via ttyd
+# Stage: app — the native TUI (am-tui) served via ttyd
 # ============================================================
-FROM docker.io/library/debian:bookworm-slim AS app-rust
+FROM docker.io/library/debian:bookworm-slim AS app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ca-certificates jq sqlite3 procps \
@@ -88,14 +59,13 @@ RUN ARCH=$(uname -m) \
   && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${ARCH}" -o /usr/local/bin/ttyd \
   && chmod +x /usr/local/bin/ttyd
 
-COPY --from=rust-build /out/am-tui /out/am-rs /out/am-hook /usr/local/bin/
-RUN ln -s /usr/local/bin/am-rs /usr/local/bin/am
+COPY --from=rust-build /out/am-tui /out/am /out/am-hook /usr/local/bin/
 
 # Install fake gh on PATH
 COPY e2e/bin/gh /usr/local/bin/gh
 RUN chmod +x /usr/local/bin/gh
 
-COPY e2e/entrypoint-rust.sh /entrypoint.sh
+COPY e2e/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV AM_DATA_DIR=/tmp/am-e2e
@@ -116,16 +86,14 @@ RUN npm install -g corepack@latest && corepack enable && corepack prepare pnpm@9
 WORKDIR /work
 
 COPY --from=deps /work/node_modules ./node_modules
-COPY package.json pnpm-lock.yaml tsconfig.json ./
-COPY e2e/playwright.config.ts ./e2e/
-COPY tests/e2e/docker/ ./tests/e2e/docker/
+COPY package.json pnpm-lock.yaml ./
 
 RUN pnpm exec playwright install chromium
 
-# Rust-binary specs (run via the tests-rust compose service). Copied after the
-# browser install so editing a spec doesn't invalidate that layer.
-COPY e2e/playwright.rust.config.ts ./e2e/
-COPY tests/e2e/docker-rust/ ./tests/e2e/docker-rust/
+# Specs are copied after the browser install so editing a spec doesn't
+# invalidate that layer.
+COPY e2e/playwright.config.ts ./e2e/
+COPY tests/e2e/docker/ ./tests/e2e/docker/
 
 ENV TUI_URL=http://app:7681
 ENV MOCK_API_URL=http://mock-api:4100

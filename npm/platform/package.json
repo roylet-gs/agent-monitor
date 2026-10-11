@@ -1,0 +1,17 @@
+{
+  "name": "@roylet-gs/agent-monitor-PLATFORM",
+  "version": "0.0.0",
+  "description": "agent-monitor native binaries for PLATFORM",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/roylet-gs/agent-monitor.git"
+  },
+  "os": ["OS"],
+  "cpu": ["CPU"],
+  "files": [
+    "bin/"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

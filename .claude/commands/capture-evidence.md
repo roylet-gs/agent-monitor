@@ -1,25 +1,25 @@
 # Capture E2E Evidence
 
-Collect build, test, and visual evidence that the current changes work. Uses Docker-based E2E infrastructure for screenshots and integration tests.
+Collect lint, test, and visual evidence that the current changes work. Uses the Cargo test suite plus the Docker-based E2E infrastructure (real `am` / `am-tui` / `am-hook` binaries behind ttyd, driven by Playwright) for screenshots and integration tests.
 
 **IMPORTANT: You MUST complete ALL steps below. Do NOT skip steps, cut corners, or summarize. Every agent MUST be spawned. Every result MUST be collected.**
 
 ## Steps
 
-1. **Build check** — Run `pnpm build` and capture the output. If it fails, stop and report.
+1. **Lint check** — Run `cargo clippy --workspace --all-targets -- -D warnings` and capture the output. If it fails, stop and report.
 
 2. **Analyze diff** — Run `git diff main...HEAD --name-only` to identify changed files. Use the coverage mapping table below to determine if new E2E specs are needed.
 
 3. **Spawn ALL parallel sub-agents** using the Agent tool. You MUST launch all applicable agents in a SINGLE message with PARALLEL tool calls. Do NOT run them sequentially. Do NOT skip any agent.
 
-   **Agent A: Unit tests** (REQUIRED) — Run `pnpm test` (vitest) with relevant test files. Capture per-test pass/fail. Return structured results as a table.
+   **Agent A: Rust tests** (REQUIRED) — Run `cargo test --workspace`. Capture per-crate / per-test-binary pass/fail counts (am-core, am-hook incl. `tests/hook.rs`, am-tui incl. insta snapshots, am-cli incl. `tests/cli.rs`) and list any failing tests by name. If an insta snapshot fails, include the snapshot diff; do NOT accept snapshots (`INSTA_UPDATE=always`) unless the UI change is intended by the diff, and say so if you did. Return structured results as a table.
 
    **Agent B: Docker E2E + screenshots** (REQUIRED) — Steps:
    1. Analyze `git diff main...HEAD --name-only` output to determine changed components/features
-   2. Check if changed components have corresponding specs in `tests/e2e/docker/` using the coverage mapping table below
-   3. If gaps exist, create new spec files in `tests/e2e/docker/` following the existing pattern (import `TuiPage` from `./pages/tui-page`, navigate to relevant view, take screenshots). Look at existing specs for reference.
+   2. Check if changed files have corresponding specs in `tests/e2e/docker/` using the coverage mapping table below
+   3. If gaps exist, create new spec files in `tests/e2e/docker/` following the existing pattern: numbered `NN-name.spec.ts` (next free number), `import { RustTui, resetMock, setupMock } from "./helpers/rust-tui"`, `resetMock()` in `beforeEach`, `tui.open()`, navigate to the relevant view, assert on `getScreenText()` / `keyBar()` / `selectedRow()`, and `tui.screenshot("<name>")`. Specs share one seeded DB and run sequentially, so restore any setting or state a spec changes. Seed data comes from `e2e/entrypoint.sh`; mock GitHub/Linear responses from `e2e/mock-api/` (fixtures in `e2e/mock-api/fixtures/`). Look at existing specs for reference.
    4. Clean prior artifacts: `rm -rf tests/e2e/tmp/*.png tests/e2e/tmp/test-results`
-   5. Run `pnpm test:e2e` — this builds Docker images (picks up new specs via `COPY`), runs all Playwright specs, screenshots land in `tests/e2e/tmp/`
+   5. Run `pnpm test:e2e` — this builds the Docker images (compiles the release binaries in the `rust-build` stage and picks up new specs via `COPY`), runs all Playwright specs, and screenshots land in `tests/e2e/tmp/`
    6. On failure: capture logs with `docker compose -f e2e/docker-compose.yml logs`, then clean up with `pnpm test:e2e:clean`
    7. On success: clean up with `pnpm test:e2e:clean`, return pass/fail summary + screenshot file list from `tests/e2e/tmp/`
    8. Upload screenshots: `bash .claude/scripts/upload-evidence.sh tests/e2e/tmp`
@@ -30,35 +30,50 @@ Collect build, test, and visual evidence that the current changes work. Uses Doc
 
    | Component/File | Covered By |
    |---|---|
-   | `src/components/Dashboard.tsx`, `WorktreeList.tsx`, `StatusBar.tsx`, `ActionBar.tsx` | `dashboard.spec.ts`, `screenshots.spec.ts` |
-   | `src/components/SettingsPanel.tsx` | `navigation.spec.ts` (s key), `screenshots.spec.ts` |
-   | `src/components/NewWorktreeForm.tsx` | `navigation.spec.ts` (n key) |
-   | `src/components/DeleteConfirm.tsx` | `navigation.spec.ts` (d key) |
-   | `src/components/WorktreeDetail.tsx` | `dashboard.spec.ts` |
-   | PR-related changes (`src/lib/github.ts`) | `pr-status.spec.ts` |
-   | Linear-related changes (`src/lib/linear.ts`) | `pr-status.spec.ts` (via mock-api) |
-   | Setup wizard (`src/components/SetupWizard.tsx`) | `setup-wizard.spec.ts` |
+   | `crates/am-tui/src/ui.rs` (worktree pane, row layout, key bar) | `01-dashboard.spec.ts`, plus screenshots in every spec |
+   | `crates/am-tui/src/ui.rs` (`draw_help`, status legend) | `02-help.spec.ts` |
+   | `crates/am-tui/src/app.rs` (navigation, selection, `w` log pane) | `01-dashboard.spec.ts` |
+   | `crates/am-tui/src/app.rs` (`rebuild_rows`: repo / ticket / project headers) | `01-dashboard.spec.ts`, `05-linear.spec.ts`, `08-standalone.spec.ts` |
+   | `crates/am-tui/src/settings_ui.rs` (settings editor) | `03-settings.spec.ts` |
+   | `crates/am-tui/src/settings_ui.rs` (sort sub-editor) | `05-linear.spec.ts` |
+   | `crates/am-tui/src/modals.rs`, `ops.rs` (new worktree form, live branch check, branch-exists choices, create) | `09-new-worktree.spec.ts` |
+   | `crates/am-tui/src/modals.rs`, `ops.rs` (delete dialog, delete) | `10-delete.spec.ts` |
+   | `crates/am-tui/src/setup.rs` (first-run wizard) | `11-setup-wizard.spec.ts` |
+   | `crates/am-tui/src/data.rs` (collector, standalone "Other sessions" group) | `01-dashboard.spec.ts`, `07-subagents.spec.ts`, `08-standalone.spec.ts` |
+   | `crates/am-tui/src/data.rs` (integrations thread), `crates/am-core/src/integrations/{cache,breaker}.rs`, offline hint | `06-offline-cache.spec.ts` |
+   | `crates/am-tui/src/theme.rs` | Screenshots in every spec (default `ansi` theme) |
+   | `crates/am-core/src/integrations/github.rs`, PR column | `04-pr-status.spec.ts` |
+   | `crates/am-core/src/integrations/linear.rs`, ticket column, Linear PR fallback | `05-linear.spec.ts`, `04-pr-status.spec.ts` |
+   | `crates/am-core/src/grouping.rs` (sort / filters / groups) | `05-linear.spec.ts`, `01-dashboard.spec.ts` |
+   | `crates/am-core/src/status.rs`, `crates/am-hook/src/*` (hook path, subagent tracking) | `07-subagents.spec.ts`, `08-standalone.spec.ts` (seeded through `am hook-event` in `e2e/entrypoint.sh`) |
+   | `crates/am-core/src/worktrees.rs` (create / delete / sync / remote probe) | `09-new-worktree.spec.ts`, `10-delete.spec.ts` |
+   | `crates/am-core/src/hooks_installer.rs` | `11-setup-wizard.spec.ts` (hooks install step) |
+   | `crates/am-cli/src/**` | `crates/am-cli/tests/cli.rs` (Agent A); `am repo add` / `am hook-event` / `am status` also run in `e2e/entrypoint.sh` |
+   | `e2e/**`, `tests/e2e/docker/helpers/**` | All specs |
 
-   For anything not in this table, Agent B should create a new spec in `tests/e2e/docker/`.
+   Not covered by E2E (unit/snapshot tests only — note this in the evidence rather than adding a spec unless the diff changes visible behaviour): `crates/am-tui/src/launcher.rs` and `crates/am-core/src/launch.rs` (open IDE/terminal/URL — external apps), `crates/am-core/src/stacks.rs` (stacked-branch tree; covered by the `stacked_branches_nest_under_their_parent` snapshot), `crates/am-core/src/procscan.rs`, audio cues, and the `f` feature-request flow.
+
+   For anything else, Agent B should create a new spec in `tests/e2e/docker/`.
 
 4. **Aggregate evidence** — Wait for ALL sub-agents to complete. Collect all results and format into structured markdown:
 
    ```markdown
    ## Evidence
 
-   ### Build
+   ### Clippy
    <details><summary>Output</summary>
 
    ```
-   (build output here)
+   (clippy output here)
    ```
 
    </details>
 
-   ### Unit Tests (X/Y passed)
-   | Test File | Tests | Status |
-   |-----------|-------|--------|
-   | test name here | 5/5 | ✅ |
+   ### Rust Tests (X/Y passed)
+   | Crate / Test Binary | Tests | Status |
+   |---------------------|-------|--------|
+   | am-core (lib) | 120/120 | ✅ |
+   | am-tui (lib, insta snapshots) | 40/40 | ✅ |
 
    <details><summary>Full test output</summary>
 
@@ -71,8 +86,8 @@ Collect build, test, and visual evidence that the current changes work. Uses Doc
    ### Docker E2E Tests (X/Y passed)
    | Spec | Tests | Status |
    |------|-------|--------|
-   | dashboard.spec.ts | 2/2 | ✅ |
-   | navigation.spec.ts | 3/3 | ✅ |
+   | 01-dashboard.spec.ts | 3/3 | ✅ |
+   | 04-pr-status.spec.ts | 4/4 | ✅ |
 
    ### Screenshots
    ![Dashboard](uploaded-url)
@@ -95,8 +110,8 @@ Collect build, test, and visual evidence that the current changes work. Uses Doc
 ## Completion Checklist
 
 Before returning, verify ALL of the following:
-- [ ] Build ran and output captured
-- [ ] Agent A (unit tests) was spawned and results collected
+- [ ] Clippy ran and output captured
+- [ ] Agent A (Rust tests) was spawned and results collected
 - [ ] Agent B (Docker E2E + screenshots) was spawned and results collected
 - [ ] Evidence markdown is complete with all sections populated
 - [ ] Screenshots uploaded via `upload-evidence.sh tests/e2e/tmp`
