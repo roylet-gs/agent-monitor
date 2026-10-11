@@ -5,42 +5,46 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-test("dashboard renders both panes with the seeded repo", async ({ page }) => {
+test("dashboard renders the worktree pane and key bar with the seeded repo", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
   await tui.waitForText("feature/to-delete");
 
   const text = await tui.getScreenText();
-  expect(text).toContain("[1] Worktrees");
-  expect(text).toContain("[2] Subagents");
-  // Repo header (two groups: the repo + "Other sessions").
-  expect(text).toMatch(/│work\s/);
+  expect(text).toContain("─Worktrees");
+  expect(text).toMatch(/ \d of \d+ /);
+  // The Subagents pane and the mode pill are gone.
+  expect(text).not.toContain("Subagents");
+  expect(text).not.toContain(" WORKTREES ");
+  // Repo header (two groups: the repo + "Other sessions"): name + rule.
+  expect(text).toMatch(/│work ─+/);
   expect(text).toContain("main");
-  expect(await tui.statusBar()).toContain(" WORKTREES ");
-  expect(await tui.statusBar()).toContain("? help");
+  const keys = await tui.keyBar();
+  expect(keys).toContain("⏎ open");
+  expect(keys).toContain("g PR");
+  expect(keys).toContain("? help");
+  expect(keys).toContain("q quit");
 
   await tui.screenshot("rust-dashboard");
 });
 
-test("j/k move the selection and tab/1/2 switch the focused pane", async ({ page }) => {
+test("j/k move the ▌ selection; Home/G jump to top/bottom", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
 
   await tui.selectRow("feature/to-delete");
+  expect(await tui.selectedName()).toBe("feature/to-delete");
   await tui.sendKey("j");
-  expect((await tui.contextLine()).trim()).toMatch(/^main/);
+  expect(await tui.selectedName()).toBe("main");
   await tui.sendKey("k");
-  expect((await tui.contextLine()).trim()).toMatch(/^feature\/to-delete/);
+  expect(await tui.selectedName()).toBe("feature/to-delete");
+  // Exactly one row is marked.
+  expect((await tui.lines()).filter((l) => l.includes("│▌"))).toHaveLength(1);
 
-  await tui.sendKey("Tab");
-  expect(await tui.statusBar()).toContain(" SUBAGENTS ");
-  await tui.sendKey("1");
-  expect(await tui.statusBar()).toContain(" WORKTREES ");
-  await tui.sendKey("2");
-  expect(await tui.statusBar()).toContain(" SUBAGENTS ");
-  // Esc from the Subagents pane returns focus instead of quitting.
-  await tui.sendKey("Escape");
-  expect(await tui.statusBar()).toContain(" WORKTREES ");
+  await tui.sendKey("G");
+  await tui.waitForMatch(/ (\d+) of \1 /);
+  await tui.sendKey("Home");
+  await tui.waitForMatch(/ 1 of \d+ /);
 });
 
 test("w toggles the log pane", async ({ page }) => {

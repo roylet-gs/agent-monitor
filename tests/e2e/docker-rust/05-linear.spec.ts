@@ -8,12 +8,13 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-test("Linear ticket column, context line and ticket cluster header", async ({ page }) => {
+test("Linear ticket column and ticket cluster header", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
   await tui.waitForText("ENG-123", 15_000);
   await tui.selectRow("main");
-  await tui.waitForMatch(/ENG-123 Implement dashboard feature \(In Progress\)/, 5_000);
+  // The identifier sits in the row's ticket column.
+  await tui.waitForMatch(/│▌.*\sENG-123\s/, 5_000);
   // Adjacent worktrees with the same ticket get a "— ticket —" header.
   await tui.waitForText("— ENG-123 Implement dashboard feature —");
   await tui.screenshot("rust-linear-ticket");

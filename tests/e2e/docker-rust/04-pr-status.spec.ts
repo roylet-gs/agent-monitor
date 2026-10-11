@@ -2,7 +2,8 @@ import { test, expect } from "@playwright/test";
 import { RustTui, resetMock, setupMock } from "./helpers/rust-tui";
 
 // The mock answers every branch of the batched `gh api graphql` lookup with
-// the current fixture, so every row carries the same PR.
+// the current fixture, so every row carries the same PR. PR info lives only in
+// the row's PR column now (`#42✓`); state/draft is conveyed by colour alone.
 
 test.beforeEach(async () => {
   await resetMock();
@@ -24,7 +25,7 @@ test("open PR with passing checks", async ({ page }) => {
   await tui.open();
   await tui.selectRow("main");
   await tui.waitForText("#42✓", 15_000);
-  await tui.waitForMatch(/PR #42 open/, 5_000);
+  expect(await tui.selectedRow()).toContain("#42✓");
   await tui.screenshot("rust-pr-open");
 });
 
@@ -43,8 +44,10 @@ test("draft PR", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
   await tui.selectRow("main");
+  // Draft = dim number (not visible in text); no checks → no glyph.
   await tui.waitForText("#43", 15_000);
-  await tui.waitForMatch(/PR #43 draft/, 5_000);
+  await tui.waitForGone("#42", 15_000);
+  expect(await tui.selectedRow()).toMatch(/#43(\s|$)/);
   await tui.screenshot("rust-pr-draft");
 });
 
@@ -56,9 +59,8 @@ test("no PR on the branch", async ({ page }) => {
   await tui.open();
   await tui.selectRow("main");
   // Whatever an earlier spec cached is replaced by the authoritative "no PR".
-  await tui.waitForGone("PR #", 15_000);
-  await tui.waitForGone("#4", 5_000);
-  expect(await tui.contextLine()).not.toContain("PR #");
+  await tui.waitForGone("#4", 15_000);
+  expect(await tui.selectedRow()).not.toMatch(/#\d/);
   await tui.screenshot("rust-pr-none");
 });
 
@@ -67,7 +69,8 @@ test("Linear PR attachment stands in when GitHub has no PR", async ({ page }) =>
   const tui = new RustTui(page);
   await tui.open();
   await tui.selectRow("main");
-  await tui.waitForMatch(/PR #42 open/, 15_000);
-  // No check status comes from an attachment, hence no ✓.
+  // No check status comes from an attachment, hence #42 without ✓.
   await tui.waitForGone("#42✓", 15_000);
+  await tui.waitForMatch(/│▌.*#42(\s|$)/m, 15_000);
+  expect(await tui.selectedRow()).toMatch(/#42(\s|$)/);
 });

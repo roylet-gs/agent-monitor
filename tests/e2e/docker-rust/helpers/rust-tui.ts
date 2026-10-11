@@ -8,8 +8,10 @@ export const FRESH_URL = process.env.TUI_FRESH_URL || "http://localhost:7692";
 
 /**
  * TuiPage plus helpers for the native (ratatui) dashboard. Layout reminder:
- * the last terminal row is the status bar, the one above it the context line
- * (` <branch> · ENG-123 … · PR #42 open · session …`) for the selection.
+ * one full-width `─Worktrees` pane (bottom-right `N of M`), then the key bar
+ * on the last terminal row (` ⏎ open  t terminal … ? help  q quit`) with any
+ * transient notice / offline hint right-aligned on it. The selected worktree
+ * row starts with `▌` just inside the pane border (`│▌<tree>◆ main …`).
  */
 export class RustTui extends TuiPage {
   constructor(private readonly pg: Page) {
@@ -19,7 +21,7 @@ export class RustTui extends TuiPage {
   /** Open the seeded dashboard and wait for its first data frame. */
   async open(): Promise<void> {
     await this.goto();
-    await this.waitForText("[1] Worktrees", 10_000);
+    await this.waitForText("─Worktrees", 10_000);
     await this.waitForText(" of ", 10_000); // "N of M" footer = rows loaded
   }
 
@@ -36,24 +38,34 @@ export class RustTui extends TuiPage {
     return lines;
   }
 
-  async statusBar(): Promise<string> {
+  /** The key bar: the last non-empty row (also carries notices / offline hint). */
+  async keyBar(): Promise<string> {
     const l = await this.lines();
     return l[l.length - 1] ?? "";
   }
 
-  async contextLine(): Promise<string> {
-    const l = await this.lines();
-    return l[l.length - 2] ?? "";
+  /** The selected worktree row (the one marked `│▌`), or "" if none. */
+  async selectedRow(): Promise<string> {
+    return (await this.lines()).find((l) => l.includes("│▌")) ?? "";
   }
 
-  /** Move the worktree selection to the row whose branch starts with `branch`. */
+  /**
+   * Name (branch / nickname / path) on the selected row: after the `▌`, any
+   * stack-tree prefix (`├─`/`└─`/`│`), then the status glyph and a space.
+   */
+  async selectedName(): Promise<string> {
+    const m = /│▌[│├└─\s]*\S (\S+)/.exec(await this.selectedRow());
+    return m ? m[1] : "";
+  }
+
+  /** Move the worktree selection to the row whose name starts with `branch`. */
   async selectRow(branch: string, max = 10): Promise<void> {
     // Several passes: a row can move while we walk the list (e.g. a new
     // worktree is re-sorted once its Linear ticket arrives).
     for (let pass = 0; pass < 3; pass++) {
       await this.sendKey("Home");
       for (let i = 0; i < max; i++) {
-        if ((await this.contextLine()).trim().startsWith(branch)) return;
+        if ((await this.selectedName()).startsWith(branch)) return;
         await this.sendKey("j");
       }
     }
@@ -94,7 +106,7 @@ export class RustTui extends TuiPage {
     await this.sendKey("Enter");
     await this.waitForGone("New worktree", 10_000);
     await this.waitForGone("Creating ", 30_000);
-    await this.waitForMatch(new RegExp(`│[▌▏ ]\\S ${branch.replace(/[/.]/g, "\\$&")}\\s`), 15_000);
+    await this.waitForMatch(new RegExp(`│[▌ ][│├└─ ]*\\S ${branch.replace(/[/.]/g, "\\$&")}\\s`), 15_000);
     return branch;
   }
 

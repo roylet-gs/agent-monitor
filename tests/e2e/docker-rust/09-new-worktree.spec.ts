@@ -50,8 +50,8 @@ test("creating a fresh worktree adds and selects its row", async ({ page }) => {
   await tui.waitForGone("Creating ", 30_000);
   await tui.waitForText(`feature/${name}`, 15_000);
   // pending_select puts the new row under the cursor.
-  await tui.waitForMatch(new RegExp(`^ feature/${name}`, "m"), 10_000);
-  expect((await tui.contextLine()).trim()).toMatch(new RegExp(`^feature/${name}`));
+  await tui.waitForMatch(new RegExp(`│▌[│├└─ ]*\\S feature/${name}\\s`), 10_000);
+  expect(await tui.selectedName()).toBe(`feature/${name}`);
   await tui.screenshot("rust-worktree-created");
 });
 

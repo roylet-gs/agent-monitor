@@ -23,6 +23,8 @@ test("cached PR/Linear data survives an outage, with an offline hint that clears
   await tui.open();
   await tui.waitForMatch(/⚠ (GitHub \+ Linear|GitHub|Linear) offline — cached/, 20_000);
   await tui.waitForMatch(/⚠ GitHub \+ Linear offline — cached/, 10_000);
+  // The hint is right-aligned on the key bar (last row).
+  expect(await tui.keyBar()).toMatch(/\? help.*⚠ GitHub \+ Linear offline — cached/);
   const text = await tui.getScreenText();
   expect(text).toContain("#42✓");
   expect(text).toContain("ENG-123");

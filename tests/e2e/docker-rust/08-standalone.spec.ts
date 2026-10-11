@@ -11,12 +11,18 @@ test.beforeEach(async () => {
 test("standalone sessions are listed under Other sessions and selectable", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
-  await tui.waitForText("Other sessions");
+  await tui.waitForMatch(/│Other sessions ─+/);
   await tui.waitForMatch(/● \/home\/user\/my-project/);
 
+  // The session row sits below the "Other sessions" header.
+  const lines = await tui.lines();
+  const header = lines.findIndex((l) => l.includes("Other sessions"));
+  const row = lines.findIndex((l) => l.includes("/home/user/my-project"));
+  expect(header).toBeGreaterThanOrEqual(0);
+  expect(row).toBeGreaterThan(header);
+
   await tui.selectRow("/home/user/my-project");
-  expect(await tui.contextLine()).toContain("session sess-standalone-1");
-  // Executing session counted in the status bar.
-  expect(await tui.statusBar()).toMatch(/● 1/);
+  // Executing (●) standalone session.
+  expect(await tui.selectedRow()).toMatch(/│▌● \/home\/user\/my-project/);
   await tui.screenshot("rust-standalone");
 });
