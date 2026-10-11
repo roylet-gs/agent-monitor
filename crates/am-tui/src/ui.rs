@@ -592,10 +592,29 @@ fn worktree_line<'a>(
         badge.push_str(" ▶");
     }
     if subagents > 0 {
-        badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
+        if width >= 100 {
+            badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
+        } else {
+            badge.push_str(&format!(" ◆{subagents}"));
+        }
     }
     let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + tree.width());
-    let name = truncate(v.worktree.display_name(), name_w);
+    // Nickname (e.g. from the Linear ticket) first, then the branch, dimmed.
+    // When space is short they share it so the branch never disappears.
+    let w = &v.worktree;
+    let show_branch = w.display_name() != w.branch && !w.is_standalone();
+    let (name, branch) = if show_branch {
+        let full = w.display_name().width() + 2 + w.branch.width();
+        if full <= name_w {
+            (w.display_name().to_string(), w.branch.clone())
+        } else {
+            let branch_w = w.branch.width().min(name_w.saturating_sub(2) / 2).max(name_w.saturating_sub(2 + w.display_name().width()));
+            let nick_w = name_w.saturating_sub(2 + branch_w);
+            (truncate(w.display_name(), nick_w), truncate(&w.branch, branch_w))
+        }
+    } else {
+        (truncate(w.display_name(), name_w), String::new())
+    };
     let name_style = if status == Some(Status::Waiting) {
         theme.bold(theme.yellow)
     } else if selected {
@@ -604,8 +623,12 @@ fn worktree_line<'a>(
         theme.fg(theme.text)
     };
     // Badges sit right after the name; padding goes after them.
-    let fill = name_w.saturating_sub(name.width());
+    let used = name.width() + if branch.is_empty() { 0 } else { 2 + branch.width() };
+    let fill = name_w.saturating_sub(used);
     left.push(Span::styled(name, name_style));
+    if !branch.is_empty() {
+        left.push(Span::styled(format!("  {branch}"), theme.faint()));
+    }
     let mut rest = badge.as_str();
     if let Some(r) = rest.strip_prefix(" •") {
         left.push(Span::styled(" •", theme.bold(theme.accent)));
@@ -1131,6 +1154,18 @@ mod tests {
             "children follow the parent, depth-first, with tree lines"
         );
         insta::assert_snapshot!(render(&app, 100, 14));
+    }
+
+    #[test]
+    fn nicknamed_rows_still_show_the_branch() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.groups[0].worktrees[0].worktree.custom_name = Some("Refactor grouping core".into());
+        app.apply(snap);
+        let wide = render(&app, 120, 8);
+        assert!(wide.contains("Refactor grouping core  feature/refactor"), "{wide}");
+        let narrow = render(&app, 80, 8);
+        assert!(narrow.contains("feature/"), "branch survives at 80 cols:\n{narrow}");
     }
 
     #[test]
