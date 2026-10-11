@@ -1,0 +1,61 @@
+# Builds the native binaries (am-rs → `am`, am-tui, am-hook) for every
+# platform and attaches them to a GitHub Release. Manual only until the
+# cut-over to the Rust app (docs/rewrite-plan.md, Phase 4).
+name: Release native binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create/update (e.g. v2.0.0-rc.1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest, npm: darwin-arm64 }
+          - { target: x86_64-apple-darwin, os: macos-latest, npm: darwin-x64 }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, npm: linux-x64 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, npm: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p am-cli -p am-tui -p am-hook
+      - name: Package
+        run: |
+          dir=agent-monitor-${{ inputs.tag }}-${{ matrix.npm }}
+          mkdir -p "$dir"
+          for b in am-rs am-tui am-hook; do cp "target/${{ matrix.target }}/release/$b" "$dir/"; done
+          mv "$dir/am-rs" "$dir/am"
+          tar -czf "$dir.tar.gz" "$dir"
+          shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.npm }}
+          path: agent-monitor-*.tar.gz*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "${{ inputs.tag }}" --repo "$GITHUB_REPOSITORY" --prerelease --title "${{ inputs.tag }} (native)" --notes "Native Rust build of agent-monitor."
+          gh release upload "${{ inputs.tag }}" agent-monitor-*.tar.gz* --clobber --repo "$GITHUB_REPOSITORY"
