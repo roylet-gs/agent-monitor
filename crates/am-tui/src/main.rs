@@ -66,12 +66,16 @@ fn main() -> io::Result<()> {
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Theme, collector: &data::Collector) -> io::Result<()> {
     let (launch_tx, launch_rx) = std::sync::mpsc::channel();
     let mut popup_since: Option<Instant> = None;
+    let mut log_lines: Vec<String> = Vec::new();
     let mut dirty = true;
     let mut last_second = am_core::timefmt::now_unix();
     let mut notice_since: Option<Instant> = None;
     loop {
         while let Some(snapshot) = collector.try_recv() {
             app.apply(snapshot);
+            for sound in app.sounds.drain(..) {
+                play_sound(&sound);
+            }
             dirty = true;
         }
         while let Ok(msg) = launch_rx.try_recv() {
@@ -97,6 +101,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Th
             // Elapsed/age labels tick once a second; the diff renderer only
             // rewrites the cells that actually changed.
             last_second = now;
+            if app.show_log {
+                log_lines = tail_log(200);
+            }
             dirty = true;
         }
         if app.notice.is_some() && notice_since.get_or_insert_with(Instant::now).elapsed() > Duration::from_secs(2) {
@@ -106,7 +113,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Th
         }
         if dirty {
             execute!(io::stdout(), BeginSynchronizedUpdate)?;
-            terminal.draw(|f| ui::draw(f, app, theme, now))?;
+            terminal.draw(|f| ui::draw(f, app, theme, now, &log_lines))?;
             execute!(io::stdout(), EndSynchronizedUpdate)?;
             io::stdout().flush()?;
             dirty = false;
@@ -122,7 +129,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Th
                             Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
                             Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
                             Action::OpenClaude(v) => launcher::open_claude(*v, launch_tx.clone()),
+                            Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
                             Action::None => {}
+                        }
+                        if app.show_log && log_lines.is_empty() {
+                            log_lines = tail_log(200);
                         }
                         dirty = true;
                     }
@@ -132,4 +143,32 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Th
             }
         }
     }
+}
+
+/// macOS system sound by name; fire-and-forget (port of src/lib/audio.ts).
+fn play_sound(name: &str) {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return;
+    }
+    let path = format!("/System/Library/Sounds/{name}.aiff");
+    let _ = std::process::Command::new("afplay")
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// Last `n` lines of debug.log (reads at most the final 64 KiB).
+fn tail_log(n: usize) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(am_core::paths::log_path()) else { return Vec::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let _ = f.seek(SeekFrom::Start(len.saturating_sub(64 * 1024)));
+    // Seeking can land mid-character; decode lossily rather than failing.
+    let mut bytes = Vec::new();
+    let _ = f.read_to_end(&mut bytes);
+    let buf = String::from_utf8_lossy(&bytes);
+    let lines: Vec<String> = buf.lines().map(str::to_owned).collect();
+    lines[lines.len().saturating_sub(n)..].to_vec()
 }

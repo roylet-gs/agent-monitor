@@ -3,14 +3,15 @@ source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 20)"
 ---
 ╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents · feature/refactor ──────╮
-│agent-monitor                                           ││ ◆ Analyze am de… general-purpose  2m14s│
-│▌◆ featur╭ Keys ────────────────────────────────────────────────────────────────────────╮ 23 tools│
-│ ◐ fix/of│    j / k  ↑ / ↓  move                                                        │se  2m14s│
-│gridsight│          gg / G  top / bottom                                                │ 23 tools│
-│ · main  │ ctrl-d / ctrl-u  page down / up                                              │e 30s ago│
-│         │           enter  open (IDE; resumes last Claude session)                     │ 23 tools│
-│         │               t  terminal at worktree                                        │         │
+│agent-mon╭ Keys ────────────────────────────────────────────────────────────────────────╮se  2m14s│
+│▌◆ featur│    j / k  ↑ / ↓  move                                                        │ 23 tools│
+│ ◐ fix/of│          gg / G  top / bottom                                                │se  2m14s│
+│gridsight│ ctrl-d / ctrl-u  page down / up                                              │ 23 tools│
+│ · main  │           enter  open (IDE; resumes last Claude session)                     │e 30s ago│
+│         │               t  terminal at worktree                                        │ 23 tools│
 │         │               c  terminal running claude --resume                            │         │
+│         │       o / l / p  open PR / Linear ticket / Linear project                    │         │
+│         │               w  toggle log pane                                             │         │
 │         │       tab  1  2  switch pane                                                 │         │
 │         │               a  subagents: this worktree ↔ all                              │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
@@ -18,7 +19,6 @@ expression: "render(&app, 100, 20)"
 │         │          q  esc  quit                                                        │         │
 │         │                                                                              │         │
 │         │● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │         │
-│         ╰──────────────────────────────────────────────────────────────────────────────╯         │
-╰──────────────────────────────────────────────── 1 of 3 ╯╰─────────── 2 running · 1 done · a: all ╯
+╰─────────╰──────────────────────────────────────────────────────────────────────────────╯· a: all ╯
  feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1
  WORKTREES  ◐ 1  ◆ 1                                                         ⏎ open  ? help  q quit

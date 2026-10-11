@@ -76,3 +76,18 @@ fn report(tx: &Sender<Msg>, r: Result<(), String>, ok: String) {
         Err(e) => Msg::Popup(format!("✗ {e}")),
     });
 }
+
+pub fn open_url(url: String, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let r = std::process::Command::new(opener)
+            .arg(&url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map_err(|e| e.to_string())
+            .and_then(|s| if s.success() { Ok(()) } else { Err(format!("{opener} failed")) });
+        report(&tx, r, format!("Opened {url}"));
+    });
+}

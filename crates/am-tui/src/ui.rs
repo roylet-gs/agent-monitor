@@ -19,10 +19,19 @@ use crate::theme::{Theme, status_glyph, status_label};
 /// Side-by-side panes from this width; below it they stack.
 pub const SIDE_BY_SIDE_MIN_COLS: u16 = 100;
 
-pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64) {
+pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[String]) {
     let area = f.area();
-    let [body, context, status] =
-        Layout::vertical([Constraint::Min(5), Constraint::Length(1), Constraint::Length(1)]).areas(area);
+    let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
+    let [body, log, context, status] = Layout::vertical([
+        Constraint::Min(5),
+        Constraint::Length(log_h),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    if app.show_log {
+        draw_log(f, theme, log, log_lines);
+    }
 
     let (left, right) = if area.width >= SIDE_BY_SIDE_MIN_COLS {
         let [l, r] = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)]).areas(body);
@@ -42,6 +51,34 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64) {
     if let Some(msg) = &app.popup {
         draw_popup(f, theme, area, msg);
     }
+}
+
+fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.fg(theme.border))
+        .title(Line::from(vec![Span::styled("─", theme.fg(theme.border)), Span::styled("[w] Log ", theme.fg(theme.text))]));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let take = inner.height as usize;
+    let rendered: Vec<Line> = lines[lines.len().saturating_sub(take)..]
+        .iter()
+        .map(|l| {
+            let style = if l.contains("[ERROR]") {
+                theme.fg(theme.red)
+            } else if l.contains("[WARN]") {
+                theme.fg(theme.yellow)
+            } else if l.contains("[INFO]") {
+                theme.fg(theme.text)
+            } else {
+                theme.faint()
+            };
+            // Drop the date part of the timestamp to save width.
+            let short = l.get(12..).filter(|_| l.starts_with('[')).unwrap_or(l);
+            Line::styled(truncate(short, inner.width as usize), style)
+        })
+        .collect();
+    f.render_widget(Paragraph::new(rendered), inner);
 }
 
 fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
@@ -185,6 +222,9 @@ fn worktree_line<'a>(
         Span::raw(" "),
     ];
     let mut badge = String::new();
+    if app.unseen.contains(&v.worktree.id) {
+        badge.push_str(" •");
+    }
     if !v.running_processes.is_empty() {
         badge.push_str(" ▶");
     }
@@ -201,12 +241,16 @@ fn worktree_line<'a>(
         theme.fg(theme.text)
     };
     left.push(Span::styled(pad(&name, name_w), name_style));
-    if let Some(rest) = badge.strip_prefix(" ▶") {
-        left.push(Span::styled(" ▶", theme.fg(theme.green)));
-        left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
-    } else {
-        left.push(Span::styled(badge, theme.fg(theme.magenta)));
+    let mut rest = badge.as_str();
+    if let Some(r) = rest.strip_prefix(" •") {
+        left.push(Span::styled(" •", theme.bold(theme.accent)));
+        rest = r;
     }
+    if let Some(r) = rest.strip_prefix(" ▶") {
+        left.push(Span::styled(" ▶", theme.fg(theme.green)));
+        rest = r;
+    }
+    left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
 
     let mut spans = left;
     spans.extend(right);
@@ -467,6 +511,8 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("enter", "open (IDE; resumes last Claude session)"),
         ("t", "terminal at worktree"),
         ("c", "terminal running claude --resume"),
+        ("o / l / p", "open PR / Linear ticket / Linear project"),
+        ("w", "toggle log pane"),
         ("tab  1  2", "switch pane"),
         ("a", "subagents: this worktree ↔ all"),
         ("r", "refresh now (bypasses backoff)"),
@@ -645,7 +691,7 @@ mod tests {
 
     fn render(app: &App, w: u16, h: u16) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-        term.draw(|f| draw(f, app, &Theme::by_name("ansi"), NOW)).unwrap();
+        term.draw(|f| draw(f, app, &Theme::by_name("ansi"), NOW, &[])).unwrap();
         let buf = term.backend().buffer().clone();
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>().trim_end().to_string())
@@ -696,6 +742,32 @@ mod tests {
         app.apply(snap);
         assert_eq!(app.selected_view().unwrap().worktree.id, "w2");
         assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn status_changes_mark_unseen_and_queue_sounds() {
+        let mut app = fixture();
+        app.settings.audio_notifications = true;
+        assert!(app.unseen.is_empty() && app.sounds.is_empty(), "first load is silent");
+        let mut snap = app.snapshot.clone();
+        // w2 (not selected) finishes; w1 (selected) starts waiting.
+        snap.groups[0].worktrees[1].agent.as_mut().unwrap().status = Status::Done;
+        snap.groups[0].worktrees[0].agent.as_mut().unwrap().status = Status::Waiting;
+        app.apply(snap);
+        assert!(app.unseen.contains("w2"));
+        assert!(!app.unseen.contains("w1"), "the selected worktree is seen immediately");
+        assert_eq!(app.sounds, vec!["Glass".to_string(), "Funk".to_string()]);
+        app.on_key(Key::Char('j'));
+        assert!(!app.unseen.contains("w2"), "selecting marks it seen");
+    }
+
+    #[test]
+    fn link_keys() {
+        let mut app = fixture();
+        assert_eq!(app.on_key(Key::Char('o')), crate::app::Action::OpenUrl("u".into()));
+        app.on_key(Key::Char('j'));
+        assert_eq!(app.on_key(Key::Char('o')), crate::app::Action::None);
+        assert_eq!(app.notice.as_deref(), Some("No PR for this branch"));
     }
 
     #[test]

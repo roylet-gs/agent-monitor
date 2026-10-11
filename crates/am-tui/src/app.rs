@@ -53,6 +53,8 @@ pub enum Action {
     OpenTerminal(Box<WorktreeView>),
     /// `c`: terminal running `claude --resume <latest>`.
     OpenClaude(Box<WorktreeView>),
+    /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
+    OpenUrl(String),
 }
 
 pub struct App {
@@ -69,6 +71,13 @@ pub struct App {
     pub notice: Option<String>,
     /// Centered message box (e.g. "copied resume command"); any key closes it.
     pub popup: Option<String>,
+    /// `w`: debug-log pane at the bottom.
+    pub show_log: bool,
+    /// Worktrees whose status changed since the user last had them selected.
+    pub unseen: std::collections::HashSet<String>,
+    seen_status: std::collections::HashMap<String, Option<Status>>,
+    /// System sounds to play for this update (audio notifications).
+    pub sounds: Vec<String>,
     pending_g: bool,
 }
 
@@ -87,6 +96,10 @@ impl App {
             loaded: false,
             notice: None,
             popup: None,
+            show_log: false,
+            unseen: Default::default(),
+            seen_status: Default::default(),
+            sounds: Vec::new(),
             pending_g: false,
         }
     }
@@ -101,7 +114,43 @@ impl App {
         }
         self.selected = self.selected.min(self.flat.len().saturating_sub(1));
         self.sub_selected = self.sub_selected.min(self.visible_subagents().len().saturating_sub(1));
+        self.track_status_changes();
         self.loaded = true;
+    }
+
+    /// Port of the TS "unseen" logic: a status change on a worktree the user
+    /// isn't looking at marks it unseen and (optionally) plays a sound — one
+    /// per status type per update, waiting and done only.
+    fn track_status_changes(&mut self) {
+        let mut changed: Vec<(String, Option<Status>)> = Vec::new();
+        for v in &self.flat {
+            let now = v.status();
+            match self.seen_status.insert(v.worktree.id.clone(), now) {
+                Some(prev) if prev != now => changed.push((v.worktree.id.clone(), now)),
+                _ => {}
+            }
+        }
+        let first_load = !self.loaded;
+        for (id, _) in &changed {
+            if !first_load {
+                self.unseen.insert(id.clone());
+            }
+        }
+        if self.settings.audio_notifications && !first_load {
+            if changed.iter().any(|(_, s)| *s == Some(Status::Waiting)) {
+                self.sounds.push(self.settings.audio_waiting_sound.clone());
+            }
+            if changed.iter().any(|(_, s)| *s == Some(Status::Done)) {
+                self.sounds.push(self.settings.audio_done_sound.clone());
+            }
+        }
+        self.mark_selected_seen();
+    }
+
+    fn mark_selected_seen(&mut self) {
+        if let Some(id) = self.selected_view().map(|v| v.worktree.id.clone()) {
+            self.unseen.remove(&id);
+        }
     }
 
     fn rebuild_rows(&mut self) {
@@ -190,6 +239,17 @@ impl App {
             Key::Enter => return self.with_selected(Action::Open),
             Key::Char('t') => return self.with_selected(Action::OpenTerminal),
             Key::Char('c') => return self.with_selected(Action::OpenClaude),
+            Key::Char('o') => return self.url_action(|v, _| {
+                let pr = v.pr.as_ref()?;
+                // Same rule as the TS app: a merged PR jumps to its last active check.
+                Some(if pr.state == "MERGED" { pr.active_check_url.clone().unwrap_or(pr.url.clone()) } else { pr.url.clone() })
+            }, "No PR for this branch"),
+            Key::Char('l') => return self.url_action(|v, s| v.linear.as_ref().map(|l| linear_url(&l.url, s)), "No Linear ticket"),
+            Key::Char('p') => return self.url_action(
+                |v, s| v.linear.as_ref()?.project.as_ref()?.url.as_ref().map(|u| linear_url(u, s)),
+                "No Linear project",
+            ),
+            Key::Char('w') => self.show_log = !self.show_log,
             Key::Char('1') => self.focus = Pane::Worktrees,
             Key::Char('2') => self.focus = Pane::Subagents,
             Key::Char('a') => {
@@ -210,6 +270,16 @@ impl App {
             _ => {}
         }
         Action::None
+    }
+
+    fn url_action(&mut self, pick: impl Fn(&WorktreeView, &Settings) -> Option<String>, missing: &str) -> Action {
+        match self.selected_view().and_then(|v| pick(v, &self.settings)) {
+            Some(url) => Action::OpenUrl(url),
+            None => {
+                self.notice = Some(missing.to_string());
+                Action::None
+            }
+        }
     }
 
     fn with_selected(&self, f: fn(Box<WorktreeView>) -> Action) -> Action {
@@ -236,7 +306,16 @@ impl App {
         *cur = next;
         if self.focus == Pane::Worktrees {
             self.sub_selected = 0;
+            self.mark_selected_seen();
         }
+    }
+}
+
+fn linear_url(url: &str, s: &Settings) -> String {
+    if s.linear_use_desktop_app {
+        url.replacen("https://linear.app/", "linear://", 1)
+    } else {
+        url.to_string()
     }
 }
 
