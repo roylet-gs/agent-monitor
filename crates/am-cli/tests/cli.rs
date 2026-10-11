@@ -644,17 +644,61 @@ fn logs_filter_tail_and_clear() {
     assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
 }
 
+fn git(dir: &Path, args: &[&str]) {
+    let ok = Command::new("git")
+        .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "init.defaultBranch=main"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "git {args:?}");
+}
+
 #[test]
-fn unported_commands_are_clear_stubs() {
+fn worktree_create_delete_sync_end_to_end() {
     let env = Env::new();
-    for args in [&["worktree", "create", "x"][..], &["new", "x"], &["worktree", "delete", "x"], &["wt", "sync"]] {
-        let o = env.run(args);
-        assert_eq!(o.code, 1, "{args:?}");
-        assert!(o.stderr.contains("not yet implemented in am-rs"), "{args:?}: {}", o.stderr);
-    }
+    let root = env.root();
+    git(&root, &["init", "-q", "--bare", "origin.git"]);
+    git(&root, &["init", "-q", "repo"]);
+    let repo = root.join("repo");
+    git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&repo, &["remote", "add", "origin", "../origin.git"]);
+    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    git(&repo, &["push", "-q", "origin", "main:refs/heads/feature/remote"]);
+    let r = repo.to_str().unwrap();
+    env.ok(&["repo", "add", r]);
+
+    let o = env.ok(&["new", "feature/x", "--repo", r, "--name", "Nick"]);
+    assert!(o.stdout.contains("Created worktree: ") && o.stdout.contains("Branch: feature/x (based on main)"), "{}", o.stdout);
+    let j = env.ok(&["ls", "--repo", r, "--json"]).json();
+    assert!(j.to_string().contains("feature/x"), "{j}");
+
+    let o = env.run(&["worktree", "create", "feature/remote", "--repo", r]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("already exists on origin") && o.stderr.contains("--track"), "{}", o.stderr);
+    let o = env.ok(&["worktree", "create", "feature/remote", "--repo", r, "--track", "--json"]);
+    assert_eq!(o.json()["mode"], "track");
+
+    let o = env.ok(&["worktree", "delete", "feature/x", "--repo", r, "--delete-branch", "--force"]);
+    assert!(o.stdout.contains("Deleted worktree: ") && o.stdout.contains("Deleted local branch: feature/x"), "{}", o.stdout);
+    assert!(!env.ok(&["ls", "--repo", r, "--json"]).json().to_string().contains("feature/x"));
+
+    // A worktree made behind am's back appears after `wt sync`.
+    git(&repo, &["worktree", "add", "-q", "-b", "ext", "../ext-wt"]);
+    assert!(env.ok(&["wt", "sync", "--repo", r]).stdout.starts_with("Synced: repo"));
+    assert!(env.ok(&["ls", "--repo", r, "--json"]).json().to_string().contains("\"ext\""));
+
+    assert_eq!(env.run(&["--version"]).code, 0);
+}
+
+#[test]
+fn cut_commands_are_gone() {
+    let env = Env::new();
     // Cut commands are gone, and usage errors exit 1 like commander.
     for args in [&["daemon", "start"][..], &["agent", "send", "x", "hi"], &["bogus"]] {
         assert_eq!(env.run(args).code, 1, "{args:?}");
     }
-    assert_eq!(env.run(&["--version"]).code, 0);
 }

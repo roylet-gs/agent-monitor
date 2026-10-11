@@ -343,14 +343,16 @@ fn main() {
         Some(Cmd::Setup) => tui::launch(false, true),
         Some(Cmd::Worktree(w)) => match w {
             WorktreeCmd::List(a) => worktree::list(a.repo.repo.as_deref(), a.json.json),
-            WorktreeCmd::Create(_) => not_yet("worktree create"),
-            WorktreeCmd::Delete { .. } => not_yet("worktree delete"),
-            WorktreeCmd::Sync(_) => not_yet("worktree sync"),
+            WorktreeCmd::Create(a) => lifecycle::create(&a),
+            WorktreeCmd::Delete { target, repo, force, delete_branch, delete_remote } => {
+                lifecycle::delete(&target, repo.repo.as_deref(), force, delete_branch, delete_remote)
+            }
+            WorktreeCmd::Sync(r) => lifecycle::sync(r.repo.as_deref()),
             WorktreeCmd::Open { target, repo } => worktree::open(&target, repo.repo.as_deref()),
             WorktreeCmd::Info { target, repo, json } => worktree::info(&target, repo.repo.as_deref(), json.json),
         },
         Some(Cmd::Ls(a)) => worktree::list(a.repo.repo.as_deref(), a.json.json),
-        Some(Cmd::New(_)) => not_yet("new"),
+        Some(Cmd::New(a)) => lifecycle::create(&a),
         Some(Cmd::Open { target, repo }) => worktree::open(&target, repo.repo.as_deref()),
         Some(Cmd::Agent(AgentCmd::Attach { target, repo, force: _ })) => agent::attach(&target, repo.repo.as_deref()),
         Some(Cmd::Repo(r)) => match r {
@@ -402,8 +404,3 @@ fn main() {
     }
 }
 
-/// TODO(am_core::worktrees): `worktree create|delete|sync` and `new` land once
-/// the shared worktree lifecycle module exists (being built separately).
-fn not_yet(what: &str) -> ! {
-    fail(&format!("am {what}: not yet implemented in am-rs (use the TS `am` for now)"))
-}

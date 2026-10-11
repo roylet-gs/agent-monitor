@@ -61,9 +61,7 @@ pub fn add(path: &str, json: bool) {
     let name = Path::new(&abs).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| abs.clone());
     let repo = store::add_repository(&conn, &abs, &name);
     info!("cli", "Added repository {} ({})", repo.name, repo.path);
-    // TODO(am_core::worktrees): the TS command runs `syncWorktrees(repo.id)`
-    // here so the repo's worktrees show up immediately. Until the shared sync
-    // lands, they appear on the next TS `am` / `am worktree sync`.
+    super::lifecycle::sync_new_repo(&conn, &repo.repository());
 
     if json {
         output::json(&repo.json());
