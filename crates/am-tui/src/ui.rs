@@ -164,7 +164,13 @@ fn worktree_line<'a>(
         Span::styled(status_glyph(status), theme.fg(theme.status(status))),
         Span::raw(" "),
     ];
-    let badge = if subagents > 0 { format!(" ◆{subagents}") } else { String::new() };
+    let mut badge = String::new();
+    if !v.running_processes.is_empty() {
+        badge.push_str(" ▶");
+    }
+    if subagents > 0 {
+        badge.push_str(&format!(" ◆{subagents}"));
+    }
     let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width());
     let name = truncate(v.worktree.display_name(), name_w);
     let name_style = if status == Some(Status::Waiting) {
@@ -175,7 +181,12 @@ fn worktree_line<'a>(
         theme.fg(theme.text)
     };
     left.push(Span::styled(pad(&name, name_w), name_style));
-    left.push(Span::styled(badge, theme.fg(theme.magenta)));
+    if let Some(rest) = badge.strip_prefix(" ▶") {
+        left.push(Span::styled(" ▶", theme.fg(theme.green)));
+        left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
+    } else {
+        left.push(Span::styled(badge, theme.fg(theme.magenta)));
+    }
 
     let mut spans = left;
     spans.extend(right);
@@ -377,6 +388,19 @@ fn draw_context(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if let Some(sid) = v.agent.as_ref().and_then(|a| a.session_id.as_ref()) {
         spans.push(sep());
         spans.push(Span::styled(format!("session {sid}"), theme.faint()));
+    }
+    let mut open_in = Vec::new();
+    match v.open_ide {
+        Some(am_core::model::Ide::Vscode) => open_in.push("VS Code"),
+        Some(am_core::model::Ide::Cursor) => open_in.push("Cursor"),
+        None => {}
+    }
+    if v.has_terminal {
+        open_in.push("terminal");
+    }
+    if !open_in.is_empty() {
+        spans.push(sep());
+        spans.push(Span::styled(format!("open in {}", open_in.join(" + ")), theme.fg(theme.accent)));
     }
     if !v.running_processes.is_empty() {
         spans.push(sep());

@@ -8,19 +8,22 @@
 //! something, plus a full sweep every polling interval.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use am_core::model::{CommitInfo, GitStatus, Worktree, WorktreeView};
+use am_core::model::{CommitInfo, GitStatus, Ide, RunningProcess, Worktree, WorktreeView};
 use am_core::settings::Settings;
-use am_core::{db, debug, gitinfo, grouping, warn};
+use am_core::{db, debug, gitinfo, grouping, procscan, warn};
 use rusqlite::Connection;
 
 use crate::app::{Health, Snapshot};
 
 const TICK: Duration = Duration::from_millis(200);
+/// A native process snapshot costs ~2 ms, so terminals/editors/dev servers
+/// are re-checked often, independent of the (slower) git sweep.
+const PROCESS_INTERVAL: Duration = Duration::from_secs(2);
 /// Recently finished subagents stay visible this long.
 const RECENT_SUBAGENT_MINUTES: u32 = 30;
 
@@ -72,6 +75,13 @@ impl Collector {
     }
 }
 
+#[derive(Default, Clone, PartialEq)]
+struct ProcData {
+    has_terminal: bool,
+    open_ide: Option<Ide>,
+    running: Vec<RunningProcess>,
+}
+
 #[derive(Default, Clone)]
 struct GitData {
     status: Option<GitStatus>,
@@ -83,6 +93,8 @@ struct Worker {
     conn: Connection,
     tx: Sender<Snapshot>,
     git: HashMap<String, GitData>,
+    procs: HashMap<String, ProcData>,
+    last_procs: Option<Instant>,
     agent_seen: HashMap<String, String>,
     last_full: Option<Instant>,
     data_version: i64,
@@ -96,6 +108,8 @@ impl Worker {
             conn,
             tx,
             git: HashMap::new(),
+            procs: HashMap::new(),
+            last_procs: None,
             agent_seen: HashMap::new(),
             last_full: None,
             data_version: -1,
@@ -123,13 +137,18 @@ impl Worker {
 
     fn cycle(&mut self, force: bool) -> rusqlite::Result<()> {
         let full_due = force || self.last_full.is_none_or(|t| t.elapsed() >= self.poll_interval());
+        let procs_due = self.last_procs.is_none_or(|t| t.elapsed() >= PROCESS_INTERVAL);
         let dv = db::data_version(&self.conn)?;
-        if !full_due && dv == self.data_version {
+        if !full_due && !procs_due && dv == self.data_version {
             return Ok(());
         }
         self.data_version = dv;
 
         let worktrees = db::worktrees(&self.conn)?;
+        if procs_due || full_due {
+            self.procs = self.collect_procs(&worktrees);
+            self.last_procs = Some(Instant::now());
+        }
         let agents = db::agent_states(&self.conn)?;
 
         // Which worktrees need fresh git data this cycle?
@@ -163,15 +182,16 @@ impl Worker {
             .into_iter()
             .map(|w| {
                 let g = self.git.get(&w.id).cloned().unwrap_or_default();
+                let p = self.procs.get(&w.id).cloned().unwrap_or_default();
                 WorktreeView {
                     agent: agents.get(&w.id).cloned(),
                     git: g.status,
                     last_commit: g.commit,
                     pr: None,
                     linear: None,
-                    has_terminal: false,
-                    open_ide: None,
-                    running_processes: Vec::new(),
+                    has_terminal: p.has_terminal,
+                    open_ide: p.open_ide,
+                    running_processes: p.running,
                     worktree: w,
                 }
             })
@@ -186,6 +206,30 @@ impl Worker {
             self.last_sent = Some(snapshot);
         }
         Ok(())
+    }
+}
+
+impl Worker {
+    fn collect_procs(&self, worktrees: &[Worktree]) -> HashMap<String, ProcData> {
+        let snap = procscan::capture();
+        let roots: Vec<PathBuf> = worktrees.iter().map(|w| PathBuf::from(&w.path)).collect();
+        let mut running = if self.settings.show_running_processes {
+            snap.running_processes(&roots, &self.settings.running_process_filter)
+        } else {
+            HashMap::new()
+        };
+        worktrees
+            .iter()
+            .map(|w| {
+                let root = PathBuf::from(&w.path);
+                let data = ProcData {
+                    has_terminal: snap.has_terminal(&root),
+                    open_ide: snap.open_ide(&root),
+                    running: running.remove(&root).unwrap_or_default(),
+                };
+                (w.id.clone(), data)
+            })
+            .collect()
     }
 }
 
