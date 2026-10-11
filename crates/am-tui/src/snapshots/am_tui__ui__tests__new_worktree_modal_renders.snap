@@ -17,4 +17,4 @@ expression: "render(&app, 100, 16)"
 │                                                        ││                                        │
 ╰──────────────────────────────────────────────── 1 of 3 ╯╰─────────── 2 running · 1 done · a: all ╯
  feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1
- WORKTREES  ◐ 1  ◆ 1                                                         ⏎ open  ? help  q quit
+ WORKTREES  ◐ 1  ◆ 1                                         ⏎ open  g PR  l linear  ? help  q quit

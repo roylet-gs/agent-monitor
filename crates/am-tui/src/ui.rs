@@ -880,7 +880,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if let Some(n) = &app.notice {
         left.push(Span::styled(n.clone(), theme.faint()));
     }
-    let hints = if area.width >= 110 { "⏎ open  t term  c claude  a scope  r refresh  ? help  q quit " } else { "⏎ open  ? help  q quit " };
+    let hints = if area.width >= 120 { "⏎ open  g PR  l linear  n new  d del  s settings  ? help  q quit " } else if area.width >= 90 { "⏎ open  g PR  l linear  ? help  q quit " } else { "⏎ open  ? help  q quit " };
     let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(hints.width() as u16)]).areas(area);
     f.render_widget(Paragraph::new(Line::from(left)), l);
     f.render_widget(Paragraph::new(Line::styled(hints, theme.faint())), r);
@@ -889,12 +889,12 @@ fn draw_status_bar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
     let keys: &[(&str, &str)] = &[
         ("j / k  ↑ / ↓", "move"),
-        ("gg / G", "top / bottom"),
+        ("home / G", "top / bottom"),
         ("ctrl-d / ctrl-u", "page down / up"),
         ("enter", "open (IDE; resumes last Claude session)"),
         ("t", "terminal at worktree"),
         ("c", "terminal running claude --resume"),
-        ("o / l / p", "open PR / Linear ticket / Linear project"),
+        ("g / l / p", "open PR / Linear ticket / Linear project"),
         ("w", "toggle log pane"),
         ("n / d", "new worktree / delete worktree"),
         ("A", "add repository"),
@@ -1152,7 +1152,8 @@ mod tests {
     #[test]
     fn link_keys() {
         let mut app = fixture();
-        assert_eq!(app.on_key(Key::Char('o')), crate::app::Action::OpenUrl("u".into()));
+        assert_eq!(app.on_key(Key::Char('g')), crate::app::Action::OpenUrl("u".into()));
+        assert_eq!(app.on_key(Key::Char('l')), crate::app::Action::OpenUrl("u".into()));
         app.on_key(Key::Char('j'));
         assert_eq!(app.on_key(Key::Char('o')), crate::app::Action::None);
         assert_eq!(app.notice.as_deref(), Some("No PR for this branch"));

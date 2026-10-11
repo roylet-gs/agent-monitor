@@ -4,12 +4,12 @@ expression: "render(&app, 100, 20)"
 ---
 ╭─[1] Work╭ Keys ────────────────────────────────────────────────────────────────────────╮or ──────╮
 │agent-mon│    j / k  ↑ / ↓  move                                                        │se  2m14s│
-│▌◆ featur│          gg / G  top / bottom                                                │ 23 tools│
+│▌◆ featur│        home / G  top / bottom                                                │ 23 tools│
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │se  2m14s│
 │         │           enter  open (IDE; resumes last Claude session)                     │ 23 tools│
 │gridsight│               t  terminal at worktree                                        │e 30s ago│
 │ · main  │               c  terminal running claude --resume                            │ 23 tools│
-│         │       o / l / p  open PR / Linear ticket / Linear project                    │         │
+│         │       g / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane                                             │         │
 │         │           n / d  new worktree / delete worktree                              │         │
 │         │               A  add repository                                              │         │

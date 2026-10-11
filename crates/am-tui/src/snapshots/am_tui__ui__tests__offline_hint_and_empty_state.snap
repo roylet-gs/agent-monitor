@@ -9,4 +9,4 @@ expression: "render(&app, 100, 8)"
 │                                                        ││                                        │
 ╰────────────────────────────────────────────────────────╯╰─────────── 0 running · 0 done · a: all ╯
 
- WORKTREES  ⚠ GitHub offline — cached                                        ⏎ open  ? help  q quit
+ WORKTREES  ⚠ GitHub offline — cached                        ⏎ open  g PR  l linear  ? help  q quit

@@ -99,7 +99,6 @@ pub struct App {
     seen_status: std::collections::HashMap<String, Option<Status>>,
     /// System sounds to play for this update (audio notifications).
     pub sounds: Vec<String>,
-    pending_g: bool,
 }
 
 impl App {
@@ -125,7 +124,6 @@ impl App {
             unseen: Default::default(),
             seen_status: Default::default(),
             sounds: Vec::new(),
-            pending_g: false,
         }
     }
 
@@ -330,7 +328,6 @@ impl App {
             }
             return Action::None;
         }
-        let g = std::mem::take(&mut self.pending_g);
         match key {
             Key::Char('q') | Key::CtrlC => return Action::Quit,
             Key::Esc if self.focus == Pane::Subagents => self.focus = Pane::Worktrees,
@@ -344,7 +341,7 @@ impl App {
             Key::Enter => return self.with_selected(Action::Open),
             Key::Char('t') => return self.with_selected(Action::OpenTerminal),
             Key::Char('c') => return self.with_selected(Action::OpenClaude),
-            Key::Char('o') => return self.url_action(|v, _| {
+            Key::Char('g') | Key::Char('o') => return self.url_action(|v, _| {
                 let pr = v.pr.as_ref()?;
                 // Same rule as the TS app: a merged PR jumps to its last active check.
                 Some(if pr.state == "MERGED" { pr.active_check_url.clone().unwrap_or(pr.url.clone()) } else { pr.url.clone() })
@@ -400,8 +397,6 @@ impl App {
             Key::PageUp | Key::CtrlU => self.move_by(-10),
             Key::Char('G') | Key::End => self.move_by(isize::MAX / 2),
             Key::Home => self.move_by(isize::MIN / 2),
-            Key::Char('g') if g => self.move_by(isize::MIN / 2),
-            Key::Char('g') => self.pending_g = true,
             _ => {}
         }
         Action::None
