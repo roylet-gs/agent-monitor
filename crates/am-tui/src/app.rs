@@ -88,6 +88,11 @@ pub struct App {
     seen_status: std::collections::HashMap<String, Option<Status>>,
     /// System sounds to play for this update (audio notifications).
     pub sounds: Vec<String>,
+    /// Worktrees being deleted in the background → whether the job has
+    /// finished. Their rows are greyed out and take no actions; a finished
+    /// entry is dropped on the next snapshot, so the row doesn't flash back
+    /// to normal before the refresh removes it.
+    pub deleting: std::collections::HashMap<String, bool>,
 }
 
 impl App {
@@ -111,6 +116,7 @@ impl App {
             unseen: Default::default(),
             seen_status: Default::default(),
             sounds: Vec::new(),
+            deleting: Default::default(),
         }
     }
 
@@ -118,6 +124,7 @@ impl App {
     pub fn apply(&mut self, snapshot: Snapshot) {
         let keep = self.pending_select.clone().or_else(|| self.selected_view().map(|v| v.worktree.id.clone()));
         self.snapshot = snapshot;
+        self.deleting.retain(|_, finished| !*finished);
         self.rebuild_rows();
         if let Some(i) = keep.and_then(|id| self.flat.iter().position(|v| v.worktree.id == id)) {
             self.selected = i;
@@ -225,6 +232,22 @@ impl App {
         }
     }
 
+    /// A background delete finished. On failure the row is usable again
+    /// right away; on success it stays greyed until the next snapshot.
+    pub fn finish_delete(&mut self, id: &str, ok: bool) {
+        if ok {
+            if let Some(finished) = self.deleting.get_mut(id) {
+                *finished = true;
+            }
+        } else {
+            self.deleting.remove(id);
+        }
+    }
+
+    pub fn is_deleting(&self, id: &str) -> bool {
+        self.deleting.contains_key(id)
+    }
+
     pub fn selected_view(&self) -> Option<&WorktreeView> {
         self.flat.get(self.selected)
     }
@@ -277,19 +300,24 @@ impl App {
                     Action::None
                 }
                 Effect::Create(repo, req) => {
-                    self.modal = Some(crate::modals::Modal::Busy(format!("Creating {}…", req.branch)));
+                    self.modal = Some(crate::modals::Modal::busy(format!("Creating {}…", req.branch)));
                     Action::Create(Box::new(repo), Box::new(req))
                 }
                 Effect::Delete { view, delete_branch } => {
-                    self.modal = Some(crate::modals::Modal::Busy(format!("Deleting {}…", view.worktree.display_name())));
+                    let id = view.worktree.id.clone();
+                    self.deleting.insert(id.clone(), false);
+                    self.modal = Some(crate::modals::Modal::Busy {
+                        text: format!("Deleting {}…", view.worktree.display_name()),
+                        deleting: Some(id),
+                    });
                     Action::Delete(view, delete_branch)
                 }
                 Effect::Suggest { title, body } => {
-                    self.modal = Some(crate::modals::Modal::Busy("Filing feature request…".into()));
+                    self.modal = Some(crate::modals::Modal::busy("Filing feature request…".into()));
                     Action::Suggest { title, body }
                 }
                 Effect::AddRepo(path) => {
-                    self.modal = Some(crate::modals::Modal::Busy(format!("Adding {path}…")));
+                    self.modal = Some(crate::modals::Modal::busy(format!("Adding {path}…")));
                     Action::AddRepo(path)
                 }
                 Effect::RunScript { repo_id, worktree_path } => {
@@ -326,6 +354,11 @@ impl App {
             if matches!(key, Key::Char('?') | Key::Esc | Key::Char('q')) {
                 self.show_help = false;
             }
+            return Action::None;
+        }
+        let row_action = matches!(key, Key::Enter | Key::Char('t' | 'c' | 'g' | 'o' | 'l' | 'p' | 'd'));
+        if row_action && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
+            self.notice = Some("Deleting in the background…".into());
             return Action::None;
         }
         match key {

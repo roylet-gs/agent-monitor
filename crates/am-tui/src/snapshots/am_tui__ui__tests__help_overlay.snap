@@ -1,5 +1,6 @@
 ---
 source: crates/am-tui/src/ui.rs
+assertion_line: 1162
 expression: "render(&app, 100, 20)"
 ---
 ╭─Worktree╭ Keys ────────────────────────────────────────────────────────────────────────╮─────────╮
@@ -20,5 +21,5 @@ expression: "render(&app, 100, 20)"
 │         │          q  esc  quit                                                        │         │
 │         │                                                                              │         │
 │         │● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │         │
-╰─────────╰──────────────────────────────────────────────────────────────────────────────╯─ 1 of 3 ╯
- ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+╰─────────│PR ready=approved+CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting  │─ 1 of 3 ╯
+ ⏎ open  c╰──────────────────────────────────────────────────────────────────────────────╯ quit

@@ -1,10 +1,11 @@
 ---
 source: crates/am-tui/src/ui.rs
+assertion_line: 1316
 expression: "render(&app, 100, 14)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◆ feature/refactor ◆2                                                    ENG-412 #127✓ ↑2 ±3  4m │
+│▌◆ feature/refactor ◆2                                                  ENG-412 #127✓ ✔ ↑2 ±3  4m │
 │ ├─ ● feature/refactor-part-2                                                           ↑2 ±3  4m │
 │ │  └─ · feature/refactor-part-3                                                        ↑2 ±3  4m │
 │ └─ · feature/refactor-alt                                                              ↑2 ±3  4m │

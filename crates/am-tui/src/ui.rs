@@ -10,7 +10,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Row};
@@ -163,10 +163,10 @@ fn key_line<'a>(theme: &Theme, key: &str, text: impl Into<String>, danger: bool)
 fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::Modal, now: i64) {
     use crate::modals::{DeleteStep, FormField, Modal};
     let (title, color, hint, lines): (String, _, &str, Vec<Line>) = match modal {
-        Modal::Busy(text) => {
-            const SPIN: [&str; 4] = ["◐", "◓", "◑", "◒"];
-            let s = SPIN[(now.rem_euclid(4)) as usize];
-            ("Working".into(), theme.accent, "", vec![Line::from(vec![Span::styled(format!("{s} "), theme.fg(theme.accent)), Span::raw(text.clone())])])
+        Modal::Busy { text, deleting } => {
+            let line = Line::from(vec![Span::styled(format!("{} ", spinner(now)), theme.fg(theme.accent)), Span::raw(text.clone())]);
+            let hint = if deleting.is_some() { "any key: continue in background" } else { "" };
+            ("Working".into(), theme.accent, hint, vec![line])
         }
         Modal::New(form) => {
             let field = |label: &str, value: String, which: FormField, note: Option<Line<'static>>| -> Vec<Line<'static>> {
@@ -322,9 +322,18 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             )
         }
     };
-    let rect = modal_rect(area, 72, lines.len() as u16 + 2);
+    // Long names wrap rather than run off the edge; size the box to fit.
+    let w = 72.min(area.width.saturating_sub(2));
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let h = para.line_count(w.saturating_sub(4)) as u16 + 2;
+    let rect = modal_rect(area, w, h);
     f.render_widget(Clear, rect);
-    f.render_widget(Paragraph::new(lines).block(modal_block(theme, title, color, hint)), rect);
+    f.render_widget(para.block(modal_block(theme, title, color, hint)), rect);
+}
+
+fn spinner(now: i64) -> &'static str {
+    const SPIN: [&str; 4] = ["◐", "◓", "◑", "◒"];
+    SPIN[now.rem_euclid(4) as usize]
 }
 
 #[allow(clippy::needless_late_init)] // each arm builds lines then picks its hint
@@ -441,19 +450,19 @@ fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
 
 fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
     let w = 72.min(area.width.saturating_sub(4));
-    let inner_w = w.saturating_sub(4) as usize;
     let mut lines: Vec<Line> = Vec::new();
     for raw in msg.lines() {
         let style = if raw.starts_with("claude") || raw.starts_with("cd ") { theme.bold(theme.accent) } else { theme.fg(theme.text) };
-        lines.push(Line::styled(truncate(raw, inner_w), style));
+        lines.push(Line::styled(raw.to_string(), style));
     }
-    let h = (lines.len() as u16 + 2).min(area.height);
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let h = (para.line_count(w.saturating_sub(4)) as u16 + 2).min(area.height);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
     let error = msg.starts_with('✗');
     let border = if error { theme.bold(theme.red) } else { theme.bold(theme.green) };
     f.render_widget(Clear, rect);
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(border).padding(ratatui::widgets::Padding::horizontal(1));
-    f.render_widget(Paragraph::new(lines).block(block), rect);
+    f.render_widget(para.block(block), rect);
 }
 
 fn pane_block<'a>(theme: &Theme, title: Line<'a>, focused: bool) -> Block<'a> {
@@ -474,6 +483,8 @@ fn title<'a>(name: &'a str, theme: &Theme) -> Line<'a> {
 struct Columns {
     ticket: usize,
     pr: usize,
+    /// Review state as a word (`ready`, `approved`…) rather than a glyph.
+    pr_words: bool,
     git: usize,
     age: usize,
 }
@@ -496,9 +507,11 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
     }
 
     let s = &app.settings;
+    let pr_words = inner.width >= 100;
     let cols = Columns {
         ticket: if s.show_linear_ticket { app.flat.iter().map(|v| ticket_text(v).width()).max().unwrap_or(0) } else { 0 },
-        pr: if s.show_pr_status { app.flat.iter().map(|v| pr_text(v).0.width()).max().unwrap_or(0) } else { 0 },
+        pr: if s.show_pr_status { app.flat.iter().map(|v| pr_text(v, pr_words).width()).max().unwrap_or(0) } else { 0 },
+        pr_words,
         git: if s.show_git_ahead_behind { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
         age: if s.show_last_commit { 3 } else { 0 },
     };
@@ -554,6 +567,7 @@ fn worktree_line<'a>(
 ) -> Line<'a> {
     let status = v.status();
     let subagents = app.running_subagents_for(&v.worktree.id);
+    let deleting = app.is_deleting(&v.worktree.id);
 
     // Right-hand columns, fixed width so they align down the list.
     let mut right: Vec<Span> = Vec::new();
@@ -563,7 +577,7 @@ fn worktree_line<'a>(
     }
     if cols.pr > 0 {
         right.push(Span::raw(" "));
-        right.extend(pr_spans(v, theme, cols.pr));
+        right.extend(pr_spans(v, theme, cols.pr, cols.pr_words));
     }
     if cols.git > 0 {
         right.push(Span::raw(" "));
@@ -581,17 +595,24 @@ fn worktree_line<'a>(
     let mut left = vec![
         Span::styled(bar, theme.bold(theme.border_focus)),
         Span::styled(tree.to_string(), theme.fg(theme.border)),
-        Span::styled(status_glyph(status), theme.fg(theme.status(status))),
+        if deleting {
+            Span::styled(spinner(now), theme.fg(theme.red))
+        } else {
+            Span::styled(status_glyph(status), theme.fg(theme.status(status)))
+        },
         Span::raw(" "),
     ];
     let mut badge = String::new();
-    if app.unseen.contains(&v.worktree.id) {
+    // A row being deleted shows only that, in place of its other badges.
+    if deleting {
+        badge.push_str(" deleting…");
+    } else if app.unseen.contains(&v.worktree.id) {
         badge.push_str(" •");
     }
-    if !v.running_processes.is_empty() {
+    if !deleting && !v.running_processes.is_empty() {
         badge.push_str(" ▶");
     }
-    if subagents > 0 {
+    if !deleting && subagents > 0 {
         if width >= 100 {
             badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
         } else {
@@ -615,7 +636,9 @@ fn worktree_line<'a>(
     } else {
         (truncate(w.display_name(), name_w), String::new())
     };
-    let name_style = if status == Some(Status::Waiting) {
+    let name_style = if deleting {
+        theme.faint()
+    } else if status == Some(Status::Waiting) {
         theme.bold(theme.yellow)
     } else if selected {
         theme.bold(theme.text)
@@ -636,6 +659,10 @@ fn worktree_line<'a>(
     }
     if let Some(r) = rest.strip_prefix(" ▶") {
         left.push(Span::styled(" ▶", theme.fg(theme.green)));
+        rest = r;
+    }
+    if let Some(r) = rest.strip_prefix(" deleting…") {
+        left.push(Span::styled(" deleting…", theme.fg(theme.red)));
         rest = r;
     }
     left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
@@ -661,10 +688,80 @@ fn ticket_text(v: &WorktreeView) -> String {
 
 type ColorPick = fn(&Theme) -> ratatui::style::Color;
 
-fn pr_text(v: &WorktreeView) -> (String, Option<ColorPick>) {
-    let Some(pr) = &v.pr else { return (String::new(), None) };
+fn pr_text(v: &WorktreeView, words: bool) -> String {
+    let Some(pr) = &v.pr else { return String::new() };
     let merged = if pr.state == "MERGED" { "⇡" } else { "" };
-    (format!("#{}{}{merged}", pr.number, checks_glyph(pr.checks_status)), Some(pr_color(pr)))
+    let review = review_state(pr).map(|r| format!(" {}", if words { r.word() } else { r.glyph() })).unwrap_or_default();
+    format!("#{}{}{merged}{review}", pr.number, checks_glyph(pr.checks_status))
+}
+
+/// Where an open PR stands on review, combined with CI and conflicts so
+/// "approved and good to go" stands apart from "approved but failing".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Review {
+    /// Approved, checks passing (or none), no merge conflicts.
+    Ready,
+    /// Approved, but checks are failing or still running.
+    Approved,
+    /// Approved and green, but conflicts with its base.
+    Conflicts,
+    ChangesRequested,
+    /// Waiting for a review.
+    Pending,
+    Draft,
+}
+
+impl Review {
+    fn word(self) -> &'static str {
+        match self {
+            Review::Ready => "ready",
+            Review::Approved => "approved",
+            Review::Conflicts => "conflicts",
+            Review::ChangesRequested => "changes",
+            Review::Pending => "review",
+            Review::Draft => "draft",
+        }
+    }
+
+    fn glyph(self) -> &'static str {
+        match self {
+            Review::Ready | Review::Approved => "✔",
+            Review::Conflicts => "⚠",
+            Review::ChangesRequested => "!",
+            Review::Pending => "…",
+            Review::Draft => "~",
+        }
+    }
+
+    fn color(self) -> ColorPick {
+        match self {
+            Review::Ready => |t| t.green,
+            Review::Approved | Review::Conflicts => |t| t.yellow,
+            Review::ChangesRequested => |t| t.red,
+            Review::Pending | Review::Draft => |t| t.faint,
+        }
+    }
+}
+
+fn review_state(pr: &am_core::model::PrInfo) -> Option<Review> {
+    if pr.state != "OPEN" {
+        return None;
+    }
+    if pr.is_draft {
+        return Some(Review::Draft);
+    }
+    Some(match pr.review_decision.as_str() {
+        "CHANGES_REQUESTED" => Review::ChangesRequested,
+        "APPROVED" => match pr.checks_status {
+            ChecksStatus::Failing | ChecksStatus::Pending => Review::Approved,
+            _ if pr.mergeable.as_deref() == Some("CONFLICTING") => Review::Conflicts,
+            _ => Review::Ready,
+        },
+        "REVIEW_REQUIRED" => Review::Pending,
+        // Empty: the repo doesn't require reviews, or the PR came from a
+        // Linear attachment — unknown, so say nothing.
+        _ => return None,
+    })
 }
 
 fn checks_glyph(c: ChecksStatus) -> &'static str {
@@ -690,24 +787,32 @@ fn pr_color(pr: &am_core::model::PrInfo) -> ColorPick {
 }
 
 /// PR cell: number in the state colour, checks glyph always in its own
-/// colour (green ✓ / red ✗ / yellow ◌) so CI is readable on drafts too.
-fn pr_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>> {
+/// colour (green ✓ / red ✗ / yellow ◌) so CI is readable on drafts too,
+/// then the review state (`ready` / `approved` / `changes`…).
+fn pr_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize, words: bool) -> Vec<Span<'a>> {
     let Some(pr) = &v.pr else { return vec![Span::raw(" ".repeat(width))] };
-    let (text, _) = pr_text(v);
+    let text = pr_text(v, words);
     let num = format!("#{}", pr.number);
     let glyph = checks_glyph(pr.checks_status);
-    let rest = &text[num.len() + glyph.len()..];
+    let merged = if pr.state == "MERGED" { "⇡" } else { "" };
     let gcolor = match pr.checks_status {
         ChecksStatus::Passing => theme.green,
         ChecksStatus::Failing => theme.red,
         ChecksStatus::Pending => theme.yellow,
         ChecksStatus::None => theme.faint,
     };
-    vec![
+    let mut spans = vec![
         Span::styled(num, theme.fg(pr_color(pr)(theme))),
         Span::styled(glyph, theme.fg(gcolor)),
-        Span::styled(pad(rest, width.saturating_sub(text.width() - rest.width())), theme.fg(theme.magenta)),
-    ]
+        Span::styled(merged, theme.fg(theme.magenta)),
+    ];
+    if let Some(r) = review_state(pr) {
+        let label = if words { r.word() } else { r.glyph() };
+        let style = if r == Review::Ready { theme.bold(r.color()(theme)) } else { theme.fg(r.color()(theme)) };
+        spans.push(Span::styled(format!(" {label}"), style));
+    }
+    spans.push(Span::raw(" ".repeat(width.saturating_sub(text.width()))));
+    spans
 }
 
 fn git_text(v: &WorktreeView) -> String {
@@ -860,15 +965,29 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         .collect();
     lines.push(Line::raw(""));
     lines.push(Line::from(legend));
+    // PR review states: ready = approved + CI green, approved = CI ✗/◌.
+    let mut pr_legend = vec![Span::styled("PR ", theme.faint())];
+    for (r, note) in [
+        (Review::Ready, "=approved+CI ✓"),
+        (Review::Approved, "=CI ✗/◌"),
+        (Review::Conflicts, ""),
+        (Review::ChangesRequested, ""),
+        (Review::Pending, "=awaiting"),
+    ] {
+        pr_legend.push(Span::styled(r.word(), theme.fg(r.color()(theme))));
+        pr_legend.push(Span::styled(format!("{note}  "), theme.faint()));
+    }
+    lines.push(Line::from(pr_legend));
     let w = 80.min(area.width.saturating_sub(4));
-    let h = (lines.len() as u16 + 2).min(area.height);
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
     f.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme.bold(theme.border_focus))
         .title(Line::styled(" Keys ", theme.bold(theme.text)));
-    f.render_widget(Paragraph::new(lines).block(block), rect);
+    f.render_widget(para.block(block), rect);
 }
 
 // ------------------------------------------------------------------ helpers
@@ -971,13 +1090,14 @@ mod tests {
             url: "u".into(),
             state: "OPEN".into(),
             is_draft: false,
-            review_decision: String::new(),
+            review_decision: "APPROVED".into(),
             has_feedback: false,
             checks_status: ChecksStatus::Passing,
             active_check_url: None,
             active_check_name: None,
             checks_waiting: false,
             base_ref_name: None,
+            mergeable: None,
         });
         refactor.linear = Some(LinearInfo {
             identifier: "ENG-412".into(),
@@ -1122,15 +1242,55 @@ mod tests {
         let pr = v.pr.as_mut().unwrap();
         pr.is_draft = true;
         pr.checks_status = ChecksStatus::Failing;
-        let spans = pr_spans(&v, &theme, 8);
+        let spans = pr_spans(&v, &theme, 16, true);
         assert_eq!(spans[0].content, "#127");
         assert_eq!(spans[0].style.fg, Some(theme.red));
         assert_eq!(spans[1].content, "✗");
         assert_eq!(spans[1].style.fg, Some(theme.red));
         v.pr.as_mut().unwrap().checks_status = ChecksStatus::Passing;
-        let spans = pr_spans(&v, &theme, 8);
+        let spans = pr_spans(&v, &theme, 16, true);
         assert_eq!(spans[0].style.fg, Some(theme.faint), "passing draft stays dim");
         assert_eq!(spans[1].style.fg, Some(theme.green));
+    }
+
+    #[test]
+    fn pr_review_state_tells_ready_from_approved_but_failing() {
+        let theme = Theme::by_name("ansi");
+        let mut v = fixture().flat[0].clone();
+        let label = |v: &WorktreeView, words: bool| {
+            let spans = pr_spans(v, &theme, 16, words);
+            spans.iter().find(|s| s.content.starts_with(' ') && !s.content.trim().is_empty()).map(|s| (s.content.trim().to_string(), s.style.fg))
+        };
+        let set = |v: &mut WorktreeView, review: &str, checks: ChecksStatus, mergeable: Option<&str>| {
+            let pr = v.pr.as_mut().unwrap();
+            pr.review_decision = review.into();
+            pr.checks_status = checks;
+            pr.mergeable = mergeable.map(str::to_string);
+        };
+        set(&mut v, "APPROVED", ChecksStatus::Passing, Some("MERGEABLE"));
+        assert_eq!(label(&v, true), Some(("ready".into(), Some(theme.green))));
+        assert_eq!(pr_text(&v, true), "#127✓ ready");
+        set(&mut v, "APPROVED", ChecksStatus::None, None);
+        assert_eq!(label(&v, true).unwrap().0, "ready", "no CI configured still counts as ready");
+        set(&mut v, "APPROVED", ChecksStatus::Failing, Some("MERGEABLE"));
+        assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.yellow))));
+        assert_eq!(pr_text(&v, true), "#127✗ approved");
+        set(&mut v, "APPROVED", ChecksStatus::Pending, None);
+        assert_eq!(label(&v, true).unwrap().0, "approved");
+        set(&mut v, "APPROVED", ChecksStatus::Passing, Some("CONFLICTING"));
+        assert_eq!(label(&v, true).unwrap().0, "conflicts");
+        set(&mut v, "CHANGES_REQUESTED", ChecksStatus::Passing, None);
+        assert_eq!(label(&v, true), Some(("changes".into(), Some(theme.red))));
+        set(&mut v, "REVIEW_REQUIRED", ChecksStatus::Passing, None);
+        assert_eq!(label(&v, true).unwrap().0, "review");
+        set(&mut v, "", ChecksStatus::Passing, None);
+        assert_eq!(pr_text(&v, true), "#127✓", "unknown review state shows nothing");
+        // Narrow terminals get a glyph instead of the word.
+        set(&mut v, "APPROVED", ChecksStatus::Passing, None);
+        assert_eq!(pr_text(&v, false), "#127✓ ✔");
+        // Merged / closed PRs have no review state.
+        v.pr.as_mut().unwrap().state = "MERGED".into();
+        assert_eq!(pr_text(&v, true), "#127✓⇡");
     }
 
     #[test]
@@ -1166,6 +1326,49 @@ mod tests {
         assert!(wide.contains("Refactor grouping core  feature/refactor"), "{wide}");
         let narrow = render(&app, 80, 8);
         assert!(narrow.contains("feature/"), "branch survives at 80 cols:\n{narrow}");
+    }
+
+    #[test]
+    fn long_delete_label_wraps_and_can_go_to_the_background() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        let nick = "Confirm the results read and the limit basis against a real customer feeder";
+        snap.groups[0].worktrees[0].worktree.custom_name = Some(nick.into());
+        app.apply(snap);
+        app.on_key(Key::Char('d'));
+        // Fixture paths don't exist, so this is the one-step stale-entry delete.
+        let action = app.on_key(Key::Enter);
+        assert!(matches!(action, crate::app::Action::Delete(..)));
+        let busy = render(&app, 100, 16);
+        assert!(busy.contains("customer feeder…"), "label wraps instead of being cut off:\n{busy}");
+        insta::assert_snapshot!("delete_busy_modal", busy);
+
+        // Any key hides the box; the row stays greyed and takes no actions.
+        assert_eq!(app.on_key(Key::Char('x')), crate::app::Action::None);
+        assert!(app.modal.is_none());
+        let row = render(&app, 100, 16);
+        assert!(row.contains("deleting…"), "{row}");
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::None);
+        assert_eq!(app.on_key(Key::Char('d')), crate::app::Action::None);
+        assert!(app.modal.is_none(), "can't delete it twice");
+        // Other rows still work.
+        app.on_key(Key::Char('j'));
+        assert!(matches!(app.on_key(Key::Enter), crate::app::Action::Open(_)));
+        insta::assert_snapshot!("delete_in_background", row);
+    }
+
+    #[test]
+    fn finished_delete_clears_on_the_next_snapshot_and_failure_right_away() {
+        let mut app = fixture();
+        app.deleting.insert("w1".into(), false);
+        app.deleting.insert("w2".into(), false);
+        app.finish_delete("w2", false);
+        assert!(!app.is_deleting("w2"), "a failed delete makes the row usable again");
+        app.finish_delete("w1", true);
+        assert!(app.is_deleting("w1"), "stays greyed until the refresh removes it");
+        let snap = app.snapshot.clone();
+        app.apply(snap);
+        assert!(!app.is_deleting("w1"));
     }
 
     #[test]

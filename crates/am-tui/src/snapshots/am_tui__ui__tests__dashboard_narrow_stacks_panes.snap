@@ -1,10 +1,11 @@
 ---
 source: crates/am-tui/src/ui.rs
+assertion_line: 1158
 expression: "render(&fixture(), 80, 24)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────│
-│▌◆ feature/refactor ◆2                                ENG-412 #127✓ ↑2 ±3  4m │
+│▌◆ feature/refactor ◆2                              ENG-412 #127✓ ✔ ↑2 ±3  4m │
 │ ◐ fix/offline-cache                                                       4m │
 │                                                                              │
 │gridsight ────────────────────────────────────────────────────────────────────│
