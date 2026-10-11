@@ -177,7 +177,7 @@ Supported terminals: Terminal.app, iTerm2, Ghostty and Warp on macOS (the one yo
 | `●` | executing | Claude is running tools or generating |
 | `◇` | planning | Claude is in plan mode |
 | `◐` | waiting | Claude needs you: a permission prompt, a question, or plan approval. The name is shown bold yellow |
-| `◆` | delegating | The main turn ended but background subagents are still running |
+| `◑` (green) | delegating | The main turn ended but background subagents are still running |
 | `✓` | done | Claude finished a task and needs nothing from you |
 | `○` | idle | The session started or ended without doing work |
 | `·` | no agent | No Claude session has reported for this worktree |
@@ -195,7 +195,7 @@ After the name (a nickname, if set, followed by the branch in dim text):
 Right-aligned columns, each of which can be turned off in settings:
 
 - **Linear ticket**: e.g. `ENG-123`
-- **PR**: `#42` coloured by state (green open, dim draft, yellow pending or changes requested, red failing, magenta merged, dim closed), followed by the checks glyph `✓` passing, `✗` failing or `◌` pending, and `⇡` when merged
+- **PR**: `#42` coloured by state (green open, dim draft, yellow pending or changes requested, red failing, magenta merged, dim closed), followed by the checks glyph `✓` passing, `✗` failing or `◌` pending, and `⇡` when merged. Open PRs then show their review state: `ready` (approved, checks passing, no merge conflicts), `approved` (approved but checks failing or still running), `conflicts` (approved and green but conflicting with the base), `changes` (changes requested), `review` (awaiting a required review) or `draft`. Terminals under 100 columns get a glyph instead (`✔` `⚠` `!` `…` `~`), and `?` shows the legend. Nothing is shown when the repo doesn't require reviews or the PR only comes from a Linear attachment
 - **Git**: `↑2` commits ahead, `↓1` behind, `±3` uncommitted changes
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
 
@@ -235,7 +235,7 @@ Worktrees created outside am (`git worktree add`, other tools) are picked up aut
 
 ## GitHub and Linear
 
-**GitHub** (`ghPrStatus`, needs an authenticated `gh`): am fetches the PR for every worktree branch with one batched `gh api graphql` call per repository, every `ghPollingIntervalMs` (default 3 minutes), right away when a new branch appears, and when you press `r`. You get the PR number, draft/merged/closed state, review decision and CI checks.
+**GitHub** (`ghPrStatus`, needs an authenticated `gh`): am fetches the PR for every worktree branch with one batched `gh api graphql` call per repository, every `ghPollingIntervalMs` (default 3 minutes), right away when a new branch appears, and when you press `r`. You get the PR number, draft/merged/closed state, review decision, mergeability (conflicts) and CI checks.
 
 **Linear** (`linearEnabled` + `linearApiKey`): am looks up the Linear issue linked to each branch name (Linear's git-branch search, so branches named the way Linear suggests, e.g. `eng-123-fix-login`, match). You get the identifier, title, state, assignee and project. With `linearAutoNickname` on, worktrees without a nickname are named after their ticket's title. If GitHub has no PR for the branch, the PR attached to the Linear issue is shown instead (without checks).
 

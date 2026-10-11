@@ -100,6 +100,10 @@ pub struct PrInfo {
     /// (Rust-only; absent in payloads written by the TS app.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_ref_name: Option<String>,
+    /// MERGEABLE | CONFLICTING | UNKNOWN (GitHub computes it lazily).
+    /// (Rust-only; absent in payloads written by the TS app.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mergeable: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

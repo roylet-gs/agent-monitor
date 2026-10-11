@@ -110,7 +110,10 @@ pub enum Modal {
     AddRepo { path: String, error: Option<String> },
     /// `f`: file a feature request as a GitHub issue on the app's repo.
     Suggest { title: String, body: String, on_body: bool, error: Option<String> },
-    Busy(String),
+    /// Spinner while a background job runs. `deleting` is the worktree id
+    /// of a delete in flight: any key hides the box and the delete carries
+    /// on in the background (the row shows it).
+    Busy { text: String, deleting: Option<String> },
 }
 
 pub enum Effect {
@@ -172,6 +175,10 @@ impl Modal {
         })
     }
 
+    pub fn busy(text: String) -> Modal {
+        Modal::Busy { text, deleting: None }
+    }
+
     pub fn delete(view: WorktreeView) -> Modal {
         let exists = std::path::Path::new(&view.worktree.path).exists();
         let w = &view.worktree;
@@ -182,7 +189,8 @@ impl Modal {
 
     pub fn on_key(&mut self, key: Key) -> Effect {
         match self {
-            Modal::Busy(_) => Effect::None,
+            Modal::Busy { deleting: Some(_), .. } => Effect::Close,
+            Modal::Busy { .. } => Effect::None,
             Modal::New(f) => {
                 let fields = f.fields();
                 let idx = fields.iter().position(|x| *x == f.field).unwrap_or(0);

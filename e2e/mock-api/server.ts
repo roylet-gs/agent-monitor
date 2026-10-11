@@ -25,6 +25,7 @@ interface GhFixture {
   state: string;
   isDraft?: boolean;
   reviewDecision?: string;
+  mergeable?: string;
   headRefName?: string;
   statusCheckRollup?: Array<Record<string, unknown>>;
 }
@@ -38,6 +39,7 @@ function toGraphqlPr(f: GhFixture, branch: string): unknown {
     state: f.state,
     isDraft: f.isDraft ?? false,
     reviewDecision: f.reviewDecision || null,
+    mergeable: f.mergeable ?? "MERGEABLE",
     headRefName: f.headRefName ?? branch,
     isCrossRepository: false,
     commits: {

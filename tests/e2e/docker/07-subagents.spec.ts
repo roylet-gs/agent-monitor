@@ -14,11 +14,11 @@ test("delegating worktree shows its running-subagent badge", async ({ page }) =>
   const tui = new RustTui(page);
   await tui.open();
 
-  // ◆ status glyph (delegating) + the badge on main's row.
-  await tui.waitForMatch(/◆ main\b.*◆ 1 subagent\s/);
+  // ◑ status glyph (delegating) + the badge on main's row.
+  await tui.waitForMatch(/◑ main\b.*◆ 1 subagent\s/);
 
   await tui.selectRow("main");
-  expect(await tui.selectedRow()).toMatch(/◆ main\b.*◆ 1 subagent\s/);
+  expect(await tui.selectedRow()).toMatch(/◑ main\b.*◆ 1 subagent\s/);
   await tui.screenshot("subagents");
 });
 

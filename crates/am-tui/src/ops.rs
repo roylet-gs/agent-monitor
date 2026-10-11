@@ -38,7 +38,10 @@ pub fn delete(view: WorktreeView, delete_branch: bool, tx: Sender<Msg>) {
         let opts = DeleteOptions { delete_branch, delete_remote: false, force: true };
         let result = db::open().map_err(|e| e.to_string()).and_then(|conn| worktrees::delete_worktree(&conn, &view.worktree, &opts));
         let label = view.worktree.display_name().to_string();
-        let _ = tx.send(Msg::Deleted(label, result.map(|r| r.warnings)));
+        if let Err(e) = &result {
+            am_core::warn!("tui", "Delete of {} failed: {e}", view.worktree.branch);
+        }
+        let _ = tx.send(Msg::Deleted(view.worktree.id.clone(), label, result.map(|r| r.warnings)));
     });
 }
 

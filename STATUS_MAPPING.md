@@ -11,7 +11,7 @@ How Claude Code hook events become a worktree's agent status. The rules live in 
 | `executing`  | `●`   | Claude is running tools or generating |
 | `planning`   | `◇`   | Claude is in plan mode (`permission_mode=plan`) |
 | `waiting`    | `◐`   | Claude needs the user (permission prompt, question, plan approval) and hasn't finished its task |
-| `delegating` | `◆`   | The main turn has ended but background subagents are still running |
+| `delegating` | `◑` (green) | The main turn has ended but background subagents are still running |
 | `done`       | `✓`   | Claude did work and finished; nothing needed from the user. Unlike `idle`, `done` means a turn actually executed |
 
 ## Processing Order (per hook event)
@@ -163,6 +163,7 @@ Rules:
 - **Stale protection.** A `running` row only counts if it was updated within the last **2 hours**, so a missed `SubagentStop` (crash, killed session) can't pin a worktree on `delegating` forever.
 - **Descriptions.** On the first event for a subagent, am reads Claude Code's `<session>/subagents/agent-<id>.meta.json` (next to the subagent transcript) for the Agent tool's `description` and `agentType`. This is best effort, since the file is undocumented.
 - **Running count** = running, non-stale rows for the owner. The dashboard shows it as `◆ N subagents` next to the worktree name, and it is the `running` input to the rules above.
+- **Parked subagents (dashboard only).** A background subagent that starts a long command (`run_in_background`) ends its turn while it waits, so Claude Code sends `SubagentStop`, and a fresh `SubagentStart` when the command finishes and wakes it. Its work isn't done in between. The TUI collector treats a subagent as **parked**, and so still running, when all of these hold: it belongs to the worktree's current session, it stopped within the last 2 hours, its last tool isn't `SubagentHandback` (the call that delivers a background subagent's final report), and a Claude Code shell command (`<shell> -c source ~/.claude/shell-snapshots/…`) is still running in the worktree. Parked subagents count in `◆ N subagents`, and a worktree that is `done` with one shows as `delegating`. This is display only: the DB keeps the hook-driven status, and the CLI doesn't apply it.
 
 ## Open Sessions
 

@@ -21,7 +21,10 @@ test("? opens the key help overlay and closes it again", async ({ page }) => {
   for (const s of ["executing", "planning", "waiting", "delegating", "done", "idle"]) {
     expect(text).toContain(s);
   }
+  // PR review-state legend.
+  expect(text).toContain("PR ready=approved+CI");
   await tui.screenshot("help");
+  await tui.screenshot("help-pr-legend");
 
   await tui.sendKey("?");
   await tui.waitForGone(" Keys ");

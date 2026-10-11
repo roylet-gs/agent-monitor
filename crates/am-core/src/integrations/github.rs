@@ -34,7 +34,7 @@ pub const GRAPHQL_CHUNK: usize = 40;
 pub const GRAPHQL_TIMEOUT: Duration = Duration::from_secs(15);
 pub const PR_VIEW_TIMEOUT: Duration = Duration::from_secs(5);
 
-const GH_PR_FIELDS: &str = "number,title,url,state,isDraft,reviewDecision,headRefName,baseRefName,statusCheckRollup";
+const GH_PR_FIELDS: &str = "number,title,url,state,isDraft,reviewDecision,mergeable,headRefName,baseRefName,statusCheckRollup";
 
 // ---------------------------------------------------------------------------
 // gh runner (injectable)
@@ -216,6 +216,7 @@ struct PrFields {
     state: String,
     is_draft: bool,
     review_decision: Option<String>,
+    mergeable: Option<String>,
     base_ref_name: Option<String>,
     /// Possibly only the first page of checks (see `summary`).
     checks: Vec<Check>,
@@ -296,6 +297,7 @@ fn to_pr_info(pr: PrFields) -> PrInfo {
         active_check_name: active.and_then(|c| c.name.clone()),
         checks_waiting,
         base_ref_name: pr.base_ref_name,
+        mergeable: pr.mergeable,
     }
 }
 
@@ -323,6 +325,7 @@ pub fn pr_status_label(pr: &PrInfo) -> (&'static str, &'static str) {
             return match checks {
                 ChecksStatus::Failing => ("Approved - Checks Failing", "yellow"),
                 ChecksStatus::Pending => ("Approved - Checks Running", "cyan"),
+                _ if pr.mergeable.as_deref() == Some("CONFLICTING") => ("Approved - Conflicts", "yellow"),
                 _ => ("Approved", "green"),
             };
         }
@@ -379,7 +382,7 @@ fn build_query(n: usize) -> String {
     // Single line on purpose: the E2E gh shim splits argv on newlines.
     format!(
         "query({vars}) {{ repository(owner: $owner, name: $name) {{{body} }} }} \
-         fragment pr on PullRequestConnection {{ nodes {{ number title url state isDraft reviewDecision \
+         fragment pr on PullRequestConnection {{ nodes {{ number title url state isDraft reviewDecision mergeable \
          headRefName baseRefName isCrossRepository commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ \
          contexts(first: 100) {{ checkRunCountsByState {{ state count }} \
          statusContextCountsByState {{ state count }} {CHECK_NODES} }} }} }} }} }} }} }}"
@@ -447,6 +450,8 @@ struct GqlPr {
     #[serde(default)]
     review_decision: Option<String>,
     #[serde(default)]
+    mergeable: Option<String>,
+    #[serde(default)]
     head_ref_name: Option<String>,
     #[serde(default)]
     base_ref_name: Option<String>,
@@ -476,6 +481,7 @@ impl GqlPr {
                 state: self.state,
                 is_draft: self.is_draft,
                 review_decision: self.review_decision,
+                mergeable: self.mergeable,
                 base_ref_name: self.base_ref_name,
                 checks,
                 summary,
@@ -675,6 +681,8 @@ struct GhPrView {
     #[serde(default)]
     review_decision: Option<String>,
     #[serde(default)]
+    mergeable: Option<String>,
+    #[serde(default)]
     head_ref_name: Option<String>,
     #[serde(default)]
     base_ref_name: Option<String>,
@@ -724,6 +732,7 @@ pub fn fetch_pr_view(gh: &dyn GhRunner, repo_path: &Path, branch: &str) -> (Fetc
         state: pr.state,
         is_draft: pr.is_draft,
         review_decision: pr.review_decision,
+        mergeable: pr.mergeable,
         base_ref_name: pr.base_ref_name,
         checks,
         summary: None,
@@ -781,6 +790,7 @@ pub(crate) mod tests {
             active_check_name: None,
             checks_waiting: false,
             base_ref_name: None,
+            mergeable: None,
         }
     }
 
@@ -882,6 +892,9 @@ pub(crate) mod tests {
         for (p, label, color) in cases {
             assert_eq!(pr_status_label(&p), (label, color), "{p:?}");
         }
+        let mut conflicts = pr("OPEN", "APPROVED", false, Passing);
+        conflicts.mergeable = Some("CONFLICTING".into());
+        assert_eq!(pr_status_label(&conflicts), ("Approved - Conflicts", "yellow"));
         let mut draft_fb = pr("OPEN", "", true, None);
         draft_fb.has_feedback = true;
         assert_eq!(pr_status_label(&draft_fb), ("Draft - Feedback", "yellow"));

@@ -21,8 +21,8 @@ pub enum Msg {
         Box<am_core::worktrees::CreateRequest>,
         Result<am_core::model::Worktree, am_core::worktrees::CreateError>,
     ),
-    /// Worktree label + warnings, or an error.
-    Deleted(String, Result<Vec<String>, String>),
+    /// Worktree id, label, and warnings or an error.
+    Deleted(String, String, Result<Vec<String>, String>),
     /// Typed path, and the repo name or an error.
     RepoAdded(String, Result<String, String>),
 }

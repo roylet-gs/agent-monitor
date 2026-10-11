@@ -4,7 +4,7 @@ expression: "render(&app, 100, 16)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◆ feature/refactor ◆2                                                    ENG-412 #127✓ ↑2 ±3  4m │
+│▌◑ feature/refactor ◆2                                                  ENG-412 #127✓ ✔ ↑2 ±3  4m │
 │ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮          4m │
 │             │ ⚠ 3 uncommitted changes                                              │             │
 │gridsight ───│ ⚠ 2 commits not pushed                                               │─────────────│

@@ -98,7 +98,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
         while let Ok(msg) = launch_rx.try_recv() {
             match msg {
                 launcher::Msg::Popup(p) => {
-                    if matches!(app.modal, Some(modals::Modal::Busy(_))) {
+                    if matches!(app.modal, Some(modals::Modal::Busy { deleting: None, .. })) {
                         app.modal = None;
                     }
                     app.popup = Some(p);
@@ -152,8 +152,13 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     Err(e) => app.modal = Some(modals::Modal::AddRepo { path, error: Some(e) }),
                 },
-                launcher::Msg::Deleted(label, result) => {
-                    app.modal = None;
+                launcher::Msg::Deleted(id, label, result) => {
+                    // The box may have been dismissed (delete in background)
+                    // and replaced by something else; only close our own.
+                    if matches!(&app.modal, Some(modals::Modal::Busy { deleting: Some(d), .. }) if *d == id) {
+                        app.modal = None;
+                    }
+                    app.finish_delete(&id, result.is_ok());
                     match result {
                         Ok(warnings) if warnings.is_empty() => app.notice = Some(format!("Deleted {label}")),
                         Ok(warnings) => {
