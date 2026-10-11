@@ -1,0 +1,18 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 14)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◆ feature/refactor ◆2                                                    ENG-412 #127✓ ↑2 ±3  4m │
+│ ├─ ● feature/refactor-part-2                                                           ↑2 ±3  4m │
+│ │  └─ · feature/refactor-part-3                                                        ↑2 ±3  4m │
+│ └─ · feature/refactor-alt                                                              ↑2 ±3  4m │
+│ ◐ fix/offline-cache                                                                           4m │
+│                                                                                                  │
+│gridsight ────────────────────────────────────────────────────────────────────────────────────────│
+│ · main                                                                                 ↑2 ±3  4m │
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 6 ╯
+ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

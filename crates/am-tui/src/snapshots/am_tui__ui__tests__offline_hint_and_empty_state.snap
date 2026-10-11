@@ -1,0 +1,12 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 8)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│                                                                                                  │
+│                          No worktrees yet — press A to add a repository                          │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ⏎ open  │ g PR  l linear  │ ? help  q quit                               ⚠ GitHub offline — cached

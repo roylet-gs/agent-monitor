@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 16)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◆ feature/refactor ◆2                                                    ENG-412 #127✓ ↑2 ±3  4m │
+│ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮          4m │
+│             │ ⚠ 3 uncommitted changes                                              │             │
+│gridsight ───│ ⚠ 2 commits not pushed                                               │─────────────│
+│ · main      │                                                                      │   ↑2 ±3  4m │
+│             │ Remove stale entry and delete local branch feature/refactor?         │             │
+│             │                                                                      │             │
+│             │     ⏎ / y  Yes                                                       │             │
+│             │   n / esc  Cancel                                                    │             │
+│             ╰──────────────────────────────────────────────────────────────────────╯             │
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

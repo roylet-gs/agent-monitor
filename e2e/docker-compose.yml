@@ -49,3 +49,48 @@ services:
       - MOCK_API_URL=http://mock-api:4100
     volumes:
       - ../tests/e2e/tmp:/work/tests/e2e/tmp
+
+  # ---------------------------------------------------------------------------
+  # Rust variant: the native binaries (am-tui / am-rs / am-hook) behind ttyd.
+  # Profile-gated so `pnpm test:e2e` (TS) never builds or starts them;
+  # `pnpm test:e2e:rust` names `tests-rust` explicitly, which pulls in
+  # app-rust and mock-api through depends_on.
+  # ---------------------------------------------------------------------------
+  app-rust:
+    profiles: ["rust"]
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+      target: app-rust
+    depends_on:
+      mock-api:
+        condition: service_healthy
+    ports:
+      - "7691:7681" # seeded dashboard
+      - "7692:7682" # fresh data dir per connection (setup wizard)
+    environment:
+      - AM_DATA_DIR=/tmp/am-e2e
+      - AM_MOCK_API_URL=http://mock-api:4100
+      - AM_LINEAR_API_URL=http://mock-api:4100/linear
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:7681/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  tests-rust:
+    profiles: ["rust"]
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+      target: test
+    depends_on:
+      app-rust:
+        condition: service_healthy
+    environment:
+      - TUI_URL=http://app-rust:7681
+      - TUI_FRESH_URL=http://app-rust:7682
+      - MOCK_API_URL=http://mock-api:4100
+    command: ["pnpm", "exec", "playwright", "test", "--config", "e2e/playwright.rust.config.ts"]
+    volumes:
+      - ../tests/e2e/tmp:/work/tests/e2e/tmp

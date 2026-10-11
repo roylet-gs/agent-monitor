@@ -18,6 +18,57 @@ let ghVersionResponse = "gh version 2.62.0 (2024-12-05)";
 /** When set, the gh and Linear routes fail as if the network were down. */
 let outage = false;
 
+interface GhFixture {
+  number: number;
+  title: string;
+  url: string;
+  state: string;
+  isDraft?: boolean;
+  reviewDecision?: string;
+  headRefName?: string;
+  statusCheckRollup?: Array<Record<string, unknown>>;
+}
+
+/** A `gh pr view --json` fixture as a GraphQL PullRequest node for `branch`. */
+function toGraphqlPr(f: GhFixture, branch: string): unknown {
+  return {
+    number: f.number,
+    title: f.title,
+    url: f.url,
+    state: f.state,
+    isDraft: f.isDraft ?? false,
+    reviewDecision: f.reviewDecision || null,
+    headRefName: f.headRefName ?? branch,
+    isCrossRepository: false,
+    commits: {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup: {
+              contexts: {
+                nodes: (f.statusCheckRollup ?? []).map((c) => ({ __typename: "CheckRun", ...c })),
+              },
+            },
+          },
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * The Rust app batches branches into one request with aliases
+ * (`b0: issueVcsBranchSearch(branchName: $b0)`). Answer each alias with the
+ * fixture's issue. Unaliased (TS app) queries and fixtures without an issue
+ * payload (e.g. an `errors` body) pass through unchanged.
+ */
+function aliasLinearFixture(fixture: unknown, query: string | undefined): unknown {
+  const aliases = [...(query ?? "").matchAll(/\b(b\d+)\s*:\s*issueVcsBranchSearch/g)].map((m) => m[1]!);
+  const data = (fixture as { data?: Record<string, unknown> } | null)?.data;
+  if (aliases.length === 0 || !data || !("issueVcsBranchSearch" in data)) return fixture;
+  return { data: Object.fromEntries(aliases.map((a) => [a, data.issueVcsBranchSearch])) };
+}
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
     let body = "";
@@ -64,6 +115,30 @@ const server = http.createServer(async (req, res) => {
     if (argsStr.includes("--version")) {
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end(ghVersionResponse);
+      return;
+    }
+
+    // Handle the Rust app's batched PR lookup:
+    //   gh api graphql -F owner={owner} -F name={repo} -f b0=<branch> -f b1=<branch> … -f query=…
+    // Answers every aliased branch with the current gh fixture, reshaped into the
+    // GraphQL `pullRequests` connection the query asks for.
+    if (args[0] === "api" && args[1] === "graphql") {
+      if (outage) {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("simulated outage");
+        return;
+      }
+      const repository: Record<string, { nodes: unknown[] }> = {};
+      for (let i = 0; i < args.length - 1; i++) {
+        if (args[i] !== "-f" && args[i] !== "-F") continue;
+        const m = /^(b\d+)=([\s\S]*)$/.exec(args[i + 1] ?? "");
+        if (!m) continue;
+        repository[m[1]!] = {
+          nodes: ghFixture === null ? [] : [toGraphqlPr(ghFixture as GhFixture, m[2]!)],
+        };
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data: { repository } }));
       return;
     }
 
@@ -116,7 +191,7 @@ const server = http.createServer(async (req, res) => {
 
     // Handle issue search
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(linearFixture));
+    res.end(JSON.stringify(aliasLinearFixture(linearFixture, parsed.query)));
     return;
   }
 

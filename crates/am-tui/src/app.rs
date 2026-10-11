@@ -1,0 +1,496 @@
+//! Dashboard state and key handling. Pure: no I/O, so it is driven directly
+//! in tests. Data arrives as a `Snapshot` from the collector (data.rs).
+
+use am_core::model::{Repository, Subagent, WorktreeGroup, WorktreeView};
+use am_core::settings::{SortKey, Settings};
+use am_core::status::Status;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Health {
+    pub github_failing: bool,
+    pub linear_failing: bool,
+}
+
+/// One consistent view of everything on screen.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Snapshot {
+    /// Every tracked repo (also those whose worktrees are all filtered out).
+    pub repos: Vec<Repository>,
+    pub groups: Vec<WorktreeGroup>,
+    /// (worktree_id, subagent) — running first, then recently finished.
+    pub subagents: Vec<(Option<String>, Subagent)>,
+    pub health: Health,
+    /// Stacked branches: child worktree id → parent worktree id.
+    pub stack: std::collections::HashMap<String, String>,
+}
+
+/// A visual row of the worktree list. Headers never take a selection index:
+/// `flat` order always equals the visual order of `Row::Worktree` entries.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Row {
+    /// Blank line separating repo sections.
+    Spacer,
+    Repo(String),
+    Project(String),
+    Ticket(String),
+    Worktree(usize),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Action {
+    None,
+    Quit,
+    Refresh,
+    /// Enter: open in the configured IDE (resuming the last session if set).
+    Open(Box<WorktreeView>),
+    /// `t`: terminal at the worktree.
+    OpenTerminal(Box<WorktreeView>),
+    /// `c`: terminal running `claude --resume <latest>`.
+    OpenClaude(Box<WorktreeView>),
+    /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
+    OpenUrl(String),
+    /// A setting was saved; theme/collector need to pick it up.
+    SettingsChanged,
+    /// `e` in settings: open settings.json in $EDITOR.
+    EditSettingsFile,
+    Create(Box<Repository>, Box<am_core::worktrees::CreateRequest>),
+    Delete(Box<WorktreeView>, bool),
+    RunScript { repo_id: String, worktree_path: String },
+    /// `d` on an "Other sessions" row: stop tracking it.
+    RemoveStandalone(String),
+    AddRepo(String),
+    InstallHooks,
+    Suggest { title: String, body: String },
+}
+
+pub struct App {
+    pub settings: Settings,
+    pub snapshot: Snapshot,
+    pub flat: Vec<WorktreeView>,
+    /// Tree-line prefix per `flat` entry ("" for top level, "└─ ", "│  ├─ "…).
+    pub tree: Vec<String>,
+    pub rows: Vec<Row>,
+    pub selected: usize,
+    pub show_help: bool,
+    pub loaded: bool,
+    pub notice: Option<String>,
+    /// Centered message box (e.g. "copied resume command"); any key closes it.
+    pub popup: Option<String>,
+    /// `w`: debug-log pane at the bottom.
+    pub show_log: bool,
+    pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
+    pub modal: Option<crate::modals::Modal>,
+    pub setup: Option<crate::setup::Setup>,
+    /// Select this worktree as soon as it shows up (after create).
+    pub pending_select: Option<String>,
+    /// Worktrees whose status changed since the user last had them selected.
+    pub unseen: std::collections::HashSet<String>,
+    seen_status: std::collections::HashMap<String, Option<Status>>,
+    /// System sounds to play for this update (audio notifications).
+    pub sounds: Vec<String>,
+}
+
+impl App {
+    pub fn new(settings: Settings) -> App {
+        App {
+            settings,
+            snapshot: Snapshot::default(),
+            flat: Vec::new(),
+            tree: Vec::new(),
+            rows: Vec::new(),
+            selected: 0,
+            show_help: false,
+            loaded: false,
+            notice: None,
+            popup: None,
+            show_log: false,
+            settings_editor: None,
+            modal: None,
+            setup: None,
+            pending_select: None,
+            unseen: Default::default(),
+            seen_status: Default::default(),
+            sounds: Vec::new(),
+        }
+    }
+
+    /// Replace the data, keeping the selection on the same worktree.
+    pub fn apply(&mut self, snapshot: Snapshot) {
+        let keep = self.pending_select.clone().or_else(|| self.selected_view().map(|v| v.worktree.id.clone()));
+        self.snapshot = snapshot;
+        self.rebuild_rows();
+        if let Some(i) = keep.and_then(|id| self.flat.iter().position(|v| v.worktree.id == id)) {
+            self.selected = i;
+            if self.pending_select.as_deref() == Some(self.flat[i].worktree.id.as_str()) {
+                self.pending_select = None;
+            }
+        }
+        self.selected = self.selected.min(self.flat.len().saturating_sub(1));
+        self.track_status_changes();
+        self.loaded = true;
+    }
+
+    /// Port of the TS "unseen" logic: a status change on a worktree the user
+    /// isn't looking at marks it unseen and (optionally) plays a sound — one
+    /// per status type per update, waiting and done only.
+    fn track_status_changes(&mut self) {
+        let mut changed: Vec<(String, Option<Status>)> = Vec::new();
+        for v in &self.flat {
+            let now = v.status();
+            match self.seen_status.insert(v.worktree.id.clone(), now) {
+                Some(prev) if prev != now => changed.push((v.worktree.id.clone(), now)),
+                _ => {}
+            }
+        }
+        let first_load = !self.loaded;
+        for (id, _) in &changed {
+            if !first_load {
+                self.unseen.insert(id.clone());
+            }
+        }
+        if self.settings.audio_notifications && !first_load {
+            if changed.iter().any(|(_, s)| *s == Some(Status::Waiting)) {
+                self.sounds.push(self.settings.audio_waiting_sound.clone());
+            }
+            if changed.iter().any(|(_, s)| *s == Some(Status::Done)) {
+                self.sounds.push(self.settings.audio_done_sound.clone());
+            }
+        }
+        self.mark_selected_seen();
+    }
+
+    fn mark_selected_seen(&mut self) {
+        if let Some(id) = self.selected_view().map(|v| v.worktree.id.clone()) {
+            self.unseen.remove(&id);
+        }
+    }
+
+    fn rebuild_rows(&mut self) {
+        let by_project = am_core::grouping::top_sort_key(&self.settings) == Some(SortKey::LinearProject);
+        let multi_repo = self.snapshot.groups.len() > 1;
+        self.flat.clear();
+        self.rows.clear();
+        self.tree.clear();
+        for group in &self.snapshot.groups {
+            if group.worktrees.is_empty() {
+                continue;
+            }
+            if multi_repo || group.repo.id == am_core::model::STANDALONE_REPO_ID {
+                if !self.rows.is_empty() {
+                    self.rows.push(Row::Spacer);
+                }
+                self.rows.push(Row::Repo(group.repo.name.clone()));
+            }
+            let ordered = stack_order(&group.worktrees, &self.snapshot.stack);
+            // Headers (project / ticket cluster) only consider top-level rows,
+            // so a stack is never split by a header.
+            let tops: Vec<usize> = ordered.iter().filter(|(_, prefix)| prefix.is_empty()).map(|(i, _)| *i).collect();
+            let mut last_project: Option<Option<String>> = None;
+            let mut top_pos: usize = 0;
+            for (i, prefix) in ordered {
+                let v = &group.worktrees[i];
+                if prefix.is_empty() {
+                    if by_project {
+                        let project = v.linear.as_ref().and_then(|l| l.project.as_ref()).map(|p| p.name.clone());
+                        if last_project.as_ref() != Some(&project) {
+                            // Breathing room between project sections (not right under the repo header).
+                            if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Spacer)) {
+                                self.rows.push(Row::Spacer);
+                            }
+                            self.rows.push(Row::Project(project.clone().unwrap_or_else(|| "No project".into())));
+                            last_project = Some(project);
+                        }
+                    }
+                    let ticket = ticket_of(v);
+                    let prev = top_pos.checked_sub(1).map(|p| ticket_of(&group.worktrees[tops[p]]));
+                    let next = tops.get(top_pos + 1).map(|&n| ticket_of(&group.worktrees[n]));
+                    if ticket.is_some() && prev != Some(ticket) && next == Some(ticket) {
+                        let l = v.linear.as_ref().unwrap();
+                        self.rows.push(Row::Ticket(format!("{} {}", l.identifier, l.title)));
+                    }
+                    top_pos += 1;
+                }
+                self.rows.push(Row::Worktree(self.flat.len()));
+                self.flat.push(v.clone());
+                self.tree.push(prefix);
+            }
+        }
+    }
+
+    pub fn selected_view(&self) -> Option<&WorktreeView> {
+        self.flat.get(self.selected)
+    }
+
+
+    pub fn running_subagents_for(&self, worktree_id: &str) -> usize {
+        self.snapshot.subagents.iter().filter(|(w, s)| s.running && w.as_deref() == Some(worktree_id)).count()
+    }
+
+
+    pub fn on_key(&mut self, key: Key) -> Action {
+        if self.popup.take().is_some() {
+            return Action::None;
+        }
+        if let Some(setup) = &mut self.setup {
+            use crate::setup::SetupEffect;
+            if key == Key::CtrlC {
+                return Action::Quit;
+            }
+            return match setup.on_key(key) {
+                SetupEffect::None => Action::None,
+                SetupEffect::InstallHooks => Action::InstallHooks,
+                SetupEffect::AddRepo(p) => Action::AddRepo(p),
+                SetupEffect::Finish(kv) => {
+                    let mut latest = None;
+                    for (k, v) in kv {
+                        match crate::settings_ui::persist(k, v) {
+                            Ok(s) => latest = Some(s),
+                            Err(e) => self.notice = Some(e),
+                        }
+                    }
+                    self.setup = None;
+                    match latest {
+                        Some(s) => {
+                            self.set_settings(s);
+                            self.notice = Some("Setup complete — press ? for keys".into());
+                            Action::SettingsChanged
+                        }
+                        None => Action::None,
+                    }
+                }
+            };
+        }
+        if let Some(modal) = &mut self.modal {
+            use crate::modals::Effect;
+            return match modal.on_key(key) {
+                Effect::None => Action::None,
+                Effect::Close => {
+                    self.modal = None;
+                    Action::None
+                }
+                Effect::Create(repo, req) => {
+                    self.modal = Some(crate::modals::Modal::Busy(format!("Creating {}…", req.branch)));
+                    Action::Create(Box::new(repo), Box::new(req))
+                }
+                Effect::Delete { view, delete_branch } => {
+                    self.modal = Some(crate::modals::Modal::Busy(format!("Deleting {}…", view.worktree.display_name())));
+                    Action::Delete(view, delete_branch)
+                }
+                Effect::Suggest { title, body } => {
+                    self.modal = Some(crate::modals::Modal::Busy("Filing feature request…".into()));
+                    Action::Suggest { title, body }
+                }
+                Effect::AddRepo(path) => {
+                    self.modal = Some(crate::modals::Modal::Busy(format!("Adding {path}…")));
+                    Action::AddRepo(path)
+                }
+                Effect::RunScript { repo_id, worktree_path } => {
+                    self.modal = None;
+                    Action::RunScript { repo_id, worktree_path }
+                }
+            };
+        }
+        if let Some(editor) = &mut self.settings_editor {
+            use crate::settings_ui::Outcome;
+            return match editor.on_key(key) {
+                Outcome::None => Action::None,
+                Outcome::Close => {
+                    self.settings_editor = None;
+                    Action::None
+                }
+                Outcome::Changed(s) => {
+                    self.set_settings(*s);
+                    Action::SettingsChanged
+                }
+                Outcome::EditFile => Action::EditSettingsFile,
+            };
+        }
+        if self.show_help {
+            if matches!(key, Key::Char('?') | Key::Esc | Key::Char('q')) {
+                self.show_help = false;
+            }
+            return Action::None;
+        }
+        match key {
+            Key::Char('q') | Key::CtrlC => return Action::Quit,
+            Key::Esc => return Action::Quit,
+            Key::Char('?') => self.show_help = true,
+            Key::Char('r') => {
+                self.notice = Some("Refreshing…".into());
+                return Action::Refresh;
+            }
+            Key::Enter => return self.with_selected(Action::Open),
+            Key::Char('t') => return self.with_selected(Action::OpenTerminal),
+            Key::Char('c') => return self.with_selected(Action::OpenClaude),
+            Key::Char('g') | Key::Char('o') => return self.url_action(|v, _| {
+                let pr = v.pr.as_ref()?;
+                // Same rule as the TS app: a merged PR jumps to its last active check.
+                Some(if pr.state == "MERGED" { pr.active_check_url.clone().unwrap_or(pr.url.clone()) } else { pr.url.clone() })
+            }, "No PR for this branch"),
+            Key::Char('l') => return self.url_action(|v, s| v.linear.as_ref().map(|l| linear_url(&l.url, s)), "No Linear ticket"),
+            Key::Char('p') => return self.url_action(
+                |v, s| v.linear.as_ref()?.project.as_ref()?.url.as_ref().map(|u| linear_url(u, s)),
+                "No Linear project",
+            ),
+            Key::Char('w') => self.show_log = !self.show_log,
+            Key::Char('n') => {
+                if self.snapshot.repos.is_empty() {
+                    self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None });
+                } else {
+                    let repo = self.selected_view().map(|v| v.worktree.repo_id.clone());
+                    self.modal = Some(crate::modals::Modal::new_worktree(
+                        self.snapshot.repos.clone(),
+                        repo.as_deref(),
+                        &self.settings.default_branch_prefix,
+                        &self.settings.default_base_branch,
+                    ));
+                }
+            }
+            Key::Char('d') => {
+                if let Some(v) = self.selected_view().cloned() {
+                    if v.worktree.is_standalone() {
+                        return Action::RemoveStandalone(v.worktree.path);
+                    }
+                    if v.worktree.is_main && (v.worktree.branch == "main" || v.worktree.branch == "master") {
+                        self.notice = Some("The main checkout can't be deleted".into());
+                    } else {
+                        self.modal = Some(crate::modals::Modal::delete(v));
+                    }
+                }
+            }
+            Key::Char('f') => {
+                self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
+            }
+            Key::Char('A') => self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None }),
+            Key::Char('s') => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
+            Key::Down | Key::Char('j') => self.move_by(1),
+            Key::Up | Key::Char('k') => self.move_by(-1),
+            Key::PageDown | Key::CtrlD => self.move_by(10),
+            Key::PageUp | Key::CtrlU => self.move_by(-10),
+            Key::Char('G') | Key::End => self.move_by(isize::MAX / 2),
+            Key::Home => self.move_by(isize::MIN / 2),
+            _ => {}
+        }
+        Action::None
+    }
+
+    /// Swap in new settings and re-derive rows (header style depends on sort).
+    pub fn set_settings(&mut self, settings: Settings) {
+        self.settings = settings;
+        if let Some(e) = &mut self.settings_editor {
+            let cursor = e.cursor;
+            *e = crate::settings_ui::SettingsEditor::new(&self.settings);
+            e.cursor = cursor;
+        }
+        let snap = self.snapshot.clone();
+        self.apply(snap);
+    }
+
+    fn url_action(&mut self, pick: impl Fn(&WorktreeView, &Settings) -> Option<String>, missing: &str) -> Action {
+        match self.selected_view().and_then(|v| pick(v, &self.settings)) {
+            Some(url) => Action::OpenUrl(url),
+            None => {
+                self.notice = Some(missing.to_string());
+                Action::None
+            }
+        }
+    }
+
+    fn with_selected(&self, f: fn(Box<WorktreeView>) -> Action) -> Action {
+        self.selected_view().map(|v| f(Box::new(v.clone()))).unwrap_or(Action::None)
+    }
+
+
+    fn move_by(&mut self, delta: isize) {
+        let len = self.flat.len();
+        if len == 0 {
+            return;
+        }
+        self.selected = (self.selected as isize).saturating_add(delta).clamp(0, len as isize - 1) as usize;
+        self.mark_selected_seen();
+    }
+}
+
+/// Order a repo's worktrees so stacked branches follow their parent
+/// (depth-first, keeping the configured sort among siblings), with the tree
+/// prefix for each row. A child whose parent isn't visible stays top-level.
+pub fn stack_order(wts: &[WorktreeView], stack: &std::collections::HashMap<String, String>) -> Vec<(usize, String)> {
+    use std::collections::HashMap;
+    let index: HashMap<&str, usize> = wts.iter().enumerate().map(|(i, v)| (v.worktree.id.as_str(), i)).collect();
+    let parent_of = |i: usize| stack.get(&wts[i].worktree.id).and_then(|p| index.get(p.as_str()).copied()).filter(|&p| p != i);
+    let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut roots = Vec::new();
+    for i in 0..wts.len() {
+        match parent_of(i) {
+            Some(p) => children.entry(p).or_default().push(i),
+            None => roots.push(i),
+        }
+    }
+    let mut out = Vec::with_capacity(wts.len());
+    let mut seen = vec![false; wts.len()];
+    fn walk(
+        i: usize,
+        lead: &str,
+        branch: &str,
+        children: &HashMap<usize, Vec<usize>>,
+        seen: &mut [bool],
+        out: &mut Vec<(usize, String)>,
+    ) {
+        if std::mem::replace(&mut seen[i], true) {
+            return;
+        }
+        out.push((i, format!("{lead}{branch}")));
+        let kids = children.get(&i).map(Vec::as_slice).unwrap_or(&[]);
+        let next_lead = if branch.is_empty() {
+            String::new()
+        } else if branch.starts_with('├') {
+            format!("{lead}│  ")
+        } else {
+            format!("{lead}   ")
+        };
+        for (k, &c) in kids.iter().enumerate() {
+            let b = if k + 1 == kids.len() { "└─ " } else { "├─ " };
+            walk(c, &next_lead, b, children, seen, out);
+        }
+    }
+    for r in roots {
+        walk(r, "", "", &children, &mut seen, &mut out);
+    }
+    // Anything left (only possible with a cycle) is shown flat.
+    out.extend(seen.iter().enumerate().filter(|(_, s)| !**s).map(|(i, _)| (i, String::new())));
+    out
+}
+
+fn linear_url(url: &str, s: &Settings) -> String {
+    if s.linear_use_desktop_app {
+        url.replacen("https://linear.app/", "linear://", 1)
+    } else {
+        url.to_string()
+    }
+}
+
+fn ticket_of(v: &WorktreeView) -> Option<&str> {
+    v.linear.as_ref().map(|l| l.identifier.as_str())
+}
+
+/// Backend-independent key events (mapped from crossterm in main.rs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    Char(char),
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    Left,
+    Right,
+    Backspace,
+    Tab,
+    BackTab,
+    Enter,
+    Esc,
+    CtrlC,
+    CtrlD,
+    CtrlU,
+}

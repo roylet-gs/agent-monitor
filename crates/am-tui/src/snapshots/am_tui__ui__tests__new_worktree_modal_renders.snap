@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 16)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◆ feature/refactor ◆2                                                    ENG-412 #127✓ ↑2 ±3  4m │
+│ ◐ fix/offline-cache                                                                           4m │
+│             ╭─New worktree ────────────────────────────────────────────────────────╮             │
+│gridsight ───│  Repo      ‹ agent-monitor ›                                         │─────────────│
+│ · main      │ ▌Branch    feature/x▏                                                │   ↑2 ±3  4m │
+│             │            ✓ exists on origin — Enter will offer to pull it          │             │
+│             │  Name      (optional)                                                │             │
+│             │  Base      tracks origin/feature/x                                   │             │
+│             ╰────────────────────────────────────── tab next  ⏎ create  esc cancel ╯             │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
