@@ -18,7 +18,7 @@ expression: "render(&app, 100, 20)"
 │         │       tab  1  2  switch pane                                                 │         │
 │         │               a  subagents: this worktree ↔ all                              │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
-│         │               ?  toggle help                                                 │         │
-╰─────────│          q  esc  quit                                                        │· a: all ╯
- feature/r│                                                                              │0c5e7f2a-1
- WORKTREES╰──────────────────────────────────────────────────────────────────────────────╯p  q quit
+╰─────────│               ?  toggle help                                                 │· a: all ╯
+ feature/r│          q  esc  quit                                                        │0c5e7f2a-1
+ WORKTREES│                                                                              │
+ ⏎ open  c╰──────────────────────────────────────────────────────────────────────────────╯ quit

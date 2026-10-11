@@ -22,13 +22,15 @@ pub const SIDE_BY_SIDE_MIN_COLS: u16 = 100;
 pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[String]) {
     let area = f.area();
     let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
-    let [body, log, context, status] = Layout::vertical([
+    let [body, log, context, status, keys] = Layout::vertical([
         Constraint::Min(5),
         Constraint::Length(log_h),
         Constraint::Length(1),
         Constraint::Length(1),
+        Constraint::Length(1),
     ])
     .areas(area);
+    draw_keybar(f, app, theme, keys);
     if app.show_log {
         draw_log(f, theme, log, log_lines);
     }
@@ -880,10 +882,65 @@ fn draw_status_bar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if let Some(n) = &app.notice {
         left.push(Span::styled(n.clone(), theme.faint()));
     }
-    let hints = if area.width >= 120 { "⏎ open  g PR  l linear  n new  d del  s settings  ? help  q quit " } else if area.width >= 90 { "⏎ open  g PR  l linear  ? help  q quit " } else { "⏎ open  ? help  q quit " };
-    let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(hints.width() as u16)]).areas(area);
-    f.render_widget(Paragraph::new(Line::from(left)), l);
-    f.render_widget(Paragraph::new(Line::styled(hints, theme.faint())), r);
+    f.render_widget(Paragraph::new(Line::from(left)), area);
+}
+
+/// Every dashboard key, grouped. Lower `priority` survives narrower widths;
+/// what doesn't fit is still in the `?` overlay.
+const KEYS: &[(&str, &str, u8)] = &[
+    ("⏎", "open", 0),
+    ("t", "terminal", 2),
+    ("c", "claude", 1),
+    ("|", "", 0),
+    ("g", "PR", 0),
+    ("l", "linear", 0),
+    ("p", "project", 2),
+    ("|", "", 0),
+    ("n", "new", 1),
+    ("d", "delete", 1),
+    ("A", "add repo", 3),
+    ("|", "", 0),
+    ("tab", "pane", 2),
+    ("a", "scope", 2),
+    ("w", "log", 3),
+    ("s", "settings", 1),
+    ("f", "feedback", 3),
+    ("r", "refresh", 1),
+    ("?", "help", 0),
+    ("q", "quit", 0),
+];
+
+fn draw_keybar(f: &mut Frame, _app: &App, theme: &Theme, area: Rect) {
+    let width = area.width as usize;
+    let render = |max_prio: u8| -> Vec<Span<'static>> {
+        let mut spans = vec![Span::raw(" ")];
+        let mut last_sep = true;
+        for (k, label, prio) in KEYS {
+            if *prio > max_prio {
+                continue;
+            }
+            if *k == "|" {
+                if !last_sep {
+                    spans.push(Span::styled("│ ", theme.fg(theme.border)));
+                    last_sep = true;
+                }
+                continue;
+            }
+            spans.push(Span::styled(k.to_string(), theme.bold(theme.accent)));
+            spans.push(Span::styled(format!(" {label}  "), theme.faint()));
+            last_sep = false;
+        }
+        spans
+    };
+    let mut spans = render(0);
+    for prio in (0..=3).rev() {
+        let candidate = render(prio);
+        if candidate.iter().map(|s| s.content.width()).sum::<usize>() <= width {
+            spans = candidate;
+            break;
+        }
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
