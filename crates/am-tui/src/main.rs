@@ -6,6 +6,7 @@
 
 mod app;
 mod data;
+mod launcher;
 mod theme;
 mod ui;
 
@@ -63,12 +64,32 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Theme, collector: &data::Collector) -> io::Result<()> {
+    let (launch_tx, launch_rx) = std::sync::mpsc::channel();
+    let mut popup_since: Option<Instant> = None;
     let mut dirty = true;
     let mut last_second = am_core::timefmt::now_unix();
     let mut notice_since: Option<Instant> = None;
     loop {
         while let Some(snapshot) = collector.try_recv() {
             app.apply(snapshot);
+            dirty = true;
+        }
+        while let Ok(msg) = launch_rx.try_recv() {
+            match msg {
+                launcher::Msg::Popup(p) => {
+                    app.popup = Some(p);
+                    popup_since = Some(Instant::now());
+                }
+                launcher::Msg::Notice(n) => {
+                    app.notice = Some(n);
+                    notice_since = None;
+                }
+            }
+            dirty = true;
+        }
+        if app.popup.is_some() && popup_since.is_some_and(|t| t.elapsed() > Duration::from_secs(6)) {
+            app.popup = None;
+            popup_since = None;
             dirty = true;
         }
         let now = am_core::timefmt::now_unix();
@@ -98,6 +119,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Th
                         match app.on_key(key) {
                             Action::Quit => return Ok(()),
                             Action::Refresh => collector.refresh(true),
+                            Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
+                            Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
+                            Action::OpenClaude(v) => launcher::open_claude(*v, launch_tx.clone()),
                             Action::None => {}
                         }
                         dirty = true;

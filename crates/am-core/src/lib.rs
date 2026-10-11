@@ -6,6 +6,7 @@ pub mod db;
 pub mod gitinfo;
 pub mod grouping;
 pub mod integrations;
+pub mod launch;
 pub mod log;
 pub mod model;
 pub mod paths;

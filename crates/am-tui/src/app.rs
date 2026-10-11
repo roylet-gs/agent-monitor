@@ -42,11 +42,17 @@ pub enum Row {
     Worktree(usize),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     None,
     Quit,
     Refresh,
+    /// Enter: open in the configured IDE (resuming the last session if set).
+    Open(Box<WorktreeView>),
+    /// `t`: terminal at the worktree.
+    OpenTerminal(Box<WorktreeView>),
+    /// `c`: terminal running `claude --resume <latest>`.
+    OpenClaude(Box<WorktreeView>),
 }
 
 pub struct App {
@@ -61,6 +67,8 @@ pub struct App {
     pub show_help: bool,
     pub loaded: bool,
     pub notice: Option<String>,
+    /// Centered message box (e.g. "copied resume command"); any key closes it.
+    pub popup: Option<String>,
     pending_g: bool,
 }
 
@@ -78,6 +86,7 @@ impl App {
             show_help: false,
             loaded: false,
             notice: None,
+            popup: None,
             pending_g: false,
         }
     }
@@ -158,6 +167,9 @@ impl App {
     }
 
     pub fn on_key(&mut self, key: Key) -> Action {
+        if self.popup.take().is_some() {
+            return Action::None;
+        }
         if self.show_help {
             if matches!(key, Key::Char('?') | Key::Esc | Key::Char('q')) {
                 self.show_help = false;
@@ -175,6 +187,9 @@ impl App {
                 return Action::Refresh;
             }
             Key::Tab | Key::BackTab => self.toggle_focus(),
+            Key::Enter => return self.with_selected(Action::Open),
+            Key::Char('t') => return self.with_selected(Action::OpenTerminal),
+            Key::Char('c') => return self.with_selected(Action::OpenClaude),
             Key::Char('1') => self.focus = Pane::Worktrees,
             Key::Char('2') => self.focus = Pane::Subagents,
             Key::Char('a') => {
@@ -195,6 +210,10 @@ impl App {
             _ => {}
         }
         Action::None
+    }
+
+    fn with_selected(&self, f: fn(Box<WorktreeView>) -> Action) -> Action {
+        self.selected_view().map(|v| f(Box::new(v.clone()))).unwrap_or(Action::None)
     }
 
     fn toggle_focus(&mut self) {

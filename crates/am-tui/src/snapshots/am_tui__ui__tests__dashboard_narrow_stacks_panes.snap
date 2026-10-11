@@ -25,4 +25,4 @@ expression: "render(&fixture(), 80, 24)"
 │   └ SubagentHandback                                                 23 tools│
 ╰───────────────────────────────────────────────── 2 running · 1 done · a: all ╯
  feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open
- WORKTREES  ◐ 1  ◆ 1              tab focus  a scope  r refresh  ? help  q quit
+ WORKTREES  ◐ 1  ◆ 1                                     ⏎ open  ? help  q quit

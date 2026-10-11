@@ -17,4 +17,4 @@ expression: "render(&app, 120, 16)"
 │                                                                    ││                                                │
 ╰──────────────────────────────────────────────────────────── 1 of 3 ╯╰───────── 2 running · 1 done · a: this worktree ╯
  feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1111-2222-3333-a91f00
- SUBAGENTS  ◐ 1  ◆ 1                                                      tab focus  a scope  r refresh  ? help  q quit
+ SUBAGENTS  ◐ 1  ◆ 1                                       ⏎ open  t term  c claude  a scope  r refresh  ? help  q quit

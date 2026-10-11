@@ -4,12 +4,13 @@ expression: "render(&app, 100, 20)"
 ---
 ╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents · feature/refactor ──────╮
 │agent-monitor                                           ││ ◆ Analyze am de… general-purpose  2m14s│
-│▌◆ feature/refactor          ◆2 ENG-412 #127✓ ↑2 ±3  4m ││   └ Bash  grep -c WARN debug.… 23 tools│
-│ ◐ fix/offline-cache                                 4m ││ ◆ Research TUI … general-purpose  2m14s│
-│gridsight╭ Keys ────────────────────────────────────────────────────────────────────────╮ 23 tools│
-│ · main  │    j / k  ↑ / ↓  move                                                        │e 30s ago│
-│         │          gg / G  top / bottom                                                │ 23 tools│
-│         │ ctrl-d / ctrl-u  page down / up                                              │         │
+│▌◆ featur╭ Keys ────────────────────────────────────────────────────────────────────────╮ 23 tools│
+│ ◐ fix/of│    j / k  ↑ / ↓  move                                                        │se  2m14s│
+│gridsight│          gg / G  top / bottom                                                │ 23 tools│
+│ · main  │ ctrl-d / ctrl-u  page down / up                                              │e 30s ago│
+│         │           enter  open (IDE; resumes last Claude session)                     │ 23 tools│
+│         │               t  terminal at worktree                                        │         │
+│         │               c  terminal running claude --resume                            │         │
 │         │       tab  1  2  switch pane                                                 │         │
 │         │               a  subagents: this worktree ↔ all                              │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
@@ -18,7 +19,6 @@ expression: "render(&app, 100, 20)"
 │         │                                                                              │         │
 │         │● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │         │
 │         ╰──────────────────────────────────────────────────────────────────────────────╯         │
-│                                                        ││                                        │
 ╰──────────────────────────────────────────────── 1 of 3 ╯╰─────────── 2 running · 1 done · a: all ╯
  feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1
- WORKTREES  ◐ 1  ◆ 1                                  tab focus  a scope  r refresh  ? help  q quit
+ WORKTREES  ◐ 1  ◆ 1                                                         ⏎ open  ? help  q quit

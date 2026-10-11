@@ -182,6 +182,12 @@ fn now_sqlite_minus_grace() -> String {
 /// `isEffectivelyOpen`: an open session is open unless it is idle and hasn't
 /// been touched within the grace period. `cutoff` is `now - 10min` as SQLite
 /// datetime text, so the check is a lexical comparison.
+/// Whether an agent session is visibly open right now (used by filters and by
+/// the Open action, which skips resuming a session the user can already see).
+pub fn is_open_now(agent: Option<&AgentState>) -> bool {
+    is_effectively_open(agent, &now_sqlite_minus_grace())
+}
+
 fn is_effectively_open(agent: Option<&AgentState>, cutoff: &str) -> bool {
     let Some(a) = agent else { return false };
     if !a.is_open {

@@ -39,6 +39,26 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64) {
     if app.show_help {
         draw_help(f, theme, area);
     }
+    if let Some(msg) = &app.popup {
+        draw_popup(f, theme, area, msg);
+    }
+}
+
+fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
+    let w = 72.min(area.width.saturating_sub(4));
+    let inner_w = w.saturating_sub(4) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    for raw in msg.lines() {
+        let style = if raw.starts_with("claude") || raw.starts_with("cd ") { theme.bold(theme.accent) } else { theme.fg(theme.text) };
+        lines.push(Line::styled(truncate(raw, inner_w), style));
+    }
+    let h = (lines.len() as u16 + 2).min(area.height);
+    let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
+    let error = msg.starts_with('✗');
+    let border = if error { theme.bold(theme.red) } else { theme.bold(theme.green) };
+    f.render_widget(Clear, rect);
+    let block = Block::bordered().border_type(BorderType::Rounded).border_style(border).padding(ratatui::widgets::Padding::horizontal(1));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn pane_block<'a>(theme: &Theme, title: Line<'a>, focused: bool) -> Block<'a> {
@@ -433,7 +453,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if let Some(n) = &app.notice {
         left.push(Span::styled(n.clone(), theme.faint()));
     }
-    let hints = "tab focus  a scope  r refresh  ? help  q quit ";
+    let hints = if area.width >= 110 { "⏎ open  t term  c claude  a scope  r refresh  ? help  q quit " } else { "⏎ open  ? help  q quit " };
     let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(hints.width() as u16)]).areas(area);
     f.render_widget(Paragraph::new(Line::from(left)), l);
     f.render_widget(Paragraph::new(Line::styled(hints, theme.faint())), r);
@@ -444,6 +464,9 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("j / k  ↑ / ↓", "move"),
         ("gg / G", "top / bottom"),
         ("ctrl-d / ctrl-u", "page down / up"),
+        ("enter", "open (IDE; resumes last Claude session)"),
+        ("t", "terminal at worktree"),
+        ("c", "terminal running claude --resume"),
         ("tab  1  2", "switch pane"),
         ("a", "subagents: this worktree ↔ all"),
         ("r", "refresh now (bypasses backoff)"),
