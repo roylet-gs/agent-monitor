@@ -88,6 +88,12 @@ npm install -g @roylet-gs/agent-monitor
 
 npm installs only the native package for your platform (`@roylet-gs/agent-monitor-darwin-arm64`, `-darwin-x64`, `-linux-arm64` or `-linux-x64`). Don't pass `--no-optional`, or the binaries won't be installed.
 
+pnpm works the same way, using the same `.npmrc`:
+
+```sh
+pnpm add -g @roylet-gs/agent-monitor
+```
+
 ### Homebrew
 
 The repository is its own tap:
@@ -408,10 +414,13 @@ Version 2 is a native rewrite (Rust) of the TypeScript app. Install it the same 
 am hooks install
 ```
 
+Update with the same package manager you installed 1.x with (`npm install -g @roylet-gs/agent-monitor` or `pnpm add -g @roylet-gs/agent-monitor`) and check `am --version` prints `am 2.x`.
+
 This points your Claude Code hooks at the native `am-hook` binary by absolute path. Old 1.x hook entries (`am hook-event`) keep working, but on npm installs they go through the Node launcher on every event; reinstalling removes that overhead. `am doctor` reports whether the native hook is found.
 
 - **Your data carries over unchanged.** The database, settings, startup scripts and cached PR/Linear data are read in place; nothing needs migrating or re-adding.
 - **Layout:** the detail panel is gone. PR, CI, ticket and git info now sit in the worktree row, and the `?` overlay lists every key.
+- **Preview builds:** if you installed the pre-release binaries with `cargo install` (`am-rs`, `am-tui`, `am-hook` in `~/.cargo/bin`), remove them so they don't shadow the release on your `PATH`: `cargo uninstall am-cli am-tui am-hook`, then run `am hooks install` again.
 - **Removed:** managed (headless) Claude sessions and the chat view (`am agent send|list|log|stop`), and `am daemon`. Use `c` in the dashboard or `am agent attach` to resume a session in a terminal instead. The Unix socket (`am.sock`) is no longer used.
 
 ---
@@ -445,6 +454,12 @@ You can also press `w` in the dashboard to see the log live.
 
 - npm: reinstall without `--no-optional`. Only macOS and Linux on arm64/x64 are supported.
 - From source: install all three crates, and make sure `~/.cargo/bin` is on your `PATH`.
+
+**No sounds**
+
+- Sounds are macOS only and off by default: `am settings set audioNotifications true` (or `s` → Notifications → Sounds).
+- Picking a sound in the settings editor plays it, so you can check your volume.
+- A sound plays when a worktree's status changes to waiting or done while `am` is open. `am logs --module audio` shows each sound played, or why it couldn't play.
 
 **PR status isn't showing**
 

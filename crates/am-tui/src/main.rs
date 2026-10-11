@@ -246,6 +246,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             }
                             Action::None => {}
                         }
+                        for sound in app.sounds.drain(..) {
+                            play_sound(&sound);
+                        }
                         if app.show_log && log_lines.is_empty() {
                             log_lines = tail_log(200);
                         }
@@ -261,16 +264,31 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
 
 /// macOS system sound by name; fire-and-forget (port of src/lib/audio.ts).
 fn play_sound(name: &str) {
-    if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        am_core::warn!("audio", "Ignoring invalid sound name {name:?}");
         return;
     }
     let path = format!("/System/Library/Sounds/{name}.aiff");
-    let _ = std::process::Command::new("afplay")
-        .arg(path)
+    match std::process::Command::new("afplay")
+        .arg(&path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => {
+            info!("audio", "Playing {name}");
+            // Reap it (and surface afplay errors) without blocking the UI.
+            std::thread::spawn(move || {
+                if let Ok(out) = child.wait_with_output()
+                    && !out.status.success()
+                {
+                    am_core::warn!("audio", "afplay {path} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+                }
+            });
+        }
+        Err(e) => am_core::warn!("audio", "Couldn't run afplay for {name}: {e}"),
+    }
 }
 
 /// Last `n` lines of debug.log (reads at most the final 64 KiB).

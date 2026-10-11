@@ -148,6 +148,14 @@ impl App {
                 self.unseen.insert(id.clone());
             }
         }
+        if !first_load && !changed.is_empty() {
+            am_core::debug!(
+                "audio",
+                "status changes: {} (sounds {})",
+                changed.iter().map(|(id, s)| format!("{id}→{}", s.map_or("none", Status::as_str))).collect::<Vec<_>>().join(", "),
+                if self.settings.audio_notifications { "on" } else { "off" }
+            );
+        }
         if self.settings.audio_notifications && !first_load {
             if changed.iter().any(|(_, s)| *s == Some(Status::Waiting)) {
                 self.sounds.push(self.settings.audio_waiting_sound.clone());
@@ -299,6 +307,15 @@ impl App {
                     Action::None
                 }
                 Outcome::Changed(s) => {
+                    // Picking a sound plays it, so the choice can be heard.
+                    if let Some(key) = self.settings_editor.as_ref().map(|e| e.field().key) {
+                        let pick = match key {
+                            "audioWaitingSound" => Some(s.audio_waiting_sound.clone()),
+                            "audioDoneSound" => Some(s.audio_done_sound.clone()),
+                            _ => None,
+                        };
+                        self.sounds.extend(pick);
+                    }
                     self.set_settings(*s);
                     Action::SettingsChanged
                 }
