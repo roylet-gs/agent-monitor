@@ -20,6 +20,10 @@ Phase 1 progress:
 - [ ] Nerd Font glyph set (setting exists, not yet implemented)
 - [ ] Docker E2E against the Rust binary (Phase 3)
 
+Phase 2 progress:
+- [x] `am-rs` CLI (`crates/am-cli`): repo, settings, hooks, pr, linear, script, doctor, status, logs, worktree list/info/open, `agent attach`, `hook-event` (shared with `am-hook` via its lib; 2.2 ms vs 2.0 ms)
+- [ ] `worktree create|delete|sync`, `new`, and the sync step of `repo add` (waiting on `am_core::worktrees`)
+
 Bugs found in the TS app while porting (fixed in Rust; TS left as is unless noted):
 - Commit statuses (`StatusContext`) count as pending forever → PRs stuck on ◌
 - Only the first 100 checks were considered → PRs with failing checks beyond 100 showed ✓

@@ -166,7 +166,7 @@ Track Claude Code agent status across all your worktrees in real time. Status in
 > [!IMPORTANT]
 > Hooks must be installed for real-time agent monitoring. Run `am hooks install` or let the setup wizard handle it. Hooks write to `~/.claude/settings.json` and fire events that Agent Monitor captures.
 >
-> **Faster hooks (optional):** with a Rust toolchain, `cargo install --path crates/am-hook` then `am hooks install` switches the hooks to the native `am-hook` binary (~3 ms per event instead of ~250 ms). It also tracks each background subagent individually, so `delegating` is reported correctly.
+> **Faster hooks (optional):** with a Rust toolchain, `cargo install --path crates/am-hook` then `am hooks install` switches the hooks to the native `am-hook` binary (~3 ms per event instead of ~250 ms). It also tracks each background subagent individually, so `delegating` is reported correctly. `cargo install --path crates/am-cli` installs the native CLI as `am-rs` (same commands as `am`; worktree create/delete/sync still go through `am` for now).
 
 ### Managed Claude Sessions
 

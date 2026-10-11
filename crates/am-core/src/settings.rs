@@ -173,11 +173,59 @@ impl Settings {
     }
 }
 
+impl Settings {
+    /// Every known key with its typed value, in default key order (the TS
+    /// `DEFAULT_SETTINGS` order), followed by any unknown keys from the file.
+    /// Mirrors what the TS `loadSettings()` returns (`{...DEFAULTS, ...file}`).
+    pub fn to_view(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut view = match serde_json::to_value(self) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        };
+        for (k, v) in &self.raw {
+            if !view.contains_key(k) {
+                view.insert(k.clone(), v.clone());
+            }
+        }
+        view
+    }
+
+    /// What [`save`] writes: the file's own keys in their original order
+    /// (unknown ones untouched), with every known key set to its typed value
+    /// (new keys appended).
+    pub fn to_file_json(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut out = self.raw.clone();
+        if let Ok(serde_json::Value::Object(typed)) = serde_json::to_value(self) {
+            for (k, v) in typed {
+                out.insert(k, v);
+            }
+        }
+        out
+    }
+}
+
 pub fn load() -> Settings {
     match std::fs::read_to_string(paths::settings_path()) {
         Ok(raw) => Settings::parse(&raw),
         Err(_) => Settings::default(),
     }
+}
+
+/// Write `settings.json` the way the TS app does (2-space JSON + trailing
+/// newline), merged with `raw` so keys the TS app — or a newer version — wrote
+/// are preserved. Written via a temp file + rename so a concurrent reader never
+/// sees a half-written file.
+pub fn save(settings: &Settings) -> std::io::Result<()> {
+    let path = paths::settings_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut text = serde_json::to_string_pretty(&serde_json::Value::Object(settings.to_file_json()))
+        .map_err(std::io::Error::other)?;
+    text.push('\n');
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, &path)
 }
 
 #[cfg(test)]
@@ -205,6 +253,27 @@ mod tests {
     fn sort_criteria_round_trip_ts_shape() {
         let s = Settings::parse(r#"{"worktreeSort":[{"key":"linearProject","direction":"desc","enabled":true}]}"#);
         assert_eq!(s.worktree_sort, vec![SortCriterion { key: SortKey::LinearProject, direction: Direction::Desc, enabled: true }]);
+    }
+
+    #[test]
+    fn file_json_keeps_unknown_keys_and_their_order() {
+        let mut s = Settings::parse(r#"{"setupCompleted":true,"ide":"vscode","zeta":1}"#);
+        s.ide = "cursor".into();
+        let out = s.to_file_json();
+        let keys: Vec<&str> = out.keys().map(String::as_str).take(3).collect();
+        assert_eq!(keys, ["setupCompleted", "ide", "zeta"]);
+        assert_eq!(out["ide"], "cursor");
+        assert_eq!(out["setupCompleted"], true);
+        assert!(out.contains_key("worktreeSort"));
+    }
+
+    #[test]
+    fn view_is_defaults_order_then_extras() {
+        let s = Settings::parse(r#"{"zeta":1,"ide":"vscode"}"#);
+        let view = s.to_view();
+        assert_eq!(view.keys().next().map(String::as_str), Some("ide"));
+        assert_eq!(view.keys().next_back().map(String::as_str), Some("zeta"));
+        assert_eq!(view["ide"], "vscode");
     }
 
     #[test]

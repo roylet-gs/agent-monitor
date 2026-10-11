@@ -1,0 +1,22 @@
+[package]
+name = "am-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# `am-rs` until cut-over, when it becomes `am` (the TS `am` is still installed).
+[[bin]]
+name = "am-rs"
+path = "src/main.rs"
+
+[dependencies]
+am-core.workspace = true
+am-hook.workspace = true
+clap = { version = "4", features = ["derive"] }
+rusqlite.workspace = true
+serde_json.workspace = true
+time.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
