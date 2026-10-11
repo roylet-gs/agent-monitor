@@ -1169,6 +1169,34 @@ mod tests {
     }
 
     #[test]
+    fn project_sections_are_separated_by_a_blank_line() {
+        use am_core::settings::{Direction, SortCriterion, SortKey};
+        let mut app = fixture();
+        app.settings.worktree_sort = vec![SortCriterion { key: SortKey::LinearProject, direction: Direction::Asc, enabled: true }];
+        let mut snap = app.snapshot.clone();
+        let proj = |name: &str| LinearProject { id: name.into(), name: name.into(), color: None, url: None };
+        let mut l = snap.groups[0].worktrees[0].linear.clone().unwrap();
+        l.project = Some(proj("Alpha"));
+        snap.groups[0].worktrees[0].linear = Some(l.clone());
+        l.identifier = "ENG-9".into();
+        l.project = Some(proj("Beta"));
+        snap.groups[0].worktrees[1].linear = Some(l);
+        app.apply(snap);
+        let kinds: Vec<&str> = app
+            .rows
+            .iter()
+            .map(|r| match r {
+                Row::Spacer => "spacer",
+                Row::Repo(_) => "repo",
+                Row::Project(_) => "project",
+                Row::Ticket(_) => "ticket",
+                Row::Worktree(_) => "wt",
+            })
+            .collect();
+        assert_eq!(kinds, ["repo", "project", "wt", "spacer", "project", "wt", "spacer", "repo", "project", "wt"]);
+    }
+
+    #[test]
     fn truncate_respects_display_width() {
         assert_eq!(truncate("feature/refactor", 8), "feature…");
         assert_eq!(truncate("short", 8), "short");

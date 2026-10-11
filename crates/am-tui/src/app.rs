@@ -193,6 +193,10 @@ impl App {
                     if by_project {
                         let project = v.linear.as_ref().and_then(|l| l.project.as_ref()).map(|p| p.name.clone());
                         if last_project.as_ref() != Some(&project) {
+                            // Breathing room between project sections (not right under the repo header).
+                            if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Spacer)) {
+                                self.rows.push(Row::Spacer);
+                            }
                             self.rows.push(Row::Project(project.clone().unwrap_or_else(|| "No project".into())));
                             last_project = Some(project);
                         }
