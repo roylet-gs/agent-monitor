@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 8)"
 ---
-╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents ·  ──────────────────────╮
+╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents ─────────────────────────╮
 │                                                        ││                                        │
 │                                                        ││                                        │
 │     No worktrees yet — press A to add a repository     ││          No subagents running          │

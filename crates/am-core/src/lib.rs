@@ -5,6 +5,7 @@
 pub mod db;
 pub mod gitinfo;
 pub mod grouping;
+pub mod hooks_installer;
 pub mod integrations;
 pub mod launch;
 pub mod log;

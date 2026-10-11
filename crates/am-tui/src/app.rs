@@ -67,6 +67,7 @@ pub enum Action {
     /// `d` on an "Other sessions" row: stop tracking it.
     RemoveStandalone(String),
     AddRepo(String),
+    InstallHooks,
 }
 
 pub struct App {
@@ -87,6 +88,7 @@ pub struct App {
     pub show_log: bool,
     pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
     pub modal: Option<crate::modals::Modal>,
+    pub setup: Option<crate::setup::Setup>,
     /// Select this worktree as soon as it shows up (after create).
     pub pending_select: Option<String>,
     /// Worktrees whose status changed since the user last had them selected.
@@ -115,6 +117,7 @@ impl App {
             show_log: false,
             settings_editor: None,
             modal: None,
+            setup: None,
             pending_select: None,
             unseen: Default::default(),
             seen_status: Default::default(),
@@ -240,6 +243,35 @@ impl App {
     pub fn on_key(&mut self, key: Key) -> Action {
         if self.popup.take().is_some() {
             return Action::None;
+        }
+        if let Some(setup) = &mut self.setup {
+            use crate::setup::SetupEffect;
+            if key == Key::CtrlC {
+                return Action::Quit;
+            }
+            return match setup.on_key(key) {
+                SetupEffect::None => Action::None,
+                SetupEffect::InstallHooks => Action::InstallHooks,
+                SetupEffect::AddRepo(p) => Action::AddRepo(p),
+                SetupEffect::Finish(kv) => {
+                    let mut latest = None;
+                    for (k, v) in kv {
+                        match crate::settings_ui::persist(k, v) {
+                            Ok(s) => latest = Some(s),
+                            Err(e) => self.notice = Some(e),
+                        }
+                    }
+                    self.setup = None;
+                    match latest {
+                        Some(s) => {
+                            self.set_settings(s);
+                            self.notice = Some("Setup complete — press ? for keys".into());
+                            Action::SettingsChanged
+                        }
+                        None => Action::None,
+                    }
+                }
+            };
         }
         if let Some(modal) = &mut self.modal {
             use crate::modals::Effect;

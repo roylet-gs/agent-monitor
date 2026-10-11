@@ -6,7 +6,7 @@
 //! clap or any other initialisation and shares its code with `am-hook`.
 
 mod commands;
-mod hooks_installer;
+pub use am_core::hooks_installer;
 mod output;
 mod resolve;
 mod store;

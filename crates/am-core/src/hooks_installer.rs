@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use am_core::{info, paths};
+use crate::{info, paths};
 use serde_json::{Map, Value, json};
 
 pub const HOOK_EVENTS: [&str; 11] = [

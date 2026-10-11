@@ -10,6 +10,7 @@ mod launcher;
 mod modals;
 mod ops;
 mod settings_ui;
+mod setup;
 mod theme;
 mod ui;
 
@@ -58,7 +59,12 @@ fn main() -> io::Result<()> {
 
 
     let collector = data::Collector::spawn(settings.clone());
+    let first_run = setup::needed(&settings);
+    let ide = settings.ide.clone();
     let mut app = App::new(settings);
+    if first_run {
+        app.setup = Some(setup::Setup::new(Vec::new(), &ide));
+    }
 
     // ratatui::init enables raw mode + alt screen and installs a panic hook
     // that restores the terminal before printing the panic.
@@ -120,6 +126,15 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             app.popup = Some(format!("✗ {e}"));
                             popup_since = Some(Instant::now());
                         }
+                    }
+                }
+                launcher::Msg::RepoAdded(path, result) if app.setup.is_some() => {
+                    app.modal = None;
+                    if result.is_ok() {
+                        collector.refresh(false);
+                    }
+                    if let Some(s) = &mut app.setup {
+                        s.on_repo_added(path, result);
                     }
                 }
                 launcher::Msg::RepoAdded(path, result) => match result {
@@ -197,6 +212,14 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             Action::Create(repo, req) => ops::create(app.settings.clone(), *repo, *req, launch_tx.clone()),
                             Action::Delete(v, delete_branch) => ops::delete(*v, delete_branch, launch_tx.clone()),
                             Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
+                            Action::InstallHooks => {
+                                let r = am_core::hooks_installer::install_global_hooks()
+                                    .map(|bin| bin.map(|b| b.display().to_string()))
+                                    .map_err(|e| e.to_string());
+                                if let Some(s) = &mut app.setup {
+                                    s.on_hooks_installed(r);
+                                }
+                            }
                             Action::RemoveStandalone(path) => {
                                 if let Ok(conn) = am_core::db::open() {
                                     let _ = am_core::db::remove_standalone_session(&conn, &path);

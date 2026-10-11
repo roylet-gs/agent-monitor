@@ -51,6 +51,9 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     if let Some(editor) = &app.settings_editor {
         draw_settings(f, theme, area, editor);
     }
+    if let Some(setup) = &app.setup {
+        draw_setup(f, theme, area, setup);
+    }
     if let Some(modal) = &app.modal {
         draw_modal(f, theme, area, modal, now);
     }
@@ -315,6 +318,90 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
     let rect = modal_rect(area, 72, lines.len() as u16 + 2);
     f.render_widget(Clear, rect);
     f.render_widget(Paragraph::new(lines).block(modal_block(theme, title, color, hint)), rect);
+}
+
+#[allow(clippy::needless_late_init)] // each arm builds lines then picks its hint
+fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup) {
+    use crate::setup::{IDES, Step};
+    let steps = [(Step::Editor, "Editor"), (Step::Hooks, "Claude hooks"), (Step::Repos, "Repositories"), (Step::Integrations, "Integrations")];
+    let mut crumbs = vec![Span::raw(" ")];
+    let cur = steps.iter().position(|(st, _)| *st == s.step).unwrap_or(0);
+    for (i, (_, name)) in steps.iter().enumerate() {
+        if i > 0 {
+            crumbs.push(Span::styled("  ›  ", theme.faint()));
+        }
+        let style = if i == cur { theme.bold(theme.border_focus) } else if i < cur { theme.fg(theme.green) } else { theme.faint() };
+        crumbs.push(Span::styled(format!("{} {name}", if i < cur { "✓" } else { "" }).trim().to_string(), style));
+    }
+    let mut lines = vec![Line::from(crumbs), Line::raw("")];
+    let hint;
+    match s.step {
+        Step::Editor => {
+            lines.push(Line::raw("Where should Enter open a worktree?"));
+            lines.push(Line::raw(""));
+            for (i, (_, label)) in IDES.iter().enumerate() {
+                let sel = i == s.ide;
+                lines.push(Line::from(vec![
+                    Span::styled(if sel { "  ● " } else { "  ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
+                    Span::styled(*label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
+                ]));
+            }
+            hint = "↑↓ choose  ⏎ next";
+        }
+        Step::Hooks => {
+            lines.push(Line::raw("am learns what each agent is doing from Claude Code hooks"));
+            lines.push(Line::raw("(written to ~/.claude/settings.json; other hooks are kept)."));
+            lines.push(Line::raw(""));
+            if s.hooks_installed {
+                lines.push(Line::styled("✓ Hooks are installed", theme.fg(theme.green)));
+            } else {
+                lines.push(Line::styled("Hooks are not installed yet", theme.fg(theme.yellow)));
+            }
+            lines.push(Line::styled(
+                match &s.hook_binary {
+                    Some(b) => format!("Native hook binary: {b} (~2 ms per event)"),
+                    None => "Native hook binary not found — falling back to `am hook-event`".into(),
+                },
+                theme.faint(),
+            ));
+            if let Some(e) = &s.repo_error {
+                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
+            }
+            hint = if s.hooks_installed { "⏎ next  esc back" } else { "⏎/y install  n skip  esc back" };
+        }
+        Step::Repos => {
+            lines.push(Line::raw("Add the git repositories whose worktrees you want to watch."));
+            lines.push(Line::raw(""));
+            for r in &s.repos_added {
+                lines.push(Line::styled(format!("  ✓ {r}"), theme.fg(theme.green)));
+            }
+            lines.push(Line::from(vec![Span::styled("› ", theme.bold(theme.border_focus)), Span::raw(format!("{}▏", s.repo_input))]));
+            if let Some(e) = &s.repo_error {
+                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
+            }
+            hint = "tab complete  ⏎ add (empty: next)  esc back";
+        }
+        Step::Integrations => {
+            lines.push(Line::raw("Optional: show PRs/CI and Linear tickets next to each branch."));
+            lines.push(Line::raw(""));
+            let f0 = s.integration_field == 0;
+            lines.push(Line::from(vec![
+                Span::styled(if f0 { "▌" } else { " " }, theme.bold(theme.border_focus)),
+                Span::raw(format!(" [{}] GitHub PR & CI status (via gh)", if s.gh { "x" } else { " " })),
+            ]));
+            let masked = "•".repeat(s.linear_key.chars().count());
+            lines.push(Line::from(vec![
+                Span::styled(if f0 { " " } else { "▌" }, theme.bold(theme.border_focus)),
+                Span::raw(" Linear API key: "),
+                Span::styled(if masked.is_empty() && f0 { "(optional)".to_string() } else { format!("{masked}{}", if f0 { "" } else { "▏" }) }, theme.faint()),
+            ]));
+            hint = "tab field  space toggle  ⏎ finish  esc back";
+        }
+    }
+    let rect = modal_rect(area, 76, lines.len() as u16 + 4);
+    f.render_widget(Clear, rect);
+    let block = modal_block(theme, "Welcome to agent-monitor".into(), theme.border_focus, hint).padding(ratatui::widgets::Padding::new(1, 1, 1, 0));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
@@ -605,7 +692,7 @@ fn draw_subagents(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         Scope::All => "all worktrees".to_string(),
         Scope::Selected => app.selected_view().map(|v| v.worktree.display_name().to_string()).unwrap_or_default(),
     };
-    let block = pane_block(theme, title(2, "Subagents", Some(scope), theme, focused), focused).title_bottom(
+    let block = pane_block(theme, title(2, "Subagents", Some(scope).filter(|s| !s.is_empty()), theme, focused), focused).title_bottom(
         Line::styled(
             format!(" {running} running · {done} done · a: {} ", if app.scope == Scope::All { "this worktree" } else { "all" }),
             theme.faint(),

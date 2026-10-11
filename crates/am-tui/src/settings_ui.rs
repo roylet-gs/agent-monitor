@@ -227,7 +227,7 @@ impl SettingsEditor {
 /// Write one key into settings.json, keeping every other key (known or not)
 /// exactly as it was, then re-read the result. Same format as the TS
 /// `saveSettings` (2-space JSON + newline).
-fn persist(key: &str, value: Value) -> Result<Settings, String> {
+pub(crate) fn persist(key: &str, value: Value) -> Result<Settings, String> {
     let path = am_core::paths::settings_path();
     let mut map = match std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
         Some(Value::Object(m)) => m,
