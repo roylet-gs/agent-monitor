@@ -64,7 +64,9 @@ pub fn enabled(level: Level) -> bool {
 }
 
 pub fn log(level: Level, module: &str, message: &str) {
-    if !enabled(level) {
+    // Unit tests exercise warn/info paths; never let them write to the real
+    // ~/.agent-monitor/debug.log.
+    if cfg!(test) || !enabled(level) {
         return;
     }
     let ts = time::OffsetDateTime::now_utc()

@@ -51,7 +51,8 @@ Phase 0 progress:
 | Terminal detection has never worked (1,983/1,983 failures) | `lsof` exits 1 when one of the shells it was asked about isn't running, and `execSync` discards valid stdout (`process.ts:57,385`) | Phase 1: native libproc scan |
 | IDE detection always returns 0 | Matches `/Code.app/` (the real app is `Visual Studio Code.app`) and splits args on whitespace | Phase 1: native scan |
 | `delegating` never visible; worktrees stuck on `executing` | A single `active_subagents` counter. SubagentStop fires more often than SubagentStart, and subagent tool events (which share the parent `session_id`) overwrite the status | **Phase 0** |
-| Linear has no offline backoff (2,483 WARNs overnight); multi-line `gh` stderr in logs | Fan-out per branch with no circuit breaker; raw stderr interpolated into log lines | Phase 1: integration scheduler, `tracing` |
+| Linear has no offline backoff (2,483 WARNs overnight); multi-line `gh` stderr in logs | Fan-out per branch with no circuit breaker; raw stderr interpolated into log lines | **Phase 1 (core done)**: `am-core::integrations` — batched GraphQL + per-source breaker, one-line error summaries |
+| PRs with commit statuses show "Checks Running" forever; PRs with >100 checks can show the wrong status | `statusCheckRollup` StatusContext entries have `state`, not `status`; only the first page of checks was considered | **Phase 1 (core done)**: StatusContext normalisation + `checkRunCountsByState` |
 | Log "rotation" keeps under 1 h of history and loses concurrent lines | Read whole file → rewrite last 1,000 lines | Phase 0/1: rename-based rotation |
 | WAL at 4.1 MB vs 233 KB DB | No checkpointing / `journal_size_limit` | **Phase 0** |
 | Hook writes `tool_input` snippets to disk | Debug payload logging | Phase 0: only logs non-sensitive fields |
