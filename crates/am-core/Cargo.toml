@@ -11,5 +11,9 @@ serde_json.workspace = true
 time.workspace = true
 uuid.workspace = true
 
+# procscan: libproc calls (proc_pidinfo, proc_pidpath, KERN_PROCARGS2). Linux reads /proc.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

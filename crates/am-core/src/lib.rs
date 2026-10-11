@@ -8,6 +8,7 @@ pub mod grouping;
 pub mod log;
 pub mod model;
 pub mod paths;
+pub mod procscan;
 pub mod settings;
 pub mod status;
 pub mod timefmt;
