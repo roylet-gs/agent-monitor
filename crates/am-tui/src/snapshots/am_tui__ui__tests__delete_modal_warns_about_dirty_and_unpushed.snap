@@ -2,19 +2,19 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 16)"
 ---
-╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents · feature/refactor ──────╮
-│agent-monitor ──────────────────────────────────────────││ ◆ Analyze am de… general-purpose  2m14s│
-│▌◆ feature/refactor          ◆2 ENG-412 #127✓ ↑2 ±3  4m ││   └ Bash  grep -c WARN debug.… 23 tools│
-│ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮urpose  2m14s│
-│             │ ⚠ 3 uncommitted changes                                              │lvh… 23 tools│
-│gridsight ───│ ⚠ 2 commits not pushed                                               │ done 30s ago│
-│ · main      │                                                                      │     23 tools│
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◆ feature/refactor ◆ 2 subagents                                         ENG-412 #127✓ ↑2 ±3  4m │
+│ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮          4m │
+│             │ ⚠ 3 uncommitted changes                                              │             │
+│gridsight ───│ ⚠ 2 commits not pushed                                               │─────────────│
+│ · main      │                                                                      │   ↑2 ±3  4m │
 │             │ Remove stale entry and delete local branch feature/refactor?         │             │
 │             │                                                                      │             │
 │             │     ⏎ / y  Yes                                                       │             │
 │             │   n / esc  Cancel                                                    │             │
 │             ╰──────────────────────────────────────────────────────────────────────╯             │
-╰──────────────────────────────────────────────── 1 of 3 ╯╰─────────── 2 running · 1 done · a: all ╯
- feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1
- WORKTREES  ◐ 1  ◆ 1
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
  ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

@@ -2,9 +2,9 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&fixture(), 80, 24)"
 ---
-╭─[1] Worktrees ───────────────────────────────────────────────────────────────╮
+╭─Worktrees ───────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────│
-│▌◆ feature/refactor                                ◆2 ENG-412 #127✓ ↑2 ±3  4m │
+│▌◆ feature/refactor ◆ 2 subagents                     ENG-412 #127✓ ↑2 ±3  4m │
 │ ◐ fix/offline-cache                                                       4m │
 │                                                                              │
 │gridsight ────────────────────────────────────────────────────────────────────│
@@ -14,15 +14,15 @@ expression: "render(&fixture(), 80, 24)"
 │                                                                              │
 │                                                                              │
 │                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
 ╰────────────────────────────────────────────────────────────────────── 1 of 3 ╯
-╭─[2] Subagents · feature/refactor ────────────────────────────────────────────╮
-│ ◆ Analyze am debug logs                                general-purpose  2m14s│
-│   └ Bash  grep -c WARN debug.log                                     23 tools│
-│ ◆ Research TUI styles                                  general-purpose  2m14s│
-│   └ WebFetch  github.com/dlvhdr/gh-dash                              23 tools│
-│ ✓ Research languages                            general-purpose  done 30s ago│
-│   └ SubagentHandback                                                 23 tools│
-╰───────────────────────────────────────────────── 2 running · 1 done · a: all ╯
- feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open
- WORKTREES  ◐ 1  ◆ 1
  ⏎ open  │ g PR  l linear  │ ? help  q quit

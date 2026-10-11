@@ -3,50 +3,31 @@
 //! ratatui diffs each frame against the previous one cell by cell, so a
 //! redraw only writes what changed — no full-screen clears, no flicker.
 
-use am_core::model::{ChecksStatus, Subagent, WorktreeView};
+use am_core::model::{ChecksStatus, WorktreeView};
 use am_core::status::Status;
 use am_core::timefmt;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Pane, Row, Scope};
+use crate::app::{App, Row};
 use crate::theme::{Theme, status_glyph, status_label};
 
-/// Side-by-side panes from this width; below it they stack.
-pub const SIDE_BY_SIDE_MIN_COLS: u16 = 100;
 
 pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[String]) {
     let area = f.area();
     let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
-    let [body, log, context, status, keys] = Layout::vertical([
-        Constraint::Min(5),
-        Constraint::Length(log_h),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let [body, log, keys] =
+        Layout::vertical([Constraint::Min(5), Constraint::Length(log_h), Constraint::Length(1)]).areas(area);
     draw_keybar(f, app, theme, keys);
     if app.show_log {
         draw_log(f, theme, log, log_lines);
     }
 
-    let (left, right) = if area.width >= SIDE_BY_SIDE_MIN_COLS {
-        let [l, r] = Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)]).areas(body);
-        (l, r)
-    } else {
-        let [t, b] = Layout::vertical([Constraint::Percentage(62), Constraint::Percentage(38)]).areas(body);
-        (t, b)
-    };
-
-    draw_worktrees(f, app, theme, left, now);
-    draw_subagents(f, app, theme, right, now);
-    draw_context(f, app, theme, context);
-    draw_status_bar(f, app, theme, status);
+    draw_worktrees(f, app, theme, body, now);
     if app.show_help {
         draw_help(f, theme, area);
     }
@@ -480,18 +461,12 @@ fn pane_block<'a>(theme: &Theme, title: Line<'a>, focused: bool) -> Block<'a> {
     Block::bordered().border_type(BorderType::Rounded).border_style(border).title(title)
 }
 
-fn title<'a>(n: u8, name: &'a str, extra: Option<String>, theme: &Theme, focused: bool) -> Line<'a> {
-    let main = if focused { theme.bold(theme.border_focus) } else { theme.fg(theme.text) };
-    let mut spans = vec![
-        Span::styled("─", if focused { theme.bold(theme.border_focus) } else { theme.fg(theme.border) }),
-        Span::styled(format!("[{n}] "), theme.faint()),
-        Span::styled(name, main),
-    ];
-    if let Some(e) = extra {
-        spans.push(Span::styled(format!(" · {e}"), theme.faint()));
-    }
-    spans.push(Span::raw(" "));
-    Line::from(spans)
+fn title<'a>(name: &'a str, theme: &Theme) -> Line<'a> {
+    Line::from(vec![
+        Span::styled("─", theme.bold(theme.border_focus)),
+        Span::styled(name, theme.bold(theme.border_focus)),
+        Span::raw(" "),
+    ])
 }
 
 // ---------------------------------------------------------------- worktrees
@@ -504,8 +479,8 @@ struct Columns {
 }
 
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
-    let focused = app.focus == Pane::Worktrees;
-    let mut block = pane_block(theme, title(1, "Worktrees", None, theme, focused), focused);
+    let focused = true;
+    let mut block = pane_block(theme, title("Worktrees", theme), focused);
     if !app.flat.is_empty() {
         block = block.title_bottom(
             Line::styled(format!(" {} of {} ", app.selected + 1, app.flat.len()), theme.faint()).alignment(Alignment::Right),
@@ -617,7 +592,7 @@ fn worktree_line<'a>(
         badge.push_str(" ▶");
     }
     if subagents > 0 {
-        badge.push_str(&format!(" ◆{subagents}"));
+        badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
     }
     let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + tree.width());
     let name = truncate(v.worktree.display_name(), name_w);
@@ -628,7 +603,9 @@ fn worktree_line<'a>(
     } else {
         theme.fg(theme.text)
     };
-    left.push(Span::styled(pad(&name, name_w), name_style));
+    // Badges sit right after the name; padding goes after them.
+    let fill = name_w.saturating_sub(name.width());
+    left.push(Span::styled(name, name_style));
     let mut rest = badge.as_str();
     if let Some(r) = rest.strip_prefix(" •") {
         left.push(Span::styled(" •", theme.bold(theme.accent)));
@@ -639,6 +616,7 @@ fn worktree_line<'a>(
         rest = r;
     }
     left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
+    left.push(Span::raw(" ".repeat(fill)));
 
     let mut spans = left;
     spans.extend(right);
@@ -746,175 +724,9 @@ fn git_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>>
     spans
 }
 
-// ---------------------------------------------------------------- subagents
-
-fn draw_subagents(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
-    let focused = app.focus == Pane::Subagents;
-    let items = app.visible_subagents();
-    let running = items.iter().filter(|(_, s)| s.running).count();
-    let done = items.len() - running;
-    let scope = match app.scope {
-        Scope::All => "all worktrees".to_string(),
-        Scope::Selected => app.selected_view().map(|v| v.worktree.display_name().to_string()).unwrap_or_default(),
-    };
-    let block = pane_block(theme, title(2, "Subagents", Some(scope).filter(|s| !s.is_empty()), theme, focused), focused).title_bottom(
-        Line::styled(
-            format!(" {running} running · {done} done · a: {} ", if app.scope == Scope::All { "this worktree" } else { "all" }),
-            theme.faint(),
-        )
-        .alignment(Alignment::Right),
-    );
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    if items.is_empty() {
-        f.render_widget(
-            Paragraph::new(Line::styled("No subagents running", theme.faint())).alignment(Alignment::Center),
-            centered_line(inner),
-        );
-        return;
-    }
-
-    let names: std::collections::HashMap<&str, &str> =
-        app.flat.iter().map(|v| (v.worktree.id.as_str(), v.worktree.display_name())).collect();
-    let width = inner.width as usize;
-    let mut lines: Vec<Line> = Vec::new();
-    let mut sel_line = 0;
-    let mut last_wt: Option<&str> = None;
-    for (i, (wt, s)) in items.iter().enumerate() {
-        if app.scope == Scope::All && last_wt != wt.as_deref() {
-            last_wt = wt.as_deref();
-            let name = wt.as_deref().and_then(|w| names.get(w).copied()).unwrap_or("(hidden worktree)");
-            lines.push(Line::styled(name.to_string(), theme.bold(theme.accent)));
-        }
-        let selected = focused && i == app.sub_selected;
-        if selected {
-            sel_line = lines.len();
-        }
-        let [a, b] = subagent_lines(s, theme, width, now, selected);
-        lines.push(a);
-        lines.push(b);
-    }
-    let height = inner.height as usize;
-    let start = (sel_line + 2).saturating_sub(height);
-    f.render_widget(Paragraph::new(lines.into_iter().skip(start).take(height).collect::<Vec<_>>()), inner);
-}
-
-fn subagent_lines<'a>(s: &'a Subagent, theme: &Theme, width: usize, now: i64, selected: bool) -> [Line<'a>; 2] {
-    let started = timefmt::parse_sqlite(&s.started_at).unwrap_or(now);
-    let (glyph, gstyle, when) = if s.running {
-        ("◆", theme.fg(theme.magenta), timefmt::elapsed(now - started))
-    } else {
-        let ended = s.ended_at.as_deref().and_then(timefmt::parse_sqlite).unwrap_or(now);
-        ("✓", theme.fg(theme.teal), format!("done {} ago", timefmt::short_age(now - ended)))
-    };
-    let kind = s.agent_type.clone().unwrap_or_default();
-    let right = format!("{kind}  {when}");
-    let name = s
-        .description
-        .clone()
-        .or_else(|| s.agent_type.clone())
-        .unwrap_or_else(|| format!("agent {}", &s.agent_id[..s.agent_id.len().min(8)]));
-    let name_w = width.saturating_sub(right.width() + 4);
-    let name_style = if s.running { theme.bold(theme.text) } else { theme.fg(theme.text) };
-    let bar = if selected { Span::styled("▌", theme.bold(theme.border_focus)) } else { Span::raw(" ") };
-    let first = Line::from(vec![
-        bar,
-        Span::styled(glyph, gstyle),
-        Span::raw(" "),
-        Span::styled(pad(&truncate(&name, name_w), name_w), name_style),
-        Span::raw(" "),
-        Span::styled(right, theme.faint()),
-    ]);
-
-    let tools = format!("{} tools", s.tool_count);
-    let mut second = vec![Span::styled("   └ ", theme.faint())];
-    let avail = width.saturating_sub(5 + tools.width() + 1);
-    match (&s.last_tool, &s.last_tool_input) {
-        (Some(tool), input) => {
-            let input = input.as_deref().unwrap_or("");
-            let tool_w = tool.width().min(avail);
-            second.push(Span::styled(truncate(tool, tool_w), theme.fg(theme.accent)));
-            let rest = avail.saturating_sub(tool_w + 2);
-            second.push(Span::styled(pad(&format!("  {}", truncate(input, rest)), avail - tool_w), theme.faint()));
-        }
-        (None, _) => second.push(Span::styled(pad(if s.running { "starting…" } else { "" }, avail), theme.faint())),
-    }
-    second.push(Span::styled(format!(" {tools}"), theme.faint()));
-    let second = Line::from(second);
-    if selected {
-        return [first.style(theme.selected()), second.style(theme.selected())];
-    }
-    [first, second]
-}
-
 // ------------------------------------------------------------ context + bar
 
-fn draw_context(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let Some(v) = app.selected_view() else { return };
-    let sep = || Span::styled(" · ", theme.faint());
-    let mut spans = vec![Span::raw(" "), Span::styled(v.worktree.branch.clone(), theme.bold(theme.text))];
-    if let Some(l) = &v.linear {
-        spans.push(sep());
-        spans.push(Span::styled(l.identifier.clone(), theme.fg(theme.blue)));
-        spans.push(Span::styled(format!(" {}", l.title), theme.fg(theme.text)));
-        spans.push(Span::styled(format!(" ({})", l.state.name), theme.faint()));
-    }
-    if let Some(pr) = &v.pr {
-        spans.push(sep());
-        let state = if pr.is_draft { "draft".to_string() } else { pr.state.to_lowercase() };
-        spans.push(Span::styled(format!("PR #{} {state}", pr.number), theme.fg(theme.text)));
-    }
-    if let Some(sid) = v.agent.as_ref().and_then(|a| a.session_id.as_ref()) {
-        spans.push(sep());
-        spans.push(Span::styled(format!("session {sid}"), theme.faint()));
-    }
-    let mut open_in = Vec::new();
-    match v.open_ide {
-        Some(am_core::model::Ide::Vscode) => open_in.push("VS Code"),
-        Some(am_core::model::Ide::Cursor) => open_in.push("Cursor"),
-        None => {}
-    }
-    if v.has_terminal {
-        open_in.push("terminal");
-    }
-    if !open_in.is_empty() {
-        spans.push(sep());
-        spans.push(Span::styled(format!("open in {}", open_in.join(" + ")), theme.fg(theme.accent)));
-    }
-    if !v.running_processes.is_empty() {
-        spans.push(sep());
-        let procs: Vec<&str> = v.running_processes.iter().map(|p| p.command.as_str()).collect();
-        spans.push(Span::styled(format!("▶ {}", procs.join(", ")), theme.fg(theme.green)));
-    }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
-}
 
-fn draw_status_bar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let mode = match app.focus {
-        Pane::Worktrees => " WORKTREES ",
-        Pane::Subagents => " SUBAGENTS ",
-    };
-    let pill = Style::new().fg(ratatui::style::Color::Black).bg(theme.border_focus).add_modifier(Modifier::BOLD);
-    let mut left = vec![Span::styled(mode, pill), Span::raw(" ")];
-    for (s, n) in app.status_counts() {
-        left.push(Span::styled(format!("{} {n}  ", status_glyph(Some(s))), theme.fg(theme.status(Some(s)))));
-    }
-    let h = &app.snapshot.health;
-    let offline = match (h.github_failing, h.linear_failing) {
-        (true, true) => Some("GitHub + Linear"),
-        (true, false) => Some("GitHub"),
-        (false, true) => Some("Linear"),
-        _ => None,
-    };
-    if let Some(src) = offline {
-        left.push(Span::styled(format!("⚠ {src} offline — cached  "), theme.fg(theme.yellow)));
-    }
-    if let Some(n) = &app.notice {
-        left.push(Span::styled(n.clone(), theme.faint()));
-    }
-    f.render_widget(Paragraph::new(Line::from(left)), area);
-}
 
 /// Every dashboard key, grouped. Lower `priority` survives narrower widths;
 /// what doesn't fit is still in the `?` overlay.
@@ -931,8 +743,6 @@ const KEYS: &[(&str, &str, u8)] = &[
     ("d", "delete", 1),
     ("A", "add repo", 3),
     ("|", "", 0),
-    ("tab", "pane", 2),
-    ("a", "scope", 2),
     ("w", "log", 3),
     ("s", "settings", 1),
     ("f", "feedback", 3),
@@ -941,7 +751,27 @@ const KEYS: &[(&str, &str, u8)] = &[
     ("q", "quit", 0),
 ];
 
-fn draw_keybar(f: &mut Frame, _app: &App, theme: &Theme, area: Rect) {
+fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    // Right side: a transient notice, else the offline warning.
+    let h = &app.snapshot.health;
+    let offline = match (h.github_failing, h.linear_failing) {
+        (true, true) => Some("GitHub + Linear"),
+        (true, false) => Some("GitHub"),
+        (false, true) => Some("Linear"),
+        _ => None,
+    };
+    let status: Option<Span> = match (&app.notice, offline) {
+        (Some(n), _) => Some(Span::styled(format!("{n} "), theme.fg(theme.accent))),
+        (None, Some(src)) => Some(Span::styled(format!("⚠ {src} offline — cached "), theme.fg(theme.yellow))),
+        _ => None,
+    };
+    let status_w = status.as_ref().map_or(0, |s| s.content.width());
+    let [keys_area, status_area] =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(status_w as u16)]).areas(area);
+    if let Some(s) = status {
+        f.render_widget(Paragraph::new(Line::from(s)), status_area);
+    }
+    let area = keys_area;
     let width = area.width as usize;
     let render = |max_prio: u8| -> Vec<Span<'static>> {
         let mut spans = vec![Span::raw(" ")];
@@ -988,8 +818,6 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("A", "add repository"),
         ("f", "suggest a feature (files a GitHub issue)"),
         ("s", "settings"),
-        ("tab  1  2", "switch pane"),
-        ("a", "subagents: this worktree ↔ all"),
         ("r", "refresh now (bypasses backoff)"),
         ("?", "toggle help"),
         ("q  esc", "quit"),
@@ -1185,15 +1013,6 @@ mod tests {
     #[test]
     fn dashboard_narrow_stacks_panes() {
         insta::assert_snapshot!(render(&fixture(), 80, 24));
-    }
-
-    #[test]
-    fn global_subagent_feed_and_focus() {
-        let mut app = fixture();
-        app.on_key(Key::Char('a'));
-        app.on_key(Key::Tab);
-        app.on_key(Key::Char('j'));
-        insta::assert_snapshot!(render(&app, 120, 16));
     }
 
     #[test]

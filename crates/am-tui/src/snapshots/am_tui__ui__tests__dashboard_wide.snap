@@ -2,19 +2,19 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&fixture(), 120, 16)"
 ---
-╭─[1] Worktrees ─────────────────────────────────────────────────────╮╭─[2] Subagents · feature/refactor ──────────────╮
-│agent-monitor ──────────────────────────────────────────────────────││ ◆ Analyze am debug logs  general-purpose  2m14s│
-│▌◆ feature/refactor                      ◆2 ENG-412 #127✓ ↑2 ±3  4m ││   └ Bash  grep -c WARN debug.log       23 tools│
-│ ◐ fix/offline-cache                                             4m ││ ◆ Research TUI styles    general-purpose  2m14s│
-│                                                                    ││   └ WebFetch  github.com/dlvhdr/gh-da… 23 tools│
-│gridsight ──────────────────────────────────────────────────────────││ ✓ Research langu… general-purpose  done 30s ago│
-│ · main                                                   ↑2 ±3  4m ││   └ SubagentHandback                   23 tools│
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-╰──────────────────────────────────────────────────────────── 1 of 3 ╯╰─────────────────── 2 running · 1 done · a: all ╯
- feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1111-2222-3333-a91f00
- WORKTREES  ◐ 1  ◆ 1
- ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌◆ feature/refactor ◆ 2 subagents                                                             ENG-412 #127✓ ↑2 ±3  4m │
+│ ◐ fix/offline-cache                                                                                               4m │
+│                                                                                                                      │
+│gridsight ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│ · main                                                                                                     ↑2 ±3  4m │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  t terminal  c claude  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

@@ -2,23 +2,23 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 20)"
 ---
-╭─[1] Work╭ Keys ────────────────────────────────────────────────────────────────────────╮or ──────╮
-│agent-mon│    j / k  ↑ / ↓  move                                                        │se  2m14s│
-│▌◆ featur│        home / G  top / bottom                                                │ 23 tools│
-│ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │se  2m14s│
-│         │           enter  open (IDE; resumes last Claude session)                     │ 23 tools│
-│gridsight│               t  terminal at worktree                                        │e 30s ago│
-│ · main  │               c  terminal running claude --resume                            │ 23 tools│
+╭─Worktree╭ Keys ────────────────────────────────────────────────────────────────────────╮─────────╮
+│agent-mon│    j / k  ↑ / ↓  move                                                        │─────────│
+│▌◆ featur│        home / G  top / bottom                                                │2 ±3  4m │
+│ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │      4m │
+│         │           enter  open (IDE; resumes last Claude session)                     │         │
+│gridsight│               t  terminal at worktree                                        │─────────│
+│ · main  │               c  terminal running claude --resume                            │2 ±3  4m │
 │         │       g / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane                                             │         │
 │         │           n / d  new worktree / delete worktree                              │         │
 │         │               A  add repository                                              │         │
 │         │               f  suggest a feature (files a GitHub issue)                    │         │
 │         │               s  settings                                                    │         │
-│         │       tab  1  2  switch pane                                                 │         │
-│         │               a  subagents: this worktree ↔ all                              │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
-╰─────────│               ?  toggle help                                                 │· a: all ╯
- feature/r│          q  esc  quit                                                        │0c5e7f2a-1
- WORKTREES│                                                                              │
- ⏎ open  c╰──────────────────────────────────────────────────────────────────────────────╯ quit
+│         │               ?  toggle help                                                 │         │
+│         │          q  esc  quit                                                        │         │
+│         │                                                                              │         │
+│         │● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │         │
+╰─────────╰──────────────────────────────────────────────────────────────────────────────╯─ 1 of 3 ╯
+ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

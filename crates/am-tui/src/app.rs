@@ -24,18 +24,6 @@ pub struct Snapshot {
     pub stack: std::collections::HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pane {
-    Worktrees,
-    Subagents,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
-    Selected,
-    All,
-}
-
 /// A visual row of the worktree list. Headers never take a selection index:
 /// `flat` order always equals the visual order of `Row::Worktree` entries.
 #[derive(Debug, Clone, PartialEq)]
@@ -83,9 +71,6 @@ pub struct App {
     pub tree: Vec<String>,
     pub rows: Vec<Row>,
     pub selected: usize,
-    pub focus: Pane,
-    pub scope: Scope,
-    pub sub_selected: usize,
     pub show_help: bool,
     pub loaded: bool,
     pub notice: Option<String>,
@@ -114,9 +99,6 @@ impl App {
             tree: Vec::new(),
             rows: Vec::new(),
             selected: 0,
-            focus: Pane::Worktrees,
-            scope: Scope::Selected,
-            sub_selected: 0,
             show_help: false,
             loaded: false,
             notice: None,
@@ -144,7 +126,6 @@ impl App {
             }
         }
         self.selected = self.selected.min(self.flat.len().saturating_sub(1));
-        self.sub_selected = self.sub_selected.min(self.visible_subagents().len().saturating_sub(1));
         self.track_status_changes();
         self.loaded = true;
     }
@@ -236,27 +217,11 @@ impl App {
         self.flat.get(self.selected)
     }
 
-    pub fn visible_subagents(&self) -> Vec<&(Option<String>, Subagent)> {
-        match self.scope {
-            Scope::All => self.snapshot.subagents.iter().collect(),
-            Scope::Selected => {
-                let Some(id) = self.selected_view().map(|v| &v.worktree.id) else { return Vec::new() };
-                self.snapshot.subagents.iter().filter(|(w, _)| w.as_ref() == Some(id)).collect()
-            }
-        }
-    }
 
     pub fn running_subagents_for(&self, worktree_id: &str) -> usize {
         self.snapshot.subagents.iter().filter(|(w, s)| s.running && w.as_deref() == Some(worktree_id)).count()
     }
 
-    pub fn status_counts(&self) -> Vec<(Status, usize)> {
-        [Status::Executing, Status::Planning, Status::Waiting, Status::Delegating, Status::Done]
-            .into_iter()
-            .map(|s| (s, self.flat.iter().filter(|v| v.status() == Some(s)).count()))
-            .filter(|(_, n)| *n > 0)
-            .collect()
-    }
 
     pub fn on_key(&mut self, key: Key) -> Action {
         if self.popup.take().is_some() {
@@ -344,14 +309,12 @@ impl App {
         }
         match key {
             Key::Char('q') | Key::CtrlC => return Action::Quit,
-            Key::Esc if self.focus == Pane::Subagents => self.focus = Pane::Worktrees,
             Key::Esc => return Action::Quit,
             Key::Char('?') => self.show_help = true,
             Key::Char('r') => {
                 self.notice = Some("Refreshing…".into());
                 return Action::Refresh;
             }
-            Key::Tab | Key::BackTab => self.toggle_focus(),
             Key::Enter => return self.with_selected(Action::Open),
             Key::Char('t') => return self.with_selected(Action::OpenTerminal),
             Key::Char('c') => return self.with_selected(Action::OpenClaude),
@@ -396,15 +359,6 @@ impl App {
             }
             Key::Char('A') => self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None }),
             Key::Char('s') => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
-            Key::Char('1') => self.focus = Pane::Worktrees,
-            Key::Char('2') => self.focus = Pane::Subagents,
-            Key::Char('a') => {
-                self.scope = match self.scope {
-                    Scope::Selected => Scope::All,
-                    Scope::All => Scope::Selected,
-                };
-                self.sub_selected = 0;
-            }
             Key::Down | Key::Char('j') => self.move_by(1),
             Key::Up | Key::Char('k') => self.move_by(-1),
             Key::PageDown | Key::CtrlD => self.move_by(10),
@@ -442,28 +396,14 @@ impl App {
         self.selected_view().map(|v| f(Box::new(v.clone()))).unwrap_or(Action::None)
     }
 
-    fn toggle_focus(&mut self) {
-        self.focus = match self.focus {
-            Pane::Worktrees => Pane::Subagents,
-            Pane::Subagents => Pane::Worktrees,
-        };
-    }
 
     fn move_by(&mut self, delta: isize) {
-        let sub_len = self.visible_subagents().len();
-        let (cur, len) = match self.focus {
-            Pane::Worktrees => (&mut self.selected, self.flat.len()),
-            Pane::Subagents => (&mut self.sub_selected, sub_len),
-        };
+        let len = self.flat.len();
         if len == 0 {
             return;
         }
-        let next = (*cur as isize).saturating_add(delta).clamp(0, len as isize - 1) as usize;
-        *cur = next;
-        if self.focus == Pane::Worktrees {
-            self.sub_selected = 0;
-            self.mark_selected_seen();
-        }
+        self.selected = (self.selected as isize).saturating_add(delta).clamp(0, len as isize - 1) as usize;
+        self.mark_selected_seen();
     }
 }
 
