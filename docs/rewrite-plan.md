@@ -1,6 +1,6 @@
 # Rewrite plan: `am` in Rust
 
-Status: **Phase 0 live, Phase 1 functionally complete** (2026-10-11).
+Status: **Phases 0–2 complete, Phase 3 nearly complete, Phase 4 (cut-over) ready to start on your go** (2026-10-11).
 
 Phase 0 progress:
 - [x] Cargo workspace, `am-core` (paths, logger, migrations, status rules), `am-hook` binary
@@ -17,12 +17,24 @@ Phase 1 progress:
 - [x] `procscan`: native libc/`/proc` scan (~2.2 ms) — terminal + VS Code detection verified live
 - [x] `integrations`: one `gh api graphql` per repo, batched Linear, per-source circuit breakers, shared cache. Live: 20 branches in 7.6 s (GitHub) / 0.6 s (Linear) on a background thread
 - [x] Ported sort/grouping (36 tests); `delegating` now ranks as active in both apps
-- [ ] Nerd Font glyph set (setting exists, not yet implemented)
-- [ ] Docker E2E against the Rust binary (Phase 3)
+- [ ] Nerd Font glyph set (`nerdFonts` setting exists, plain Unicode only for now) — deferred
 
 Phase 2 progress:
 - [x] `am-rs` CLI (`crates/am-cli`): repo, settings, hooks, pr, linear, script, doctor, status, logs, worktree list/info/open, `agent attach`, `hook-event` (shared with `am-hook` via its lib; 2.2 ms vs 2.0 ms)
-- [ ] `worktree create|delete|sync`, `new`, and the sync step of `repo add` (waiting on `am_core::worktrees`)
+- [x] `worktree create|delete|sync`, `new`, and the sync step of `repo add` (on `am_core::worktrees`)
+- [x] `am_core::worktrees`: sync, create (fresh / reuse / track / disconnected / delete-and-recreate), delete (worktree / branch-only / stale), live branch probe (ls-remote vs gh race), worktree limit, startup scripts, repo add/remove
+- [x] TUI actions: Enter (IDE + resume last session), `t` terminal, `c` claude, `o`/`l`/`p` links, `n` new (live origin check, branch-exists choices), `d` delete, `A` add repo, startup-script prompt, `s` settings editor (+ sort sub-editor, `e` → $EDITOR), 10 s auto-sync, Linear auto-nicknames
+
+Phase 3 progress:
+- [x] Audio cues + unseen markers, log pane (`w`), standalone sessions ("Other sessions"), suggest-a-feature (`f`), first-run setup wizard, `doctor`
+- [x] CI: Rust tests + clippy on Linux/macOS; manual `release-native` workflow; npm/Homebrew packaging scaffold in `npm/`
+- [ ] Docker E2E against the Rust binaries (in progress)
+
+Phase 4 (cut-over) — needs your go-ahead:
+- [ ] Bump the workspace to 2.0.0; rename `am-rs` → `am`; npm launcher + per-platform packages; first `release-native` run
+- [ ] Create `roylet-gs/homebrew-tap` and commit the formula
+- [ ] Remove `src/`, TS tests and Ink deps; TS E2E specs replaced by the Rust ones; rewrite CLAUDE.md/README for the Rust app
+- [ ] Drop TS-compat shims: `active_subagents` mirror, `agent-status-update` socket publishes
 
 Bugs found in the TS app while porting (fixed in Rust; TS left as is unless noted):
 - Commit statuses (`StatusContext`) count as pending forever → PRs stuck on ◌
@@ -39,7 +51,7 @@ Bugs found in the TS app while porting (fixed in Rust; TS left as is unless note
 
 | Topic | Decision |
 |---|---|
-| Stack | Rust + ratatui + crossterm, tokio, rusqlite (bundled), `tracing` |
+| Stack | Rust + ratatui + crossterm, rusqlite (bundled), std threads + channels (no async runtime needed), small in-house logger (same line format as the TS one) |
 | Layout | lazygit-style bordered panes: `[1] Worktrees` (left) and `[2] Subagents` (right) |
 | Detail panel | **Removed.** PR, CI, Linear and git data move into the worktree rows; one footer line shows session ID and full ticket title |
 | Subagents pane | Follows the selected worktree by default; a key toggles a global feed across all worktrees. Shows description, type, background/depth, elapsed time, tool count and current tool + input, plus recently finished subagents |
