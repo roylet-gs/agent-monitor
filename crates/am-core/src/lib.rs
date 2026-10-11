@@ -4,6 +4,7 @@
 
 pub mod db;
 pub mod log;
+pub mod model;
 pub mod paths;
 pub mod settings;
 pub mod status;

@@ -60,7 +60,7 @@ fn main() {
         }
     };
     let s = settings::load();
-    am_core::log::init(s.log_level, s.max_log_size_mb);
+    am_core::log::init(s.log_level(), s.max_log_size_mb);
     let started = Instant::now();
 
     let mut raw = String::new();
