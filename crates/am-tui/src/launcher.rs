@@ -23,6 +23,8 @@ pub enum Msg {
     ),
     /// Worktree label + warnings, or an error.
     Deleted(String, Result<Vec<String>, String>),
+    /// Typed path, and the repo name or an error.
+    RepoAdded(String, Result<String, String>),
 }
 
 /// Long enough for the popup to register before the editor steals focus.

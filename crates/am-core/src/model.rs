@@ -26,7 +26,15 @@ pub struct Worktree {
     pub created_at: String,
 }
 
+/// Synthetic repo id for the "Other sessions" group (Claude sessions running
+/// outside any tracked worktree).
+pub const STANDALONE_REPO_ID: &str = "__standalone__";
+
 impl Worktree {
+    pub fn is_standalone(&self) -> bool {
+        self.repo_id == STANDALONE_REPO_ID
+    }
+
     pub fn display_name(&self) -> &str {
         self.custom_name.as_deref().filter(|n| !n.is_empty()).unwrap_or(&self.branch)
     }

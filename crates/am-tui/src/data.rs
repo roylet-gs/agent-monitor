@@ -162,6 +162,9 @@ impl Worker {
     fn run(mut self, cmds: Receiver<Cmd>) {
         loop {
             let mut force = false;
+            if self.last_full.is_none() {
+                let _ = db::prune_standalone_sessions(&self.conn);
+            }
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(Cmd::Refresh { force: f }) => force = f,
@@ -268,8 +271,10 @@ impl Worker {
             .collect();
 
         let repos = db::repositories(&self.conn)?;
-        let groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
-
+        let mut groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
+        if let Some(g) = self.standalone_group()? {
+            groups.push(g);
+        }
         let subagents = db::subagents(&self.conn, None, RECENT_SUBAGENT_MINUTES)?;
         let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone() };
         if self.last_sent.as_ref() != Some(&snapshot) {
@@ -281,6 +286,44 @@ impl Worker {
 }
 
 impl Worker {
+    /// "Other sessions": open standalone sessions as pseudo-worktree rows so
+    /// selection, Enter and `d` work on them like on any row.
+    fn standalone_group(&self) -> rusqlite::Result<Option<am_core::model::WorktreeGroup>> {
+        use am_core::model::{Repository, STANDALONE_REPO_ID, WorktreeGroup};
+        let home = am_core::paths::home_dir().to_string_lossy().into_owned();
+        let views: Vec<WorktreeView> = db::standalone_sessions(&self.conn)?
+            .into_iter()
+            .filter(|(_, _, a)| grouping::is_open_now(Some(a)))
+            .map(|(id, path, agent)| {
+                let short = path.strip_prefix(&home).map(|p| format!("~{p}")).unwrap_or_else(|| path.clone());
+                WorktreeView {
+                    worktree: Worktree {
+                        id: format!("standalone:{id}"),
+                        repo_id: STANDALONE_REPO_ID.into(),
+                        path,
+                        branch: short.clone(),
+                        name: short,
+                        custom_name: None,
+                        is_main: false,
+                        created_at: agent.updated_at.clone(),
+                    },
+                    agent: Some(agent),
+                    git: None,
+                    last_commit: None,
+                    pr: None,
+                    linear: None,
+                    has_terminal: false,
+                    open_ide: None,
+                    running_processes: Vec::new(),
+                }
+            })
+            .collect();
+        Ok((!views.is_empty()).then(|| WorktreeGroup {
+            repo: Repository { id: STANDALONE_REPO_ID.into(), path: String::new(), name: "Other sessions".into() },
+            worktrees: views,
+        }))
+    }
+
     fn collect_procs(&self, worktrees: &[Worktree]) -> HashMap<String, ProcData> {
         let snap = procscan::capture();
         let roots: Vec<PathBuf> = worktrees.iter().map(|w| PathBuf::from(&w.path)).collect();

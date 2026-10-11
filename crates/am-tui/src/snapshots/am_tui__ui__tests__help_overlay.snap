@@ -12,13 +12,13 @@ expression: "render(&app, 100, 20)"
 │         │       o / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane                                             │         │
 │         │           n / d  new worktree / delete worktree                              │         │
+│         │               A  add repository                                              │         │
 │         │               s  settings                                                    │         │
 │         │       tab  1  2  switch pane                                                 │         │
 │         │               a  subagents: this worktree ↔ all                              │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
 │         │               ?  toggle help                                                 │         │
 │         │          q  esc  quit                                                        │         │
-│         │                                                                              │         │
-╰─────────│● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │· a: all ╯
- feature/r╰──────────────────────────────────────────────────────────────────────────────╯0c5e7f2a-1
- WORKTREES  ◐ 1  ◆ 1                                                         ⏎ open  ? help  q quit
+╰─────────│                                                                              │· a: all ╯
+ feature/r│● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │0c5e7f2a-1
+ WORKTREES╰──────────────────────────────────────────────────────────────────────────────╯p  q quit

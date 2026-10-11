@@ -122,6 +122,14 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                         }
                     }
                 }
+                launcher::Msg::RepoAdded(path, result) => match result {
+                    Ok(name) => {
+                        app.modal = None;
+                        app.notice = Some(format!("Added repository {name}"));
+                        collector.refresh(false);
+                    }
+                    Err(e) => app.modal = Some(modals::Modal::AddRepo { path, error: Some(e) }),
+                },
                 launcher::Msg::Deleted(label, result) => {
                     app.modal = None;
                     match result {
@@ -188,6 +196,14 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             }
                             Action::Create(repo, req) => ops::create(app.settings.clone(), *repo, *req, launch_tx.clone()),
                             Action::Delete(v, delete_branch) => ops::delete(*v, delete_branch, launch_tx.clone()),
+                            Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
+                            Action::RemoveStandalone(path) => {
+                                if let Ok(conn) = am_core::db::open() {
+                                    let _ = am_core::db::remove_standalone_session(&conn, &path);
+                                }
+                                app.notice = Some("Stopped tracking session".into());
+                                collector.refresh(false);
+                            }
                             Action::RunScript { repo_id, worktree_path } => {
                                 run_script(terminal, &repo_id, &worktree_path)?;
                             }

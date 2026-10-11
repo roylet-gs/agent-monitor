@@ -665,6 +665,40 @@ pub fn clear_linear_nicknames(conn: &Connection) -> rusqlite::Result<usize> {
     )
 }
 
+/// Claude sessions running outside any tracked worktree:
+/// (row id, path, state), most recently active first.
+pub fn standalone_sessions(conn: &Connection) -> rusqlite::Result<Vec<(String, String, crate::model::AgentState)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, path, status, session_id, last_response, is_open, active_subagents, updated_at
+         FROM standalone_sessions ORDER BY updated_at DESC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            crate::model::AgentState {
+                status: r.get::<_, Option<String>>(2)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle),
+                session_id: r.get(3)?,
+                last_response: r.get(4)?,
+                is_open: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
+                active_subagents: r.get::<_, Option<i64>>(6)?.unwrap_or(0),
+                updated_at: r.get(7)?,
+            },
+        ))
+    })?;
+    rows.collect()
+}
+
+pub fn remove_standalone_session(conn: &Connection, path: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM standalone_sessions WHERE path = ?", [path])?;
+    Ok(())
+}
+
+/// `pruneStaleStandaloneSessions`: closed sessions idle for over an hour.
+pub fn prune_standalone_sessions(conn: &Connection) -> rusqlite::Result<usize> {
+    conn.execute("DELETE FROM standalone_sessions WHERE is_open = 0 AND updated_at < datetime('now', '-1 hour')", [])
+}
+
 /// Cheap change detector for the TUI: bumps whenever any connection commits.
 pub fn data_version(conn: &Connection) -> rusqlite::Result<i64> {
     conn.pragma_query_value(None, "data_version", |r| r.get(0))

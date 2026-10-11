@@ -64,6 +64,9 @@ pub enum Action {
     Create(Box<Repository>, Box<am_core::worktrees::CreateRequest>),
     Delete(Box<WorktreeView>, bool),
     RunScript { repo_id: String, worktree_path: String },
+    /// `d` on an "Other sessions" row: stop tracking it.
+    RemoveStandalone(String),
+    AddRepo(String),
 }
 
 pub struct App {
@@ -181,7 +184,7 @@ impl App {
             if group.worktrees.is_empty() {
                 continue;
             }
-            if multi_repo {
+            if multi_repo || group.repo.id == am_core::model::STANDALONE_REPO_ID {
                 self.rows.push(Row::Repo(group.repo.name.clone()));
             }
             let mut last_project: Option<Option<String>> = None;
@@ -254,6 +257,10 @@ impl App {
                     self.modal = Some(crate::modals::Modal::Busy(format!("Deleting {}…", view.worktree.display_name())));
                     Action::Delete(view, delete_branch)
                 }
+                Effect::AddRepo(path) => {
+                    self.modal = Some(crate::modals::Modal::Busy(format!("Adding {path}…")));
+                    Action::AddRepo(path)
+                }
                 Effect::RunScript { repo_id, worktree_path } => {
                     self.modal = None;
                     Action::RunScript { repo_id, worktree_path }
@@ -308,7 +315,7 @@ impl App {
             Key::Char('w') => self.show_log = !self.show_log,
             Key::Char('n') => {
                 if self.snapshot.repos.is_empty() {
-                    self.notice = Some("No repositories yet — add one with `am repo add <path>`".into());
+                    self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None });
                 } else {
                     let repo = self.selected_view().map(|v| v.worktree.repo_id.clone());
                     self.modal = Some(crate::modals::Modal::new_worktree(
@@ -321,6 +328,9 @@ impl App {
             }
             Key::Char('d') => {
                 if let Some(v) = self.selected_view().cloned() {
+                    if v.worktree.is_standalone() {
+                        return Action::RemoveStandalone(v.worktree.path);
+                    }
                     if v.worktree.is_main && (v.worktree.branch == "main" || v.worktree.branch == "master") {
                         self.notice = Some("The main checkout can't be deleted".into());
                     } else {
@@ -328,6 +338,7 @@ impl App {
                     }
                 }
             }
+            Key::Char('A') => self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None }),
             Key::Char('s') => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
             Key::Char('1') => self.focus = Pane::Worktrees,
             Key::Char('2') => self.focus = Pane::Subagents,

@@ -285,6 +285,17 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             }
             (title, if g.dirty > 0 || g.ahead > 0 { theme.yellow } else { theme.red }, "", lines)
         }
+        Modal::AddRepo { path, error } => {
+            let mut lines = vec![
+                Line::raw("Path to a git repository:"),
+                Line::from(vec![Span::styled("› ", theme.bold(theme.border_focus)), Span::raw(format!("{path}▏"))]),
+            ];
+            if let Some(e) = error {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
+            }
+            ("Add repository".into(), theme.border_focus, "tab complete  ⏎ add  esc cancel", lines)
+        }
         Modal::RunScript { repo_id, .. } => {
             let path = am_core::worktrees::script_path(repo_id);
             (
@@ -391,7 +402,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
     f.render_widget(block, area);
 
     if app.flat.is_empty() {
-        let msg = if app.loaded { "No worktrees. Add a repo with `am repo add`." } else { "Loading…" };
+        let msg = if app.loaded { "No worktrees yet — press A to add a repository" } else { "Loading…" };
         f.render_widget(Paragraph::new(Line::styled(msg, theme.faint())).alignment(Alignment::Center), centered_line(inner));
         return;
     }
@@ -767,6 +778,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("o / l / p", "open PR / Linear ticket / Linear project"),
         ("w", "toggle log pane"),
         ("n / d", "new worktree / delete worktree"),
+        ("A", "add repository"),
         ("s", "settings"),
         ("tab  1  2", "switch pane"),
         ("a", "subagents: this worktree ↔ all"),

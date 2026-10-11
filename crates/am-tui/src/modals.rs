@@ -106,6 +106,8 @@ pub enum Modal {
     BranchExists { repo: Repository, req: CreateRequest, local: bool, remote: bool },
     Delete(DeleteState),
     RunScript { repo_id: String, worktree_path: String },
+    /// `A`: register a repository by path (Tab completes directories).
+    AddRepo { path: String, error: Option<String> },
     Busy(String),
 }
 
@@ -115,6 +117,40 @@ pub enum Effect {
     Create(Repository, CreateRequest),
     Delete { view: Box<WorktreeView>, delete_branch: bool },
     RunScript { repo_id: String, worktree_path: String },
+    AddRepo(String),
+}
+
+/// Expand `~` and complete the last path component to the longest common
+/// prefix of matching directories (shell-style Tab).
+pub fn complete_dir(input: &str) -> String {
+    let home = am_core::paths::home_dir();
+    let expanded = match input.strip_prefix('~') {
+        Some(rest) => format!("{}{rest}", home.display()),
+        None => input.to_string(),
+    };
+    let (dir, stem) = match expanded.rfind('/') {
+        Some(i) => (&expanded[..=i], &expanded[i + 1..]),
+        None => return input.to_string(),
+    };
+    let Ok(entries) = std::fs::read_dir(if dir.is_empty() { "/" } else { dir }) else { return input.to_string() };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(stem) && (stem.starts_with('.') || !n.starts_with('.')))
+        .collect();
+    names.sort();
+    let Some(first) = names.first() else { return input.to_string() };
+    let common = names.iter().fold(first.clone(), |acc, n| acc.chars().zip(n.chars()).take_while(|(a, b)| a == b).map(|(a, _)| a).collect());
+    let mut out = format!("{dir}{common}");
+    if names.len() == 1 {
+        out.push('/');
+    }
+    // Keep the user's `~` spelling.
+    match input.starts_with('~') {
+        true => out.replacen(&home.display().to_string(), "~", 1),
+        false => out,
+    }
 }
 
 impl Modal {
@@ -214,6 +250,20 @@ impl Modal {
                 (DeleteStep::LocalBranch, Key::Char('n')) => Effect::Delete { view: Box::new(d.view.clone()), delete_branch: false },
                 _ => Effect::None,
             },
+            Modal::AddRepo { path, error } => {
+                *error = None;
+                match key {
+                    Key::Esc => return Effect::Close,
+                    Key::Tab => *path = complete_dir(path),
+                    Key::Backspace => {
+                        path.pop();
+                    }
+                    Key::Char(c) => path.push(c),
+                    Key::Enter if !path.trim().is_empty() => return Effect::AddRepo(path.trim().to_string()),
+                    _ => {}
+                }
+                Effect::None
+            }
             Modal::RunScript { repo_id, worktree_path, .. } => match key {
                 Key::Enter | Key::Char('y') => Effect::RunScript { repo_id: repo_id.clone(), worktree_path: worktree_path.clone() },
                 Key::Esc | Key::Char('n') => Effect::Close,
@@ -302,6 +352,19 @@ mod tests {
         m.on_check_result("fe".into(), BranchCheck { local: true, remote: Some(false) });
         let Modal::New(f) = &m else { panic!() };
         assert!(f.remote_exists());
+    }
+
+    #[test]
+    fn tab_completes_directories() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("projects/alpha")).unwrap();
+        std::fs::create_dir_all(d.path().join("projects/alpine")).unwrap();
+        std::fs::write(d.path().join("projects/alps.txt"), "").unwrap();
+        let base = d.path().display().to_string();
+        assert_eq!(complete_dir(&format!("{base}/proj")), format!("{base}/projects/"));
+        assert_eq!(complete_dir(&format!("{base}/projects/al")), format!("{base}/projects/alp"));
+        assert_eq!(complete_dir(&format!("{base}/projects/alph")), format!("{base}/projects/alpha/"));
+        assert_eq!(complete_dir(&format!("{base}/nothing")), format!("{base}/nothing"));
     }
 
     #[test]

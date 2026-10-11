@@ -41,3 +41,16 @@ pub fn delete(view: WorktreeView, delete_branch: bool, tx: Sender<Msg>) {
         let _ = tx.send(Msg::Deleted(label, result.map(|r| r.warnings)));
     });
 }
+
+pub fn add_repo(path: String, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let expanded = match path.strip_prefix('~') {
+            Some(rest) => format!("{}{rest}", am_core::paths::home_dir().display()),
+            None => path.clone(),
+        };
+        let result = db::open()
+            .map_err(|e| e.to_string())
+            .and_then(|conn| worktrees::add_repository(&conn, Path::new(expanded.trim_end_matches('/'))).map_err(|e| e.to_string()));
+        let _ = tx.send(Msg::RepoAdded(path, result.map(|r| r.name)));
+    });
+}
