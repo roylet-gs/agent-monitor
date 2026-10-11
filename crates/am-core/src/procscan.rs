@@ -67,7 +67,6 @@ use std::path::{Path, PathBuf};
 
 use crate::model::{Ide, RunningProcess};
 
-const MODULE: &str = "procscan";
 
 /// Ancestor walks stop after this many hops (guards against pid-reuse cycles).
 const MAX_DEPTH: usize = 64;
@@ -102,17 +101,8 @@ pub struct ProcessSnapshot {
 /// Scan the process table once. Never fails: unreadable processes are skipped
 /// and a total failure yields an empty snapshot.
 pub fn capture() -> ProcessSnapshot {
-    let started = std::time::Instant::now();
-    let procs = os::scan();
-    let snap = ProcessSnapshot::from_processes(procs, std::process::id() as i32);
-    crate::debug!(
-        MODULE,
-        "captured {} processes ({} with a non-root cwd) in {:.2}ms",
-        snap.procs.len(),
-        snap.procs.values().filter(|p| in_interesting_cwd(p.cwd.as_deref())).count(),
-        started.elapsed().as_secs_f64() * 1000.0
-    );
-    snap
+    // Runs every 2 s in the TUI: deliberately not logged per scan.
+    ProcessSnapshot::from_processes(os::scan(), std::process::id() as i32)
 }
 
 impl ProcessSnapshot {
@@ -130,14 +120,9 @@ impl ProcessSnapshot {
     /// `worktree_root` (and not inside a worktree nested beneath it).
     pub fn has_terminal(&self, worktree_root: &Path) -> bool {
         let root = canonical(worktree_root);
-        let found = self
-            .procs
+        self.procs
             .values()
-            .find(|p| is_interactive_shell(p) && cwd_belongs_to(p.cwd.as_deref(), &root, has_git_entry));
-        if let Some(p) = found {
-            crate::debug!(MODULE, "has_terminal {}: pid {} ({})", root.display(), p.pid, p.name);
-        }
-        found.is_some()
+            .any(|p| is_interactive_shell(p) && cwd_belongs_to(p.cwd.as_deref(), &root, has_git_entry))
     }
 
     /// Which editor, if any, has `worktree_root` open. See the module docs for
@@ -149,7 +134,6 @@ impl ProcessSnapshot {
                 continue;
             }
             if let Some(ide) = self.ide_signal(p) {
-                crate::debug!(MODULE, "open_ide {}: {:?} via pid {} ({})", root.display(), ide, p.pid, p.name);
                 return Some(ide);
             }
         }
@@ -177,8 +161,7 @@ impl ProcessSnapshot {
             if p.pid == self.self_pid || Some(p.pid) == self_parent {
                 continue;
             }
-            if let Some(reason) = self.exclusion(p) {
-                crate::debug!(MODULE, "skip pid {} ({}) in {}: {reason}", p.pid, p.name, cwd.display());
+            if self.exclusion(p).is_some() {
                 continue;
             }
             if !needle.is_empty() && !command_line(p).to_lowercase().contains(&needle) {
