@@ -55,6 +55,10 @@ pub enum Action {
     OpenClaude(Box<WorktreeView>),
     /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
     OpenUrl(String),
+    /// A setting was saved; theme/collector need to pick it up.
+    SettingsChanged,
+    /// `e` in settings: open settings.json in $EDITOR.
+    EditSettingsFile,
 }
 
 pub struct App {
@@ -73,6 +77,7 @@ pub struct App {
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
     pub show_log: bool,
+    pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
     /// Worktrees whose status changed since the user last had them selected.
     pub unseen: std::collections::HashSet<String>,
     seen_status: std::collections::HashMap<String, Option<Status>>,
@@ -97,6 +102,7 @@ impl App {
             notice: None,
             popup: None,
             show_log: false,
+            settings_editor: None,
             unseen: Default::default(),
             seen_status: Default::default(),
             sounds: Vec::new(),
@@ -219,6 +225,21 @@ impl App {
         if self.popup.take().is_some() {
             return Action::None;
         }
+        if let Some(editor) = &mut self.settings_editor {
+            use crate::settings_ui::Outcome;
+            return match editor.on_key(key) {
+                Outcome::None => Action::None,
+                Outcome::Close => {
+                    self.settings_editor = None;
+                    Action::None
+                }
+                Outcome::Changed(s) => {
+                    self.set_settings(*s);
+                    Action::SettingsChanged
+                }
+                Outcome::EditFile => Action::EditSettingsFile,
+            };
+        }
         if self.show_help {
             if matches!(key, Key::Char('?') | Key::Esc | Key::Char('q')) {
                 self.show_help = false;
@@ -250,6 +271,7 @@ impl App {
                 "No Linear project",
             ),
             Key::Char('w') => self.show_log = !self.show_log,
+            Key::Char('s') => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
             Key::Char('1') => self.focus = Pane::Worktrees,
             Key::Char('2') => self.focus = Pane::Subagents,
             Key::Char('a') => {
@@ -270,6 +292,18 @@ impl App {
             _ => {}
         }
         Action::None
+    }
+
+    /// Swap in new settings and re-derive rows (header style depends on sort).
+    pub fn set_settings(&mut self, settings: Settings) {
+        self.settings = settings;
+        if let Some(e) = &mut self.settings_editor {
+            let cursor = e.cursor;
+            *e = crate::settings_ui::SettingsEditor::new(&self.settings);
+            e.cursor = cursor;
+        }
+        let snap = self.snapshot.clone();
+        self.apply(snap);
     }
 
     fn url_action(&mut self, pick: impl Fn(&WorktreeView, &Settings) -> Option<String>, missing: &str) -> Action {
@@ -333,6 +367,9 @@ pub enum Key {
     PageDown,
     Home,
     End,
+    Left,
+    Right,
+    Backspace,
     Tab,
     BackTab,
     Enter,

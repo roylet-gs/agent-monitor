@@ -30,6 +30,7 @@ const RECENT_SUBAGENT_MINUTES: u32 = 30;
 
 enum Cmd {
     Refresh { force: bool },
+    Settings(Box<Settings>),
     Quit,
 }
 
@@ -78,6 +79,11 @@ impl Collector {
     pub fn try_recv(&self) -> Option<Snapshot> {
         // Coalesce: only the newest snapshot matters.
         self.rx.try_iter().last()
+    }
+
+    pub fn update_settings(&self, settings: Settings) {
+        let _ = self.cmd.send(Cmd::Settings(Box::new(settings.clone())));
+        let _ = self.int_cmd.send(Cmd::Settings(Box::new(settings)));
     }
 
     pub fn refresh(&self, force: bool) {
@@ -154,6 +160,12 @@ impl Worker {
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(Cmd::Refresh { force: f }) => force = f,
+                Ok(Cmd::Settings(s)) => {
+                    // Filters/sort/process filter may have changed: rebuild now.
+                    self.settings = *s;
+                    self.last_procs = None;
+                    self.data_version = -1;
+                }
                 Err(RecvTimeoutError::Timeout) => {}
             }
             if let Err(e) = self.cycle(force) {
@@ -288,7 +300,7 @@ fn collect_git(worktrees: &[&Worktree]) -> Vec<(String, GitData)> {
 /// thread and hands the collector a ready-made field map. Cached values are
 /// sent before the first fetch, so PR badges and tickets appear immediately
 /// (and survive being offline).
-fn run_integrations(settings: Settings, cmds: Receiver<Cmd>, tx: Sender<IntegrationUpdate>) {
+fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<IntegrationUpdate>) {
     let conn = match db::open() {
         Ok(c) => c,
         Err(e) => {
@@ -298,9 +310,6 @@ fn run_integrations(settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Integrat
     };
     let mut ints = Integrations::new();
     ints.hydrate(&conn);
-    let gh_every = Duration::from_millis(settings.gh_polling_interval_ms.max(30_000));
-    let linear_every = Duration::from_millis(settings.linear_polling_interval_ms.max(30_000));
-    let linear_on = settings.linear_enabled && !settings.linear_api_key.is_empty();
     let (mut last_gh, mut last_linear): (Option<Instant>, Option<Instant>) = (None, None);
     let mut known_branches: Vec<(String, String)> = Vec::new();
     let mut first = true;
@@ -310,8 +319,22 @@ fn run_integrations(settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Integrat
         match cmds.recv_timeout(Duration::from_secs(1)) {
             Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(Cmd::Refresh { force: f }) => force = f,
+            Ok(Cmd::Settings(s)) => {
+                // A newly enabled source or new API key should fetch right away.
+                let enabled_now = (s.gh_pr_status && !settings.gh_pr_status)
+                    || (s.linear_enabled && !settings.linear_enabled)
+                    || s.linear_api_key != settings.linear_api_key;
+                settings = *s;
+                if enabled_now {
+                    last_gh = None;
+                    last_linear = None;
+                }
+            }
             Err(RecvTimeoutError::Timeout) => {}
         }
+        let gh_every = Duration::from_millis(settings.gh_polling_interval_ms.max(30_000));
+        let linear_every = Duration::from_millis(settings.linear_polling_interval_ms.max(30_000));
+        let linear_on = settings.linear_enabled && !settings.linear_api_key.is_empty();
         let Ok(repos) = db::repositories(&conn) else { continue };
         let Ok(worktrees) = db::worktrees(&conn) else { continue };
         let groups: Vec<RepoBranches> = repos

@@ -7,6 +7,7 @@
 mod app;
 mod data;
 mod launcher;
+mod settings_ui;
 mod theme;
 mod ui;
 
@@ -28,6 +29,9 @@ fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
         KeyCode::Char('u') if ctrl => Key::CtrlU,
         KeyCode::Char(c) => Key::Char(c),
         KeyCode::Up => Key::Up,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        KeyCode::Backspace => Key::Backspace,
         KeyCode::Down => Key::Down,
         KeyCode::PageUp => Key::PageUp,
         KeyCode::PageDown => Key::PageDown,
@@ -50,20 +54,21 @@ fn main() -> io::Result<()> {
     am_core::log::init(settings.log_level(), settings.max_log_size_mb);
     info!("tui", "am-tui {} starting (theme={})", env!("CARGO_PKG_VERSION"), settings.theme);
 
-    let theme = theme::Theme::by_name(&settings.theme);
+
     let collector = data::Collector::spawn(settings.clone());
     let mut app = App::new(settings);
 
     // ratatui::init enables raw mode + alt screen and installs a panic hook
     // that restores the terminal before printing the panic.
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal, &mut app, &theme, &collector);
+    let result = run(&mut terminal, &mut app, &collector);
     ratatui::restore();
     collector.shutdown();
     result
 }
 
-fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Theme, collector: &data::Collector) -> io::Result<()> {
+fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data::Collector) -> io::Result<()> {
+    let mut theme = theme::Theme::by_name(&app.settings.theme);
     let (launch_tx, launch_rx) = std::sync::mpsc::channel();
     let mut popup_since: Option<Instant> = None;
     let mut log_lines: Vec<String> = Vec::new();
@@ -113,7 +118,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Th
         }
         if dirty {
             execute!(io::stdout(), BeginSynchronizedUpdate)?;
-            terminal.draw(|f| ui::draw(f, app, theme, now, &log_lines))?;
+            terminal.draw(|f| ui::draw(f, app, &theme, now, &log_lines))?;
             execute!(io::stdout(), EndSynchronizedUpdate)?;
             io::stdout().flush()?;
             dirty = false;
@@ -130,6 +135,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, theme: &theme::Th
                             Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
                             Action::OpenClaude(v) => launcher::open_claude(*v, launch_tx.clone()),
                             Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
+                            Action::SettingsChanged => {
+                                theme = theme::Theme::by_name(&app.settings.theme);
+                                collector.update_settings(app.settings.clone());
+                            }
+                            Action::EditSettingsFile => {
+                                edit_settings_file(terminal)?;
+                                app.set_settings(settings::load());
+                                theme = theme::Theme::by_name(&app.settings.theme);
+                                collector.update_settings(app.settings.clone());
+                            }
                             Action::None => {}
                         }
                         if app.show_log && log_lines.is_empty() {
@@ -171,4 +186,19 @@ fn tail_log(n: usize) -> Vec<String> {
     let buf = String::from_utf8_lossy(&bytes);
     let lines: Vec<String> = buf.lines().map(str::to_owned).collect();
     lines[lines.len().saturating_sub(n)..].to_vec()
+}
+
+/// Hand the terminal to $EDITOR (default `vi`) for settings.json, then take it back.
+fn edit_settings_file(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
+    let path = am_core::paths::settings_path();
+    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
+    ratatui::restore();
+    // $EDITOR may carry arguments (e.g. `code --wait`), so run it via the shell.
+    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
+    *terminal = ratatui::init();
+    terminal.clear()?;
+    if let Err(e) = status {
+        am_core::warn!("settings", "Failed to run editor {editor}: {e}");
+    }
+    Ok(())
 }

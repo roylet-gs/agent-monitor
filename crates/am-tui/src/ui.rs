@@ -48,9 +48,101 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     if app.show_help {
         draw_help(f, theme, area);
     }
+    if let Some(editor) = &app.settings_editor {
+        draw_settings(f, theme, area, editor);
+    }
     if let Some(msg) = &app.popup {
         draw_popup(f, theme, area, msg);
     }
+}
+
+fn draw_settings(f: &mut Frame, theme: &Theme, area: Rect, ed: &crate::settings_ui::SettingsEditor) {
+    use crate::settings_ui::{FIELDS, Kind, sort_label};
+    let w = 84.min(area.width.saturating_sub(2));
+    let h = area.height.saturating_sub(2).min(FIELDS.len() as u16 + 16);
+    let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
+    f.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.bold(theme.border_focus))
+        .title(Line::from(vec![Span::styled("─", theme.bold(theme.border_focus)), Span::styled("Settings ", theme.bold(theme.text))]))
+        .title_bottom(
+            Line::styled(" ⏎/space change  ←→ adjust  e edit file  esc close ", theme.faint()).alignment(Alignment::Right),
+        );
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let [list, help] = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).areas(inner);
+
+    if let Some(sort) = &ed.sort {
+        let mut lines = vec![
+            Line::styled(" Sort order — space on/off · d direction · J/K move · ⏎ save · esc cancel", theme.faint()),
+            Line::raw(""),
+        ];
+        for (i, c) in sort.items.iter().enumerate() {
+            let sel = i == sort.cursor;
+            let dir = match c.direction {
+                am_core::settings::Direction::Asc => "↑ asc ",
+                am_core::settings::Direction::Desc => "↓ desc",
+            };
+            let line = Line::from(vec![
+                Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+                Span::styled(format!("{:>2}. ", i + 1), theme.faint()),
+                Span::styled(if c.enabled { "[x] " } else { "[ ] " }, theme.fg(if c.enabled { theme.green } else { theme.faint })),
+                Span::styled(format!("{:<16}", sort_label(c.key)), if c.enabled { theme.fg(theme.text) } else { theme.faint() }),
+                Span::styled(dir, theme.faint()),
+            ]);
+            lines.push(if sel { line.style(theme.selected()) } else { line });
+        }
+        f.render_widget(Paragraph::new(lines), list);
+        return;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    let mut sel_line = 0;
+    let mut section = "";
+    let label_w = 30usize;
+    for (i, field) in FIELDS.iter().enumerate() {
+        if field.section != section {
+            section = field.section;
+            if !lines.is_empty() {
+                lines.push(Line::raw(""));
+            }
+            lines.push(Line::styled(format!(" {section}"), theme.bold(theme.accent)));
+        }
+        let sel = i == ed.cursor;
+        if sel {
+            sel_line = lines.len();
+        }
+        let value = match (&ed.editing, sel) {
+            (Some(buf), true) => {
+                let shown = if matches!(field.kind, Kind::Text { secret: true }) { "•".repeat(buf.chars().count()) } else { buf.clone() };
+                format!("{shown}▏")
+            }
+            _ => ed.display(field),
+        };
+        let vstyle = match field.kind {
+            Kind::Bool if value == "on" => theme.fg(theme.green),
+            Kind::Bool => theme.faint(),
+            _ => theme.fg(theme.text),
+        };
+        let avail = (list.width as usize).saturating_sub(label_w + 4);
+        let line = Line::from(vec![
+            Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(format!("  {:<width$}", field.label, width = label_w), theme.fg(theme.text)),
+            Span::styled(truncate(&value, avail), vstyle),
+        ]);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+    }
+    let height = list.height as usize;
+    let start = (sel_line + 2).saturating_sub(height);
+    f.render_widget(Paragraph::new(lines.into_iter().skip(start).take(height).collect::<Vec<_>>()), list);
+
+    let field = ed.field();
+    let help_line = match &ed.error {
+        Some(e) => Line::styled(format!(" {e}"), theme.fg(theme.red)),
+        None => Line::styled(format!(" {}", field.help), theme.faint()),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
 }
 
 fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
@@ -513,6 +605,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("c", "terminal running claude --resume"),
         ("o / l / p", "open PR / Linear ticket / Linear project"),
         ("w", "toggle log pane"),
+        ("s", "settings"),
         ("tab  1  2", "switch pane"),
         ("a", "subagents: this worktree ↔ all"),
         ("r", "refresh now (bypasses backoff)"),
