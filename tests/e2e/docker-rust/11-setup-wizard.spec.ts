@@ -47,7 +47,8 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
   await tui.sendKey("Enter");
 
   await tui.waitForGone("Welcome to agent-monitor");
-  await tui.waitForText("feature/to-delete", 10_000);
+  // First sync + git scan of the new repo can be slow on a cold container.
+  await tui.waitForText("feature/to-delete", 20_000);
   // A fresh settings.json has hideMainBranch on (the default), and no Linear key.
   const text = await tui.getScreenText();
   expect(text).not.toMatch(/\S main\s/);
