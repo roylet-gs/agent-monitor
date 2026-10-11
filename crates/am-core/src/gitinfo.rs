@@ -58,20 +58,19 @@ pub fn list_worktrees(repo: &Path) -> Option<Vec<(String, Option<String>, bool)>
     Some(parse_worktree_list(&out))
 }
 
+/// Entries are keyed off each `worktree ` line rather than blank-line
+/// separators, so output missing a separator can't merge two entries (the TS
+/// parser had the same guard). `branch` is `None` for detached/bare entries.
 pub fn parse_worktree_list(out: &str) -> Vec<(String, Option<String>, bool)> {
-    let mut result = Vec::new();
-    for (i, block) in out.split("\n\n").filter(|b| !b.trim().is_empty()).enumerate() {
-        let mut path = None;
-        let mut branch = None;
-        for line in block.lines() {
-            if let Some(p) = line.strip_prefix("worktree ") {
-                path = Some(p.to_string());
-            } else if let Some(b) = line.strip_prefix("branch ") {
-                branch = Some(b.trim_start_matches("refs/heads/").to_string());
-            }
-        }
-        if let Some(path) = path {
-            result.push((path, branch, i == 0));
+    let mut result: Vec<(String, Option<String>, bool)> = Vec::new();
+    for line in out.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            let first = result.is_empty();
+            result.push((p.trim().to_string(), None, first));
+        } else if let Some(b) = line.strip_prefix("branch ")
+            && let Some(last) = result.last_mut()
+        {
+            last.1 = Some(b.trim().trim_start_matches("refs/heads/").to_string());
         }
     }
     result
@@ -106,6 +105,14 @@ mod tests {
         assert_eq!(l[0], ("/r".into(), Some("main".into()), true));
         assert_eq!(l[1].1.as_deref(), Some("feature/x"));
         assert_eq!(l[2].1, None);
+    }
+
+    #[test]
+    fn worktree_list_without_blank_separators() {
+        let out = "worktree /r\nHEAD a\nbranch refs/heads/main\nworktree /r/x\nHEAD b\nbranch refs/heads/x";
+        let l = parse_worktree_list(out);
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[1], ("/r/x".into(), Some("x".into()), false));
     }
 
     #[test]

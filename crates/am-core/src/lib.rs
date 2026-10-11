@@ -14,3 +14,4 @@ pub mod procscan;
 pub mod settings;
 pub mod status;
 pub mod timefmt;
+pub mod worktrees;

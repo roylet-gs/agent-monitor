@@ -525,6 +525,146 @@ pub fn subagents(
     rows.collect()
 }
 
+// --- Repository / worktree writes (worktree lifecycle) ---
+//
+// Same SQL as the TS `src/lib/db.ts` functions named in each doc comment:
+// both apps write these rows, so conflict handling must stay identical.
+
+const WORKTREE_COLS: &str = "id, repo_id, path, branch, name, custom_name, is_main, created_at";
+
+fn row_to_worktree(r: &rusqlite::Row) -> rusqlite::Result<crate::model::Worktree> {
+    Ok(crate::model::Worktree {
+        id: r.get(0)?,
+        repo_id: r.get(1)?,
+        path: r.get(2)?,
+        branch: r.get(3)?,
+        name: r.get(4)?,
+        custom_name: r.get(5)?,
+        is_main: r.get::<_, Option<i64>>(6)?.unwrap_or(0) != 0,
+        created_at: r.get(7)?,
+    })
+}
+
+fn row_to_repository(r: &rusqlite::Row) -> rusqlite::Result<crate::model::Repository> {
+    Ok(crate::model::Repository { id: r.get(0)?, path: r.get(1)?, name: r.get(2)? })
+}
+
+/// `addRepository`: insert, or on an existing path refresh its name and
+/// `last_used_at` (the id is kept). Returns the stored row.
+pub fn add_repository(conn: &Connection, path: &str, name: &str) -> rusqlite::Result<crate::model::Repository> {
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO repositories (id, path, name) VALUES (?1, ?2, ?3)
+         ON CONFLICT(path) DO UPDATE SET name = excluded.name, last_used_at = datetime('now')",
+        params![id, path, name],
+    )?;
+    repository_by_path(conn, path)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+/// `getRepositoryByPath`.
+pub fn repository_by_path(conn: &Connection, path: &str) -> rusqlite::Result<Option<crate::model::Repository>> {
+    conn.query_row("SELECT id, path, name FROM repositories WHERE path = ?1", [path], row_to_repository)
+        .optional()
+}
+
+/// `getRepositoryById`.
+pub fn repository_by_id(conn: &Connection, id: &str) -> rusqlite::Result<Option<crate::model::Repository>> {
+    conn.query_row("SELECT id, path, name FROM repositories WHERE id = ?1", [id], row_to_repository)
+        .optional()
+}
+
+/// `touchRepository`.
+pub fn touch_repository(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE repositories SET last_used_at = datetime('now') WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// `removeRepository`. Worktrees (and their status/session rows) go with it
+/// via `ON DELETE CASCADE` (`foreign_keys` is on for every connection).
+pub fn remove_repository(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM repositories WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// `upsertWorktree`: insert, or on an existing `(repo_id, branch)` update
+/// path/name/is_main (id, custom_name and created_at are kept). A path that
+/// was tracked as a standalone session is promoted: its standalone row goes.
+pub fn upsert_worktree(
+    conn: &Connection,
+    repo_id: &str,
+    path: &str,
+    branch: &str,
+    name: &str,
+    is_main: bool,
+) -> rusqlite::Result<crate::model::Worktree> {
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO worktrees (id, repo_id, path, branch, name, is_main) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(repo_id, branch) DO UPDATE SET path = excluded.path, name = excluded.name, is_main = excluded.is_main",
+        params![id, repo_id, path, branch, name, is_main as i64],
+    )?;
+    conn.execute("DELETE FROM standalone_sessions WHERE path = ?1", [path])?;
+    worktree_by_branch(conn, repo_id, branch)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+/// `getWorktrees`: one repo's worktrees, newest first.
+pub fn worktrees_for_repo(conn: &Connection, repo_id: &str) -> rusqlite::Result<Vec<crate::model::Worktree>> {
+    let mut stmt =
+        conn.prepare(&format!("SELECT {WORKTREE_COLS} FROM worktrees WHERE repo_id = ?1 ORDER BY created_at DESC"))?;
+    let rows = stmt.query_map([repo_id], row_to_worktree)?;
+    rows.collect()
+}
+
+/// `getWorktreeByBranch`.
+pub fn worktree_by_branch(
+    conn: &Connection,
+    repo_id: &str,
+    branch: &str,
+) -> rusqlite::Result<Option<crate::model::Worktree>> {
+    conn.query_row(
+        &format!("SELECT {WORKTREE_COLS} FROM worktrees WHERE repo_id = ?1 AND branch = ?2"),
+        [repo_id, branch],
+        row_to_worktree,
+    )
+    .optional()
+}
+
+/// `getWorktreeByPath`.
+pub fn worktree_by_path(conn: &Connection, path: &str) -> rusqlite::Result<Option<crate::model::Worktree>> {
+    conn.query_row(&format!("SELECT {WORKTREE_COLS} FROM worktrees WHERE path = ?1"), [path], row_to_worktree)
+        .optional()
+}
+
+/// `removeWorktree`.
+pub fn remove_worktree(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM worktrees WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+/// `updateWorktreeCustomName`: set (or clear with `None`) the nickname and
+/// where it came from (`None` = user, `Some("linear")` = auto-nickname).
+pub fn update_worktree_custom_name(
+    conn: &Connection,
+    id: &str,
+    custom_name: Option<&str>,
+    source: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE worktrees SET custom_name = ?1, nickname_source = ?2 WHERE id = ?3",
+        params![custom_name, source, id],
+    )?;
+    Ok(())
+}
+
+/// `clearLinearNicknames`: drop every nickname the Linear auto-nickname
+/// feature set (user-set nicknames are kept). Returns how many were cleared.
+pub fn clear_linear_nicknames(conn: &Connection) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE worktrees SET custom_name = NULL, nickname_source = NULL WHERE nickname_source = 'linear'",
+        [],
+    )
+}
+
 /// Cheap change detector for the TUI: bumps whenever any connection commits.
 pub fn data_version(conn: &Connection) -> rusqlite::Result<i64> {
     conn.pragma_query_value(None, "data_version", |r| r.get(0))
@@ -668,5 +808,44 @@ mod tests {
         let row = get_status(&conn, &o).unwrap().unwrap();
         assert_eq!(row.status, Some(Status::Waiting));
         assert_eq!(row.active_subagents, 1);
+    }
+
+    #[test]
+    fn repository_and_worktree_writes_match_ts_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_at(&dir.path().join("t.db")).unwrap();
+        let r = add_repository(&conn, "/repo", "repo").unwrap();
+        // Re-adding the same path keeps the id and refreshes the name.
+        let again = add_repository(&conn, "/repo", "renamed").unwrap();
+        assert_eq!((again.id.as_str(), again.name.as_str()), (r.id.as_str(), "renamed"));
+        assert_eq!(repository_by_id(&conn, &r.id).unwrap().unwrap().path, "/repo");
+        touch_repository(&conn, &r.id).unwrap();
+
+        conn.execute("INSERT INTO standalone_sessions (id, path) VALUES ('s', '/repo/wt')", []).unwrap();
+        let w = upsert_worktree(&conn, &r.id, "/repo/wt", "feature/x", "x", false).unwrap();
+        let standalone: i64 = conn.query_row("SELECT COUNT(*) FROM standalone_sessions", [], |r| r.get(0)).unwrap();
+        assert_eq!(standalone, 0, "upsert promotes a standalone session at the same path");
+
+        update_worktree_custom_name(&conn, &w.id, Some("Nick"), Some("linear")).unwrap();
+        // Upsert on the same (repo, branch) keeps id + custom_name, updates path/is_main.
+        let w2 = upsert_worktree(&conn, &r.id, "/repo/moved", "feature/x", "x", true).unwrap();
+        assert_eq!(w2.id, w.id);
+        assert_eq!(w2.custom_name.as_deref(), Some("Nick"));
+        assert_eq!((w2.path.as_str(), w2.is_main), ("/repo/moved", true));
+        assert_eq!(worktree_by_path(&conn, "/repo/moved").unwrap().unwrap().id, w.id);
+
+        assert_eq!(clear_linear_nicknames(&conn).unwrap(), 1);
+        assert_eq!(worktree_by_branch(&conn, &r.id, "feature/x").unwrap().unwrap().custom_name, None);
+
+        upsert_worktree(&conn, &r.id, "/repo", "main", "main", true).unwrap();
+        assert_eq!(worktrees_for_repo(&conn, &r.id).unwrap().len(), 2);
+        remove_worktree(&conn, &w.id).unwrap();
+        assert_eq!(worktrees_for_repo(&conn, &r.id).unwrap().len(), 1);
+
+        // Removing the repo cascades to its worktrees.
+        remove_repository(&conn, &r.id).unwrap();
+        assert!(repository_by_path(&conn, "/repo").unwrap().is_none());
+        let left: i64 = conn.query_row("SELECT COUNT(*) FROM worktrees", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
     }
 }
