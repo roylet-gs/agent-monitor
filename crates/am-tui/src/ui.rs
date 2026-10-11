@@ -540,7 +540,15 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         .skip(start)
         .take(height)
         .map(|row| match row {
-            Row::Repo(name) => Line::from(Span::styled(name.clone(), theme.bold(theme.accent))),
+            Row::Spacer => Line::raw(""),
+            // Repo header: name followed by a rule to the pane edge.
+            Row::Repo(name) => {
+                let rule = (inner.width as usize).saturating_sub(name.width() + 1);
+                Line::from(vec![
+                    Span::styled(format!("{name} "), theme.bold(theme.accent)),
+                    Span::styled("─".repeat(rule), theme.fg(theme.border)),
+                ])
+            }
             Row::Project(name) => Line::from(vec![
                 Span::styled("═ ", theme.fg(theme.magenta)),
                 Span::styled(name.clone(), theme.bold(theme.magenta)),

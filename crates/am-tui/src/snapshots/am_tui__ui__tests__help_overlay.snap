@@ -6,9 +6,9 @@ expression: "render(&app, 100, 20)"
 │agent-mon│    j / k  ↑ / ↓  move                                                        │se  2m14s│
 │▌◆ featur│          gg / G  top / bottom                                                │ 23 tools│
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │se  2m14s│
-│gridsight│           enter  open (IDE; resumes last Claude session)                     │ 23 tools│
-│ · main  │               t  terminal at worktree                                        │e 30s ago│
-│         │               c  terminal running claude --resume                            │ 23 tools│
+│         │           enter  open (IDE; resumes last Claude session)                     │ 23 tools│
+│gridsight│               t  terminal at worktree                                        │e 30s ago│
+│ · main  │               c  terminal running claude --resume                            │ 23 tools│
 │         │       o / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane                                             │         │
 │         │           n / d  new worktree / delete worktree                              │         │

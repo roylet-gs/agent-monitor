@@ -3,12 +3,12 @@ source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 16)"
 ---
 ╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents · feature/refactor ──────╮
-│agent-monitor                                           ││ ◆ Analyze am de… general-purpose  2m14s│
+│agent-monitor ──────────────────────────────────────────││ ◆ Analyze am de… general-purpose  2m14s│
 │▌◆ feature/refactor          ◆2 ENG-412 #127✓ ↑2 ±3  4m ││   └ Bash  grep -c WARN debug.… 23 tools│
 │ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮urpose  2m14s│
-│gridsight    │ ⚠ 3 uncommitted changes                                              │lvh… 23 tools│
-│ · main      │ ⚠ 2 commits not pushed                                               │ done 30s ago│
-│             │                                                                      │     23 tools│
+│             │ ⚠ 3 uncommitted changes                                              │lvh… 23 tools│
+│gridsight ───│ ⚠ 2 commits not pushed                                               │ done 30s ago│
+│ · main      │                                                                      │     23 tools│
 │             │ Remove stale entry and delete local branch feature/refactor?         │             │
 │             │                                                                      │             │
 │             │     ⏎ / y  Yes                                                       │             │

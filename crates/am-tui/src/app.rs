@@ -38,6 +38,8 @@ pub enum Scope {
 /// `flat` order always equals the visual order of `Row::Worktree` entries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Row {
+    /// Blank line separating repo sections.
+    Spacer,
     Repo(String),
     Project(String),
     Ticket(String),
@@ -189,6 +191,9 @@ impl App {
                 continue;
             }
             if multi_repo || group.repo.id == am_core::model::STANDALONE_REPO_ID {
+                if !self.rows.is_empty() {
+                    self.rows.push(Row::Spacer);
+                }
                 self.rows.push(Row::Repo(group.repo.name.clone()));
             }
             let mut last_project: Option<Option<String>> = None;
