@@ -915,8 +915,15 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 }
                 continue;
             }
-            spans.push(Span::styled(k.to_string(), theme.bold(theme.accent)));
-            spans.push(Span::styled(format!(" {label}  "), theme.faint()));
+            // Actions the selected worktree can't take stay in place, dimmed.
+            if app.key_available(k) {
+                spans.push(Span::styled(k.to_string(), theme.bold(theme.accent)));
+                spans.push(Span::styled(format!(" {label}  "), theme.faint()));
+            } else {
+                let off = theme.faint().add_modifier(Modifier::DIM);
+                spans.push(Span::styled(k.to_string(), off));
+                spans.push(Span::styled(format!(" {label}  "), off));
+            }
             last_sep = false;
         }
         spans
@@ -1355,6 +1362,45 @@ mod tests {
         app.on_key(Key::Char('j'));
         assert!(matches!(app.on_key(Key::Enter), crate::app::Action::Open(_)));
         insta::assert_snapshot!("delete_in_background", row);
+    }
+
+    #[test]
+    fn key_bar_dims_actions_the_selected_worktree_lacks() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.groups[1].worktrees[0].worktree.is_main = true;
+        app.apply(snap);
+        // w1: PR + Linear ticket (no project).
+        assert!(app.key_available("g") && app.key_available("l") && app.key_available("d"));
+        assert!(!app.key_available("p"), "ticket without a project");
+        // w2: no PR, no ticket.
+        app.on_key(Key::Char('j'));
+        assert!(!app.key_available("g") && !app.key_available("l"));
+        assert!(app.key_available("⏎") && app.key_available("d"));
+        // w3: the main checkout on main can't be deleted.
+        app.on_key(Key::Char('j'));
+        assert!(!app.key_available("d"));
+        assert!(app.key_available("n") && app.key_available("?"), "global keys are always on");
+        // A row being deleted takes no row actions at all.
+        app.deleting.insert("w3".into(), false);
+        assert!(!app.key_available("⏎") && !app.key_available("t"));
+
+        // Rendered: available keys are bold accent, unavailable ones dimmed.
+        let theme = Theme::by_name("ansi");
+        app.deleting.clear();
+        let mut term = Terminal::new(TestBackend::new(100, 16)).unwrap();
+        term.draw(|f| draw(f, &app, &theme, NOW, &[])).unwrap();
+        let buf = term.backend().buffer().clone();
+        let bar: String = (0..100).map(|x| buf[(x, 15)].symbol().to_string()).collect();
+        let style_of = |needle: &str| {
+            let col = bar.chars().collect::<Vec<_>>();
+            let i = (0..col.len()).find(|&i| col[i..].iter().collect::<String>().starts_with(needle)).unwrap();
+            buf[(i as u16, 15)].style()
+        };
+        assert!(style_of("d delete").add_modifier.contains(Modifier::DIM), "{bar}");
+        assert!(style_of("g PR").add_modifier.contains(Modifier::DIM));
+        assert!(!style_of("n new").add_modifier.contains(Modifier::DIM));
+        assert!(style_of("n new").add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]

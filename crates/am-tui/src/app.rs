@@ -244,6 +244,28 @@ impl App {
         }
     }
 
+    /// Whether a key-bar action applies to the selected worktree (the key
+    /// bar dims the ones that don't). Keys that aren't per-worktree are
+    /// always available.
+    pub fn key_available(&self, key: &str) -> bool {
+        let row_key = matches!(key, "⏎" | "t" | "c" | "g" | "l" | "p" | "d");
+        if !row_key {
+            return true;
+        }
+        let Some(v) = self.selected_view() else { return false };
+        if self.is_deleting(&v.worktree.id) {
+            return false;
+        }
+        let w = &v.worktree;
+        match key {
+            "g" => v.pr.is_some(),
+            "l" => v.linear.is_some(),
+            "p" => v.linear.as_ref().and_then(|l| l.project.as_ref()).is_some_and(|p| p.url.is_some()),
+            "d" => w.is_standalone() || !(w.is_main && (w.branch == "main" || w.branch == "master")),
+            _ => true,
+        }
+    }
+
     pub fn is_deleting(&self, id: &str) -> bool {
         self.deleting.contains_key(id)
     }
