@@ -7,14 +7,15 @@
 //! rescanning git. Git is refreshed for the worktrees whose agent just did
 //! something, plus a full sweep every polling interval.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use am_core::integrations::{Integrations, RepoBranches};
-use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Worktree, WorktreeView};
+use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Subagent, Worktree, WorktreeView};
+use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
@@ -30,6 +31,11 @@ const PROCESS_INTERVAL: Duration = Duration::from_secs(2);
 const SYNC_INTERVAL: Duration = Duration::from_secs(10);
 /// Recently finished subagents stay visible this long.
 const RECENT_SUBAGENT_MINUTES: u32 = 30;
+/// How far back a stopped subagent can still be "parked" (waiting on a
+/// background command); matches the stale cut-off for running ones.
+const PARKED_SUBAGENT_MINUTES: u32 = 120;
+/// The tool a background subagent calls to hand its final report back.
+const HANDBACK_TOOL: &str = "SubagentHandback";
 
 enum Cmd {
     Refresh { force: bool },
@@ -110,6 +116,8 @@ struct ProcData {
     has_terminal: bool,
     open_ide: Option<Ide>,
     running: Vec<RunningProcess>,
+    /// Claude Code shell commands still running here (see `parked_subagents`).
+    claude_shells: usize,
 }
 
 #[derive(Default, Clone)]
@@ -136,6 +144,8 @@ struct Worker {
     last_full: Option<Instant>,
     data_version: i64,
     last_sent: Option<Snapshot>,
+    /// Parked subagent ids last cycle, to log only when the set changes.
+    parked: HashSet<String>,
 }
 
 impl Worker {
@@ -150,6 +160,7 @@ impl Worker {
             git: HashMap::new(),
             procs: HashMap::new(),
             last_procs: None,
+            parked: HashSet::new(),
             last_sync: None,
             stack_git: HashMap::new(),
             agent_seen: HashMap::new(),
@@ -274,6 +285,24 @@ impl Worker {
             })
             .collect();
 
+        // A subagent waiting on a background command has *stopped* as far as
+        // hooks go, but its work isn't done: keep it (and the worktree) going.
+        let mut subagents = db::subagents(&self.conn, None, PARKED_SUBAGENT_MINUTES)?;
+        let shells: HashMap<&str, usize> = self.procs.iter().map(|(id, p)| (id.as_str(), p.claude_shells)).collect();
+        let parked = parked_subagents(&subagents, &views, |id| shells.get(id).copied().unwrap_or(0));
+        if parked != self.parked {
+            info!("tui", "Parked subagents (stopped, background command still running): {:?}", parked);
+            self.parked = parked.clone();
+        }
+        let views = apply_parked(views, &subagents, &parked);
+        let now = am_core::timefmt::now_unix();
+        subagents.retain_mut(|(_, s)| {
+            if parked.contains(&s.agent_id) {
+                s.running = true;
+            }
+            s.running || s.ended_at.as_deref().and_then(am_core::timefmt::parse_sqlite).is_some_and(|t| now - t <= i64::from(RECENT_SUBAGENT_MINUTES) * 60)
+        });
+
         let repos = db::repositories(&self.conn)?;
         if full_due || self.stack_git.len() != repos.len() {
             self.refresh_stack_git(&repos, &worktrees_for_stacks(&views));
@@ -283,7 +312,6 @@ impl Worker {
         if let Some(g) = self.standalone_group()? {
             groups.push(g);
         }
-        let subagents = db::subagents(&self.conn, None, RECENT_SUBAGENT_MINUTES)?;
         let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone(), stack };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());
@@ -390,6 +418,7 @@ impl Worker {
                     has_terminal: snap.has_terminal(&root),
                     open_ide: snap.open_ide(&root),
                     running: running.remove(&root).unwrap_or_default(),
+                    claude_shells: snap.claude_shell_commands(&root),
                 };
                 (w.id.clone(), data)
             })
@@ -528,4 +557,138 @@ fn stack_branches(worktrees: &[Worktree], repo_id: &str) -> Vec<stacks::Branch> 
         .filter(|w| w.repo_id == repo_id)
         .map(|w| stacks::Branch { worktree_id: w.id.clone(), name: w.branch.clone(), is_main: w.is_main })
         .collect()
+}
+
+/// Subagents that stopped without handing back a result while a Claude Code
+/// shell command is still running in their worktree: they're parked waiting
+/// on a background command and will be woken when it finishes. Only the
+/// worktree's current session counts. A finished background subagent calls
+/// `SubagentHandback`; one that just replied (no handback) has nothing left
+/// running, so it isn't caught by the shell check.
+fn parked_subagents(
+    subagents: &[(Option<String>, Subagent)],
+    views: &[WorktreeView],
+    claude_shells: impl Fn(&str) -> usize,
+) -> HashSet<String> {
+    let session: HashMap<&str, &str> = views
+        .iter()
+        .filter_map(|v| Some((v.worktree.id.as_str(), v.agent.as_ref()?.session_id.as_deref()?)))
+        .collect();
+    subagents
+        .iter()
+        .filter(|(wt, s)| {
+            let Some(wt) = wt.as_deref() else { return false };
+            !s.running
+                && s.last_tool.as_deref() != Some(HANDBACK_TOOL)
+                && session.get(wt) == Some(&s.session_id.as_str())
+                && claude_shells(wt) > 0
+        })
+        .map(|(_, s)| s.agent_id.clone())
+        .collect()
+}
+
+/// A worktree whose main turn is `done` but has a parked subagent is still
+/// `delegating`. (Display only; the DB keeps the hook-driven status.)
+fn apply_parked(mut views: Vec<WorktreeView>, subagents: &[(Option<String>, Subagent)], parked: &HashSet<String>) -> Vec<WorktreeView> {
+    if parked.is_empty() {
+        return views;
+    }
+    let busy: HashSet<&str> =
+        subagents.iter().filter(|(_, s)| parked.contains(&s.agent_id)).filter_map(|(wt, _)| wt.as_deref()).collect();
+    for v in &mut views {
+        if busy.contains(v.worktree.id.as_str())
+            && let Some(a) = v.agent.as_mut()
+            && a.status == Status::Done
+        {
+            debug!("tui", "{} shown as delegating: parked subagent", v.worktree.branch);
+            a.status = Status::Delegating;
+        }
+    }
+    views
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use am_core::model::AgentState;
+
+    fn view(id: &str, session: &str, status: Status) -> WorktreeView {
+        WorktreeView {
+            worktree: Worktree {
+                id: id.into(),
+                repo_id: "r".into(),
+                path: format!("/r/{id}"),
+                branch: id.into(),
+                name: id.into(),
+                custom_name: None,
+                is_main: false,
+                created_at: "2026-10-01 00:00:00".into(),
+            },
+            agent: Some(AgentState {
+                status,
+                session_id: Some(session.into()),
+                last_response: None,
+                is_open: true,
+                active_subagents: 0,
+                updated_at: "2026-10-11 21:00:00".into(),
+            }),
+            git: None,
+            last_commit: None,
+            pr: None,
+            linear: None,
+            has_terminal: false,
+            open_ide: None,
+            running_processes: Vec::new(),
+        }
+    }
+
+    fn sub(wt: &str, session: &str, id: &str, running: bool, last_tool: &str) -> (Option<String>, Subagent) {
+        (
+            Some(wt.into()),
+            Subagent {
+                session_id: session.into(),
+                agent_id: id.into(),
+                agent_type: Some("general-purpose".into()),
+                description: None,
+                running,
+                tool_count: 1,
+                last_tool: Some(last_tool.into()),
+                last_tool_input: None,
+                started_at: "2026-10-11 21:00:00".into(),
+                ended_at: (!running).then(|| "2026-10-11 21:05:00".into()),
+                updated_at: "2026-10-11 21:05:00".into(),
+                transcript_path: None,
+            },
+        )
+    }
+
+    #[test]
+    fn a_stopped_subagent_with_a_background_command_is_parked() {
+        let views = vec![view("w1", "s1", Status::Done), view("w2", "s2", Status::Done)];
+        let subs = vec![
+            sub("w1", "s1", "parked", false, "Bash"),
+            sub("w1", "s1", "finished", false, HANDBACK_TOOL),
+            sub("w1", "s0", "old-session", false, "Bash"),
+            sub("w1", "s1", "live", true, "Bash"),
+            // Stopped without a handback, but nothing is running in w2.
+            sub("w2", "s2", "replied", false, "Read"),
+        ];
+        let shells = |wt: &str| usize::from(wt == "w1");
+        let parked = parked_subagents(&subs, &views, shells);
+        assert_eq!(parked, HashSet::from(["parked".to_string()]));
+
+        let views = apply_parked(views, &subs, &parked);
+        assert_eq!(views[0].status(), Some(Status::Delegating), "done + parked subagent → delegating");
+        assert_eq!(views[1].status(), Some(Status::Done));
+    }
+
+    #[test]
+    fn only_done_is_promoted() {
+        let subs = vec![sub("w1", "s1", "parked", false, "Bash")];
+        let parked = HashSet::from(["parked".to_string()]);
+        for s in [Status::Executing, Status::Waiting, Status::Idle] {
+            let views = apply_parked(vec![view("w1", "s1", s)], &subs, &parked);
+            assert_eq!(views[0].status(), Some(s), "{s:?} is left alone");
+        }
+    }
 }

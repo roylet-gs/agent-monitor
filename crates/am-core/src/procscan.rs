@@ -125,6 +125,18 @@ impl ProcessSnapshot {
             .any(|p| is_interactive_shell(p) && cwd_belongs_to(p.cwd.as_deref(), &root, has_git_entry))
     }
 
+    /// Claude Code shell commands running in `worktree_root` (not in a
+    /// worktree nested beneath it). Claude wraps every Bash tool command in
+    /// `<shell> -c source ~/.claude/shell-snapshots/…`, so while its agents are
+    /// between turns these are the background commands they're waiting on.
+    pub fn claude_shell_commands(&self, worktree_root: &Path) -> usize {
+        let root = canonical(worktree_root);
+        self.procs
+            .values()
+            .filter(|p| is_claude_shell_command(p) && cwd_belongs_to(p.cwd.as_deref(), &root, has_git_entry))
+            .count()
+    }
+
     /// Which editor, if any, has `worktree_root` open. See the module docs for
     /// the heuristic and its limits.
     pub fn open_ide(&self, worktree_root: &Path) -> Option<Ide> {
@@ -296,6 +308,11 @@ const SHELL_LIKE: &[&str] = &["login", "tmux"];
 fn shell_name(p: &ProcInfo) -> Option<&str> {
     let name = p.name.trim_start_matches('-');
     [name, argv0_name(p)].into_iter().find(|n| SHELLS.contains(n))
+}
+
+/// A shell Claude Code started for its Bash tool.
+fn is_claude_shell_command(p: &ProcInfo) -> bool {
+    is_shell(p) && p.argv.iter().skip(1).any(|a| a.contains("/.claude/shell-snapshots/"))
 }
 
 fn is_shell(p: &ProcInfo) -> bool {
@@ -780,6 +797,28 @@ mod tests {
         let map = ts_fixture().running_processes(&roots(&["/wt/a"]), "");
         assert_eq!(map.len(), 1);
         assert!(!map.values().flatten().any(|p| p.pid == 1003));
+    }
+
+    #[test]
+    fn counts_claude_shell_commands_per_worktree() {
+        let wrapper = "source /Users/me/.claude/shell-snapshots/snapshot-zsh-1-abc.sh 2>/dev/null || true && { pnpm test:e2e; }";
+        let snap = ProcessSnapshot::from_processes(
+            [
+                proc(1, 0, "/bin/zsh", "/wt/a", &["/bin/zsh", "-c", wrapper]),
+                proc(2, 1, "/usr/bin/node", "/wt/a", &["node", "pnpm", "test:e2e"]),
+                proc(3, 0, "/bin/zsh", "/wt/a/sub", &["/bin/zsh", "-c", wrapper]),
+                // An interactive shell and a plain `zsh -c` aren't Claude's.
+                proc(4, 0, "/bin/zsh", "/wt/a", &["-zsh"]),
+                proc(5, 0, "/bin/zsh", "/wt/a", &["/bin/zsh", "-c", "make watch"]),
+                // A non-shell mentioning the path doesn't count either.
+                proc(6, 0, "/usr/bin/cat", "/wt/a", &["cat", "/Users/me/.claude/shell-snapshots/x.sh"]),
+                proc(7, 0, "/bin/bash", "/wt/b", &["bash", "-c", wrapper]),
+            ],
+            999,
+        );
+        assert_eq!(snap.claude_shell_commands(Path::new("/wt/a")), 2);
+        assert_eq!(snap.claude_shell_commands(Path::new("/wt/b")), 1);
+        assert_eq!(snap.claude_shell_commands(Path::new("/wt/c")), 0);
     }
 
     #[test]
