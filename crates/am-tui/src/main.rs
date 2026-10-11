@@ -59,12 +59,16 @@ fn main() -> io::Result<()> {
 
 
     let collector = data::Collector::spawn(settings.clone());
-    let first_run = setup::needed(&settings);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
+    let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
+    let show_log = args.iter().any(|a| a == "--log");
     let ide = settings.ide.clone();
     let mut app = App::new(settings);
     if first_run {
         app.setup = Some(setup::Setup::new(Vec::new(), &ide));
     }
+    app.show_log = show_log;
 
     // ratatui::init enables raw mode + alt screen and installs a panic hook
     // that restores the terminal before printing the panic.
@@ -242,6 +246,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             }
                             Action::None => {}
                         }
+                        for sound in app.sounds.drain(..) {
+                            play_sound(&sound);
+                        }
                         if app.show_log && log_lines.is_empty() {
                             log_lines = tail_log(200);
                         }
@@ -257,16 +264,31 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
 
 /// macOS system sound by name; fire-and-forget (port of src/lib/audio.ts).
 fn play_sound(name: &str) {
-    if !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric()) {
+        am_core::warn!("audio", "Ignoring invalid sound name {name:?}");
         return;
     }
     let path = format!("/System/Library/Sounds/{name}.aiff");
-    let _ = std::process::Command::new("afplay")
-        .arg(path)
+    match std::process::Command::new("afplay")
+        .arg(&path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => {
+            info!("audio", "Playing {name}");
+            // Reap it (and surface afplay errors) without blocking the UI.
+            std::thread::spawn(move || {
+                if let Ok(out) = child.wait_with_output()
+                    && !out.status.success()
+                {
+                    am_core::warn!("audio", "afplay {path} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+                }
+            });
+        }
+        Err(e) => am_core::warn!("audio", "Couldn't run afplay for {name}: {e}"),
+    }
 }
 
 /// Last `n` lines of debug.log (reads at most the final 64 KiB).

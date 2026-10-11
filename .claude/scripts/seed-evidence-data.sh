@@ -15,12 +15,18 @@ mkdir -p "$AM_DATA_DIR"
 
 echo "Created isolated data dir: $AM_DATA_DIR"
 
-# Register the current repo so the TUI has data to display
-npx tsx src/cli.tsx repo add . 2>&1 || {
+# Register the current repo so the TUI has data to display.
+# Uses an installed `am`, else builds and runs it from this workspace.
+if command -v am >/dev/null 2>&1; then
+  AM=(am)
+else
+  AM=(cargo run --quiet -p am-cli --)
+fi
+"${AM[@]}" repo add . 2>&1 || {
   echo "WARNING: repo add failed, TUI may have no data" >&2
 }
 
-# Write settings so TUI skips setup wizard (loadSettings merges with defaults)
+# Write settings so the TUI skips the setup wizard (missing keys use defaults)
 echo '{"setupCompleted":true}' > "$AM_DATA_DIR/settings.json"
 
 echo "Seeded with current repo. AM_DATA_DIR=$AM_DATA_DIR"

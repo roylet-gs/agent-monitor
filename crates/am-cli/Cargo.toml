@@ -4,9 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# `am-rs` until cut-over, when it becomes `am` (the TS `am` is still installed).
 [[bin]]
-name = "am-rs"
+name = "am"
 path = "src/main.rs"
 
 [dependencies]

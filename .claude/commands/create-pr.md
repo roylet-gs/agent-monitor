@@ -4,9 +4,9 @@ Idempotent: detects existing PRs and updates them instead of failing.
 
 ## Steps
 
-1. **Build & test** — Run `pnpm build` and `pnpm test`. Stop if either fails.
+1. **Lint & test** — Run `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test --workspace`. Stop if either fails.
 
-2. **Ensure test coverage** — Check that critical paths affected by the diff have tests. If tests need to be added, add them and re-test before continuing.
+2. **Ensure test coverage** — Check that critical paths affected by the diff have tests (unit tests next to the code in `crates/*/src`, integration tests in `crates/am-hook/tests/` and `crates/am-cli/tests/`, insta snapshots for `crates/am-tui/src/ui.rs`). If tests need to be added, add them and re-test before continuing. If a UI change is intended, accept snapshots with `INSTA_UPDATE=always cargo test -p am-tui` and review the `.snap` diffs.
 
 3. **Detect existing PR** — Run:
    ```bash
@@ -18,9 +18,10 @@ Idempotent: detects existing PRs and updates them instead of failing.
    - Will update (not recreate) the PR later
 
 4. **Analyze diff for test scenarios** — Run `git diff main...HEAD --name-only` to identify all changes. Determine:
-   - Which unit test files are relevant
+   - Which crates and test modules are relevant
    - Which E2E scenarios should be tested (CLI commands, feature flows)
-   - Whether TUI screenshots are needed (if UI components changed)
+   - Whether TUI screenshots are needed (if `crates/am-tui` or anything shown on the dashboard changed)
+   - Whether docs need updating (`CLAUDE.md`, `README.md`, `STATUS_MAPPING.md` for status-rule changes)
 
 5. **Run `/capture-evidence`** — This spawns sub-agents to collect per-test evidence based on the diff analysis. The evidence markdown is returned.
 

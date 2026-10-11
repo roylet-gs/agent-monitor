@@ -4,192 +4,184 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Dev Commands
 
-- **Package manager:** pnpm (v9)
-- `pnpm build` — TypeScript compile (`tsc`) to `dist/`
-- `pnpm start` — Run directly via `tsx src/cli.tsx` (no build needed)
-- `pnpm dev` — Watch mode via `tsx --watch src/cli.tsx`
-- `pnpm test` — Run vitest test suite (`tests/` directory)
-- `pnpm test:e2e` — Run Docker-based E2E tests (builds containers, runs Playwright specs, exits)
-- `pnpm test:e2e:build` — Pre-build Docker images without running tests
-- `pnpm test:e2e:clean` — Tear down containers, remove images/volumes
-- `pnpm test:e2e:rust` — Same Docker E2E flow against the native Rust binaries (`tests/e2e/docker-rust/`); `test:e2e:rust:build` / `test:e2e:rust:clean` likewise
-- `cargo test` — Rust workspace tests (`crates/`)
-- `cargo install --path crates/am-hook` — install the native hook binary to `~/.cargo/bin`, then `am hooks install` to point Claude Code at it
-- `cargo install --path crates/am-cli` — install the native CLI as `am-rs` (becomes `am` at cut-over)
-
-### Rust rewrite (in progress)
-A native rewrite is under way; see `docs/rewrite-plan.md` for decisions and phases. The Cargo workspace lives in `crates/` alongside the TS app and shares the same SQLite DB in place:
-- `crates/am-core` — paths (`AM_DATA_DIR`-aware), single-line logger with rename-based rotation, `PRAGMA user_version` schema migrations (v1 = baseline of the TS schema, v2 = `subagents` table), and the origin-aware status rules (`status.rs`, ported from `mapEventToStatus` with tests).
-- `crates/am-hook` — `am-hook hook-event --worktree <path> --event <E> [--managed]`, a drop-in for `am hook-event` (~3 ms vs ~250 ms). Tracks each subagent by `(session_id, agent_id)` in the `subagents` table instead of a counter: tool events carrying `agent_id` update only that subagent's row and never the parent status, internal agents (empty `agent_type`) are ignored, duplicate SubagentStops are idempotent, and descriptions are read from Claude Code's `<session>/subagents/agent-<id>.meta.json`. It mirrors the live count into `agent_status.active_subagents` so the TS TUI keeps working, and publishes the same socket messages plus `subagent-update`. `AM_HOOK_CAPTURE=1` saves raw payloads to `hook-captures/`.
-- `crates/am-hook` is a lib + bin: `am_hook::run_hook_event(worktree, event)` / `parse_hook_args` hold the handling, so `am-rs hook-event` runs the same code (dispatched before clap or any other init; ~2.2 ms vs ~2.0 ms for `am-hook`).
-- `crates/am-cli` — the `am-rs` binary (becomes `am` at cut-over): a clap port of `src/cli.tsx` + `src/commands/**` with the same command names, aliases (`wt`, `a`, `ls`, `open`, `install-hooks`), flags, table/key-value/`--json` output (`output.rs`) and exit codes (usage errors exit 1 like commander). No subcommand execs `am-tui` (next to the exe, else `$PATH`). `resolve.rs` ports `resolve.ts` (also detects the repo from inside a tracked linked worktree); `store.rs` holds the CLI-only queries; `hooks_installer.rs` ports `hooks-installer.ts` (prefers `$AM_HOOK_BIN`, then `am-hook` next to the exe, `$PATH`, `~/.cargo/bin`; its marker also matches `am-rs`). Settings writes go through `am_core::settings::save`, which keeps unknown keys and the file's key order (serde_json `preserve_order`). `worktree list` refreshes the shared integration cache (batched) and sorts with `grouping::build_groups`. `worktree create|delete|sync` and `new` are stubs (exit 1, "not yet implemented in am-rs") until `am_core::worktrees` lands; `daemon` and managed-chat `agent` commands are dropped (`agent attach` resumes the worktree's latest Claude session). Integration tests (`crates/am-cli/tests/cli.rs`) run the binary with temp `AM_DATA_DIR`/`HOME` and fake `gh`/editor/Linear.
-- `crates/am-core/src/integrations/` — blocking GitHub/Linear fetchers + the shared `integration_cache` (same `kind`/`cache_key`/payload JSON as `integration-cache.ts`, so both apps read each other's rows). `Integrations` is the facade the TUI's worker thread calls (`hydrate`, `refresh_github`, `refresh_linear`, `fields_for`, `health`). GitHub uses **one `gh api graphql` per repo** (aliased `pullRequests(headRefName:)`, 40 branches/call; status from `checkRunCountsByState` so PRs with >100 checks aren't misread; StatusContexts are normalised — the TS app counted them as pending forever) and falls back to per-branch `gh pr view` on a non-network GraphQL failure. Linear batches distinct branches with aliases (25/request, honours `AM_LINEAR_API_URL`). `breaker.rs` is a per-source circuit breaker: a network-class failure (DNS, refused, "error connecting", timeouts, 5xx/429) aborts the rest of that source's cycle and backs off 30 s → 15 min; WARN only on healthy→failing, INFO on recovery, DEBUG otherwise; `force` (user refresh) bypasses it. `gh` (`GhRunner`) and HTTP (`HttpTransport`) are traits for fixture tests. The E2E mock-api answers `gh api graphql` and aliased Linear queries. Manual probe: `cargo run -p am-core --example integrations_probe -- <repo> <branch>...` (throwaway DB).
-- `crates/am-tui` — native dashboard (`cargo run -p am-tui`, or `cargo install --path crates/am-tui` → `am-tui`). `app.rs` is pure state + key handling (`Snapshot` in, `Action` out); `ui.rs` renders lazygit-style `[1] Worktrees` / `[2] Subagents` panes (stacked below `SIDE_BY_SIDE_MIN_COLS` = 100) with insta snapshot tests; `theme.rs` holds semantic colour tokens (`ansi` default, `catppuccin-mocha`, `tokyonight`, `gruvbox` via the `theme` setting); `data.rs` runs a collector thread (watches `PRAGMA data_version`, so hook writes show within ~200 ms without the socket; git per worktree only when its agent acted plus a full sweep each `pollingIntervalMs`; `procscan` every 2 s) and a separate integrations thread (publishes cached PR/Linear first, then refreshes every gh/linear interval, on new branches, and on `r`). Frames are wrapped in synchronized output and only drawn on change. Headers (repo, `═ project ═` when the top sort key is `linearProject`, `— ticket —` clusters) never take a selection index.
-- `crates/am-core/src/{grouping,gitinfo,procscan,timefmt}.rs` — sort/filter/group port of `grouping.ts`; 2-spawn git status (`status --porcelain=v2 --branch` + `log -1`); native process scan (libc on macOS, `/proc` on Linux) for terminals, VS Code/Cursor windows and dev servers; time helpers (relative times are computed at draw time).
+- **Toolchain:** stable Rust (edition 2024), Cargo workspace in `crates/`. pnpm (v9) is only used for the Docker E2E harness.
+- `cargo build --workspace` — debug build of `am`, `am-tui`, `am-hook` into `target/debug/`
+- `cargo run -p am-cli -- <args>` — run the CLI (`am`). With no args it execs `am-tui` (next to the exe, else `$PATH`), so for the dashboard use `cargo run -p am-tui`
+- `cargo test --workspace` — unit, snapshot and integration tests
+- `cargo clippy --workspace --all-targets -- -D warnings` — lint (CI fails on any warning)
+- `INSTA_UPDATE=always cargo test -p am-tui` — accept changed insta snapshots (`crates/am-tui/src/snapshots/*.snap`); review the diff before committing
+- `cargo install --path crates/am-cli && cargo install --path crates/am-tui && cargo install --path crates/am-hook` — install all three binaries to `~/.cargo/bin`, then `am hooks install` to point Claude Code at `am-hook`
+- `cargo run -p am-core --example integrations_probe -- <repo> <branch>...` — manual GitHub/Linear fetch against a throwaway DB
+- `pnpm test:e2e` — Docker E2E: build images, run the Playwright specs against the real binaries, exit with the tests' exit code
+- `pnpm test:e2e:build` — pre-build the Docker images only
+- `pnpm test:e2e:clean` — tear down containers, remove local images and volumes
 
 ## What This Is
 
-`agent-monitor` (`am`) is a terminal UI (TUI) dashboard for monitoring multiple Claude Code agent sessions across git worktrees. Built with Ink (React for CLIs) and SQLite.
+`agent-monitor` (`am`) is a terminal dashboard for monitoring Claude Code agent sessions across git worktrees, written in Rust (ratatui + crossterm, rusqlite). Version 2.x is a native rewrite of the 1.x TypeScript/Ink app and reads and writes the same SQLite DB and `settings.json` in place (history and decisions: `docs/rewrite-plan.md`).
 
-Key capabilities: live agent status tracking, GitHub PR/CI status, Linear ticket integration, worktree lifecycle management (create/delete), IDE launching, per-repo startup scripts, and managed Claude sessions (am starts and drives one headless Claude Code session per worktree).
+Key capabilities: live agent status from Claude Code hooks (including background subagents → `delegating`), GitHub PR/CI status, Linear tickets and project grouping, stacked-branch detection, worktree create/delete with a live "exists on origin" check, IDE/terminal launching with "resume last Claude session", per-repo startup scripts, dev-server detection, and a scriptable CLI with `--json` output.
 
 ## Architecture
 
+Three binaries over one library:
+
+| Crate | Binary | Role |
+|---|---|---|
+| `am-core` | (lib) | Paths, logger, DB + migrations, status rules, settings, grouping/sort, git/worktree ops, integrations, process scan, launching |
+| `am-hook` | `am-hook` (lib + bin) | Claude Code hook handler, on the per-event hot path (~3 ms) |
+| `am-tui` | `am-tui` | ratatui dashboard |
+| `am-cli` | `am` | clap CLI; no subcommand execs `am-tui` |
+
 ### Entry Flow
-`src/cli.tsx` uses `commander` for CLI parsing and routes to subcommands or launches the TUI (default action). Commands are organized as subcommand groups (`worktree`, `repo`, `settings`, `hooks`, `pr`, `linear`, `script`, `doctor`) with short aliases (`ls`, `new`, `open`). Each command handler lives in `src/commands/` and uses dynamic imports to avoid loading unnecessary modules. The TUI runs in a `while(true)` loop: Ink renders → user exits → unmount → run any pending startup script in raw terminal → re-launch Ink. This loop exists because Ink takes over stdin/stdout and can't coexist with interactive child processes.
+`am` (`crates/am-cli/src/main.rs`) first checks `argv[1] == "hook-event"` and, if so, calls `am_hook::run_hook_event` **before clap, settings or logger init** (same code as `am-hook`, ~2 ms). Otherwise clap parses the command; usage errors exit 1 (help/version exit 0), matching 1.x scripts. No subcommand `exec`s `am-tui` via `commands::find_sibling_or_path`; `am setup` passes `--setup` (reopen the wizard) and `am --watch` passes `--log` (open the log pane). Command handlers live in `crates/am-cli/src/commands/`.
 
-### State Machine
-`src/app.tsx` is the root component managing an `AppMode` string union that controls rendering:
-`dashboard` → `folder-browse` → `repo-select` → `new-worktree` → `branch-exists` → `creating-worktree` → `delete-confirm` → `deleting-worktree` → `settings` → `suggest-feature` (feature-request form) → `chat` (per-worktree Claude session view)
+`am-tui` (`crates/am-tui/src/main.rs`) loads settings, spawns the collector, shows the first-run setup wizard when `settings.json` lacks `setupCompleted: true`, and runs a single-threaded event loop: drain snapshots and launcher messages → draw only when something changed (or the clock second ticked), inside synchronized-output escapes (DEC 2026) → poll input for 100 ms. Anything slow (git, gh, launching, create/delete) runs on a spawned thread and reports back over an `mpsc` channel (`launcher::Msg`). Interactive child processes (startup script, `$EDITOR` on `settings.json`) temporarily `ratatui::restore()` and then re-init the terminal.
 
-The New Worktree form (`src/components/NewWorktreeForm.tsx`) runs a debounced (400ms) **advisory** existence check while the user types the branch name (`checkBranch` prop wired in `app.tsx` to `localBranchExists` + `remoteBranchProbe`): an inline indicator shows "✓ exists on origin — Enter will offer to pull it" (or "! exists locally only"), and when the branch exists on origin the base-branch field is skipped/dimmed since the worktree will track `origin/<branch>`. The check is advisory only — `doCreateWorktree`'s fresh-mode check remains the source of truth and routes to `branch-exists` on submit. `remoteBranchProbe` (`src/lib/git.ts`) races `git ls-remote` (SSH, can take seconds) against a `gh api` ref lookup (`ghBranchExists` in `src/lib/github.ts`, HTTPS, usually sub-second): the first "yes" wins, and a timeout/failure on one path can't produce a false "not on origin". All remote-existence consumers (the form's live check, `doCreateWorktree`, `am worktree create`) go through the probe.
+### UI State
+`app.rs` is pure state + key handling (no I/O): a `Snapshot` comes in, `on_key` returns an `Action` that `main.rs` executes. Overlays take keys in priority order: popup (any key closes) → setup wizard → modal (`modals.rs`: new worktree, branch exists, delete confirm, add repo, startup-script prompt, suggest feature, busy) → settings editor (`settings_ui.rs`) → help → dashboard keys.
+
+`rebuild_rows` turns `snapshot.groups` into visual `Row`s: repo headers (when >1 group, or for the "Other sessions" group), `═ Project ═` headers when the top enabled sort key is `linearProject` (blank line between project sections), `— ENG-123 title —` headers for a ticket shared by 2+ adjacent top-level rows, and worktree rows. Stacked branches are placed depth-first under their parent with tree prefixes (`├─ `, `└─ `) by `stack_order`; headers only consider top-level rows, so a stack is never split. **Invariant:** headers never take a selection index; `flat` order always equals the visual order of `Row::Worktree` rows. Selection follows the worktree id across refreshes; `pending_select` selects a just-created worktree once it appears. Status changes on unselected rows mark them unseen (`•`) and queue audio cues (`afplay` system sounds) for `waiting`/`done` when `audioNotifications` is on.
+
+`ui.rs` renders one full-width `─Worktrees` pane (bottom-right `N of M`), an optional log pane (`w`, tail of `debug.log`), and a one-line key bar whose hints drop by priority as the width shrinks, with a transient notice or the `⚠ <source> offline — cached` hint right-aligned. A row is: selection bar `▌`, tree prefix, status glyph, display name (nickname first, then the branch dimmed), badges (`•` unseen, `▶` running processes, `◆ N subagents`), then fixed-width columns: Linear ticket, PR (`#42` + `✓`/`✗`/`◌`, `⇡` when merged; coloured by state), git (`↑ahead ↓behind ±dirty`), last-commit age. Columns follow the `show*` settings. `theme.rs` holds semantic colour tokens for `ansi` (default, follows the terminal palette; selection is reverse video), `catppuccin-mocha`, `tokyonight` and `gruvbox`.
 
 ### Data Flow
-1. **Agent status in:** Claude Code fires hook events → `am hook-event --worktree $CLAUDE_PROJECT_DIR` receives JSON on stdin → writes to SQLite via `src/commands/hook-event.ts` → publishes to Unix domain socket for instant TUI update. `mapEventToStatus` maps events to an `AgentStatusType` (`idle`/`executing`/`planning`/`waiting`/`delegating`/`done`). To handle Claude Code's background-subagents feature, `hook-event.ts` keeps a live `active_subagents` counter on `agent_status` (`+1` on `SubagentStart`, `−1` floored at 0 on `SubagentStop`, reset on session boundaries): when a `Stop`/`idle_prompt` fires while the counter is `> 0`, the worktree reports **`delegating`** (background agents still running) instead of `waiting`/`done`, and transitions to `done` once the last subagent stops.
-2. **Pub/sub layer:** Unix domain socket at `~/.agent-monitor/am.sock` provides instant push updates. The TUI starts a server (`src/lib/pubsub-server.ts`, managed by `src/hooks/usePubSub.ts`), and `hook-event` publishes fire-and-forget messages (`src/lib/pubsub-client.ts`). Only one TUI can own the socket; others fall back to polling. SQLite remains the source of truth — pub/sub is an optimization to avoid polling delay. Messages are newline-delimited JSON, typed in `src/lib/pubsub-types.ts`.
-3. **TUI polling:** `src/hooks/useWorktrees.ts` still polls SQLite + git status (2s default), GitHub PRs (180s default), and Linear tickets (180s default) as a fallback. Uses JSON fingerprinting to skip re-renders when data hasn't changed. Filtering, sorting, and group/flat-list construction are all centralized in `src/lib/grouping.ts` and shared with the daemon (`applyWorktreeFilters`, `makeComparator`/`SORT_REGISTRY`, `buildGroups`) — the hook and daemon only pass config and consume the result, so they can't diverge. Worktree ordering is user-configurable via the `worktreeSort` setting (an ordered list of `{ key, direction, enabled }` criteria — the comparator walks enabled criteria in order, first non-zero wins). `buildGroups` produces one group per repo; repo sections keep config order unless the `repo` sort criterion is enabled, in which case they are ordered by repo name. There is **no separate grouping setting** — clustering by ticket or project is achieved purely through the sort order. `WorktreeList` renders three kinds of render-only headers: per-repo headers (when >1 repo), ticket-cluster headers (`— ENG-123 —` for tickets with 2+ adjacent worktrees), and — when the top enabled sort criterion is `linearProject` (passed down as `groupByProject`) — Linear-project cluster headers (`═ Project ═`) so the project grouping produced by the sort is visible. The invariant is that `flatWorktrees` order always equals the visual row order — headers never consume a selection index. Any worktree field read as a new sort key must be added to the `fingerprint` in `useWorktrees.ts` **and** `useDaemon.ts` (that's why `agent_status.updated_at` is fingerprinted, for the `lastActivity` sort) — the same applies to `integrationHealth`, which is appended to both fingerprints so the "cached" hint can appear.
-4. **Managed sessions (agent control):** `am agent send` / the TUI chat view spawn a **detached** `claude -p --output-format stream-json` process per turn (`src/lib/claude-session.ts`), first turn with `--session-id <uuid>`, later turns with `--resume <uuid>`. Stdout/stderr append to `~/.agent-monitor/sessions/<uuid>.jsonl`, which is the transcript store; SQLite (`managed_sessions`) tracks the session UUID, turn pid, and turn count. Because turns are detached, they survive the TUI exiting. Transcript rendering (`loadTranscript`) prefers Claude Code's own project file (`~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`) — which also covers interactive attach turns and sessions started outside am — falling back to am's stream-json log; the chat view (`src/components/ChatView.tsx` + `src/hooks/useChatTranscript.ts`) polls it for live updates. Sessions started manually at a worktree are **adopted**: hooks record their `session_id` in `agent_status`, the chat view shows their history, and the first am prompt resumes them. The detail panel (`WorktreeDetail`) surfaces `agent_status.session_id` as a "Session" row (full UUID, copyable for `claude --resume`). `discoverWorktreeSessions` finds every session started at the worktree root **or any subdirectory** (candidate project dirs matched by encoded-name prefix, confirmed via the `cwd` field inside each transcript); with multiple sessions, `c` opens a `SessionPicker` (`chat-pick` mode) before the chat, and resumed turns spawn from the session's original start directory (claude resolves `--resume` within the current project). On terminals ≥ `DETAIL_PANEL_MIN_COLS` (100) the chat renders **embedded**: `app.tsx` passes `ChatView` as `Dashboard`'s `chatPane` prop, replacing `WorktreeDetail`, with the `ActionBar` in `chatMode`; narrower terminals get the full-screen `ChatView` (which then renders its own hint bar). Regular hooks fire for managed sessions too, so `agent_status` works unchanged. `claude --resume <uuid>` (via `am agent attach` or `openClaudeInTerminal`) hands the same conversation to an interactive terminal. When the `resumeLastSession` setting is on (default), the dashboard **Open** action (`Enter`) also resumes the worktree's most-recent session (`discoverWorktreeSessions(path)[0]`): in `terminal` IDE mode the opened terminal runs `claude --resume` directly; in `vscode`/`cursor` mode `copyResumeCommand` (`src/lib/ide-launcher.ts`) **copies** the `claude --resume <id>` command to the system clipboard (via `copyToClipboard` — `pbcopy`/`clip`/`xclip`, no npm dep, no trailing newline), `handleOpen` shows a transient centered "Copied to clipboard" popup (a bordered box driven by the `notice` state in `app.tsx`, auto-clearing after ~5s, telling the user they can disable it in Settings), then **pauses ~600ms** so the popup is visible before calling `openInIde` — which opens the editor and steals focus. The user pastes the command into the editor's own terminal. We deliberately avoid keystroke injection into the integrated terminal — it needs macOS Accessibility permission and fails silently (osascript error 1002) without it.
-5. **Integration cache (offline resilience):** GitHub PR and Linear ticket lookups are cached in the `integration_cache` SQLite table by `src/lib/integration-cache.ts`, shared by `useWorktrees` and the daemon. The fetchers distinguish *absence* from *failure* (`FetchResult<T>` in `types.ts`: `fetchPrResult`/`fetchAllPrResults` in `github.ts`, `fetchLinearResult` in `linear.ts` — the older `fetchPrInfo`/`fetchLinearInfo` remain as lossy wrappers for the one-shot CLI commands), and **only a successful fetch ever writes to the cache**. A failed fetch leaves the previous value untouched, so going offline no longer blanks PR badges or Linear tickets — which used to collapse ticket/project clustering, since grouping is derived from `linear_info`. Entries have no TTL: they live until a successful fetch replaces them or `pruneIntegrationCache` drops keys whose worktree is gone (a momentarily empty worktree list is ignored so the cache can't be wiped by a transient state). Because the cache is on disk it also survives the TUI's Ink relaunch loop and daemon restarts — both call `hydrateIntegrationCache()` before their first render/broadcast. `getIntegrationHealth()` reports which source last failed; it rides on `DaemonData.integrationHealth`, is returned from `useWorktrees`, and renders as a `⚠ offline — cached` hint in the `ActionBar`. Linear fetches are deduped per distinct branch (`issueVcsBranchSearch` is workspace-wide), then fanned out to repo-scoped cache keys. A user-initiated refresh (`[r]`, or a TUI-requested daemon refresh) passes `force`, which calls `clearPrBackoff` so GitHub's per-repo exponential backoff can't silently swallow it — otherwise reconnecting and pressing refresh would leave the hint up for up to 5 minutes with no way to clear it. Timer-driven polls stay subject to the backoff.
+1. **Agent status in:** Claude Code runs `"<abs path>/am-hook" hook-event --worktree "$CLAUDE_PROJECT_DIR" --event <E>` (written by `am hooks install`) with the JSON payload on stdin. `am_hook` walks up to the directory containing `.git` (no git spawn), finds the worktree row (otherwise tracks the path as a standalone session in `standalone_sessions`), does subagent bookkeeping, then applies `am_core::status::map_event_to_status` and upserts `agent_status`. Hooks never fail Claude Code: errors are logged and the process always exits 0. Full rules: `STATUS_MAPPING.md`.
+2. **Subagents:** tracked per `(session_id, agent_id)` in the `subagents` table (schema v2), not with a counter. Tool events carrying `agent_id` come *from inside* a subagent: they update only that subagent's row (tool count, last tool + summarized input) and never move the parent status, except a permission prompt → `waiting`. Internal agents (empty `agent_type`) are ignored, duplicate `SubagentStop`s are idempotent, a running row only counts if it was updated in the last 2 h, `SessionStart` closes subagents from other sessions and `SessionEnd` closes the session's own. Descriptions come from Claude Code's `<session>/subagents/agent-<id>.meta.json`. The live count is mirrored into `agent_status.active_subagents` for 1.x compatibility. When the main turn stops with subagents still running the worktree is `delegating`; it becomes `done` when the last one stops.
+3. **TUI collector (`am-tui/src/data.rs`):** a `collector` thread holds a long-lived connection and polls `PRAGMA data_version` every 200 ms. The value changes whenever another connection (a hook) commits, so hook writes appear within ~200 ms with no socket. Per cycle: `worktrees::sync_all` every 10 s (picks up worktrees made outside am); a native process scan every 2 s (`procscan`: terminals, VS Code/Cursor windows, dev servers); git status (`gitinfo`, 2 spawns per worktree, run concurrently) only for new rows and worktrees whose `agent_status.updated_at` moved, plus a full sweep every `pollingIntervalMs` (min 5 s) or on `r`; stack inference (`stacks`) when branch tips change. It then builds views → `grouping::apply_filters` → `grouping::build_groups` → appends "Other sessions" (effectively-open standalone sessions) and sends a `Snapshot` only if it differs from the last one. The UI coalesces to the newest snapshot.
+4. **Integrations thread:** a separate `integrations` thread owns `am_core::integrations::Integrations`. It hydrates from the `integration_cache` table and publishes cached PR/Linear fields before the first fetch, then refreshes GitHub every `ghPollingIntervalMs` and Linear every `linearPollingIntervalMs` (min 30 s each), immediately when the set of branches changes, and on `r` (`force`, subject to `ghRefreshOnManual`/`linearRefreshOnManual`). After a refresh it applies Linear auto-nicknames (`linearAutoNickname`; user-set names are never touched) and sends fields + health to the collector.
+5. **Integration cache (offline resilience):** `integrations/cache.rs` uses `integration_cache(kind, cache_key, payload, fetched_at)` with `kind` `pr`/`linear`, `cache_key` `<repo_id>:<branch>`, and camelCase JSON payloads (NULL = fetched OK, none exists). **Only a successful fetch writes**; a failure leaves the old value, so PR badges and ticket/project clustering survive going offline. No TTL: rows are replaced by a later success or pruned when their worktree is gone (an empty worktree list never prunes). `breaker.rs` is a per-source circuit breaker: a network-class failure (DNS, refused, "error connecting", timeouts, 5xx/429) aborts the rest of that source's cycle and backs off 30 s doubling to 15 min; other failures mark the source failing without backoff; WARN only on healthy→failing, INFO on recovery, DEBUG in between; `force` bypasses the backoff. `health()` drives the offline hint. When GitHub has no PR, the Linear ticket's PR attachment for that branch stands in (without checks).
+6. **Stacked branches (`stacks.rs`):** a worktree's parent is the worktree whose branch its open PR targets (`baseRefName`). Failing that, git decides: the other worktree branch whose tip is among this branch's commits not yet on the trunk (`origin/<main>` when it exists), choosing the closest one (most unmerged commits). Rev-lists rerun only when a branch tip moves.
+7. **Opening (`am-tui/src/launcher.rs` + `am_core::launch`):** `Enter` opens the worktree in the `ide` setting. With `resumeLastSession` on and no session already visibly open, it resumes the newest Claude session found under `~/.claude/projects/` for the worktree root or any subdirectory (`launch::discover_sessions`, confirmed via each transcript's `cwd`). In `terminal` mode the new terminal runs `claude --resume <id>` (or `claude -c` when only hooks know a session). In `cursor`/`vscode` mode the command is copied to the clipboard (`pbcopy`/`clip`/`xclip`), a popup says so, and the editor opens after ~600 ms. There is no keystroke injection: it needs macOS Accessibility permission and fails silently (osascript error 1002) without it. When a terminal is already open at the worktree, `Enter` (terminal mode) and `t` bring the terminal app forward instead. `c` always opens a terminal running the resume command. Supported terminals: Terminal.app, iTerm2, Ghostty and Warp (picked from `$TERM_PROGRAM`), and `x-terminal-emulator` on Linux.
+8. **Worktree lifecycle (`am_core::worktrees`, called from `am-tui/src/ops.rs` and `am-cli/src/commands/lifecycle.rs`):** worktrees live at `<repo>/.claude/worktrees/<branch with / → ->`. Create = limit check → existence check (`CreateMode::Fresh` only; returns `BranchExists{local,remote}` so the TUI can show the choices) → optional local-branch delete → fetch → `git worktree add` from `origin/<base>` when it exists → sync → nickname. Modes: `Fresh`, `ReuseLocal` (`--reuse`, fast-forwards to origin first), `TrackRemote` (`--track`), `Disconnected` (`--no-track`), `DeleteAndRecreate`. The New Worktree form runs a debounced (400 ms) **advisory** live check (`check_branch`): "✓ exists on origin — Enter will offer to pull it" hides the base field, since the worktree will track `origin/<branch>`; "! exists locally only" offers reuse. Remote existence goes through `remote_branch_probe`, which races `git ls-remote` against a `gh api` ref lookup. The first "yes" wins, and a timeout or failure on one path can't produce a false "no". Delete handles a worktree, a main checkout on a non-default branch (branch only), or a stale row whose directory is gone; the TUI deletes with `force` after showing dirty/unpushed warnings. `check_worktree_limit` (`worktreeLimitEnabled` + `maxWorktrees`, per repo, excluding the main checkout) hard-blocks creation in both the TUI and the CLI. After creating, the TUI offers to run the repo's startup script (`scripts/<repo-id>.sh`) in the real terminal.
 
 ### Key Modules
-- `src/lib/db.ts` — SQLite with WAL mode. Tables: `repositories`, `worktrees`, `agent_status`, `standalone_sessions`, `managed_sessions`, `integration_cache`. Handles schema migrations.
-- `src/lib/claude-session.ts` — managed Claude sessions: spawns detached headless `claude` turns, parses stream-json transcripts
-- `src/lib/git.ts` — Git ops via `simple-git`. Worktree creation uses raw `git worktree` commands for `--force`/`-b` flag control.
-- `src/lib/github.ts` — Shells out to `gh` CLI for PR info. `fetchPrResult`/`fetchAllPrResults` return a `FetchResult` so callers can tell "no PR on this branch" from "couldn't reach GitHub" (including the per-repo exponential backoff); `fetchPrInfo`/`fetchAllPrInfo` are lossy wrappers kept for the CLI commands.
-- `src/lib/integration-cache.ts` — Shared GitHub/Linear cache used by both `useWorktrees` and the daemon so they can't diverge (same reasoning as `grouping.ts`). Owns the in-memory maps, mirrors them into `integration_cache`, and funnels every write through one `commit()` that ignores failed fetches. Exposes `hydrateIntegrationCache`, `refreshPrCache`, `refreshLinearCache`, `integrationFieldsFor` (the `pr_info`/`linear_info` enrichment, including the Linear-attachment PR fallback), `cachedLinearInfo`, `clearCachedLinear` and `getIntegrationHealth`. The PR-number cache is derived from the cached `PrInfo` rather than stored, which is what stopped the TUI and daemon drifting apart over MERGED/CLOSED eviction.
-- `src/lib/linear.ts` — Raw HTTPS POST to Linear GraphQL API (no SDK). Fetches ticket info incl. the issue's project (`LinearInfo.project`). Non-2xx responses and GraphQL `errors` bodies are treated as failures, not as "this branch has no ticket" — `fetchLinearResult` returns a `FetchResult`, `fetchLinearInfo` is the lossy wrapper.
-- `src/lib/grouping.ts` — Shared filter/sort/group core used by both `useWorktrees` and the daemon: `applyWorktreeFilters` (which worktrees show), `SORT_REGISTRY` + `makeComparator` (the customizable `worktreeSort` comparator), and `buildGroups` (one group per repo, worktrees sorted by the criteria). Display-field toggles (`showPrStatus`, `showLinearTicket`, `showGitAheadBehind`, `showLastCommit`) are threaded from settings through `app.tsx` → `Dashboard` into `WorktreeList`/`WorktreeDetail`. The `worktreeSort` list is edited in a dedicated full-page editor (`src/components/SortEditor.tsx`) that `SettingsPanel` renders in place of itself while `sortEditing` is true: a grab-to-move criteria list (Enter grabs an item, ↑↓ moves it, Enter drops) alongside a live example-preview list re-sorted by `makeComparator` so the effect of each change is visible.
-- `src/lib/hooks-installer.ts` — Writes Claude hook config to the global `~/.claude/settings.json`. Uses the native `am-hook` binary (absolute path, found via `$AM_HOOK_BIN` → `$PATH` → `~/.cargo/bin`; `AM_NO_NATIVE_HOOK=1` opts out) when present, otherwise `cat | am hook-event`. Re-running install replaces existing am entries, so it upgrades in place.
-- `src/lib/settings.ts` — Loads/saves `~/.agent-monitor/settings.json`
-- `src/lib/worktree-limit.ts` — `checkWorktreeLimit(settings, repoId, repoName)`: optional, off-by-default **per-repo** cap (`worktreeLimitEnabled` + `maxWorktrees`, default 5) on dedicated worktrees (excludes the main checkout via `is_main`). Returns a block message or null; **hard-blocks** creation in both the TUI (`app.tsx`: at the `onNew`/`handlePickRepoForCreate` entry points, before the form opens, plus a backstop in `doCreateWorktree`) and the CLI (`worktree/create.ts`, after `resolveRepo`). Shared so both enforce identically.
-- `src/lib/process.ts` — cwd-based process detection via batched `lsof`/`ps` (one call per poll cycle, sync + async variants). `getTerminalPaths`/`getIdePaths` back the `has_terminal`/`open_ide` fields. When the off-by-default `showRunningProcesses` setting is on, `getWorktreeProcesses(filter)` scans every process' cwd and `processesForWorktree` attributes each to its **most-specific** worktree root (subtree match, so monorepo dev servers in subdirectories are found and nested worktrees don't double-count), excluding shells/Claude/editors/am; results populate `WorktreeWithStatus.running_processes` in both `useWorktrees.refresh` and `daemon.buildData`. The optional `runningProcessFilter` setting narrows detection to processes whose full command line contains a case-insensitive substring (applied inside `parseWorktreeProcesses`, so non-matches never reach the payload). Pure helpers (`parseWorktreeProcesses`, `parsePsArgs`, `friendlyCommandLabel`) are unit-tested.
-- `src/lib/output.ts` — CLI output formatting (table, key-value, JSON) for non-TUI commands
-- `src/lib/resolve.ts` — Resolves CLI targets (branch names, paths) to DB entities; CWD-based repo detection
+`am-core` (`crates/am-core/src/`):
+- `paths.rs` — `app_dir()` = `$AM_DATA_DIR` or `~/.agent-monitor`; DB, settings, log and `hook-captures/` paths derive from it.
+- `log.rs` — append-only `debug.log` in `[ISO] [LEVEL] [module] message` format; `info!`/`warn!`/`debug!` macros; one line per call; rename-based rotation.
+- `db.rs` — WAL, `busy_timeout` 5 s, `journal_size_limit` 4 MB, `PRAGMA user_version` migrations (`SCHEMA_VERSION` = 2: v1 is a baseline of the 1.x schema, v2 adds `subagents`). Tables: `repositories`, `worktrees`, `agent_status`, `standalone_sessions`, `subagents`, `integration_cache` (`managed_sessions` is a 1.x leftover kept in the baseline). Holds all dashboard queries plus `data_version()`.
+- `status.rs` — `Status`, `HookEvent::from_json`, origin-aware `map_event_to_status`, `detect_git_activity`, `summarize_tool_input`.
+- `settings.rs` — `Settings` (camelCase serde, defaults mirror 1.x), parsed field by field so one bad value can't reset the rest; unknown keys are kept in `raw`; `save` keeps the file's key order (serde_json `preserve_order`) and writes via temp file + rename.
+- `model.rs` — `Repository`, `Worktree`, `AgentState`, `GitStatus`, `CommitInfo`, `PrInfo`, `LinearInfo`, `Subagent`, `WorktreeView`, `WorktreeGroup`; serde shapes match the 1.x cache payloads.
+- `grouping.rs` — `apply_filters` (`hideMainBranch`, `hideMergedClosedPrs`, `hideIdleDoneAgents`, `hideWithoutLinearTicket`; a row with an effectively-open session, meaning open and not idle for >10 min, is never hidden), `compare` over the ordered `worktreeSort` criteria (the first non-equal enabled criterion wins), `build_groups` (one group per repo, config order unless the `repo` criterion is enabled), `top_sort_key`, `is_open_now`. There is no separate grouping setting: ticket/project clustering comes from the sort order. Shared by the TUI and `am worktree list`.
+- `gitinfo.rs` — `git status --porcelain=v2 --branch` + `git log -1` per worktree; `git worktree list` parsing.
+- `stacks.rs` — stacked-branch inference (Data Flow 6).
+- `worktrees.rs` — repo add/remove, sync with `git worktree list`, branch checks + remote probe, create/delete, worktree limit, startup scripts. Blocking; never call it from the UI thread.
+- `integrations/` — `mod.rs` (the `Integrations` facade: `hydrate`, `refresh_github`, `refresh_linear`, `fields_for`, `health`; `FetchResult` tells absence from failure), `github.rs` (one `gh api graphql` per repo with aliased `pullRequests(headRefName:)`, 40 branches per call, checks from `checkRunCountsByState` plus normalised `StatusContext`s, falls back to per-branch `gh pr view` on a non-network GraphQL failure; `GhRunner` trait for fixtures), `linear.rs` (raw GraphQL over `ureq`, aliased `issueVcsBranchSearch` batches of 25 distinct branches, non-2xx or GraphQL `errors` = failure, `AM_LINEAR_API_URL` override; `HttpTransport` trait), `cache.rs`, `breaker.rs`.
+- `procscan.rs` — one process-table snapshot per scan (libproc via `libc` on macOS, `/proc` on Linux, ~2 ms): `has_terminal` (interactive shell in the worktree), `open_ide` (a VS Code/Cursor window or its integrated terminal), `running_processes` (attributed to the most-specific worktree root, filtered by `runningProcessFilter`). Nested worktrees don't light up their parent.
+- `launch.rs` — session discovery, `resolve_open_action`, `claude_command`, clipboard, editor/terminal launch.
+- `hooks_installer.rs` — writes the 11 hook events into `~/.claude/settings.json`, replacing only am's entries (`is_am_hook_command`) and keeping everyone else's. Points at the native binary by absolute path (`$AM_HOOK_BIN` → `am-hook` next to the current exe → `$PATH` → `~/.cargo/bin`; `AM_NO_NATIVE_HOOK=1` falls back to `cat | am hook-event`). `PermissionRequest` is written in Claude Code's own `--managed` shape so reinstalling is idempotent. Native commands carry a `# am hook-event (native)` comment so 1.x installs still recognise them.
+- `timefmt.rs` — SQLite UTC datetime parsing, relative/short ages (computed at draw time).
+
+`am-hook` (`crates/am-hook/src/lib.rs`): `parse_hook_args` (`-w/--worktree`, `-e/--event`, `--managed`, `--flag=value`; unknown flags are ignored) and `run_hook_event`. `AM_HOOK_CAPTURE=1` saves the raw payload per event and origin to `hook-captures/`. A passive WAL checkpoint runs on `Stop`/`SessionEnd`.
+
+`am-tui` (`crates/am-tui/src/`): `main.rs` (event loop, key mapping, audio, log tail, `$EDITOR`, startup script), `app.rs`, `ui.rs` (+ insta tests), `data.rs`, `launcher.rs`, `ops.rs` (create/delete/branch check/add repo, and the `f` feature request via `gh issue create` on `roylet-gs/agent-monitor`), `modals.rs`, `settings_ui.rs` (field list, per-key persist that keeps unknown keys, sort sub-editor), `setup.rs` (Editor → Claude hooks → Repositories → Integrations), `theme.rs`.
+
+`am-cli` (`crates/am-cli/src/`): `main.rs` (clap tree), `commands/*.rs`, `output.rs` (table / key-value / `--json`, same layout as 1.x), `resolve.rs` (branch/path → DB rows; detects the repo from the CWD, including from inside a tracked linked worktree), `store.rs` (CLI-only queries).
 
 ### CLI Commands
-Commands in `src/commands/` are organized by domain:
-- `src/commands/worktree/` — list, create, delete, open, sync, info
-- `src/commands/agent/` — send, list, log, attach, stop (managed Claude sessions)
-- `src/commands/repo/` — list, add, remove
-- `src/commands/settings/` — list, get, set, reset
-- `src/commands/hooks.ts` — install, uninstall, status
-- `src/commands/pr.ts` — show, open
-- `src/commands/linear.ts` — show, open
-- `src/commands/script.ts` — edit, remove, show
-- `src/commands/doctor.ts` — system health check
-- `src/commands/status.ts` — get/set agent status (unchanged)
-- `src/commands/hook-event.ts` — receive hook events from stdin (unchanged)
+`crates/am-cli/src/commands/`:
+- `worktree.rs` — `worktree list|info|open` (`wt` alias; `ls` and `open` shortcuts). `list` refreshes the shared integration cache (batched) and sorts with `grouping::build_groups`
+- `lifecycle.rs` — `worktree create|delete|sync`, `new` shortcut
+- `agent.rs` — `agent attach` (`a` alias): `claude --resume` the worktree's latest session in this terminal
+- `repo.rs` — `repo list|add|remove`
+- `settings.rs` — `settings list|get|set|reset` (`worktreeSort` can't be set from the CLI; `reset` keeps unknown keys such as `setupCompleted`)
+- `hooks.rs` — `hooks install|uninstall|status`, plus `install-hooks` / `uninstall-hooks`
+- `pr.rs`, `linear.rs` — `pr|linear [target]`, `show`, `open`
+- `script.rs` — `script edit|remove|show`
+- `doctor.rs` — app dir, DB, settings, hooks, native hook binary, `gh`, `ttyd`, Linear key
+- `logs.rs` — `logs [-n N] [-f] [--level] [--module] [--clear]`
+- `status.rs` — `status --worktree <path> [--set <status>]`
+- `tui.rs` — no subcommand / `setup`: exec `am-tui`
+- `hook-event` — dispatched in `main.rs` before clap (see Entry Flow)
 
 ### Persistence
-All data at `~/.agent-monitor/` (or `$AM_DATA_DIR` if set): SQLite DB (`agent-monitor.db`), `settings.json`, `debug.log` (auto-rotated), `scripts/<repo-id>.sh`, `sessions/<session-id>.jsonl` (managed session transcripts).
+All data lives in `~/.agent-monitor/` (or `$AM_DATA_DIR`): `agent-monitor.db` (SQLite, WAL), `settings.json`, `debug.log` (+ `debug.log.1` after rotation), `scripts/<repo-id>.sh`, and `hook-captures/` (only with `AM_HOOK_CAPTURE=1`). Hook config lives in `~/.claude/settings.json`. The 1.x files `am.sock` and `sessions/` are no longer used.
+
+The DB and `settings.json` are shared with 1.x in place, so never rename or drop a column or setting key. Add schema changes as a new `user_version` step in `db::migrate` (idempotent, in one transaction) and bump `SCHEMA_VERSION`. New settings take their default from `Settings::default()` when absent, and unknown keys must keep round-tripping.
 
 ### Data Isolation (`AM_DATA_DIR`)
-`src/lib/paths.ts` exports `APP_DIR` which defaults to `~/.agent-monitor/` but can be overridden via the `AM_DATA_DIR` environment variable. All other paths (`DB_PATH`, `SETTINGS_PATH`, `LOG_PATH`, `SOCKET_PATH`, etc.) derive from `APP_DIR` automatically. This enables running the app against isolated temp directories for testing without touching real user data.
+`am_core::paths::app_dir()` honours `AM_DATA_DIR` and every other path derives from it, so any binary can run against a temp directory without touching real data. Tests set it, plus a temp `HOME` so `~/.claude` is isolated too. Other env vars: `AM_HOOK_BIN`, `AM_NO_NATIVE_HOOK`, `AM_HOOK_CAPTURE`, `AM_LINEAR_API_URL`, `AM_BINARY_DIR` (npm launcher), `AM_PROCSCAN_ROOTS` (procscan probe test only).
 
 ## Testing
 
-### Unit Tests (vitest)
-Unit and component tests live in `tests/` mirroring the `src/` structure. Run with `pnpm test`. Uses `ink-testing-library` for React component tests. All tests use isolated `AM_DATA_DIR` temp directories.
+### Rust tests
+- `cargo test --workspace` runs everything; `cargo clippy --workspace --all-targets -- -D warnings` must be clean.
+- Unit tests sit next to the code (`#[cfg(test)] mod tests`). Pure logic is tested directly: status rules, grouping/sort, settings parsing, cache/breaker rules, GitHub/Linear response parsing through the `GhRunner`/`HttpTransport` fixtures, procscan with fixture processes, and `worktrees` against real temp git repos.
+- `am-tui`: `App` is driven directly with `Key`s; `ui.rs` renders to a ratatui `TestBackend` and compares against **insta** snapshots in `crates/am-tui/src/snapshots/`. After an intended UI change run `INSTA_UPDATE=always cargo test -p am-tui` and review the `.snap` diffs.
+- Integration tests: `crates/am-hook/tests/hook.rs` replays real event sequences through the binary; `crates/am-cli/tests/cli.rs` runs `am` with temp `AM_DATA_DIR`/`HOME` and fake `gh`/editor/Linear on `PATH`.
+- `log::log` is a no-op under `cfg(test)`, so tests never write the real `debug.log`. Tests that touch process-global env (`AM_DATA_DIR`) hold a lock.
 
 ### Docker E2E Tests
-End-to-end tests run the real TUI in Docker containers with mocked external services. This is the primary way to capture visual evidence (screenshots) and test full user flows.
+End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Linear mocked, driven by Playwright. Use them to capture screenshots and test full flows.
 
-**Architecture:** Three Docker containers orchestrated by `e2e/docker-compose.yml`:
-1. **`mock-api`** — HTTP server (`e2e/mock-api/server.ts`) that serves configurable fixtures for `gh` CLI and Linear API responses. Fixtures live in `e2e/mock-api/fixtures/`.
-2. **`app`** — The real TUI served via ttyd on port 7681. Uses a fake `gh` shim (`e2e/bin/gh`) that proxies to mock-api. Entrypoint (`e2e/entrypoint.sh`) seeds a git repo and skips the setup wizard.
-3. **`tests`** — Playwright container that connects to the TUI via browser, interacts with it, and captures screenshots.
+**Containers** (`e2e/docker-compose.yml`, `e2e/Dockerfile`):
+1. **`mock-api`** — `e2e/mock-api/server.ts` on port 4100, serving fixtures from `e2e/mock-api/fixtures/`.
+2. **`app`** — a `rust-build` stage (`cargo build --release --locked -p am-tui -p am-cli -p am-hook`, BuildKit cache mounts, LTO off for speed) → `debian:bookworm-slim` with git, ttyd and the fake `gh` (`e2e/bin/gh`, which proxies to mock-api). `e2e/entrypoint.sh` seeds `/work` with a local bare `origin` (`main` plus an origin-only `feature/on-origin`) and a linked worktree `feature/to-delete`, runs `am repo add /work`, and writes settings (`setupCompleted`, `hideMainBranch: false`, Linear on with a mock key, `linearAutoNickname: false`). It then replays hook events through `am hook-event` (UserPromptSubmit → SubagentStart → subagent PreToolUse → Stop), leaving `main` **delegating** with one running subagent, and fires a hook on the untracked `/home/user/my-project` to create a standalone session. ttyd port **7681** serves `am-tui` on the seeded data dir; port **7682** runs `am-tui-fresh`, which wipes `AM_DATA_DIR`/`HOME` on every connection so the setup wizard always shows. ttyd spawns a new `am-tui` per connection, so `page.reload()` restarts the process.
+3. **`tests`** — Playwright (Chromium, 1280×1080) with `TUI_URL`/`TUI_FRESH_URL`/`MOCK_API_URL`. Config `e2e/playwright.config.ts`: 45 s timeout, 1 retry, 1 worker, sequential (the specs share one DB).
 
-**Test specs** live in `tests/e2e/docker/` and use two helpers:
-- `helpers/tui-page.ts` — Page Object Model for the TUI. Methods: `goto()`, `getScreenText()` (reads xterm.js terminal buffer), `waitForText(text)`, `sendKey(key)`, `type(text)`, `screenshot(name)`.
-- `helpers/mock-api-client.ts` — `setupMock({gh?, linear?})` to inject per-test fixtures, `resetMock()` in `beforeEach` for isolation.
+**Helpers** (`tests/e2e/docker/helpers/`): `tui-page.ts` (`TuiPage`: `goto`, `getScreenText` from the xterm.js buffer, `waitForText`, `sendKey`, `type`, `screenshot(name)` → `tests/e2e/tmp/<name>.png`), `rust-tui.ts` (`RustTui extends TuiPage`: `open`, `openUrl(FRESH_URL)`, `lines`, `keyBar` (last row), `selectedRow` (the `│▌` row), `selectedName`, `selectRow(branch)`, `waitForGone`, `waitForMatch`, `createWorktree`, `press`; re-exports the mock client), `mock-api-client.ts` (`setupMock({ gh?, linear?, ghVersion?, outage? })`, and `resetMock()` for `beforeEach`).
 
-**Existing specs and coverage:**
+**Specs** (numbered so they run in a deliberate order against the shared DB; each restores any setting it changes):
 
 | Spec | What it tests |
 |------|---------------|
-| `dashboard.spec.ts` | Dashboard renders with seeded repo, shows repo name |
-| `navigation.spec.ts` | Keyboard nav: `s`→settings, `n`→new worktree, `d`→delete |
-| `pr-status.spec.ts` | Open PR, draft PR, and no-PR states (uses mock fixtures) |
-| `linear-grouping.spec.ts` | Linear project header renders above grouped worktrees; selection traverses rows only |
-| `offline-cache.spec.ts` | PR/Linear data stays on screen with the `⚠ offline — cached` hint when the API is down, and the hint clears on recovery |
-| `setup-wizard.spec.ts` | Verifies wizard is skipped when settings are seeded |
-| `screenshots.spec.ts` | Baseline screenshots: dashboard, settings, dashboard with PR |
+| `01-dashboard.spec.ts` | `─Worktrees` pane with `N of M`, `work ───` repo header, key bar hints; j/k move the `▌` selection, `Home`/`G` jump to top/bottom; `w` toggles the log pane |
+| `02-help.spec.ts` | `?` help overlay (keys + status legend) opens and closes |
+| `03-settings.spec.ts` | `s` settings editor; toggling "Resume last session on open" persists across a process restart (then restored) |
+| `04-pr-status.spec.ts` | PR column: open (`#42✓`), draft (`#43`) and no PR, via the batched `gh api graphql` path; the Linear PR attachment stands in when GitHub has no PR |
+| `05-linear.spec.ts` | ENG-123 ticket column and `— ticket —` cluster header; making Linear project the top sort key in the sort editor renders `═ Dashboard Revamp ═` (headers take no selection index), then restores |
+| `06-offline-cache.spec.ts` | Mock outage → cached PR/ticket stay, with `⚠ GitHub + Linear offline — cached` on the key bar; `r` after recovery clears it |
+| `07-subagents.spec.ts` | Delegating `main`: `◆` glyph + `◆ 1 subagent` badge; rows without running subagents have no badge |
+| `08-standalone.spec.ts` | `Other sessions ───` header with the hook-created standalone session row (executing `●`), selectable |
+| `09-new-worktree.spec.ts` | `n` form: live `✓ exists on origin` + base `tracks origin/…`, Enter → "Branch exists" choices; creating a fresh worktree adds and selects its row; an empty name is refused |
+| `10-delete.spec.ts` | Delete dialog text + cancel; the main checkout is refused; create → delete (incl. the local branch) end to end |
+| `11-setup-wizard.spec.ts` | The seeded dir skips the wizard; a fresh dir (7682) walks Editor → hooks install → add `/work` → Integrations → dashboard |
 
-**Writing new E2E specs:**
+**Writing a spec:**
 ```typescript
 import { test } from "@playwright/test";
-import { TuiPage } from "./helpers/tui-page";
-import { resetMock, setupMock } from "./helpers/mock-api-client";
+import { RustTui, resetMock, setupMock } from "./helpers/rust-tui";
 
 test.beforeEach(async () => { await resetMock(); });
 
 test("my feature works", async ({ page }) => {
   await setupMock({ gh: { number: 42, state: "OPEN" } }); // optional
-  const tui = new TuiPage(page);
-  await tui.goto();
-  await tui.waitForText("main", 10_000);
-  await tui.sendKey("s"); // navigate to settings
-  await tui.screenshot("my-feature");
+  const tui = new RustTui(page);
+  await tui.open();                   // waits for "─Worktrees" and "N of M"
+  await tui.selectRow("main");
+  await tui.sendKey("s");
+  await tui.waitForText("Settings");
+  await tui.screenshot("my-feature"); // tests/e2e/tmp/my-feature.png
 });
 ```
 
-**Adding mock fixtures:** Add JSON files to `e2e/mock-api/fixtures/`, then use `setupMock()` to select them or pass inline objects. The mock-api routes are:
-- `POST /gh` — handles gh CLI calls (args-based routing: `pr view`, `--version`)
-- `POST /linear` — handles Linear GraphQL queries (viewer, issue search)
-- `POST /mock/setup` — per-test fixture injection (`{ gh, linear, ghVersion, outage }`; `outage: true` makes both routes fail so offline behaviour can be tested)
-- `DELETE /mock/reset` — restore defaults
+**Mock API routes:** `POST /gh` (routed on args: `gh api graphql` with `-f bN=<branch>` aliases, `gh pr view`, `--version`), `POST /linear` (viewer query for key verification, aliased `issueVcsBranchSearch`), `POST /mock/setup` (`{ gh, linear, ghVersion, outage }`; `outage: true` fails both routes), `DELETE /mock/reset`, `GET /health`. New fixtures go in `e2e/mock-api/fixtures/`.
 
-**Running E2E tests:**
-```bash
-pnpm test:e2e          # Build + run + exit with test code
-pnpm test:e2e:clean    # Tear down containers after
-```
-Screenshots land in `tests/e2e/tmp/`. New specs are automatically picked up via Dockerfile `COPY` on rebuild.
+New specs are picked up by the `tests` image's `COPY` on rebuild. On this macOS setup `docker` may be Podman (`docker compose` shells out to `docker-compose` v2 against the Podman socket); the Buildah backend honours the cache mounts.
 
-**Config:** `e2e/playwright.config.ts` — single Chromium worker, 30s timeout, 1 retry, screenshots on failure. Tests run sequentially (`workers: 1`) because they share a single TUI terminal.
+## Distribution & Release
 
-#### Rust variant (`am-tui` / `am-rs` / `am-hook`)
-The same mock-api + ttyd + Playwright setup drives the native binaries. It is fully separate from the TS suite above (which is still what ships until cut-over): different Dockerfile stages, profile-gated compose services, its own spec dir and Playwright config.
-
-- **Dockerfile:** `rust-build` (`rust:1-slim-bookworm`, `cargo build --release --locked -p am-tui -p am-cli -p am-hook` with BuildKit/Buildah cache mounts for the registry and `target/`; LTO off and 16 codegen units via `CARGO_PROFILE_RELEASE_*` env, since E2E doesn't need the shipping profile — a warm rebuild is ~40 s) → `app-rust` (`debian:bookworm-slim` + git, jq, sqlite3, ttyd, the fake `gh`; binaries in `/usr/local/bin`, `am` → `am-rs`). The `test` stage also copies `tests/e2e/docker-rust/` and `e2e/playwright.rust.config.ts`. A root `.dockerignore` keeps `target/`, `node_modules/` and `.git/` out of the build context.
-- **Seeding (`e2e/entrypoint-rust.sh`):** `/work` repo with a local bare `origin` (`/srv/origin.git`) holding `main` and an origin-only `feature/on-origin` (for the live "exists on origin" check, answered by `git ls-remote`), plus a linked worktree `feature/to-delete`; `am-rs repo add /work`; settings with `setupCompleted`, Linear on (mock key) and `linearAutoNickname: false` (the mock links every branch to ENG-123, which would otherwise rename every row). Agent state goes through the real hook path: `am-rs hook-event` UserPromptSubmit → SubagentStart/PreToolUse with `agent_id`/`agent_type` (description from a seeded `<session>/subagents/agent-<id>.meta.json`) → Stop, leaving `main` **delegating** with one running subagent; a hook event on the untracked `/home/user/my-project` creates the standalone session. No tsx/sqlite seeding needed.
-- **Two ttyd ports:** `7681` serves `am-tui` on the seeded data dir (host `7691`); `7682` (host `7692`) runs `am-tui-fresh`, which wipes `AM_DATA_DIR`/`HOME` on every connection so the first-run setup wizard always shows. Both use `-t disableLeaveAlert=true` so navigation never hits a "leave site?" dialog. ttyd spawns a new `am-tui` per connection, so `page.reload()` is a process restart (fresh circuit breakers, settings re-read from disk).
-- **Compose:** `app-rust` and `tests-rust` are in the `rust` profile, so `pnpm test:e2e` never builds or starts them. `tests-rust` gets `TUI_URL=http://app-rust:7681`, `TUI_FRESH_URL=http://app-rust:7682` and runs `e2e/playwright.rust.config.ts` (45 s timeout, 1 retry, 1 worker).
-- **Specs** (`tests/e2e/docker-rust/`, numbered so they run in a deliberate order against the one shared DB; each restores any setting it changes). `helpers/rust-tui.ts` extends the shared `TuiPage` (imported from `../docker/helpers/`) with `open()`, `openUrl()`, `keyBar()` (the last row: key hints plus any right-aligned notice / offline hint), `selectedRow()` (the row marked `│▌`), `selectedName()` (its branch/path, past any `├─`/`└─` stack prefix), `selectRow(branch)`, `waitForGone()`, `waitForMatch()` and re-exports `setupMock`/`resetMock`.
-
-| Spec | What it tests |
-|------|---------------|
-| `01-dashboard.spec.ts` | Single `─Worktrees` pane (`N of M`, no Subagents pane / mode pill), `work ───` repo header, key bar; j/k move the `▌` selection, `Home`/`G` top/bottom; `w` log pane |
-| `02-help.spec.ts` | `?` help overlay (keys + status legend) opens and closes |
-| `03-settings.spec.ts` | `s` settings editor; toggling "Resume last session on open" persists across a process restart (then restored) |
-| `04-pr-status.spec.ts` | PR column in the selected row: open (`#42✓`), draft (`#43`, dim — colour only) and no-PR (no `#4…`) fixtures via the batched `gh api graphql` path; with no GitHub PR the Linear ticket's PR attachment stands in (`#42`, no checks), so the no-PR case also unlinks the ticket |
-| `05-linear.spec.ts` | ENG-123 in the selected row's ticket column, `— ticket —` cluster header; enabling Linear project as the top sort key in the sort editor renders `═ Dashboard Revamp ═` (headers take no selection index), then restores |
-| `06-offline-cache.spec.ts` | Mock outage → cached PR/ticket stay with `⚠ GitHub + Linear offline — cached` right-aligned on the key bar; `r` after recovery clears it |
-| `07-subagents.spec.ts` | Delegating `main` row: ◆ status glyph + `◆ 1 subagent` badge after the name; rows without running subagents carry no badge |
-| `08-standalone.spec.ts` | `Other sessions ───` header with the hook-created (executing `●`) standalone session row beneath it, selectable |
-| `09-new-worktree.spec.ts` | `n` form: live `✓ exists on origin` check + base `tracks origin/…`, Enter → "Branch exists" choices; creating a fresh worktree adds + selects the row; empty name refused |
-| `10-delete.spec.ts` | Delete dialog text + cancel; main checkout refused; create → delete (incl. local branch) end to end |
-| `11-setup-wizard.spec.ts` | Seeded dir skips the wizard; fresh dir walks Editor → hooks install → add `/work` → Integrations → dashboard |
-
-Screenshots are written as `tests/e2e/tmp/rust-*.png`.
-
-```bash
-pnpm test:e2e:rust        # build + run + exit with the tests-rust exit code
-pnpm test:e2e:rust:clean  # tear down (incl. profile services)
-```
-On this macOS setup `docker` is Podman (`docker compose` shells out to `docker-compose` v2 against the Podman socket); the Buildah backend honours the `--mount=type=cache` mounts.
+- **npm** (GitHub Packages, `@roylet-gs` scope): `@roylet-gs/agent-monitor` is a small Node launcher (`npm/agent-monitor/bin/am.js`) that `spawnSync`s the native `am` from the matching optional dependency `@roylet-gs/agent-monitor-{darwin,linux}-{arm64,x64}` (template `npm/platform/package.json`; each holds `bin/am`, `bin/am-tui`, `bin/am-hook`, and `os`/`cpu` make npm install only the matching one). `AM_BINARY_DIR` overrides the lookup (CI's launcher smoke test uses it). Hooks call `am-hook` by absolute path, so Node is never on the per-event path. See `npm/README.md`.
+- **Homebrew:** the repo is its own tap. `npm/agent-monitor.rb.tmpl` is rendered into `Formula/agent-monitor.rb` on each release: `brew tap roylet-gs/agent-monitor https://github.com/roylet-gs/agent-monitor && brew install agent-monitor`.
+- **CI** (`.github/workflows/ci.yml`; runs on PRs to main and is reused by publish): clippy `-D warnings` + `cargo test --workspace` on ubuntu and macOS, then builds the binaries and runs `node npm/agent-monitor/bin/am.js --version` against them.
+- **Publish** (`.github/workflows/publish.yml`; every push to main except its own `chore: release v…` commit): CI → compute the version → build release binaries for `aarch64`/`x86_64-apple-darwin` and `x86_64`/`aarch64-unknown-linux-gnu` → GitHub Release `vX.Y.Z` with `agent-monitor-vX.Y.Z-<platform>.tar.gz` + `SHA256SUMS` → publish the four platform packages, then the main package with pinned `optionalDependencies` → regenerate the formula, stamp `Cargo.toml`/`Cargo.lock`, commit `chore: release vX.Y.Z` and push.
+- **Versioning rule:** the release version is the `[workspace.package] version` in `Cargo.toml` if it is greater than the published npm version, otherwise the next patch past what's published. Bump `Cargo.toml` yourself only for a minor or major release; patch releases happen automatically on merge. All crates use `version.workspace = true`, and each binary's `--version` prints it.
+- The release profile uses LTO, one codegen unit, `strip` and `panic = "abort"`.
 
 ## Evidence Capture & PR Workflow
 
 ### Slash Commands
-- `/capture-evidence` — Spawns two parallel sub-agents: Agent A runs `pnpm test` for unit tests, Agent B runs `pnpm test:e2e` for Docker E2E tests and screenshots. Includes a coverage mapping table so Agent B knows which specs cover which components and can create new specs for gaps.
-- `/create-pr` — Idempotent PR creation: detects existing PRs via `gh pr view`, runs `/capture-evidence`, then creates or updates the PR with evidence.
+- `/capture-evidence` — Runs clippy, then spawns two parallel sub-agents: Agent A runs `cargo test --workspace`, Agent B runs `pnpm test:e2e` for Docker E2E tests and screenshots. Includes a coverage mapping (`crates/am-tui` modules → specs) so Agent B knows which specs cover the diff and can add specs for gaps.
+- `/create-pr` — Idempotent PR creation: clippy + tests, detects an existing PR via `gh pr view`, runs `/capture-evidence`, then creates or updates the PR with the evidence.
+- `/merge-main` — Merge the latest main into the branch, then clippy + tests, fix, push.
+- `/suggest-changes` — Analyse `am logs` output against the `crates/` sources and propose concrete fixes.
 
 ### Scripts (`.claude/scripts/`)
-- `upload-evidence.sh [evidence-dir]` — Uploads screenshots as assets to the `evidence-store` GitHub release via `gh release upload --clobber`. Outputs release asset URLs. Called with `tests/e2e/tmp` as the evidence dir.
-- `seed-evidence-data.sh` — **Deprecated.** For local manual debugging only. Use `pnpm test:e2e` instead.
-- `capture-tui.sh` — **Deprecated.** For local manual debugging only. Use `pnpm test:e2e` instead.
-- `cleanup-tui.sh` — **Deprecated.** For local manual debugging only. Use `pnpm test:e2e:clean` instead.
+- `upload-evidence.sh [evidence-dir]` — Uploads screenshots as assets to the `evidence-store` GitHub release via `gh release upload --clobber` (branch-prefixed names) and prints the asset URLs. Called with `tests/e2e/tmp`.
+- `seed-evidence-data.sh` — **Deprecated.** Local manual debugging only (isolated `AM_DATA_DIR` + `am repo add .`). Use `pnpm test:e2e` instead.
+- `capture-tui.sh` — **Deprecated.** Local manual debugging only (serves a command such as `am-tui` via ttyd). Use `pnpm test:e2e` instead.
+- `cleanup-tui.sh` — **Deprecated.** Local manual debugging only. Use `pnpm test:e2e:clean` instead.
 
 ### GitHub API Note
 `gh pr edit --body` triggers a "Projects (classic) is being deprecated" GraphQL error. Use the REST API instead:
@@ -199,21 +191,27 @@ gh api "repos/OWNER/REPO/pulls/NUMBER" -X PATCH -f body='...'
 
 ## Documentation
 
-When making changes to architecture, data flow, modules, or conventions, update this file (CLAUDE.md) and README.md to keep them in sync with the codebase.
+When making changes to architecture, data flow, modules, or conventions, update this file (CLAUDE.md) and README.md to keep them in sync with the codebase. Status-rule changes also go in `STATUS_MAPPING.md`.
 
 ## Logging
 
-When adding or modifying code paths, add appropriate `log()` calls to maintain observability:
-- `log("info", ...)` for key state changes (status updates, hook install/uninstall, config changes)
-- `log("debug", ...)` for branching decisions, mapping logic, and detailed context (e.g. which branch was taken in `mapEventToStatus` and why)
-- `log("warn", ...)` for recoverable errors or unexpected state
-- Always include relevant context in log messages (event names, tool names, computed values) to aid debugging
+When adding or modifying code paths, add log calls with the `am_core` macros (`use am_core::{debug, info, warn};`; the first argument is the module tag):
+- `info!("module", ...)` for key state changes (status updates, hook install/uninstall, worktree create/delete, settings changes, integration recovery)
+- `debug!("module", ...)` for branching decisions, mapping logic and timings (e.g. why `map_event_to_status` returned no change). `debug!` checks the level before formatting, so it is cheap when disabled.
+- `warn!("module", ...)` for recoverable errors or unexpected state. Don't WARN on every cycle of a repeating failure; log the transition (see `breaker.rs`).
+- Always include context (event names, tool names, paths, computed values, elapsed times).
+
+Every call becomes exactly one line (`[ISO] [LEVEL] [module] message`; embedded newlines are joined with ` ⏎ `), written with a single `O_APPEND` write so concurrent hook processes never interleave. Each binary calls `log::init(level, maxLogSizeMb)` at startup, which rotates by renaming `debug.log` → `debug.log.1` once it exceeds `maxLogSizeMb`. Never print to stdout/stderr from `am-tui` (it owns the terminal) or from the hook path.
 
 ## Conventions
 
-- ESM (`"type": "module"`) with NodeNext module resolution
-- TypeScript strict mode, all shared types in `src/lib/types.ts`
-- React 18 JSX transform (`react-jsx`)
-- Components are in `src/components/`, hooks in `src/hooks/`, core logic in `src/lib/`
-- SQLite chosen over JSON files for concurrency safety (hooks write while TUI reads)
-- Published to GitHub Packages as `@roylet-gs/agent-monitor`
+- Rust edition 2024, resolver 3; shared dependency versions in `[workspace.dependencies]`; every crate inherits the workspace version.
+- `cargo clippy --workspace --all-targets -- -D warnings` must pass, and `cargo test --workspace` must stay green on Linux and macOS.
+- **No async runtime.** Concurrency is `std::thread` + `std::sync::mpsc` channels (collector, integrations, launcher/ops jobs, scoped threads for parallel git). Blocking work never runs on the UI thread.
+- The hook path must stay fast and infallible: no clap/TUI code in `am-hook`, one SQLite connection, no git spawns, always exit 0.
+- One SQLite DB is shared by every process (hooks write while the TUI reads): WAL, busy timeout, `PRAGMA user_version` migrations. Keep the schema readable by 1.x (additive changes only).
+- External tools are shelled out to (`git`, `gh`, `osascript`/`open`, `pbcopy`) rather than reimplemented, so the user's auth and config apply. Wrap them in traits where tests need fixtures.
+- Shared types live in `am_core::model`. Dashboard logic used by both the TUI and the CLI lives in `am_core` (`grouping`, `worktrees`, `integrations`) so they can't diverge.
+- `am-tui` keeps state and key handling pure (`app.rs`, `modals.rs`, `settings_ui.rs`, `setup.rs`) and side effects in `main.rs`/`launcher.rs`/`ops.rs`/`data.rs`.
+- Unix only (macOS + Linux); `std::os::unix` APIs are fine.
+- Published to GitHub Packages as `@roylet-gs/agent-monitor` (plus the per-platform packages) and to the in-repo Homebrew tap.

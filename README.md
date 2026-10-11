@@ -5,20 +5,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" alt="Node >= 18">
+  <img src="https://img.shields.io/badge/built%20with-Rust-orange?style=flat-square" alt="Built with Rust">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
 </p>
 
 <p align="center">
-  Agent Monitor (<code>am</code>) gives you a single TUI dashboard to manage git worktrees across multiple repositories, track Claude Code agent activity in real time, and surface GitHub PR and Linear ticket status — all without leaving the terminal.
-</p>
-
----
-
-## Dashboard Preview
-
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-dashboard-pr.png" alt="Agent Monitor dashboard showing PR and Linear integration" width="800">
+  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each Claude Code agent is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
 </p>
 
 ---
@@ -28,62 +20,62 @@
 - [Quick Start](#quick-start)
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Features](#features)
-    - [Dashboard](#dashboard)
-    - [Worktree Management](#worktree-management)
-    - [Agent Monitoring](#agent-monitoring)
-    - [GitHub Integration](#github-integration)
-    - [Linear Integration](#linear-integration)
-    - [Startup Scripts](#startup-scripts)
-    - [Settings](#settings)
-- [Keyboard Shortcuts](#keyboard-shortcuts)
+- [First Run](#first-run)
+- [The Dashboard](#the-dashboard)
+  - [Keyboard Shortcuts](#keyboard-shortcuts)
+  - [Status Legend](#status-legend)
+  - [Row Badges and Columns](#row-badges-and-columns)
+  - [Stacked Branches](#stacked-branches)
+- [Worktree Management](#worktree-management)
+- [GitHub and Linear](#github-and-linear)
+- [Startup Scripts](#startup-scripts)
+- [Settings](#settings)
 - [CLI Reference](#cli-reference)
-- [Configuration](#configuration)
 - [How It Works](#how-it-works)
+- [Upgrading from 1.x](#upgrading-from-1x)
 - [Troubleshooting](#troubleshooting)
+- [Development](#development)
 
 ---
 
 ## Quick Start
 
 ```sh
-# 1. Authenticate with GitHub Packages (one-time)
-# Get the PAT from 1Password: https://start.1password.com/open/i?a=CFXLFRMHFNBWZLNUZISXEKVBPQ&v=kwxg7dvupd3om3qtfe2x3v7rqi&i=m6yhuhvalu4cwod6cwernzyfia&h=my.1password.com
-echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
-echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
-
-# 2. Install globally
+# npm (GitHub Packages; see Installation for the one-time .npmrc setup)
 npm install -g @roylet-gs/agent-monitor
 
-# 3. Launch
+# or Homebrew
+brew tap roylet-gs/agent-monitor https://github.com/roylet-gs/agent-monitor
+brew install agent-monitor
+
+# then
 am
 ```
 
-The setup wizard walks you through everything on first launch — IDE preference, repositories, Claude Code hooks, and optional integrations.
+On first launch a setup wizard picks your editor, installs the Claude Code hooks, adds your repositories and configures the GitHub/Linear integrations.
 
 ---
 
 ## Requirements
 
-- **Node.js** >= 18
-- **git** — for worktree operations
-- **gh CLI** — optional, for GitHub PR status ([install](https://cli.github.com))
-- **Claude Code** — for agent monitoring features
-- **Linear** — optional, for ticket tracking and GitHub PR status
+- **macOS or Linux** (arm64 or x64)
+- **git**
+- **Claude Code**, for agent monitoring
+- **gh CLI** (optional), for PR and CI status ([install](https://cli.github.com)); run `gh auth login` once
+- **Linear API key** (optional), for ticket tracking
+- **Node.js >= 18** only if you install through npm (the package is a small launcher for the native binary)
 
 ---
 
 ## Installation
 
-### From GitHub Packages
+Every install method gives you three binaries: `am` (the CLI, and the dashboard launcher), `am-tui` (the dashboard) and `am-hook` (the Claude Code hook handler).
 
-GitHub Packages requires authentication. Get the shared PAT from [1Password](https://start.1password.com/open/i?a=CFXLFRMHFNBWZLNUZISXEKVBPQ&v=kwxg7dvupd3om3qtfe2x3v7rqi&i=m6yhuhvalu4cwod6cwernzyfia&h=my.1password.com) (Gridsight members only).
+### npm (GitHub Packages)
 
-Configure npm (one-time):
+The package is published to GitHub Packages, which requires authentication. Get the shared PAT from [1Password](https://start.1password.com/open/i?a=CFXLFRMHFNBWZLNUZISXEKVBPQ&v=kwxg7dvupd3om3qtfe2x3v7rqi&i=m6yhuhvalu4cwod6cwernzyfia&h=my.1password.com) (Gridsight members only), then configure npm once:
 
 ```sh
-# Authenticate and point npm to GitHub Packages for the @roylet-gs scope
-# Get the PAT from 1Password: https://start.1password.com/open/i?a=CFXLFRMHFNBWZLNUZISXEKVBPQ&v=kwxg7dvupd3om3qtfe2x3v7rqi&i=m6yhuhvalu4cwod6cwernzyfia&h=my.1password.com
 echo "//npm.pkg.github.com/:_authToken=YOUR_GITHUB_PAT" >> ~/.npmrc
 echo "@roylet-gs:registry=https://npm.pkg.github.com" >> ~/.npmrc
 ```
@@ -94,365 +86,295 @@ Then install globally:
 npm install -g @roylet-gs/agent-monitor
 ```
 
-### From Source
+npm installs only the native package for your platform (`@roylet-gs/agent-monitor-darwin-arm64`, `-darwin-x64`, `-linux-arm64` or `-linux-x64`). Don't pass `--no-optional`, or the binaries won't be installed.
+
+pnpm works the same way, using the same `.npmrc`:
+
+```sh
+pnpm add -g @roylet-gs/agent-monitor
+```
+
+### Homebrew
+
+The repository is its own tap:
+
+```sh
+brew tap roylet-gs/agent-monitor https://github.com/roylet-gs/agent-monitor
+brew install agent-monitor
+```
+
+### From source
+
+Requires a stable Rust toolchain ([rustup](https://rustup.rs)).
 
 ```sh
 git clone https://github.com/roylet-gs/agent-monitor.git
 cd agent-monitor
-pnpm install
-pnpm build
-pnpm link --global
+cargo install --path crates/am-cli    # am
+cargo install --path crates/am-tui    # am-tui
+cargo install --path crates/am-hook   # am-hook
 ```
 
-### First Run
+The binaries land in `~/.cargo/bin`, which must be on your `PATH`.
 
-On first launch, the setup wizard configures:
-
-- **IDE preference** — Cursor, VS Code, or Terminal
-- **Repositories** — which repos to track
-- **Claude Code hooks** — for real-time agent status monitoring
-- **GitHub PR integration** — inline PR and CI status (requires `gh` CLI)
-- **Linear integration** — automatic ticket linking (optional)
-
-You can re-run the wizard anytime with `am setup`, or verify your setup with `am doctor`.
+Prebuilt tarballs for each platform (with `SHA256SUMS`) are also attached to every [GitHub Release](https://github.com/roylet-gs/agent-monitor/releases). Keep the three binaries in the same directory.
 
 ---
 
-## Features
+## First Run
 
-### Dashboard
+Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walks through:
 
-The main view is a two-pane layout: worktrees grouped by repository on the left, with a detail panel on the right showing agent status, the Claude session id (usable with `claude --resume <id>`), PR info, and Linear ticket data for the selected worktree.
+1. **Editor**: Cursor, VS Code or Terminal (what `Enter` opens worktrees in)
+2. **Claude Code hooks**: installs am's hooks into `~/.claude/settings.json`, pointing at the native `am-hook`
+3. **Repositories**: type a path (Tab completes) to start tracking a repo and its worktrees
+4. **Integrations**: GitHub PR status (needs `gh`) and an optional Linear API key
 
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-dashboard.png" alt="Agent Monitor dashboard" width="800">
-</p>
+Everything can be changed later: `s` for settings, `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use `am setup`. Run `am doctor` to check the setup.
 
-The dashboard auto-refreshes: agent status updates are pushed instantly via a Unix domain socket, while GitHub and Linear data polls on a configurable interval. That GitHub and Linear data is cached on disk, so it survives restarts and stays on screen when you're offline — a `⚠ offline — cached` hint appears in the action bar when the last fetch failed, and cached values are only replaced once a fetch succeeds.
+---
 
-### Worktree Management
+## The Dashboard
 
-Create, delete, and open git worktrees from the TUI or CLI. The new worktree form lets you set a branch name, base branch, and optional custom name:
+One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for Claude sessions running in directories am doesn't track. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
 
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-new-worktree.png" alt="New worktree creation form" width="800">
-</p>
+Agent status changes show up within about 200 ms of the hook firing.
 
-Key commands:
+### Keyboard Shortcuts
 
-- `am new <branch>` — create a worktree
-- `am ls` — list all worktrees
-- `am open <target>` — open in your configured IDE
+| Key | Action |
+| --- | ------ |
+| `j` / `k`, `↑` / `↓` | Move the selection |
+| `Home` / `G` (`End`) | Jump to top / bottom |
+| `Ctrl-d` / `Ctrl-u` (`PgDn` / `PgUp`) | Page down / up |
+| `Enter` | Open the worktree in your editor (and resume its last Claude session, see below) |
+| `t` | Open a terminal at the worktree (or focus the one already open there) |
+| `c` | Open a terminal running `claude --resume` for the worktree's latest session |
+| `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
+| `l` | Open the Linear ticket |
+| `p` | Open the Linear project |
+| `n` | New worktree (adds a repository first if none is tracked) |
+| `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
+| `A` | Add a repository |
+| `w` | Toggle the log pane (tail of `debug.log`) |
+| `s` | Settings |
+| `f` | Suggest a feature (files a GitHub issue via `gh`) |
+| `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
+| `?` | Help overlay with every key and the status legend |
+| `q` / `Esc` / `Ctrl-c` | Quit |
 
-By default (`resumeLastSession` setting), opening a worktree from the dashboard (`Enter`) also helps you **resume its most recent Claude session**. In Terminal IDE mode the opened terminal runs `claude --resume` directly; in VS Code / Cursor the editor opens and the `claude --resume` command is **copied to your clipboard** so you can paste it into the editor's terminal (confirmed with a popup in the dashboard). Turn it off with `am settings set resumeLastSession false`.
+**Resume last session.** With `resumeLastSession` on (the default), `Enter` also picks up the worktree's most recent Claude session (started at the worktree root or any subdirectory) unless one is already open:
 
-### Agent Monitoring
+- **Terminal** mode: the new terminal runs `claude --resume <id>` directly.
+- **Cursor / VS Code** mode: `claude --resume <id>` is copied to the clipboard, a popup tells you so, and the editor opens. Paste it into the editor's terminal. am doesn't type into the editor's terminal for you, because that needs macOS Accessibility permission and fails silently without it.
 
-Track Claude Code agent status across all your worktrees in real time. Status indicators:
+Supported terminals: Terminal.app, iTerm2, Ghostty and Warp on macOS (the one you run am in), and `x-terminal-emulator` on Linux.
 
-| Status     | Indicator   | Meaning                                             |
-| ---------- | ----------- | --------------------------------------------------- |
-| Executing  | `●` green   | Agent is running tools or writing code              |
-| Planning   | `●` cyan    | Agent is thinking / planning next steps             |
-| Waiting    | `●` yellow  | Agent is waiting for user input                     |
-| Delegating | `●` magenta | Main turn ended but background subagents still running |
-| Done       | `●` blue    | Agent finished its task                             |
-| Idle       | `◌` gray    | No active agent session                             |
+### Status Legend
 
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-standalone-session.png" alt="Standalone agent session monitoring" width="800">
-</p>
+| Glyph | Status | Meaning |
+| ----- | ------ | ------- |
+| `●` | executing | Claude is running tools or generating |
+| `◇` | planning | Claude is in plan mode |
+| `◐` | waiting | Claude needs you: a permission prompt, a question, or plan approval. The name is shown bold yellow |
+| `◆` | delegating | The main turn ended but background subagents are still running |
+| `✓` | done | Claude finished a task and needs nothing from you |
+| `○` | idle | The session started or ended without doing work |
+| `·` | no agent | No Claude session has reported for this worktree |
 
-> [!IMPORTANT]
-> Hooks must be installed for real-time agent monitoring. Run `am hooks install` or let the setup wizard handle it. Hooks write to `~/.claude/settings.json` and fire events that Agent Monitor captures.
->
-> **Faster hooks (optional):** with a Rust toolchain, `cargo install --path crates/am-hook` then `am hooks install` switches the hooks to the native `am-hook` binary (~3 ms per event instead of ~250 ms). It also tracks each background subagent individually, so `delegating` is reported correctly. `cargo install --path crates/am-cli` installs the native CLI as `am-rs` (same commands as `am`; worktree create/delete/sync still go through `am` for now).
+See [STATUS_MAPPING.md](./STATUS_MAPPING.md) for exactly which hook events produce which status.
 
-### Managed Claude Sessions
+### Row Badges and Columns
 
-Beyond monitoring, `am` can *drive* Claude Code: start one headless Claude session per worktree, send it prompts, and watch the conversation — from the TUI chat view (`c` on a worktree) or the CLI.
+After the name (a nickname, if set, followed by the branch in dim text):
 
-- `am agent send <target> "prompt"` — send a prompt (starts a session on first use); add `--wait` to print the response
-- `am agent list` — show all managed sessions and whether a turn is running
-- `am agent sessions <target>` — list every Claude session found at the worktree (root and subdirectories)
-- `am agent log <target>` — print the conversation transcript
-- `am agent attach <target>` — resume the same conversation interactively (`claude --resume`)
-- `am agent stop <target>` — stop an in-flight turn
+- `•`: the status changed since you last selected this row
+- `▶`: processes such as dev servers are running in the worktree (with `showRunningProcesses` on)
+- `◆ 2 subagents` (`◆2` on narrow terminals): background subagents currently running
 
-`send` and `log` take `--session <id-or-prefix>` to target a specific session. In the TUI, if several sessions exist at a worktree, pressing `c` opens a picker first (start dir, last activity, last prompt) so you choose which conversation to continue.
+Right-aligned columns, each of which can be turned off in settings:
 
-On wide terminals (≥100 columns) the chat opens **in place of the detail panel**, keeping the worktree list visible; input focus moves to the chat (highlighted with a cyan border) and the action bar switches to chat keys. `Esc` returns to the detail panel. On narrower terminals the chat takes over the full screen.
+- **Linear ticket**: e.g. `ENG-123`
+- **PR**: `#42` coloured by state (green open, dim draft, yellow pending or changes requested, red failing, magenta merged, dim closed), followed by the checks glyph `✓` passing, `✗` failing or `◌` pending, and `⇡` when merged
+- **Git**: `↑2` commits ahead, `↓1` behind, `±3` uncommitted changes
+- **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
 
-Each prompt runs as a detached `claude -p` process writing stream-json to `~/.agent-monitor/sessions/<session-id>.jsonl`, so closing the TUI never kills a running turn. Sessions you start manually at a worktree (e.g. `claude` in a VS Code terminal) are picked up too: the chat view shows their history and prompting from `am` resumes that same conversation. Sessions bill to your normal Claude Code login. Turns run with `--permission-mode acceptEdits` by default (`agentPermissionMode` setting); when an agent needs real interaction, press `Tab` in the chat view (or run `am agent attach`) to open the session in a terminal at that worktree, or `Shift+Tab` to open the worktree in your configured IDE.
+When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
-### GitHub Integration
+### Stacked Branches
 
-PR status appears inline next to each worktree — `PR #42 ✓`, `(draft)`, or CI status. The detail panel shows the full picture: title, review state, and check results.
+If a worktree's branch is built on top of another worktree's branch, it's listed under its parent with tree lines:
 
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-dashboard-pr.png" alt="Dashboard with PR and CI status" width="800">
-</p>
+```
+● feature/api
+├─ ● feature/api-auth
+│  └─ ○ feature/api-auth-tests
+└─ ✓ feature/api-docs
+```
 
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-pr-draft.png" alt="Dashboard with draft PR" width="800">
-</p>
+The parent comes from the open PR's base branch when it targets another worktree's branch (works with Graphite, `gh` stacks or manual stacks, and survives squash-rebases). Without such a PR, am uses git: the closest other worktree branch whose tip is among this branch's commits that aren't on `origin/<main>` yet.
 
-- `am pr` — show PR info for the current branch
-- `am pr open` — open the PR in your browser
-- Press `g` in the dashboard to open the selected worktree's PR
+---
 
-Requires the `gh` CLI to be installed and authenticated.
+## Worktree Management
 
-### Linear Integration
+Press `n` for the New Worktree form: repository (when you track several), branch name (prefilled with `defaultBranchPrefix`), an optional nickname, and the base branch. While you type the branch name, am checks in the background whether it already exists:
 
-Branch names containing Linear ticket identifiers (e.g., `feature/LIN-521-auth-flow`) are automatically linked to their tickets. The dashboard shows ticket status and priority in the detail panel.
+- `✓ exists on origin — Enter will offer to pull it`: the base field is skipped, since the worktree will track `origin/<branch>`
+- `! exists locally only — Enter will offer to reuse it`
 
-Ticket data is cached, so the clustering below stays intact when you lose your connection instead of collapsing into an unsorted list.
+If the branch exists, `Enter` offers the choices: pull the remote (track `origin/<branch>`, or reset the local branch to it), create disconnected (a new branch from the base with no tracking), reuse the existing local branch, or delete the local branch and re-create it from the base. Worktrees are created at `<repo>/.claude/worktrees/<branch>` (with `/` replaced by `-`), branching from `origin/<base>` when it exists.
 
-To cluster related work together — e.g. all worktrees for the same Linear project, ticket, or repository — enable the corresponding criterion in **Settings → Sorting & Display → Sort Order** (put "Linear project", "Linear ticket", or "Repository" at the top). Sorting handles the grouping, so there's no separate grouping toggle. When "Linear project" is the top criterion, the dashboard shows a `═ Project ═` header above each project cluster.
+Press `d` to delete. The dialog warns about uncommitted changes and unpushed commits, then asks whether to delete the local branch too. The `main`/`master` checkout can't be deleted. A main checkout on a non-default branch offers to delete just that branch, and a row whose directory has disappeared is cleaned up as a stale entry.
 
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-linear-ticket.png" alt="Linear ticket integration" width="800">
-</p>
+Worktrees created outside am (`git worktree add`, other tools) are picked up automatically within about 10 seconds.
 
-- `am linear` — show ticket info for the current branch
-- `am linear open` — open the ticket in your browser
-- Press `l` in the dashboard to open the selected ticket
+**Worktree limit.** Turn on `worktreeLimitEnabled` to cap dedicated worktrees per repository at `maxWorktrees` (default 5; the main checkout doesn't count). Creation is blocked in both the dashboard and the CLI once the cap is reached.
 
-> [!NOTE]
-> Linear integration requires a read-only API key. You can set it up through the setup wizard or via `am settings set linearApiKey <key>`. Generate one at [Linear Settings > Security & Access](https://linear.app/settings/account/security).
+---
 
-### Startup Scripts
+## GitHub and Linear
 
-Define per-repository shell scripts that run automatically after creating a new worktree. Useful for installing dependencies, setting up environment files, or running migrations.
+**GitHub** (`ghPrStatus`, needs an authenticated `gh`): am fetches the PR for every worktree branch with one batched `gh api graphql` call per repository, every `ghPollingIntervalMs` (default 3 minutes), right away when a new branch appears, and when you press `r`. You get the PR number, draft/merged/closed state, review decision and CI checks.
 
-- `am script edit` — create or open the startup script in your IDE
-- `am script show` — print script contents
-- `am script remove` — delete the startup script
+**Linear** (`linearEnabled` + `linearApiKey`): am looks up the Linear issue linked to each branch name (Linear's git-branch search, so branches named the way Linear suggests, e.g. `eng-123-fix-login`, match). You get the identifier, title, state, assignee and project. With `linearAutoNickname` on, worktrees without a nickname are named after their ticket's title. If GitHub has no PR for the branch, the PR attached to the Linear issue is shown instead (without checks).
+
+**Offline.** Results are cached in the database, and only a successful fetch replaces them. If GitHub or Linear can't be reached, the dashboard keeps showing the last good data, along with `⚠ GitHub offline — cached` (or `Linear`, or both) on the key bar. am backs off from 30 seconds up to 15 minutes while offline. Press `r` once you're back online to retry immediately; the warning clears on the next successful fetch.
+
+---
+
+## Startup Scripts
+
+Each repository can have a shell script that runs after a new worktree is created, for example to install dependencies or copy `.env` files. After creating a worktree from the dashboard, am asks whether to run it; the script runs in your terminal, in the new worktree's directory, and am returns when you press Enter.
+
+```sh
+am script edit     # create or open the current repo's script in your editor
+am script show     # print it
+am script remove   # delete it
+```
 
 Scripts are stored at `~/.agent-monitor/scripts/<repo-id>.sh`.
 
-### Settings
-
-All settings are accessible from the TUI (press `s`) or CLI. Categories include IDE preference, worktree defaults, GitHub, Linear, and polling intervals.
-
-<p align="center">
-  <img src="https://github.com/roylet-gs/agent-monitor/releases/download/evidence-store/readme-settings.png" alt="Settings screen" width="800">
-</p>
-
-Settings are stored in `~/.agent-monitor/settings.json` (or `$AM_DATA_DIR/settings.json`) and can be edited directly. The TUI also provides an **Open settings.json** shortcut at the top of the settings panel to open the file in your configured editor.
-
-CLI access: `am settings list`, `am settings get <key>`, `am settings set <key> <value>`.
-
-<details>
-<summary><strong>Example settings.json</strong></summary>
-
-```json
-{
-  "ide": "cursor",
-  "resumeLastSession": true,
-  "defaultBranchPrefix": "feature/",
-  "defaultBaseBranch": "main",
-  "pollingIntervalMs": 30000,
-  "autoSyncOnStartup": true,
-  "compactView": false,
-  "hideMainBranch": true,
-  "worktreeLimitEnabled": false,
-  "maxWorktrees": 5,
-  "ghPrStatus": true,
-  "ghPollingIntervalMs": 180000,
-  "logLevel": "info",
-  "linearEnabled": false,
-  "linearApiKey": "",
-  "linearPollingIntervalMs": 180000
-}
-```
-
-</details>
-
 ---
 
-## Keyboard Shortcuts
+## Settings
 
-| Key             | Action                   |
-| --------------- | ------------------------ |
-| `j` / `↓`       | Move down                |
-| `k` / `↑`       | Move up                  |
-| `Enter`         | Open in IDE              |
-| `c`             | Chat with Claude session |
-| `n`             | New worktree             |
-| `d`             | Delete selected worktree |
-| `s`             | Settings                 |
-| `f`             | Suggest a feature (files a GitHub issue) |
-| `r`             | Refresh / sync all repos |
-| `g`             | Open PR in browser       |
-| `l`             | Open Linear ticket       |
-| `q` / `Esc Esc` | Quit                     |
+Press `s` to open the settings editor:
+
+| Key | Action |
+| --- | ------ |
+| `j` / `k` | Move |
+| `Enter` / `Space` | Toggle, cycle a choice, or edit a text or number field |
+| `←` / `→` (`h` / `l`) | Step a choice backwards or forwards |
+| `e` | Open `settings.json` in `$VISUAL` / `$EDITOR` (default `vi`) for anything not listed |
+| `Esc` / `q` / `s` | Close |
+
+Changes are saved immediately. The **Sort order** field opens a sub-editor: `j`/`k` move, `Space` turns a criterion on or off, `d` flips its direction, `J`/`K` move it down/up, `Enter` saves, `Esc` cancels. Criteria apply in order, and the first one that tells two rows apart decides their order.
+
+Settings are stored in `~/.agent-monitor/settings.json` and can also be read or changed with `am settings` (except `worktreeSort`, which is a list).
+
+<details>
+<summary><strong>All settings</strong></summary>
+
+| Key | Default | Description |
+| --- | ------- | ----------- |
+| `ide` | `"cursor"` | What `Enter` opens worktrees in: `cursor`, `vscode`, `terminal` |
+| `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest Claude session |
+| `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
+| `defaultBaseBranch` | `"main"` | Default base branch for new worktrees |
+| `pollingIntervalMs` | `30000` | Full git refresh interval (min 5000); a worktree whose agent acts is refreshed immediately |
+| `theme` | `"ansi"` | `ansi` (follows your terminal's colours), `catppuccin-mocha`, `tokyonight`, `gruvbox` |
+| `worktreeSort` | main last › ticket › created (newest first) | Ordered sort criteria: `isMain`, `repo`, `linearTicket`, `linearProject`, `agentStatus`, `lastActivity`, `createdAt`, `branchName`, `prStatus`, `gitDirty`, each with a direction and on/off. Edit in the TUI |
+| `hideMainBranch` | `true` | Hide the `main`/`master` checkout |
+| `hideMergedClosedPrs` | `false` | Hide worktrees whose PR is merged or closed |
+| `hideIdleDoneAgents` | `false` | Hide worktrees whose agent is idle, done or absent |
+| `hideWithoutLinearTicket` | `false` | Hide worktrees with no Linear ticket |
+| `showPrStatus` | `true` | Show the PR column |
+| `showLinearTicket` | `true` | Show the ticket column |
+| `showGitAheadBehind` | `true` | Show the ahead/behind/dirty column |
+| `showLastCommit` | `true` | Show the last-commit age |
+| `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
+| `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
+| `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
+| `audioWaitingSound` | `"Glass"` | Sound for waiting |
+| `audioDoneSound` | `"Funk"` | Sound for done |
+| `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
+| `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
+| `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |
+| `linearEnabled` | `false` | Fetch Linear tickets |
+| `linearApiKey` | `""` | Linear personal API key |
+| `linearPollingIntervalMs` | `180000` | Linear refresh interval (min 30000) |
+| `linearRefreshOnManual` | `true` | Include Linear when you press `r` |
+| `linearUseDesktopApp` | `false` | Open Linear links in the desktop app (`linear://`) |
+| `linearAutoNickname` | `true` | Name worktrees after their Linear ticket title (never overwrites a name you set) |
+| `worktreeLimitEnabled` | `false` | Block creating more than `maxWorktrees` worktrees per repo |
+| `maxWorktrees` | `5` | Per-repo limit (excludes the main checkout) |
+| `logLevel` | `"info"` | `debug`, `info`, `warn`, `error` |
+| `maxLogSizeMb` | `2` | `debug.log` is rotated to `debug.log.1` past this size |
+
+Keys from 1.x that the native app no longer uses (`compactView`, `autoSyncOnStartup`, `agentPermissionMode`, `agentClaudeArgs`) are kept in the file but ignored.
+
+</details>
 
 ---
 
 ## CLI Reference
 
-All read commands support `--json` for machine-readable output. `<target>` resolves flexibly by path or branch name.
+Every command that takes a `<target>` accepts a branch name or a worktree path. `--repo <path>` picks the repository; by default it's detected from the current directory (including from inside one of its worktrees). Most read commands accept `--json`.
+
+```sh
+am                                  # launch the dashboard
+am --version
+```
 
 <details>
-<summary><strong>Worktree</strong> — <code>am worktree</code> (alias: <code>wt</code>)</summary>
+<summary><strong>Worktrees</strong> (<code>am worktree</code>, alias <code>am wt</code>)</summary>
 
-| Command                       | Description                                     | Flags                                                     |
-| ----------------------------- | ----------------------------------------------- | --------------------------------------------------------- |
-| `am worktree list`            | List worktrees with status, PR, and Linear info | `--repo <path>`, `--json`                                 |
-| `am worktree create <branch>` | Create a new worktree                           | `--repo`, `--name`, `--base`, `--reuse`, `--json`         |
-| `am worktree delete <target>` | Delete a worktree                               | `--repo`, `--force`, `--delete-branch`, `--delete-remote` |
-| `am worktree open <target>`   | Open in IDE                                     | `--repo`                                                  |
-| `am worktree sync`            | Sync git state with database                    | `--repo`                                                  |
-| `am worktree info <target>`   | Show detailed worktree info                     | `--repo`, `--json`                                        |
-
-**Short aliases:** `am ls` (list), `am new <branch>` (create), `am open <target>` (open)
+| Command | Description | Options |
+| ------- | ----------- | ------- |
+| `am worktree list` / `am ls` | List worktrees with agent status, PR and Linear info | `--repo`, `--json` |
+| `am worktree create <branch>` / `am new <branch>` | Create a worktree | `--repo`, `--name <name>`, `--base <branch>`, `--reuse` (use the existing local branch), `--track` (pull `origin/<branch>`), `--no-track` (new branch from base, no upstream), `--json` |
+| `am worktree delete <target>` | Delete a worktree | `--repo`, `--force` (even with uncommitted changes), `--delete-branch`, `--delete-remote` |
+| `am worktree open <target>` / `am open <target>` | Open in your configured editor | `--repo` |
+| `am worktree info <target>` | Detailed info for one worktree | `--repo`, `--json` |
+| `am worktree sync` | Sync the database with `git worktree list` | `--repo` |
 
 </details>
 
 <details>
-<summary><strong>Agent</strong> — <code>am agent</code> (alias: <code>a</code>)</summary>
+<summary><strong>Repositories, sessions, PRs, tickets</strong></summary>
 
-| Command                          | Description                                              | Flags                        |
-| -------------------------------- | -------------------------------------------------------- | ---------------------------- |
-| `am agent send <target> <prompt>`| Send a prompt to a worktree's Claude session             | `--repo`, `--session`, `--wait`, `--json` |
-| `am agent list`                  | List managed Claude sessions                             | `--json`                     |
-| `am agent sessions <target>`     | List sessions found at a worktree (incl. subdirectories) | `--repo`, `--json`           |
-| `am agent log <target>`          | Show the session transcript                              | `--repo`, `--session`, `--json` |
-| `am agent attach <target>`       | Resume the session interactively in this terminal        | `--repo`, `--force`          |
-| `am agent stop <target>`         | Stop the in-flight turn                                  | `--repo`                     |
-
-</details>
-
-<details>
-<summary><strong>Repo</strong> — <code>am repo</code></summary>
-
-| Command                         | Description                 | Flags    |
-| ------------------------------- | --------------------------- | -------- |
-| `am repo list`                  | List tracked repositories   | `--json` |
-| `am repo add <path>`            | Add a repository to track   | `--json` |
-| `am repo remove <name-or-path>` | Remove a tracked repository | —        |
+| Command | Description | Options |
+| ------- | ----------- | ------- |
+| `am repo list` | List tracked repositories | `--json` |
+| `am repo add <path>` | Track a repository (and its existing worktrees) | `--json` |
+| `am repo remove <name-or-path>` | Stop tracking a repository | |
+| `am agent attach <target>` (`am a attach`) | Resume the worktree's latest Claude session in this terminal (`claude --resume`) | `--repo` |
+| `am pr [target]` / `am pr show [target]` | PR info for a branch (default: current branch) | `--repo`, `--json` |
+| `am pr open [target]` | Open the PR in the browser | `--repo` |
+| `am linear [target]` / `am linear show [target]` | Linear ticket for a branch | `--repo`, `--json` |
+| `am linear open [target]` | Open the ticket | `--repo` |
+| `am script edit` / `show` / `remove` | Manage the repo's startup script | `--repo` (`show` also `--json`) |
+| `am status --worktree <path>` | Show the stored agent status | `--set <status>` (`idle`, `executing`, `planning`, `waiting`, `delegating`, `done`) |
 
 </details>
 
 <details>
-<summary><strong>Settings</strong> — <code>am settings</code></summary>
+<summary><strong>Setup and maintenance</strong></summary>
 
-| Command                         | Description                    | Flags    |
-| ------------------------------- | ------------------------------ | -------- |
-| `am settings list`              | Show all settings              | `--json` |
-| `am settings get <key>`         | Get a setting value            | `--json` |
-| `am settings set <key> <value>` | Set a setting value            | —        |
-| `am settings reset`             | Reset all settings to defaults | —        |
-
-</details>
-
-<details>
-<summary><strong>Hooks</strong> — <code>am hooks</code></summary>
-
-| Command              | Description                                         | Flags    |
-| -------------------- | --------------------------------------------------- | -------- |
-| `am hooks install`   | Install Claude hooks into `~/.claude/settings.json` | —        |
-| `am hooks uninstall` | Remove agent-monitor hooks                          | —        |
-| `am hooks status`    | Check if hooks are installed                        | `--json` |
-
-</details>
-
-<details>
-<summary><strong>PR</strong> — <code>am pr</code></summary>
-
-| Command               | Description                        | Flags              |
-| --------------------- | ---------------------------------- | ------------------ |
-| `am pr [target]`      | Show PR info for a worktree branch | `--repo`, `--json` |
-| `am pr open [target]` | Open PR in browser                 | `--repo`           |
-
-</details>
-
-<details>
-<summary><strong>Linear</strong> — <code>am linear</code></summary>
-
-| Command                   | Description             | Flags              |
-| ------------------------- | ----------------------- | ------------------ |
-| `am linear [target]`      | Show Linear ticket info | `--repo`, `--json` |
-| `am linear open [target]` | Open ticket in browser  | `--repo`           |
-
-</details>
-
-<details>
-<summary><strong>Script</strong> — <code>am script</code></summary>
-
-| Command            | Description                       | Flags              |
-| ------------------ | --------------------------------- | ------------------ |
-| `am script edit`   | Create/open startup script in IDE | `--repo`           |
-| `am script show`   | Print script contents             | `--repo`, `--json` |
-| `am script remove` | Remove startup script             | `--repo`           |
-
-</details>
-
-<details>
-<summary><strong>Doctor & Logs</strong></summary>
-
-| Command     | Description                                     | Flags                                                         |
-| ----------- | ----------------------------------------------- | ------------------------------------------------------------- |
-| `am doctor` | Check system health (hooks, gh CLI, DB, Linear) | `--json`                                                      |
-| `am logs`   | Show recent debug logs                          | `-n <lines>`, `-f` (follow), `--level`, `--module`, `--clear` |
-| `am setup`  | Re-run the setup wizard                         | —                                                             |
-
-</details>
-
----
-
-## Configuration
-
-All data is stored in `~/.agent-monitor/`:
-
-| File                   | Purpose                                          |
-| ---------------------- | ------------------------------------------------ |
-| `settings.json`        | User preferences                                 |
-| `agent-monitor.db`     | SQLite database (worktrees, repos, agent status, cached GitHub/Linear data) |
-| `scripts/<repo-id>.sh` | Per-repo startup scripts                         |
-| `debug.log`            | Debug log (auto-rotated)                         |
-| `am.sock`              | Unix domain socket for real-time updates         |
-| `sessions/<id>.jsonl`  | Managed Claude session transcripts (stream-json) |
-
-<details>
-<summary><strong>All settings</strong></summary>
-
-| Key                       | Default      | Description                                               |
-| ------------------------- | ------------ | --------------------------------------------------------- |
-| `ide`                     | `"cursor"`   | IDE to open worktrees in (`cursor`, `vscode`, `terminal`) |
-| `defaultBranchPrefix`     | `"feature/"` | Prefix for new branch names                               |
-| `defaultBaseBranch`       | `"main"`     | Default base branch for new worktrees                     |
-| `pollingIntervalMs`       | `30000`      | Dashboard polling interval (ms)                           |
-| `autoSyncOnStartup`       | `true`       | Sync git state when dashboard launches                    |
-| `compactView`             | `false`      | Use compact worktree list layout                          |
-| `hideMainBranch`          | `true`       | Hide main/master branch from worktree list                |
-| `worktreeLimitEnabled`    | `false`      | Cap dedicated worktrees per repo; blocks new creation when reached |
-| `maxWorktrees`            | `5`          | Max dedicated worktrees per repo (excludes main) when the limit is enabled |
-| `ghPrStatus`              | `true`       | Enable GitHub PR status                                   |
-| `ghPollingIntervalMs`     | `180000`     | GitHub PR polling interval (ms)                           |
-| `ghRefreshOnManual`       | `true`       | Refresh GitHub data on manual refresh                     |
-| `logLevel`                | `"info"`     | Log level (`debug`, `info`, `warn`, `error`)              |
-| `linearEnabled`           | `false`      | Enable Linear integration                                 |
-| `linearApiKey`            | `""`         | Linear API key (read-only)                                |
-| `linearPollingIntervalMs` | `180000`     | Linear polling interval (ms)                              |
-| `linearUseDesktopApp`     | `false`      | Open Linear links in desktop app                          |
-| `linearRefreshOnManual`   | `true`       | Refresh Linear data on manual refresh                     |
-| `linearAutoNickname`      | `true`       | Auto-set worktree nicknames from Linear ticket titles     |
-| `worktreeSort`            | (see below)  | Ordered list of sort criteria; edit in the TUI (Settings → Sorting & Display) or settings.json, not the CLI |
-| `hideMergedClosedPrs`     | `false`      | Hide worktrees whose PR is merged/closed                  |
-| `hideIdleDoneAgents`      | `false`      | Hide worktrees whose agent is idle/done/none              |
-| `hideWithoutLinearTicket` | `false`      | Hide worktrees with no linked Linear ticket               |
-| `showPrStatus`            | `true`       | Show the PR/CI badge on each worktree                     |
-| `showLinearTicket`        | `true`       | Show the Linear ticket badge on each worktree             |
-| `showGitAheadBehind`      | `true`       | Show git ahead/behind/dirty counts in the detail panel    |
-| `showLastCommit`          | `true`       | Show the last commit in the detail panel                  |
-| `showRunningProcesses`    | `false`      | Detect long-running processes (dev servers, etc.) per worktree and show them in the list (`▶N`) and detail panel |
-| `runningProcessFilter`    | `""`         | Track only processes whose command line contains this text (case-insensitive substring); blank shows all |
-| `maxLogSizeMb`            | `2`          | Max debug log file size in MB before rotation             |
-| `agentPermissionMode`     | `"acceptEdits"` | Permission mode for managed Claude sessions (`acceptEdits`, `plan`, `dontAsk`, `bypassPermissions`, …) |
-| `agentClaudeArgs`         | `""`         | Extra CLI args appended to managed `claude` turns         |
+| Command | Description | Options |
+| ------- | ----------- | ------- |
+| `am hooks install` (`am install-hooks`) | Install Claude Code hooks into `~/.claude/settings.json` | |
+| `am hooks uninstall` (`am uninstall-hooks`) | Remove am's hooks (other hooks are kept) | |
+| `am hooks status` | Check whether hooks are installed | `--json` |
+| `am settings list` | Show all settings | `--json` |
+| `am settings get <key>` | Get one setting | `--json` |
+| `am settings set <key> <value>` | Set one setting (booleans and numbers are parsed) | |
+| `am settings reset` | Reset all settings to defaults (keeps `setupCompleted`) | |
+| `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, Linear | `--json` |
+| `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear` |
+| `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run) | |
+| `am hook-event` | Receive a hook event on stdin (used by Claude Code; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>` |
 
 </details>
 
@@ -461,89 +383,118 @@ All data is stored in `~/.agent-monitor/`:
 ## How It Works
 
 ```
-Claude Code hooks → am hook-event → SQLite → Unix socket → TUI renders
+Claude Code hook ─▶ am-hook ─▶ SQLite (WAL) ◀── am-tui collector (PRAGMA data_version, every 200 ms)
+                                    ▲
+           gh / Linear ─▶ integrations thread (cached in the DB)
 ```
 
-1. **Claude Code fires hook events** when agent status changes (tool use, planning, idle)
-2. **`am hook-event`** receives the event via stdin, writes it to SQLite, and publishes to the Unix domain socket
-3. **The TUI** listens on the socket for instant updates, with SQLite polling as a fallback
-4. **GitHub and Linear** data is polled on separate intervals and cached in the database
+1. **Claude Code runs `am-hook`** on every hook event (11 events: tool use, prompts, stops, notifications, permission requests, session and subagent lifecycle). It takes about 3 ms, maps the event to a status and writes it to SQLite. It never blocks or fails Claude Code.
+2. **Subagents are tracked individually** by their agent id, so a background subagent's tool calls don't overwrite the parent's status, and the worktree shows **delegating** until the last one finishes.
+3. **The dashboard** watches SQLite's change counter, so a hook write shows up within about 200 ms. Git status is refreshed for worktrees whose agent just acted, plus a full sweep every `pollingIntervalMs`. Terminals, editor windows and dev servers are detected with a native process scan every 2 seconds.
+4. **GitHub and Linear** are fetched on a background thread, batched per repository, and cached in the database so the data survives restarts and outages.
 
-Only one TUI instance owns the socket at a time — others fall back to polling. SQLite (WAL mode) is the source of truth, ensuring safe concurrent reads/writes between the TUI and hook events.
+Everything is local: the database, settings and logs live in `~/.agent-monitor/` (or `$AM_DATA_DIR`).
 
-See [CLAUDE.md](./CLAUDE.md) for full architecture details.
+| File | Purpose |
+| ---- | ------- |
+| `agent-monitor.db` | SQLite database: repositories, worktrees, agent status, subagents, cached GitHub/Linear data |
+| `settings.json` | Your settings |
+| `debug.log` (`debug.log.1`) | Log, rotated at `maxLogSizeMb` |
+| `scripts/<repo-id>.sh` | Per-repo startup scripts |
+
+See [CLAUDE.md](./CLAUDE.md) for the full architecture.
 
 ---
 
-## Testing
+## Upgrading from 1.x
 
-### Unit Tests
-
-```sh
-pnpm test              # Run all vitest tests
-pnpm test:watch        # Watch mode
-pnpm test:coverage     # With coverage report
-```
-
-### Docker E2E Tests
-
-End-to-end tests run the real TUI in Docker containers with mocked GitHub and Linear APIs. Requires Docker.
+Version 2 is a native rewrite (Rust) of the TypeScript app. Install it the same way (`npm install -g @roylet-gs/agent-monitor`) or switch to Homebrew, then **run this once**:
 
 ```sh
-pnpm test:e2e          # Build containers, run Playwright specs, exit
-pnpm test:e2e:clean    # Tear down containers and images
+am hooks install
 ```
 
-The Docker setup uses three containers:
-- **mock-api** — Configurable HTTP server serving gh CLI and Linear API fixtures
-- **app** — The real TUI served via ttyd in a seeded environment
-- **tests** — Playwright (Chromium) connecting to the TUI, running specs, capturing screenshots
+Update with the same package manager you installed 1.x with (`npm install -g @roylet-gs/agent-monitor` or `pnpm add -g @roylet-gs/agent-monitor`) and check `am --version` prints `am 2.x`.
 
-Test specs live in `tests/e2e/docker/`. Screenshots are saved to `tests/e2e/tmp/`. See [CLAUDE.md](./CLAUDE.md) for details on writing new specs and configuring mock fixtures.
+This points your Claude Code hooks at the native `am-hook` binary by absolute path. Old 1.x hook entries (`am hook-event`) keep working, but on npm installs they go through the Node launcher on every event; reinstalling removes that overhead. `am doctor` reports whether the native hook is found.
+
+- **Your data carries over unchanged.** The database, settings, startup scripts and cached PR/Linear data are read in place; nothing needs migrating or re-adding.
+- **Layout:** the detail panel is gone. PR, CI, ticket and git info now sit in the worktree row, and the `?` overlay lists every key.
+- **Preview builds:** if you installed the pre-release binaries with `cargo install` (`am-rs`, `am-tui`, `am-hook` in `~/.cargo/bin`), remove them so they don't shadow the release on your `PATH`: `cargo uninstall am-cli am-tui am-hook`, then run `am hooks install` again.
+- **Removed:** managed (headless) Claude sessions and the chat view (`am agent send|list|log|stop`), and `am daemon`. Use `c` in the dashboard or `am agent attach` to resume a session in a terminal instead. The Unix socket (`am.sock`) is no longer used.
 
 ---
 
 ## Troubleshooting
 
-Run `am doctor` to check the health of your setup — it verifies hooks, `gh` CLI, database, and Linear connectivity.
+Run `am doctor` first. It checks the data directory, database, settings, Claude hooks, the native `am-hook` binary, `gh`, and your Linear key.
 
-Use `am logs` to view debug logs, with filtering by level or module:
+`am logs` shows the debug log, with filters:
 
 ```sh
-am logs --level error           # Show only errors
-am logs -f                      # Follow log output
-am logs --module hooks          # Filter by module
+am logs --level warn            # warnings and errors only
+am logs -f                      # follow
+am logs --module hook-event     # one module (e.g. hook-event, integrations, tui, sync)
+am logs -n 500 --level debug    # more history (set logLevel to debug first)
 ```
+
+You can also press `w` in the dashboard to see the log live.
 
 <details>
 <summary><strong>Common issues</strong></summary>
 
-**Agent status not updating**
+**Agent status isn't updating**
 
-- Run `am hooks status` to verify hooks are installed
-- Check that the worktree path in hook config matches your project directory
-- View logs with `am logs --level debug --module hook` for detailed event tracking
+- `am hooks status` should report the hooks as installed; if not, run `am hooks install`.
+- After upgrading from 1.x, run `am hooks install` once so the hooks use `am-hook`.
+- Check `am logs --module hook-event` while Claude is working. No lines means the hooks aren't firing; for more detail, `am settings set logLevel debug`.
+- A session in a directory am doesn't track shows up under **Other sessions**. Add the repository with `A` or `am repo add <path>`.
 
-**GitHub PR status not showing**
+**`am-tui not found` or `no native build for …`**
 
-- Ensure `gh` CLI is installed and authenticated: `gh auth status`
-- Check that `ghPrStatus` is enabled: `am settings get ghPrStatus`
+- npm: reinstall without `--no-optional`. Only macOS and Linux on arm64/x64 are supported.
+- From source: install all three crates, and make sure `~/.cargo/bin` is on your `PATH`.
 
-**Linear tickets not linking**
+**No sounds**
 
-- Verify the API key is set: `am settings get linearApiKey`
-- Ensure `linearEnabled` is `true`: `am settings set linearEnabled true`
-- Branch names must contain a Linear identifier (e.g., `LIN-521`)
+- Sounds are macOS only and off by default: `am settings set audioNotifications true` (or `s` → Notifications → Sounds).
+- Picking a sound in the settings editor plays it, so you can check your volume.
+- A sound plays when a worktree's status changes to waiting or done while `am` is open. `am logs --module audio` shows each sound played, or why it couldn't play.
 
-**`⚠ offline — cached` in the action bar**
+**PR status isn't showing**
 
-- The last GitHub or Linear fetch failed, so the dashboard is showing the last data it successfully fetched. Everything on screen is real, just not necessarily current.
-- Usual causes: no network, an expired API key, or rate limiting. Check `am doctor` and `~/.agent-monitor/debug.log`.
-- The hint clears itself on the next successful fetch — press `r` once you're back online.
+- `gh auth status` must succeed inside the repository.
+- `am settings get ghPrStatus` should be `true`; `am pr <branch>` shows what am sees.
+
+**Linear tickets aren't linking**
+
+- `am settings get linearEnabled` should be `true`, with `linearApiKey` set.
+- The branch has to be linked to the issue in Linear, which happens when it's named the way Linear suggests (containing the identifier, e.g. `eng-123-…`). `am linear <branch>` shows what am sees.
+
+**`⚠ … offline — cached` on the key bar**
+
+- The last GitHub or Linear fetch failed, so you're seeing the last data that was fetched successfully. It's real, just possibly out of date.
+- Usual causes: no network, an expired `gh` login or Linear key, or rate limiting. Check `am doctor` and `am logs --module integrations`.
+- Press `r` once you're back online; the hint clears on the next successful fetch.
 
 **Database issues**
 
-- Run `am doctor` to check DB health
-- The database auto-migrates on startup — if corrupted, delete `~/.agent-monitor/agent-monitor.db` and re-add your repos
+- `am doctor` checks that the database opens. Schema upgrades run automatically.
+- As a last resort, delete `~/.agent-monitor/agent-monitor.db` and re-add your repositories.
 
 </details>
+
+---
+
+## Development
+
+```sh
+cargo build --workspace
+cargo run -p am-tui                                     # the dashboard
+cargo run -p am-cli -- ls                               # the CLI
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+pnpm test:e2e                                           # Docker E2E (Playwright against the real binaries)
+```
+
+Set `AM_DATA_DIR=/tmp/am-dev` to run against an isolated data directory. See [CLAUDE.md](./CLAUDE.md) for the architecture, test setup and release process.

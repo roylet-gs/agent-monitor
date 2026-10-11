@@ -1,6 +1,6 @@
 # Rewrite plan: `am` in Rust
 
-Status: **Phases 0–2 complete, Phase 3 nearly complete, Phase 4 (cut-over) ready to start on your go** (2026-10-11).
+Status: **Complete — cut over to the native app in 2.0.0** (2026-10-11).
 
 Phase 0 progress:
 - [x] Cargo workspace, `am-core` (paths, logger, migrations, status rules), `am-hook` binary
@@ -30,11 +30,14 @@ Phase 3 progress:
 - [x] CI: Rust tests + clippy on Linux/macOS; manual `release-native` workflow; npm/Homebrew packaging scaffold in `npm/`
 - [x] Docker E2E against the Rust binaries: `pnpm test:e2e:rust`, 11 specs / 23 tests in `tests/e2e/docker-rust/` (TS suite untouched)
 
-Phase 4 (cut-over) — needs your go-ahead:
-- [ ] Bump the workspace to 2.0.0; rename `am-rs` → `am`; npm launcher + per-platform packages; first `release-native` run
-- [ ] Create `roylet-gs/homebrew-tap` and commit the formula
-- [ ] Remove `src/`, TS tests and Ink deps; TS E2E specs replaced by the Rust ones; rewrite CLAUDE.md/README for the Rust app
-- [ ] Drop TS-compat shims: `active_subagents` mirror, `agent-status-update` socket publishes
+Phase 4 (cut-over) — done in `feature/rust-cutover`:
+- [x] Workspace version 2.0.0; `am-rs` renamed to `am`
+- [x] TS app, TS unit tests and Ink deps removed; the Rust Docker E2E suite is now *the* E2E suite (`pnpm test:e2e`, `tests/e2e/docker/`)
+- [x] npm: `@roylet-gs/agent-monitor` is a Node launcher (`npm/agent-monitor/bin/am.js`) + per-platform optional packages with the binaries; assembled and published by `publish.yml` on merge to main (GitHub Packages, `GITHUB_TOKEN` only)
+- [x] Homebrew without a separate tap repo: `Formula/agent-monitor.rb` is regenerated in this repo on each release, so `brew tap roylet-gs/agent-monitor https://github.com/roylet-gs/agent-monitor` works
+- [x] GitHub Release per version with tarballs for darwin/linux × arm64/x64 + SHA256SUMS
+- [x] Hook no longer publishes to the Unix socket (the TUI watches `PRAGMA data_version`); the `active_subagents` mirror and the `# am hook-event (native)` marker are kept as cheap compatibility for anyone still on 1.x
+- [x] CLAUDE.md / README / STATUS_MAPPING / repo skills rewritten for Rust
 
 Bugs found in the TS app while porting (fixed in Rust; TS left as is unless noted):
 - Commit statuses (`StatusContext`) count as pending forever → PRs stuck on ◌

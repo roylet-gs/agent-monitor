@@ -77,7 +77,7 @@ pub fn set(key: &str, value: &str) {
     if key == "worktreeSort" {
         fail(
             "worktreeSort is a list and can't be set from the CLI.\n\
-             Edit it in the TUI (Settings → Sorting & Display → Sort Order) or\n\
+             Edit it in the TUI (s → Sort order) or\n\
              run `am` and use the \"Open settings.json\" action to edit it directly.",
         );
     }

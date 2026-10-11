@@ -387,6 +387,17 @@ mod tests {
     }
 
     #[test]
+    fn choosing_a_sound_previews_it() {
+        let _lock = data_dir();
+        let mut app = crate::app::App::new(Settings::default());
+        app.on_key(Key::Char('s'));
+        let ed = app.settings_editor.as_mut().unwrap();
+        goto(ed, "audioDoneSound");
+        app.on_key(Key::Right); // Funk → Glass
+        assert_eq!(app.sounds, vec!["Glass".to_string()]);
+    }
+
+    #[test]
     fn secret_is_masked() {
         let s = Settings { linear_api_key: "lin_api_abcdef1234".into(), ..Settings::default() };
         let ed = SettingsEditor::new(&s);

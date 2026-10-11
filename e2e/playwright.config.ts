@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Playwright config for the E2E specs (tests/e2e/docker/), run by the
+// `tests` compose service against `app` (am-tui behind ttyd).
 export default defineConfig({
   testDir: "../tests/e2e/docker",
   outputDir: "../tests/e2e/tmp/test-results",
@@ -7,14 +9,14 @@ export default defineConfig({
     baseURL: process.env.TUI_URL || "http://localhost:7681",
     screenshot: "on",
   },
-  timeout: 30_000,
+  timeout: 45_000,
   retries: 1,
+  // One shared seeded TUI (DB + settings.json) — specs must run sequentially.
   workers: 1,
+  fullyParallel: false,
   projects: [
     {
       name: "chromium",
-      // Taller viewport → more xterm rows so the full-height Settings panel
-      // fits without Ink overwriting lines (the default 720px clips it).
       use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 1080 } },
     },
   ],
