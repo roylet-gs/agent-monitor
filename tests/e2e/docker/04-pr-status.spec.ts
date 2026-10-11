@@ -26,6 +26,8 @@ test("open PR with passing checks", async ({ page }) => {
   await tui.selectRow("main");
   await tui.waitForText("#42✓", 15_000);
   expect(await tui.selectedRow()).toContain("#42✓");
+  // REVIEW_REQUIRED → `review` after the checks glyph.
+  await tui.waitForMatch(/│▌.*#42✓ review/m, 15_000);
   await tui.screenshot("pr-open");
 });
 
@@ -73,4 +75,72 @@ test("Linear PR attachment stands in when GitHub has no PR", async ({ page }) =>
   await tui.waitForGone("#42✓", 15_000);
   await tui.waitForMatch(/│▌.*#42(\s|$)/m, 15_000);
   expect(await tui.selectedRow()).toMatch(/#42(\s|$)/);
+});
+
+// Review state after `#N` + checks glyph. The browser is 1280px wide, so the
+// PR column has room for words (`ready`, `approved`, `changes`…) not glyphs.
+
+test("approved PR with passing checks reads ready", async ({ page }) => {
+  await setupMock({
+    gh: {
+      number: 42,
+      title: "feat: add dashboard feature",
+      url: "https://github.com/test/repo/pull/42",
+      state: "OPEN",
+      isDraft: false,
+      reviewDecision: "APPROVED",
+      mergeable: "MERGEABLE",
+      statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS", name: "build" }],
+    },
+  });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("main");
+  await tui.waitForMatch(/│▌.*#42✓ ready/m, 15_000);
+  expect(await tui.selectedRow()).toContain("#42✓ ready");
+  await tui.screenshot("pr-ready");
+});
+
+test("approved PR with a failing check reads approved", async ({ page }) => {
+  await setupMock({
+    gh: {
+      number: 42,
+      title: "feat: add dashboard feature",
+      url: "https://github.com/test/repo/pull/42",
+      state: "OPEN",
+      isDraft: false,
+      reviewDecision: "APPROVED",
+      mergeable: "MERGEABLE",
+      statusCheckRollup: [
+        { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+        { status: "COMPLETED", conclusion: "FAILURE", name: "test" },
+      ],
+    },
+  });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("main");
+  await tui.waitForMatch(/│▌.*#42✗ approved/m, 15_000);
+  expect(await tui.selectedRow()).toContain("#42✗ approved");
+  await tui.screenshot("pr-approved-checks-failing");
+});
+
+test("changes requested PR reads changes", async ({ page }) => {
+  await setupMock({
+    gh: {
+      number: 42,
+      title: "feat: add dashboard feature",
+      url: "https://github.com/test/repo/pull/42",
+      state: "OPEN",
+      isDraft: false,
+      reviewDecision: "CHANGES_REQUESTED",
+      statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS", name: "build" }],
+    },
+  });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("main");
+  await tui.waitForMatch(/│▌.*#42✓ changes/m, 15_000);
+  expect(await tui.selectedRow()).toContain("#42✓ changes");
+  await tui.screenshot("pr-changes-requested");
 });
