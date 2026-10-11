@@ -1404,6 +1404,15 @@ mod tests {
     }
 
     #[test]
+    fn delegating_is_a_green_half_circle() {
+        let theme = Theme::by_name("ansi");
+        assert_eq!(status_glyph(Some(Status::Delegating)), "◑");
+        assert_eq!(theme.status(Some(Status::Delegating)), theme.green);
+        assert_ne!(status_glyph(Some(Status::Delegating)), status_glyph(Some(Status::Waiting)));
+        assert_ne!(theme.status(Some(Status::Delegating)), theme.status(Some(Status::Waiting)));
+    }
+
+    #[test]
     fn finished_delete_clears_on_the_next_snapshot_and_failure_right_away() {
         let mut app = fixture();
         app.deleting.insert("w1".into(), false);

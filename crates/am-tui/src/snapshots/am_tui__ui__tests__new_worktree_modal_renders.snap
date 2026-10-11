@@ -1,11 +1,10 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 1228
 expression: "render(&app, 100, 16)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◆ feature/refactor ◆2                                                  ENG-412 #127✓ ✔ ↑2 ±3  4m │
+│▌◑ feature/refactor ◆2                                                  ENG-412 #127✓ ✔ ↑2 ±3  4m │
 │ ◐ fix/offline-cache                                                                           4m │
 │             ╭─New worktree ────────────────────────────────────────────────────────╮             │
 │gridsight ───│  Repo      ‹ agent-monitor ›                                         │─────────────│

@@ -11,7 +11,7 @@ How Claude Code hook events become a worktree's agent status. The rules live in 
 | `executing`  | `●`   | Claude is running tools or generating |
 | `planning`   | `◇`   | Claude is in plan mode (`permission_mode=plan`) |
 | `waiting`    | `◐`   | Claude needs the user (permission prompt, question, plan approval) and hasn't finished its task |
-| `delegating` | `◆`   | The main turn has ended but background subagents are still running |
+| `delegating` | `◑` (green) | The main turn has ended but background subagents are still running |
 | `done`       | `✓`   | Claude did work and finished; nothing needed from the user. Unlike `idle`, `done` means a turn actually executed |
 
 ## Processing Order (per hook event)

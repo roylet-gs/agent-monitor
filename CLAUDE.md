@@ -132,7 +132,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 | `04-pr-status.spec.ts` | PR column: open (`#42✓`), draft (`#43`) and no PR, via the batched `gh api graphql` path; the Linear PR attachment stands in when GitHub has no PR |
 | `05-linear.spec.ts` | ENG-123 ticket column and `— ticket —` cluster header; making Linear project the top sort key in the sort editor renders `═ Dashboard Revamp ═` (headers take no selection index), then restores |
 | `06-offline-cache.spec.ts` | Mock outage → cached PR/ticket stay, with `⚠ GitHub + Linear offline — cached` on the key bar; `r` after recovery clears it |
-| `07-subagents.spec.ts` | Delegating `main`: `◆` glyph + `◆ 1 subagent` badge; rows without running subagents have no badge |
+| `07-subagents.spec.ts` | Delegating `main`: green `◑` glyph + `◆ 1 subagent` badge; rows without running subagents have no badge |
 | `08-standalone.spec.ts` | `Other sessions ───` header with the hook-created standalone session row (executing `●`), selectable |
 | `09-new-worktree.spec.ts` | `n` form: live `✓ exists on origin` + base `tracks origin/…`, Enter → "Branch exists" choices; creating a fresh worktree adds and selects its row; an empty name is refused |
 | `10-delete.spec.ts` | Delete dialog text + cancel; the main checkout is refused; create → delete (incl. the local branch) end to end |

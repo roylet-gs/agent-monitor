@@ -177,7 +177,7 @@ Supported terminals: Terminal.app, iTerm2, Ghostty and Warp on macOS (the one yo
 | `●` | executing | Claude is running tools or generating |
 | `◇` | planning | Claude is in plan mode |
 | `◐` | waiting | Claude needs you: a permission prompt, a question, or plan approval. The name is shown bold yellow |
-| `◆` | delegating | The main turn ended but background subagents are still running |
+| `◑` (green) | delegating | The main turn ended but background subagents are still running |
 | `✓` | done | Claude finished a task and needs nothing from you |
 | `○` | idle | The session started or ended without doing work |
 | `·` | no agent | No Claude session has reported for this worktree |

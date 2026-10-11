@@ -1,11 +1,10 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 1162
 expression: "render(&app, 100, 20)"
 ---
 ╭─Worktree╭ Keys ────────────────────────────────────────────────────────────────────────╮─────────╮
 │agent-mon│    j / k  ↑ / ↓  move                                                        │─────────│
-│▌◆ featur│        home / G  top / bottom                                                │2 ±3  4m │
+│▌◑ featur│        home / G  top / bottom                                                │2 ±3  4m │
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │      4m │
 │         │           enter  open (IDE; resumes last Claude session)                     │         │
 │gridsight│               t  terminal at worktree                                        │─────────│
@@ -20,6 +19,6 @@ expression: "render(&app, 100, 20)"
 │         │               ?  toggle help                                                 │         │
 │         │          q  esc  quit                                                        │         │
 │         │                                                                              │         │
-│         │● executing  ◇ planning  ◐ waiting  ◆ delegating  ✓ done  ○ idle              │         │
+│         │● executing  ◇ planning  ◐ waiting  ◑ delegating  ✓ done  ○ idle              │         │
 ╰─────────│PR ready=approved+CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting  │─ 1 of 3 ╯
  ⏎ open  c╰──────────────────────────────────────────────────────────────────────────────╯ quit

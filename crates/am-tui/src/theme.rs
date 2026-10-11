@@ -97,7 +97,7 @@ impl Theme {
             Some(Status::Executing) => self.green,
             Some(Status::Planning) => self.blue,
             Some(Status::Waiting) => self.yellow,
-            Some(Status::Delegating) => self.magenta,
+            Some(Status::Delegating) => self.green,
             Some(Status::Done) => self.teal,
             Some(Status::Idle) | None => self.faint,
         }
@@ -132,7 +132,9 @@ pub fn status_glyph(s: Option<Status>) -> &'static str {
         Some(Status::Executing) => "●",
         Some(Status::Planning) => "◇",
         Some(Status::Waiting) => "◐",
-        Some(Status::Delegating) => "◆",
+        // Half-filled like waiting, but green: the main turn is idle while
+        // subagents work, so nothing is needed from the user.
+        Some(Status::Delegating) => "◑",
         Some(Status::Done) => "✓",
         Some(Status::Idle) => "○",
         None => "·",
