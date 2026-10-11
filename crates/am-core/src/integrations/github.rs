@@ -34,7 +34,7 @@ pub const GRAPHQL_CHUNK: usize = 40;
 pub const GRAPHQL_TIMEOUT: Duration = Duration::from_secs(15);
 pub const PR_VIEW_TIMEOUT: Duration = Duration::from_secs(5);
 
-const GH_PR_FIELDS: &str = "number,title,url,state,isDraft,reviewDecision,headRefName,statusCheckRollup";
+const GH_PR_FIELDS: &str = "number,title,url,state,isDraft,reviewDecision,headRefName,baseRefName,statusCheckRollup";
 
 // ---------------------------------------------------------------------------
 // gh runner (injectable)
@@ -216,6 +216,7 @@ struct PrFields {
     state: String,
     is_draft: bool,
     review_decision: Option<String>,
+    base_ref_name: Option<String>,
     /// Possibly only the first page of checks (see `summary`).
     checks: Vec<Check>,
     /// Status computed from GitHub's per-state counts over *all* checks; when
@@ -294,6 +295,7 @@ fn to_pr_info(pr: PrFields) -> PrInfo {
         active_check_url: active.and_then(|c| c.details_url.clone()),
         active_check_name: active.and_then(|c| c.name.clone()),
         checks_waiting,
+        base_ref_name: pr.base_ref_name,
     }
 }
 
@@ -378,7 +380,7 @@ fn build_query(n: usize) -> String {
     format!(
         "query({vars}) {{ repository(owner: $owner, name: $name) {{{body} }} }} \
          fragment pr on PullRequestConnection {{ nodes {{ number title url state isDraft reviewDecision \
-         headRefName isCrossRepository commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ \
+         headRefName baseRefName isCrossRepository commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ \
          contexts(first: 100) {{ checkRunCountsByState {{ state count }} \
          statusContextCountsByState {{ state count }} {CHECK_NODES} }} }} }} }} }} }} }}"
     )
@@ -447,6 +449,8 @@ struct GqlPr {
     #[serde(default)]
     head_ref_name: Option<String>,
     #[serde(default)]
+    base_ref_name: Option<String>,
+    #[serde(default)]
     is_cross_repository: bool,
     #[serde(default)]
     commits: Option<Value>,
@@ -472,6 +476,7 @@ impl GqlPr {
                 state: self.state,
                 is_draft: self.is_draft,
                 review_decision: self.review_decision,
+                base_ref_name: self.base_ref_name,
                 checks,
                 summary,
             },
@@ -672,6 +677,8 @@ struct GhPrView {
     #[serde(default)]
     head_ref_name: Option<String>,
     #[serde(default)]
+    base_ref_name: Option<String>,
+    #[serde(default)]
     status_check_rollup: Option<Vec<Value>>,
 }
 
@@ -717,6 +724,7 @@ pub fn fetch_pr_view(gh: &dyn GhRunner, repo_path: &Path, branch: &str) -> (Fetc
         state: pr.state,
         is_draft: pr.is_draft,
         review_decision: pr.review_decision,
+        base_ref_name: pr.base_ref_name,
         checks,
         summary: None,
     });
@@ -772,6 +780,7 @@ pub(crate) mod tests {
             active_check_url: None,
             active_check_name: None,
             checks_waiting: false,
+            base_ref_name: None,
         }
     }
 

@@ -13,6 +13,7 @@ pub mod model;
 pub mod paths;
 pub mod procscan;
 pub mod settings;
+pub mod stacks;
 pub mod status;
 pub mod timefmt;
 pub mod worktrees;

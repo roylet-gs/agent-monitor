@@ -96,6 +96,10 @@ pub struct PrInfo {
     pub active_check_name: Option<String>,
     #[serde(default)]
     pub checks_waiting: bool,
+    /// Branch the PR merges into; another worktree's branch means a stack.
+    /// (Rust-only; absent in payloads written by the TS app.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_ref_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

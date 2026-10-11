@@ -557,7 +557,9 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
                 Span::styled(" ═", theme.fg(theme.magenta)),
             ]),
             Row::Ticket(t) => Line::styled(format!("  — {} —", truncate(t, inner.width as usize - 6)), theme.faint()),
-            Row::Worktree(i) => worktree_line(app, theme, &app.flat[*i], *i == app.selected, focused, &cols, inner.width, now),
+            Row::Worktree(i) => {
+                worktree_line(app, theme, &app.flat[*i], &app.tree[*i], *i == app.selected, focused, &cols, inner.width, now)
+            }
         })
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
@@ -568,6 +570,7 @@ fn worktree_line<'a>(
     app: &App,
     theme: &Theme,
     v: &'a WorktreeView,
+    tree: &str,
     selected: bool,
     focused: bool,
     cols: &Columns,
@@ -602,6 +605,7 @@ fn worktree_line<'a>(
     let bar = if selected { if focused { "▌" } else { "▏" } } else { " " };
     let mut left = vec![
         Span::styled(bar, theme.bold(theme.border_focus)),
+        Span::styled(tree.to_string(), theme.fg(theme.border)),
         Span::styled(status_glyph(status), theme.fg(theme.status(status))),
         Span::raw(" "),
     ];
@@ -615,7 +619,7 @@ fn worktree_line<'a>(
     if subagents > 0 {
         badge.push_str(&format!(" ◆{subagents}"));
     }
-    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width());
+    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + tree.width());
     let name = truncate(v.worktree.display_name(), name_w);
     let name_style = if status == Some(Status::Waiting) {
         theme.bold(theme.yellow)
@@ -1122,6 +1126,7 @@ mod tests {
             active_check_url: None,
             active_check_name: None,
             checks_waiting: false,
+            base_ref_name: None,
         });
         refactor.linear = Some(LinearInfo {
             identifier: "ENG-412".into(),
@@ -1154,6 +1159,7 @@ mod tests {
                 sub("w1", "a3", "Research languages", false, Some(("SubagentHandback", ""))),
             ],
             health: Default::default(),
+            stack: Default::default(),
         };
         let settings = Settings { worktree_sort: vec![], ..Settings::default() };
         let mut app = App::new(settings);
@@ -1283,6 +1289,29 @@ mod tests {
         let spans = pr_spans(&v, &theme, 8);
         assert_eq!(spans[0].style.fg, Some(theme.faint), "passing draft stays dim");
         assert_eq!(spans[1].style.fg, Some(theme.green));
+    }
+
+    #[test]
+    fn stacked_branches_nest_under_their_parent() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        // r1: refactor, offline-cache. Add two stacked on refactor and one on those.
+        let mut a = view("w4", "r1", "feature/refactor-part-2", Some(Status::Executing));
+        a.pr = None;
+        let b = view("w5", "r1", "feature/refactor-part-3", None);
+        let c = view("w6", "r1", "feature/refactor-alt", None);
+        snap.groups[0].worktrees.splice(0..0, [a, b, c]);
+        snap.stack.insert("w4".into(), "w1".into());
+        snap.stack.insert("w5".into(), "w4".into());
+        snap.stack.insert("w6".into(), "w1".into());
+        app.apply(snap);
+        let order: Vec<(&str, &str)> = app.flat.iter().zip(&app.tree).map(|(v, t)| (v.worktree.id.as_str(), t.as_str())).collect();
+        assert_eq!(
+            order,
+            [("w1", ""), ("w4", "├─ "), ("w5", "│  └─ "), ("w6", "└─ "), ("w2", ""), ("w3", "")],
+            "children follow the parent, depth-first, with tree lines"
+        );
+        insta::assert_snapshot!(render(&app, 100, 14));
     }
 
     #[test]

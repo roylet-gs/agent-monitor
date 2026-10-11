@@ -20,6 +20,8 @@ pub struct Snapshot {
     /// (worktree_id, subagent) — running first, then recently finished.
     pub subagents: Vec<(Option<String>, Subagent)>,
     pub health: Health,
+    /// Stacked branches: child worktree id → parent worktree id.
+    pub stack: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +79,8 @@ pub struct App {
     pub settings: Settings,
     pub snapshot: Snapshot,
     pub flat: Vec<WorktreeView>,
+    /// Tree-line prefix per `flat` entry ("" for top level, "└─ ", "│  ├─ "…).
+    pub tree: Vec<String>,
     pub rows: Vec<Row>,
     pub selected: usize,
     pub focus: Pane,
@@ -107,6 +111,7 @@ impl App {
             settings,
             snapshot: Snapshot::default(),
             flat: Vec::new(),
+            tree: Vec::new(),
             rows: Vec::new(),
             selected: 0,
             focus: Pane::Worktrees,
@@ -184,6 +189,7 @@ impl App {
         let multi_repo = self.snapshot.groups.len() > 1;
         self.flat.clear();
         self.rows.clear();
+        self.tree.clear();
         for group in &self.snapshot.groups {
             if group.worktrees.is_empty() {
                 continue;
@@ -194,26 +200,34 @@ impl App {
                 }
                 self.rows.push(Row::Repo(group.repo.name.clone()));
             }
+            let ordered = stack_order(&group.worktrees, &self.snapshot.stack);
+            // Headers (project / ticket cluster) only consider top-level rows,
+            // so a stack is never split by a header.
+            let tops: Vec<usize> = ordered.iter().filter(|(_, prefix)| prefix.is_empty()).map(|(i, _)| *i).collect();
             let mut last_project: Option<Option<String>> = None;
-            let wts = &group.worktrees;
-            for (i, v) in wts.iter().enumerate() {
-                if by_project {
-                    let project = v.linear.as_ref().and_then(|l| l.project.as_ref()).map(|p| p.name.clone());
-                    if last_project.as_ref() != Some(&project) {
-                        self.rows.push(Row::Project(project.clone().unwrap_or_else(|| "No project".into())));
-                        last_project = Some(project);
+            let mut top_pos: usize = 0;
+            for (i, prefix) in ordered {
+                let v = &group.worktrees[i];
+                if prefix.is_empty() {
+                    if by_project {
+                        let project = v.linear.as_ref().and_then(|l| l.project.as_ref()).map(|p| p.name.clone());
+                        if last_project.as_ref() != Some(&project) {
+                            self.rows.push(Row::Project(project.clone().unwrap_or_else(|| "No project".into())));
+                            last_project = Some(project);
+                        }
                     }
-                }
-                let ticket = ticket_of(v);
-                let starts_cluster = ticket.is_some()
-                    && (i == 0 || ticket_of(&wts[i - 1]) != ticket)
-                    && wts.get(i + 1).is_some_and(|n| ticket_of(n) == ticket);
-                if starts_cluster {
-                    let l = v.linear.as_ref().unwrap();
-                    self.rows.push(Row::Ticket(format!("{} {}", l.identifier, l.title)));
+                    let ticket = ticket_of(v);
+                    let prev = top_pos.checked_sub(1).map(|p| ticket_of(&group.worktrees[tops[p]]));
+                    let next = tops.get(top_pos + 1).map(|&n| ticket_of(&group.worktrees[n]));
+                    if ticket.is_some() && prev != Some(ticket) && next == Some(ticket) {
+                        let l = v.linear.as_ref().unwrap();
+                        self.rows.push(Row::Ticket(format!("{} {}", l.identifier, l.title)));
+                    }
+                    top_pos += 1;
                 }
                 self.rows.push(Row::Worktree(self.flat.len()));
                 self.flat.push(v.clone());
+                self.tree.push(prefix);
             }
         }
     }
@@ -451,6 +465,56 @@ impl App {
             self.mark_selected_seen();
         }
     }
+}
+
+/// Order a repo's worktrees so stacked branches follow their parent
+/// (depth-first, keeping the configured sort among siblings), with the tree
+/// prefix for each row. A child whose parent isn't visible stays top-level.
+pub fn stack_order(wts: &[WorktreeView], stack: &std::collections::HashMap<String, String>) -> Vec<(usize, String)> {
+    use std::collections::HashMap;
+    let index: HashMap<&str, usize> = wts.iter().enumerate().map(|(i, v)| (v.worktree.id.as_str(), i)).collect();
+    let parent_of = |i: usize| stack.get(&wts[i].worktree.id).and_then(|p| index.get(p.as_str()).copied()).filter(|&p| p != i);
+    let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut roots = Vec::new();
+    for i in 0..wts.len() {
+        match parent_of(i) {
+            Some(p) => children.entry(p).or_default().push(i),
+            None => roots.push(i),
+        }
+    }
+    let mut out = Vec::with_capacity(wts.len());
+    let mut seen = vec![false; wts.len()];
+    fn walk(
+        i: usize,
+        lead: &str,
+        branch: &str,
+        children: &HashMap<usize, Vec<usize>>,
+        seen: &mut [bool],
+        out: &mut Vec<(usize, String)>,
+    ) {
+        if std::mem::replace(&mut seen[i], true) {
+            return;
+        }
+        out.push((i, format!("{lead}{branch}")));
+        let kids = children.get(&i).map(Vec::as_slice).unwrap_or(&[]);
+        let next_lead = if branch.is_empty() {
+            String::new()
+        } else if branch.starts_with('├') {
+            format!("{lead}│  ")
+        } else {
+            format!("{lead}   ")
+        };
+        for (k, &c) in kids.iter().enumerate() {
+            let b = if k + 1 == kids.len() { "└─ " } else { "├─ " };
+            walk(c, &next_lead, b, children, seen, out);
+        }
+    }
+    for r in roots {
+        walk(r, "", "", &children, &mut seen, &mut out);
+    }
+    // Anything left (only possible with a cycle) is shown flat.
+    out.extend(seen.iter().enumerate().filter(|(_, s)| !**s).map(|(i, _)| (i, String::new())));
+    out
 }
 
 fn linear_url(url: &str, s: &Settings) -> String {

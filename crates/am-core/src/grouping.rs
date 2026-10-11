@@ -393,6 +393,7 @@ pub(crate) mod tests {
                 active_check_url: None,
                 active_check_name: None,
                 checks_waiting: false,
+                base_ref_name: None,
             };
             f(&mut pr);
             self.pr = Some(pr);

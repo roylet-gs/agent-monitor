@@ -338,6 +338,7 @@ pub fn attachment_to_pr_info(attachment: &LinearPrAttachment) -> PrInfo {
         active_check_url: None,
         active_check_name: None,
         checks_waiting: false,
+        base_ref_name: None,
     }
 }
 

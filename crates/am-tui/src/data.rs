@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use am_core::integrations::{Integrations, RepoBranches};
 use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Worktree, WorktreeView};
 use am_core::settings::Settings;
-use am_core::{db, debug, gitinfo, grouping, info, procscan, warn, worktrees};
+use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
 
 use crate::app::{Health, Snapshot};
@@ -129,6 +129,9 @@ struct Worker {
     procs: HashMap<String, ProcData>,
     last_procs: Option<Instant>,
     last_sync: Option<Instant>,
+    /// Per repo: (branch-tips signature, trunk ref, git view) — rev-lists only
+    /// rerun when some branch tip moved.
+    stack_git: HashMap<String, (String, stacks::GitView)>,
     agent_seen: HashMap<String, String>,
     last_full: Option<Instant>,
     data_version: i64,
@@ -148,6 +151,7 @@ impl Worker {
             procs: HashMap::new(),
             last_procs: None,
             last_sync: None,
+            stack_git: HashMap::new(),
             agent_seen: HashMap::new(),
             last_full: None,
             data_version: -1,
@@ -271,12 +275,16 @@ impl Worker {
             .collect();
 
         let repos = db::repositories(&self.conn)?;
+        if full_due || self.stack_git.len() != repos.len() {
+            self.refresh_stack_git(&repos, &worktrees_for_stacks(&views));
+        }
+        let stack = self.infer_stacks(&views);
         let mut groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
         if let Some(g) = self.standalone_group()? {
             groups.push(g);
         }
         let subagents = db::subagents(&self.conn, None, RECENT_SUBAGENT_MINUTES)?;
-        let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone() };
+        let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone(), stack };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());
             self.last_sent = Some(snapshot);
@@ -285,7 +293,49 @@ impl Worker {
     }
 }
 
+fn worktrees_for_stacks(views: &[WorktreeView]) -> Vec<Worktree> {
+    views.iter().map(|v| v.worktree.clone()).collect()
+}
+
 impl Worker {
+    fn refresh_stack_git(&mut self, repos: &[am_core::model::Repository], worktrees: &[Worktree]) {
+        for repo in repos {
+            let path = Path::new(&repo.path);
+            let tips = stacks::branch_tips(path);
+            let mut sig: Vec<String> = tips.iter().map(|(b, s)| format!("{b}={s}")).collect();
+            sig.sort();
+            let sig = sig.join(",");
+            if self.stack_git.get(&repo.id).is_some_and(|(s, _)| *s == sig) {
+                continue;
+            }
+            let branches = stack_branches(worktrees, &repo.id);
+            let main = worktrees::main_branch(path).unwrap_or_else(|_| "main".into());
+            let trunk = stacks::trunk_ref(path, &main);
+            let started = Instant::now();
+            let view = stacks::collect(path, &branches, &trunk, tips);
+            debug!("stacks", "{}: rev-lists for {} branch(es) in {:?}", repo.name, view.unmerged.len(), started.elapsed());
+            self.stack_git.insert(repo.id.clone(), (sig, view));
+        }
+    }
+
+    /// child worktree id → parent worktree id, across all repos.
+    fn infer_stacks(&self, views: &[WorktreeView]) -> HashMap<String, String> {
+        let worktrees = worktrees_for_stacks(views);
+        let pr_base: HashMap<String, String> = views
+            .iter()
+            .filter_map(|v| {
+                let (pr, _) = self.fields.get(&(v.worktree.repo_id.clone(), v.worktree.branch.clone()))?;
+                let pr = pr.as_ref().filter(|p| p.state == "OPEN")?;
+                Some((v.worktree.id.clone(), pr.base_ref_name.clone()?))
+            })
+            .collect();
+        let mut out = HashMap::new();
+        for (repo_id, (_, git)) in &self.stack_git {
+            out.extend(stacks::infer_parents(&stack_branches(&worktrees, repo_id), git, &pr_base));
+        }
+        out
+    }
+
     /// "Other sessions": open standalone sessions as pseudo-worktree rows so
     /// selection, Enter and `d` work on them like on any row.
     fn standalone_group(&self) -> rusqlite::Result<Option<am_core::model::WorktreeGroup>> {
@@ -470,4 +520,12 @@ fn update(ints: &Integrations, branches: &[(String, String)]) -> IntegrationUpda
     let fields = branches.iter().map(|(r, b)| ((r.clone(), b.clone()), ints.fields_for(r, b))).collect();
     let h = ints.health();
     IntegrationUpdate { fields, health: Health { github_failing: h.github_failing, linear_failing: h.linear_failing } }
+}
+
+fn stack_branches(worktrees: &[Worktree], repo_id: &str) -> Vec<stacks::Branch> {
+    worktrees
+        .iter()
+        .filter(|w| w.repo_id == repo_id)
+        .map(|w| stacks::Branch { worktree_id: w.id.clone(), name: w.branch.clone(), is_main: w.is_main })
+        .collect()
 }
