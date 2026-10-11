@@ -1,0 +1,28 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&fixture(), 80, 24)"
+---
+╭─[1] Worktrees ───────────────────────────────────────────────────────────────╮
+│agent-monitor                                                                 │
+│▌◆ feature/refactor                                ◆2 ENG-412 #127✓ ↑2 ±3  4m │
+│ ◐ fix/offline-cache                                                       4m │
+│gridsight                                                                     │
+│ · main                                                             ↑2 ±3  4m │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+╭─[2] Subagents · feature/refactor ────────────────────────────────────────────╮
+│ ◆ Analyze am debug logs                                general-purpose  2m14s│
+│   └ Bash  grep -c WARN debug.log                                     23 tools│
+│ ◆ Research TUI styles                                  general-purpose  2m14s│
+│   └ WebFetch  github.com/dlvhdr/gh-dash                              23 tools│
+│ ✓ Research languages                            general-purpose  done 30s ago│
+│   └ SubagentHandback                                                 23 tools│
+╰───────────────────────────────────────────────── 2 running · 1 done · a: all ╯
+ feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open
+ WORKTREES  ◐ 1  ◆ 1              tab focus  a scope  r refresh  ? help  q quit

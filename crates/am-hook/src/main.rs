@@ -212,11 +212,14 @@ fn track_subagents(conn: &rusqlite::Connection, owner: &Owner, ev: &HookEvent) -
             ev.agent_transcript_path.as_deref(),
             ev.last_assistant_message.as_deref().map(|m| status::truncate(m.trim(), 500)).as_deref(),
         )?,
-        "PreToolUse" | "PostToolUse" => {
+        // PreToolUse records what the subagent is doing now; PostToolUse only
+        // proves it is still alive (keeps it out of the stale window).
+        "PreToolUse" => {
             let tool = ev.tool_name.as_deref();
-            let input = tool.and_then(|t| status::summarize_tool_input(t, ev.tool_input.as_ref()));
-            db::subagent_tool(conn, owner, &key, agent_type, tool, input.as_deref(), ev.is("PreToolUse"))?;
+            let input = tool.and_then(|t| status::summarize_tool_input(t, ev.tool_input.as_ref(), ev.cwd.as_deref()));
+            db::subagent_tool(conn, owner, &key, agent_type, tool, input.as_deref(), true)?;
         }
+        "PostToolUse" => db::subagent_tool(conn, owner, &key, agent_type, None, None, false)?,
         _ => return Ok(false),
     }
 

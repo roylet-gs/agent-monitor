@@ -265,7 +265,7 @@ pub fn detect_git_activity(command: &str) -> Option<&'static str> {
 
 /// A short, single-line summary of a tool's input for display
 /// (`Bash: pnpm test`, `Read: src/lib/db.ts`). Never the full payload.
-pub fn summarize_tool_input(tool: &str, input: Option<&Value>) -> Option<String> {
+pub fn summarize_tool_input(tool: &str, input: Option<&Value>, cwd: Option<&str>) -> Option<String> {
     let input = input?;
     let pick = |k: &str| input.get(k).and_then(Value::as_str);
     let raw = match tool {
@@ -278,6 +278,13 @@ pub fn summarize_tool_input(tool: &str, input: Option<&Value>) -> Option<String>
         _ => None,
     }?;
     let line = raw.lines().next().unwrap_or("").trim();
+    // Paths inside the session's directory read better relative to it.
+    let line = cwd
+        .filter(|c| !c.is_empty())
+        .and_then(|c| line.strip_prefix(c))
+        .map(|rest| rest.trim_start_matches('/'))
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(line);
     Some(truncate(line, 120))
 }
 
@@ -471,10 +478,12 @@ mod tests {
     #[test]
     fn tool_input_summary_is_one_short_line() {
         let v = serde_json::json!({"command": "pnpm test\n--watch"});
-        assert_eq!(summarize_tool_input("Bash", Some(&v)).as_deref(), Some("pnpm test"));
+        assert_eq!(summarize_tool_input("Bash", Some(&v), None).as_deref(), Some("pnpm test"));
         let v = serde_json::json!({"file_path": "/a/b.rs"});
-        assert_eq!(summarize_tool_input("Read", Some(&v)).as_deref(), Some("/a/b.rs"));
-        assert_eq!(summarize_tool_input("Mystery", Some(&v)), None);
+        assert_eq!(summarize_tool_input("Read", Some(&v), None).as_deref(), Some("/a/b.rs"));
+        assert_eq!(summarize_tool_input("Read", Some(&v), Some("/a")).as_deref(), Some("b.rs"));
+        assert_eq!(summarize_tool_input("Read", Some(&v), Some("/x")).as_deref(), Some("/a/b.rs"));
+        assert_eq!(summarize_tool_input("Mystery", Some(&v), None), None);
         assert_eq!(truncate("abcdef", 4), "abc…");
     }
 }

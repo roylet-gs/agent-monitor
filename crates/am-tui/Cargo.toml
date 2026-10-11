@@ -1,0 +1,18 @@
+[package]
+name = "am-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "am-tui"
+path = "src/main.rs"
+
+[dependencies]
+am-core.workspace = true
+rusqlite.workspace = true
+ratatui = "0.30"
+unicode-width = "0.2"
+
+[dev-dependencies]
+insta = "1"

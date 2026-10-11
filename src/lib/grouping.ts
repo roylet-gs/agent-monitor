@@ -18,14 +18,16 @@ type Cmp = (a: WorktreeWithStatus, b: WorktreeWithStatus) => number;
 // Agent status ordering, active-first (lower rank = higher priority).
 const AGENT_RANK: Record<string, number> = {
   executing: 0,
-  planning: 1,
-  waiting: 2,
-  idle: 3,
-  done: 4,
-  none: 5,
+  // Main turn ended but background subagents are still working: active.
+  delegating: 1,
+  planning: 2,
+  waiting: 3,
+  idle: 4,
+  done: 5,
+  none: 6,
 };
 const agentRank = (w: WorktreeWithStatus): number =>
-  AGENT_RANK[w.agent_status?.status ?? "none"] ?? 5;
+  AGENT_RANK[w.agent_status?.status ?? "none"] ?? 6;
 
 // PR ordering, attention-first: failing checks and requested changes float up,
 // merged/closed sink, worktrees without a PR go last.

@@ -79,6 +79,15 @@ describe("makeComparator", () => {
     expect(sorted.map((w) => w.id)).toEqual(["exec", "idle", "none"]);
   });
 
+  it("ranks delegating (background subagents running) as active, right after executing", () => {
+    const exec = makeWorktree({ id: "exec", agent_status: status("executing") });
+    const deleg = makeWorktree({ id: "deleg", agent_status: status("delegating") });
+    const waiting = makeWorktree({ id: "waiting", agent_status: status("waiting") });
+    const none = makeWorktree({ id: "none", agent_status: null });
+    const sorted = [none, waiting, deleg, exec].sort(makeComparator(only("agentStatus")));
+    expect(sorted.map((w) => w.id)).toEqual(["exec", "deleg", "waiting", "none"]);
+  });
+
   it("orders PRs attention-first (failing before open before merged before none)", () => {
     const failing = makeWorktree({ id: "failing", pr_info: pr({ checksStatus: "failing" }) });
     const open = makeWorktree({ id: "open", pr_info: pr({ state: "OPEN" }) });

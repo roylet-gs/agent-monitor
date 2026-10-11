@@ -351,7 +351,10 @@ pub fn subagent_tool(
            status = 'running', ended_at = NULL,
            tool_count = subagents.tool_count + ?6,
            last_tool = COALESCE(excluded.last_tool, subagents.last_tool),
-           last_tool_input = COALESCE(excluded.last_tool_input, subagents.last_tool_input),
+           -- tool and input move together: a new tool without a summarisable
+           -- input must not keep showing the previous tool's input
+           last_tool_input = CASE WHEN excluded.last_tool IS NOT NULL THEN excluded.last_tool_input
+                                  ELSE subagents.last_tool_input END,
            agent_type = COALESCE(excluded.agent_type, subagents.agent_type),
            updated_at = datetime('now')",
         params![key.session_id, key.agent_id, wt, sp, agent_type, count_call as i64, tool, tool_input],
@@ -432,6 +435,101 @@ pub fn checkpoint_passive(conn: &Connection) {
     let _ = conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()));
 }
 
+// --- Dashboard reads ---
+
+pub fn repositories(conn: &Connection) -> rusqlite::Result<Vec<crate::model::Repository>> {
+    let mut stmt = conn.prepare("SELECT id, path, name FROM repositories ORDER BY last_used_at DESC")?;
+    let rows = stmt.query_map([], |r| Ok(crate::model::Repository { id: r.get(0)?, path: r.get(1)?, name: r.get(2)? }))?;
+    rows.collect()
+}
+
+pub fn worktrees(conn: &Connection) -> rusqlite::Result<Vec<crate::model::Worktree>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, repo_id, path, branch, name, custom_name, is_main, created_at FROM worktrees ORDER BY created_at DESC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(crate::model::Worktree {
+            id: r.get(0)?,
+            repo_id: r.get(1)?,
+            path: r.get(2)?,
+            branch: r.get(3)?,
+            name: r.get(4)?,
+            custom_name: r.get(5)?,
+            is_main: r.get::<_, Option<i64>>(6)?.unwrap_or(0) != 0,
+            created_at: r.get(7)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn agent_states(conn: &Connection) -> rusqlite::Result<std::collections::HashMap<String, crate::model::AgentState>> {
+    let mut stmt = conn.prepare(
+        "SELECT worktree_id, status, session_id, last_response, is_open, active_subagents, updated_at FROM agent_status",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let status = r.get::<_, Option<String>>(1)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle);
+        Ok((
+            r.get::<_, String>(0)?,
+            crate::model::AgentState {
+                status,
+                session_id: r.get(2)?,
+                last_response: r.get(3)?,
+                is_open: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
+                active_subagents: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                updated_at: r.get(6)?,
+            },
+        ))
+    })?;
+    rows.collect()
+}
+
+/// Subagents for the dashboard pane: every running one plus those that
+/// finished within `recent_minutes`, newest first. `worktree_id = None`
+/// returns them for all worktrees (the global feed).
+pub fn subagents(
+    conn: &Connection,
+    worktree_id: Option<&str>,
+    recent_minutes: u32,
+) -> rusqlite::Result<Vec<(Option<String>, crate::model::Subagent)>> {
+    let sql = format!(
+        "SELECT worktree_id, session_id, agent_id, agent_type, description, status, tool_count, last_tool,
+                last_tool_input, started_at, ended_at, updated_at, transcript_path
+         FROM subagents
+         WHERE (?1 IS NULL OR worktree_id = ?1)
+           AND worktree_id IS NOT NULL
+           AND ((status = 'running' AND updated_at > {STALE_SUBAGENT_SQL})
+                OR ended_at > datetime('now', ?2))
+         ORDER BY (status = 'running') DESC, started_at DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let window = format!("-{recent_minutes} minutes");
+    let rows = stmt.query_map(params![worktree_id, window], |r| {
+        Ok((
+            r.get::<_, Option<String>>(0)?,
+            crate::model::Subagent {
+                session_id: r.get(1)?,
+                agent_id: r.get(2)?,
+                agent_type: r.get(3)?,
+                description: r.get(4)?,
+                running: r.get::<_, String>(5)? == "running",
+                tool_count: r.get(6)?,
+                last_tool: r.get(7)?,
+                last_tool_input: r.get(8)?,
+                started_at: r.get(9)?,
+                ended_at: r.get(10)?,
+                updated_at: r.get(11)?,
+                transcript_path: r.get(12)?,
+            },
+        ))
+    })?;
+    rows.collect()
+}
+
+/// Cheap change detector for the TUI: bumps whenever any connection commits.
+pub fn data_version(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.pragma_query_value(None, "data_version", |r| r.get(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -507,12 +605,16 @@ mod tests {
         subagent_tool(&conn, &o, &key, Some("Explore"), Some("Bash"), Some("pnpm test"), true).unwrap();
         subagent_tool(&conn, &o, &key, None, Some("Bash"), None, false).unwrap();
         subagent_tool(&conn, &o, &key, None, Some("Read"), Some("a.rs"), true).unwrap();
+        subagent_tool(&conn, &o, &key, None, Some("SubagentHandback"), None, true).unwrap();
+        let cleared: Option<String> = conn.query_row("SELECT last_tool_input FROM subagents", [], |r| r.get(0)).unwrap();
+        assert_eq!(cleared, None);
+        subagent_tool(&conn, &o, &key, None, Some("Read"), Some("a.rs"), false).unwrap();
         let (n, tool, input): (i64, String, String) = conn
             .query_row("SELECT tool_count, last_tool, last_tool_input FROM subagents", [], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))
             })
             .unwrap();
-        assert_eq!((n, tool.as_str(), input.as_str()), (2, "Read", "a.rs"));
+        assert_eq!((n, tool.as_str(), input.as_str()), (3, "Read", "a.rs"));
     }
 
     #[test]
@@ -538,6 +640,23 @@ mod tests {
         assert_eq!(row.session_id.as_deref(), Some("s1"));
         set_active_subagents(&conn, &o, 2).unwrap();
         assert_eq!(get_status(&conn, &o).unwrap().unwrap().active_subagents, 2);
+    }
+
+    #[test]
+    fn dashboard_reads() {
+        let (_d, conn) = fresh();
+        assert_eq!(repositories(&conn).unwrap().len(), 1);
+        let wts = worktrees(&conn).unwrap();
+        assert_eq!(wts[0].branch, "feat");
+        upsert_status(&conn, &wt(), &StatusUpdate { status: Status::Delegating, session_id: Some("s"), last_response: None, transcript_summary: None, is_open: true }).unwrap();
+        assert_eq!(agent_states(&conn).unwrap()["w"].status, Status::Delegating);
+        subagent_started(&conn, &wt(), &SubagentKey { session_id: "s", agent_id: "a" }, Some("Explore")).unwrap();
+        subagent_stopped(&conn, &wt(), &SubagentKey { session_id: "s", agent_id: "b" }, None, None, None).unwrap();
+        let subs = subagents(&conn, Some("w"), 30).unwrap();
+        assert_eq!(subs.len(), 2);
+        assert!(subs[0].1.running);
+        assert_eq!(subagents(&conn, None, 30).unwrap().len(), 2);
+        assert_eq!(subagents(&conn, Some("other"), 30).unwrap().len(), 0);
     }
 
     #[test]

@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 120, 16)"
+---
+╭─[1] Worktrees ─────────────────────────────────────────────────────╮╭─[2] Subagents · all worktrees ─────────────────╮
+│agent-monitor                                                       ││feature/refactor                                │
+│▏◆ feature/refactor                      ◆2 ENG-412 #127✓ ↑2 ±3  4m ││ ◆ Analyze am debug logs  general-purpose  2m14s│
+│ ◐ fix/offline-cache                                             4m ││   └ Bash  grep -c WARN debug.log       23 tools│
+│gridsight                                                           ││▌◆ Research TUI styles    general-purpose  2m14s│
+│ · main                                                   ↑2 ±3  4m ││   └ WebFetch  github.com/dlvhdr/gh-da… 23 tools│
+│                                                                    ││ ✓ Research langu… general-purpose  done 30s ago│
+│                                                                    ││   └ SubagentHandback                   23 tools│
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+╰──────────────────────────────────────────────────────────── 1 of 3 ╯╰───────── 2 running · 1 done · a: this worktree ╯
+ feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1111-2222-3333-a91f00
+ SUBAGENTS  ◐ 1  ◆ 1                                                      tab focus  a scope  r refresh  ? help  q quit
