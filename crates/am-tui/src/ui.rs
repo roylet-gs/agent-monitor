@@ -51,6 +51,9 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     if let Some(editor) = &app.settings_editor {
         draw_settings(f, theme, area, editor);
     }
+    if let Some(modal) = &app.modal {
+        draw_modal(f, theme, area, modal, now);
+    }
     if let Some(msg) = &app.popup {
         draw_popup(f, theme, area, msg);
     }
@@ -143,6 +146,164 @@ fn draw_settings(f: &mut Frame, theme: &Theme, area: Rect, ed: &crate::settings_
         None => Line::styled(format!(" {}", field.help), theme.faint()),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
+    let w = w.min(area.width.saturating_sub(2));
+    let h = h.min(area.height.saturating_sub(2));
+    Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
+}
+
+fn modal_block<'a>(theme: &Theme, title: String, color: ratatui::style::Color, hint: &'a str) -> Block<'a> {
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.bold(color))
+        .padding(ratatui::widgets::Padding::horizontal(1))
+        .title(Line::from(vec![Span::styled("─", theme.bold(color)), Span::styled(format!("{title} "), theme.bold(theme.text))]));
+    if hint.is_empty() {
+        block
+    } else {
+        block.title_bottom(Line::styled(format!(" {hint} "), theme.faint()).alignment(Alignment::Right))
+    }
+}
+
+fn key_line<'a>(theme: &Theme, key: &str, text: impl Into<String>, danger: bool) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(format!("{key:>9}  "), theme.bold(if danger { theme.red } else { theme.yellow })),
+        Span::styled(text.into(), theme.fg(theme.text)),
+    ])
+}
+
+fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::Modal, now: i64) {
+    use crate::modals::{DeleteStep, FormField, Modal};
+    let (title, color, hint, lines): (String, _, &str, Vec<Line>) = match modal {
+        Modal::Busy(text) => {
+            const SPIN: [&str; 4] = ["◐", "◓", "◑", "◒"];
+            let s = SPIN[(now.rem_euclid(4)) as usize];
+            ("Working".into(), theme.accent, "", vec![Line::from(vec![Span::styled(format!("{s} "), theme.fg(theme.accent)), Span::raw(text.clone())])])
+        }
+        Modal::New(form) => {
+            let field = |label: &str, value: String, which: FormField, note: Option<Line<'static>>| -> Vec<Line<'static>> {
+                let active = form.field == which;
+                let mut v = vec![Line::from(vec![
+                    Span::styled(if active { "▌" } else { " " }, theme.bold(theme.border_focus)),
+                    Span::styled(format!("{label:<10}"), if active { theme.bold(theme.text) } else { theme.faint() }),
+                    Span::styled(
+                        if active && which != FormField::Repo { format!("{value}▏") } else { value },
+                        theme.fg(theme.text),
+                    ),
+                ])];
+                if let Some(n) = note {
+                    v.push(n);
+                }
+                v
+            };
+            let mut lines = Vec::new();
+            if form.repos.len() > 1 {
+                lines.extend(field("Repo", format!("‹ {} ›", form.repo().name), FormField::Repo, None));
+            }
+            let note = if form.remote_exists() {
+                Some(Line::styled("           ✓ exists on origin — Enter will offer to pull it", theme.fg(theme.green)))
+            } else if form.local_only() {
+                Some(Line::styled("           ! exists locally only — Enter will offer to reuse it", theme.fg(theme.yellow)))
+            } else if form.pending_check.is_some() {
+                Some(Line::styled("           checking…", theme.faint()))
+            } else {
+                None
+            };
+            lines.extend(field("Branch", form.branch.clone(), FormField::Branch, note));
+            lines.extend(field("Name", if form.name.is_empty() && form.field != FormField::Name { "(optional)".into() } else { form.name.clone() }, FormField::Name, None));
+            if form.remote_exists() {
+                lines.push(Line::styled(format!(" Base      tracks origin/{}", form.branch), theme.faint()));
+            } else {
+                lines.extend(field("Base", form.base.clone(), FormField::Base, None));
+            }
+            if let Some(e) = &form.error {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
+            }
+            ("New worktree".into(), theme.border_focus, "tab next  ⏎ create  esc cancel", lines)
+        }
+        Modal::BranchExists { req, local, remote, .. } => {
+            let b = &req.branch;
+            let header = match (local, remote) {
+                (true, true) => format!("Branch \"{b}\" exists locally and on origin"),
+                (_, true) => format!("Branch \"{b}\" exists on origin"),
+                _ => format!("Branch \"{b}\" already exists locally"),
+            };
+            let mut lines = vec![Line::styled(header, theme.bold(theme.yellow)), Line::raw("")];
+            if *remote {
+                lines.push(key_line(theme, "⏎ / p", if *local { "Pull remote (reset local to origin)".to_string() } else { format!("Pull remote (track origin/{b})") }, false));
+                lines.push(key_line(
+                    theme,
+                    "c",
+                    if *local { "Create disconnected (deletes local, no tracking)" } else { "Create disconnected (new branch from base, no tracking)" },
+                    *local,
+                ));
+            } else {
+                lines.push(key_line(theme, "⏎ / r", "Reuse existing local branch", false));
+                lines.push(key_line(theme, "d", "Delete local branch and re-create from base", true));
+            }
+            lines.push(key_line(theme, "esc / n", "Go back", false));
+            ("Branch exists".into(), theme.yellow, "", lines)
+        }
+        Modal::Delete(d) => {
+            let w = &d.view.worktree;
+            let name = w.display_name();
+            let title = if d.stale { format!("Remove stale entry \"{name}\"") } else if d.branch_only { format!("Delete branch \"{name}\"") } else { format!("Delete worktree \"{name}\"") };
+            let mut lines = Vec::new();
+            let g = d.view.git.unwrap_or_default();
+            if g.dirty > 0 {
+                lines.push(Line::styled(format!("⚠ {} uncommitted change{}", g.dirty, if g.dirty == 1 { "" } else { "s" }), theme.fg(theme.yellow)));
+            }
+            if g.ahead > 0 {
+                lines.push(Line::styled(format!("⚠ {} commit{} not pushed", g.ahead, if g.ahead == 1 { "" } else { "s" }), theme.fg(theme.yellow)));
+            }
+            if !lines.is_empty() {
+                lines.push(Line::raw(""));
+            }
+            match d.step {
+                DeleteStep::Confirm => {
+                    lines.push(Line::raw(if d.stale {
+                        format!("Remove stale entry and delete local branch {}?", w.branch)
+                    } else if d.branch_only {
+                        format!("Delete branch {} and switch back to the default branch?", w.branch)
+                    } else {
+                        "Remove this worktree from disk?".to_string()
+                    }));
+                    lines.push(Line::raw(""));
+                    lines.push(key_line(theme, "⏎ / y", "Yes", true));
+                    lines.push(key_line(theme, "n / esc", "Cancel", false));
+                }
+                DeleteStep::LocalBranch => {
+                    lines.push(Line::raw(format!("Also delete local branch {}?", w.branch)));
+                    lines.push(Line::raw(""));
+                    lines.push(key_line(theme, "⏎ / y", "Yes", true));
+                    lines.push(key_line(theme, "n", "No, keep it", false));
+                    lines.push(key_line(theme, "esc", "Cancel", false));
+                }
+            }
+            (title, if g.dirty > 0 || g.ahead > 0 { theme.yellow } else { theme.red }, "", lines)
+        }
+        Modal::RunScript { repo_id, .. } => {
+            let path = am_core::worktrees::script_path(repo_id);
+            (
+                "Startup script".into(),
+                theme.green,
+                "",
+                vec![
+                    Line::raw("A startup script exists for this repository:"),
+                    Line::styled(path.display().to_string(), theme.faint()),
+                    Line::raw(""),
+                    key_line(theme, "⏎ / y", "Run script", false),
+                    key_line(theme, "esc / n", "Skip", false),
+                ],
+            )
+        }
+    };
+    let rect = modal_rect(area, 72, lines.len() as u16 + 2);
+    f.render_widget(Clear, rect);
+    f.render_widget(Paragraph::new(lines).block(modal_block(theme, title, color, hint)), rect);
 }
 
 fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
@@ -605,6 +766,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("c", "terminal running claude --resume"),
         ("o / l / p", "open PR / Linear ticket / Linear project"),
         ("w", "toggle log pane"),
+        ("n / d", "new worktree / delete worktree"),
         ("s", "settings"),
         ("tab  1  2", "switch pane"),
         ("a", "subagents: this worktree ↔ all"),
@@ -759,6 +921,7 @@ mod tests {
         waiting.git = Some(GitStatus::default());
         let main = view("w3", "r2", "main", None);
         let snapshot = Snapshot {
+            repos: vec![],
             groups: vec![
                 WorktreeGroup {
                     repo: Repository { id: "r1".into(), path: "/r1".into(), name: "agent-monitor".into() },
@@ -861,6 +1024,30 @@ mod tests {
         app.on_key(Key::Char('j'));
         assert_eq!(app.on_key(Key::Char('o')), crate::app::Action::None);
         assert_eq!(app.notice.as_deref(), Some("No PR for this branch"));
+    }
+
+    #[test]
+    fn new_worktree_modal_renders() {
+        let mut app = fixture();
+        app.snapshot.repos = vec![
+            Repository { id: "r1".into(), path: "/r1".into(), name: "agent-monitor".into() },
+            Repository { id: "r2".into(), path: "/r2".into(), name: "gridsight".into() },
+        ];
+        app.on_key(Key::Char('n'));
+        for c in "x".chars() {
+            app.on_key(Key::Char(c));
+        }
+        if let Some(m) = &mut app.modal {
+            m.on_check_result("feature/x".into(), am_core::worktrees::BranchCheck { local: false, remote: Some(true) });
+        }
+        insta::assert_snapshot!(render(&app, 100, 16));
+    }
+
+    #[test]
+    fn delete_modal_warns_about_dirty_and_unpushed() {
+        let mut app = fixture();
+        app.on_key(Key::Char('d'));
+        insta::assert_snapshot!(render(&app, 100, 16));
     }
 
     #[test]

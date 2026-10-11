@@ -15,6 +15,14 @@ pub enum Msg {
     Popup(String),
     /// Short status-bar notice.
     Notice(String),
+    BranchChecked(String, am_core::worktrees::BranchCheck),
+    Created(
+        Box<am_core::model::Repository>,
+        Box<am_core::worktrees::CreateRequest>,
+        Result<am_core::model::Worktree, am_core::worktrees::CreateError>,
+    ),
+    /// Worktree label + warnings, or an error.
+    Deleted(String, Result<Vec<String>, String>),
 }
 
 /// Long enough for the popup to register before the editor steals focus.

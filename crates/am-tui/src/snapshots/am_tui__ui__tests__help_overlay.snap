@@ -2,16 +2,16 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 20)"
 ---
-╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents · feature/refactor ──────╮
-│agent-mon╭ Keys ────────────────────────────────────────────────────────────────────────╮se  2m14s│
-│▌◆ featur│    j / k  ↑ / ↓  move                                                        │ 23 tools│
-│ ◐ fix/of│          gg / G  top / bottom                                                │se  2m14s│
-│gridsight│ ctrl-d / ctrl-u  page down / up                                              │ 23 tools│
-│ · main  │           enter  open (IDE; resumes last Claude session)                     │e 30s ago│
-│         │               t  terminal at worktree                                        │ 23 tools│
-│         │               c  terminal running claude --resume                            │         │
+╭─[1] Work╭ Keys ────────────────────────────────────────────────────────────────────────╮or ──────╮
+│agent-mon│    j / k  ↑ / ↓  move                                                        │se  2m14s│
+│▌◆ featur│          gg / G  top / bottom                                                │ 23 tools│
+│ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │se  2m14s│
+│gridsight│           enter  open (IDE; resumes last Claude session)                     │ 23 tools│
+│ · main  │               t  terminal at worktree                                        │e 30s ago│
+│         │               c  terminal running claude --resume                            │ 23 tools│
 │         │       o / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane                                             │         │
+│         │           n / d  new worktree / delete worktree                              │         │
 │         │               s  settings                                                    │         │
 │         │       tab  1  2  switch pane                                                 │         │
 │         │               a  subagents: this worktree ↔ all                              │         │

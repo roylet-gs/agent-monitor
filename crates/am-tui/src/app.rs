@@ -1,7 +1,7 @@
 //! Dashboard state and key handling. Pure: no I/O, so it is driven directly
 //! in tests. Data arrives as a `Snapshot` from the collector (data.rs).
 
-use am_core::model::{Subagent, WorktreeGroup, WorktreeView};
+use am_core::model::{Repository, Subagent, WorktreeGroup, WorktreeView};
 use am_core::settings::{SortKey, Settings};
 use am_core::status::Status;
 
@@ -14,6 +14,8 @@ pub struct Health {
 /// One consistent view of everything on screen.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Snapshot {
+    /// Every tracked repo (also those whose worktrees are all filtered out).
+    pub repos: Vec<Repository>,
     pub groups: Vec<WorktreeGroup>,
     /// (worktree_id, subagent) — running first, then recently finished.
     pub subagents: Vec<(Option<String>, Subagent)>,
@@ -59,6 +61,9 @@ pub enum Action {
     SettingsChanged,
     /// `e` in settings: open settings.json in $EDITOR.
     EditSettingsFile,
+    Create(Box<Repository>, Box<am_core::worktrees::CreateRequest>),
+    Delete(Box<WorktreeView>, bool),
+    RunScript { repo_id: String, worktree_path: String },
 }
 
 pub struct App {
@@ -78,6 +83,9 @@ pub struct App {
     /// `w`: debug-log pane at the bottom.
     pub show_log: bool,
     pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
+    pub modal: Option<crate::modals::Modal>,
+    /// Select this worktree as soon as it shows up (after create).
+    pub pending_select: Option<String>,
     /// Worktrees whose status changed since the user last had them selected.
     pub unseen: std::collections::HashSet<String>,
     seen_status: std::collections::HashMap<String, Option<Status>>,
@@ -103,6 +111,8 @@ impl App {
             popup: None,
             show_log: false,
             settings_editor: None,
+            modal: None,
+            pending_select: None,
             unseen: Default::default(),
             seen_status: Default::default(),
             sounds: Vec::new(),
@@ -112,11 +122,14 @@ impl App {
 
     /// Replace the data, keeping the selection on the same worktree.
     pub fn apply(&mut self, snapshot: Snapshot) {
-        let keep = self.selected_view().map(|v| v.worktree.id.clone());
+        let keep = self.pending_select.clone().or_else(|| self.selected_view().map(|v| v.worktree.id.clone()));
         self.snapshot = snapshot;
         self.rebuild_rows();
         if let Some(i) = keep.and_then(|id| self.flat.iter().position(|v| v.worktree.id == id)) {
             self.selected = i;
+            if self.pending_select.as_deref() == Some(self.flat[i].worktree.id.as_str()) {
+                self.pending_select = None;
+            }
         }
         self.selected = self.selected.min(self.flat.len().saturating_sub(1));
         self.sub_selected = self.sub_selected.min(self.visible_subagents().len().saturating_sub(1));
@@ -225,6 +238,28 @@ impl App {
         if self.popup.take().is_some() {
             return Action::None;
         }
+        if let Some(modal) = &mut self.modal {
+            use crate::modals::Effect;
+            return match modal.on_key(key) {
+                Effect::None => Action::None,
+                Effect::Close => {
+                    self.modal = None;
+                    Action::None
+                }
+                Effect::Create(repo, req) => {
+                    self.modal = Some(crate::modals::Modal::Busy(format!("Creating {}…", req.branch)));
+                    Action::Create(Box::new(repo), Box::new(req))
+                }
+                Effect::Delete { view, delete_branch } => {
+                    self.modal = Some(crate::modals::Modal::Busy(format!("Deleting {}…", view.worktree.display_name())));
+                    Action::Delete(view, delete_branch)
+                }
+                Effect::RunScript { repo_id, worktree_path } => {
+                    self.modal = None;
+                    Action::RunScript { repo_id, worktree_path }
+                }
+            };
+        }
         if let Some(editor) = &mut self.settings_editor {
             use crate::settings_ui::Outcome;
             return match editor.on_key(key) {
@@ -271,6 +306,28 @@ impl App {
                 "No Linear project",
             ),
             Key::Char('w') => self.show_log = !self.show_log,
+            Key::Char('n') => {
+                if self.snapshot.repos.is_empty() {
+                    self.notice = Some("No repositories yet — add one with `am repo add <path>`".into());
+                } else {
+                    let repo = self.selected_view().map(|v| v.worktree.repo_id.clone());
+                    self.modal = Some(crate::modals::Modal::new_worktree(
+                        self.snapshot.repos.clone(),
+                        repo.as_deref(),
+                        &self.settings.default_branch_prefix,
+                        &self.settings.default_base_branch,
+                    ));
+                }
+            }
+            Key::Char('d') => {
+                if let Some(v) = self.selected_view().cloned() {
+                    if v.worktree.is_main && (v.worktree.branch == "main" || v.worktree.branch == "master") {
+                        self.notice = Some("The main checkout can't be deleted".into());
+                    } else {
+                        self.modal = Some(crate::modals::Modal::delete(v));
+                    }
+                }
+            }
             Key::Char('s') => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
             Key::Char('1') => self.focus = Pane::Worktrees,
             Key::Char('2') => self.focus = Pane::Subagents,

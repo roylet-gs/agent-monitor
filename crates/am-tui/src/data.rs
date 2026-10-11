@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use am_core::integrations::{Integrations, RepoBranches};
 use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Worktree, WorktreeView};
 use am_core::settings::Settings;
-use am_core::{db, debug, gitinfo, grouping, info, procscan, warn};
+use am_core::{db, debug, gitinfo, grouping, info, procscan, warn, worktrees};
 use rusqlite::Connection;
 
 use crate::app::{Health, Snapshot};
@@ -25,6 +25,9 @@ const TICK: Duration = Duration::from_millis(200);
 /// A native process snapshot costs ~2 ms, so terminals/editors/dev servers
 /// are re-checked often, independent of the (slower) git sweep.
 const PROCESS_INTERVAL: Duration = Duration::from_secs(2);
+/// Pick up worktrees created/removed outside am (`git worktree add`, other
+/// tools): one `git worktree list` per repo.
+const SYNC_INTERVAL: Duration = Duration::from_secs(10);
 /// Recently finished subagents stay visible this long.
 const RECENT_SUBAGENT_MINUTES: u32 = 30;
 
@@ -125,6 +128,7 @@ struct Worker {
     git: HashMap<String, GitData>,
     procs: HashMap<String, ProcData>,
     last_procs: Option<Instant>,
+    last_sync: Option<Instant>,
     agent_seen: HashMap<String, String>,
     last_full: Option<Instant>,
     data_version: i64,
@@ -143,6 +147,7 @@ impl Worker {
             git: HashMap::new(),
             procs: HashMap::new(),
             last_procs: None,
+            last_sync: None,
             agent_seen: HashMap::new(),
             last_full: None,
             data_version: -1,
@@ -189,6 +194,20 @@ impl Worker {
         }
         self.data_version = dv;
 
+        if force || self.last_sync.is_none_or(|t| t.elapsed() >= SYNC_INTERVAL) {
+            self.last_sync = Some(Instant::now());
+            if let Ok(results) = worktrees::sync_all(&self.conn) {
+                for (repo, r) in results {
+                    match r {
+                        Ok(rep) if !rep.added.is_empty() || !rep.removed.is_empty() => {
+                            info!("sync", "{}: +{} -{} worktree(s)", repo.name, rep.added.len(), rep.removed.len())
+                        }
+                        Ok(_) => {}
+                        Err(e) => debug!("sync", "{} failed: {e}", repo.name),
+                    }
+                }
+            }
+        }
         let worktrees = db::worktrees(&self.conn)?;
         if procs_due || full_due {
             self.procs = self.collect_procs(&worktrees);
@@ -203,6 +222,10 @@ impl Worker {
             worktrees
                 .iter()
                 .filter(|w| {
+                    // New rows (just created or synced) get git data right away.
+                    if !self.git.contains_key(&w.id) {
+                        return true;
+                    }
                     let updated = agents.get(&w.id).map(|a| a.updated_at.as_str());
                     updated.is_some() && self.agent_seen.get(&w.id).map(String::as_str) != updated
                 })
@@ -246,8 +269,9 @@ impl Worker {
 
         let repos = db::repositories(&self.conn)?;
         let groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
+
         let subagents = db::subagents(&self.conn, None, RECENT_SUBAGENT_MINUTES)?;
-        let snapshot = Snapshot { groups, subagents, health: self.health.clone() };
+        let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone() };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());
             self.last_sent = Some(snapshot);
@@ -320,6 +344,12 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(Cmd::Refresh { force: f }) => force = f,
             Ok(Cmd::Settings(s)) => {
+                if settings.linear_auto_nickname
+                    && !s.linear_auto_nickname
+                    && let Ok(n) = db::clear_linear_nicknames(&conn)
+                {
+                    info!("integrations", "Cleared {n} Linear auto-nickname(s)");
+                }
                 // A newly enabled source or new API key should fetch right away.
                 let enabled_now = (s.gh_pr_status && !settings.gh_pr_status)
                     || (s.linear_enabled && !settings.linear_enabled)
@@ -375,7 +405,21 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             last_linear = Some(Instant::now());
         }
         known_branches = branches.clone();
+        if settings.linear_enabled && settings.linear_auto_nickname {
+            auto_nickname(&conn, &ints, &worktrees);
+        }
         let _ = tx.send(update(&ints, &branches));
+    }
+}
+
+/// Port of `autoSetLinearNicknames`: name un-named worktrees after their
+/// Linear ticket title (user-set names are never touched).
+fn auto_nickname(conn: &Connection, ints: &Integrations, worktrees: &[Worktree]) {
+    for w in worktrees.iter().filter(|w| w.custom_name.is_none()) {
+        if let (_, Some(l)) = ints.fields_for(&w.repo_id, &w.branch) {
+            info!("integrations", "Auto-setting nickname for {} from Linear: {:?}", w.branch, l.title);
+            let _ = db::update_worktree_custom_name(conn, &w.id, Some(&l.title), Some("linear"));
+        }
     }
 }
 

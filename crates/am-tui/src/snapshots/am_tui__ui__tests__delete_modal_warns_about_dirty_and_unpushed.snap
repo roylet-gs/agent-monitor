@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 16)"
+---
+╭─[1] Worktrees ─────────────────────────────────────────╮╭─[2] Subagents · feature/refactor ──────╮
+│agent-monitor                                           ││ ◆ Analyze am de… general-purpose  2m14s│
+│▌◆ feature/refactor          ◆2 ENG-412 #127✓ ↑2 ±3  4m ││   └ Bash  grep -c WARN debug.… 23 tools│
+│ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮urpose  2m14s│
+│gridsight    │ ⚠ 3 uncommitted changes                                              │lvh… 23 tools│
+│ · main      │ ⚠ 2 commits not pushed                                               │ done 30s ago│
+│             │                                                                      │     23 tools│
+│             │ Remove stale entry and delete local branch feature/refactor?         │             │
+│             │                                                                      │             │
+│             │     ⏎ / y  Yes                                                       │             │
+│             │   n / esc  Cancel                                                    │             │
+│             ╰──────────────────────────────────────────────────────────────────────╯             │
+│                                                        ││                                        │
+╰──────────────────────────────────────────────── 1 of 3 ╯╰─────────── 2 running · 1 done · a: all ╯
+ feature/refactor · ENG-412 Refactor grouping core (In Progress) · PR #127 open · session 0c5e7f2a-1
+ WORKTREES  ◐ 1  ◆ 1                                                         ⏎ open  ? help  q quit

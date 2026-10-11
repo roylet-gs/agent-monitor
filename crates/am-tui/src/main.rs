@@ -7,6 +7,8 @@
 mod app;
 mod data;
 mod launcher;
+mod modals;
+mod ops;
 mod settings_ui;
 mod theme;
 mod ui;
@@ -93,8 +95,53 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     app.notice = Some(n);
                     notice_since = None;
                 }
+                launcher::Msg::BranchChecked(branch, r) => {
+                    if let Some(m) = &mut app.modal {
+                        m.on_check_result(branch, r);
+                    }
+                }
+                launcher::Msg::Created(repo, req, result) => {
+                    use am_core::worktrees::CreateError;
+                    app.modal = None;
+                    match result {
+                        Ok(w) => {
+                            app.notice = Some(format!("Created {}", w.branch));
+                            app.pending_select = Some(w.id.clone());
+                            let _ = &w.id;
+                            if am_core::worktrees::has_script(&repo.id) {
+                                app.modal = Some(modals::Modal::RunScript { repo_id: repo.id.clone(), worktree_path: w.path.clone() });
+                            }
+                            collector.refresh(false);
+                        }
+                        Err(CreateError::BranchExists { local, remote, .. }) if local || remote => {
+                            app.modal = Some(modals::Modal::BranchExists { repo: *repo, req: *req, local, remote });
+                        }
+                        Err(e) => {
+                            app.popup = Some(format!("✗ {e}"));
+                            popup_since = Some(Instant::now());
+                        }
+                    }
+                }
+                launcher::Msg::Deleted(label, result) => {
+                    app.modal = None;
+                    match result {
+                        Ok(warnings) if warnings.is_empty() => app.notice = Some(format!("Deleted {label}")),
+                        Ok(warnings) => {
+                            app.popup = Some(format!("Deleted {label}, with warnings:\n\n{}", warnings.join("\n")));
+                            popup_since = Some(Instant::now());
+                        }
+                        Err(e) => {
+                            app.popup = Some(format!("✗ {e}"));
+                            popup_since = Some(Instant::now());
+                        }
+                    }
+                    collector.refresh(false);
+                }
             }
             dirty = true;
+        }
+        if let Some((repo_path, branch)) = app.modal.as_mut().and_then(|m| m.due_check()) {
+            ops::check_branch(repo_path, branch, launch_tx.clone());
         }
         if app.popup.is_some() && popup_since.is_some_and(|t| t.elapsed() > Duration::from_secs(6)) {
             app.popup = None;
@@ -138,6 +185,11 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             Action::SettingsChanged => {
                                 theme = theme::Theme::by_name(&app.settings.theme);
                                 collector.update_settings(app.settings.clone());
+                            }
+                            Action::Create(repo, req) => ops::create(app.settings.clone(), *repo, *req, launch_tx.clone()),
+                            Action::Delete(v, delete_branch) => ops::delete(*v, delete_branch, launch_tx.clone()),
+                            Action::RunScript { repo_id, worktree_path } => {
+                                run_script(terminal, &repo_id, &worktree_path)?;
                             }
                             Action::EditSettingsFile => {
                                 edit_settings_file(terminal)?;
@@ -200,5 +252,24 @@ fn edit_settings_file(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()>
     if let Err(e) = status {
         am_core::warn!("settings", "Failed to run editor {editor}: {e}");
     }
+    Ok(())
+}
+
+/// Run a repo's startup script in the real terminal (the TUI steps aside),
+/// then wait for Enter so the output can be read before returning.
+fn run_script(terminal: &mut ratatui::DefaultTerminal, repo_id: &str, cwd: &str) -> io::Result<()> {
+    let script = am_core::worktrees::script_path(repo_id);
+    ratatui::restore();
+    println!("\x1b[1m▶ Running startup script\x1b[0m {}\n  in {cwd}\n", script.display());
+    let status = std::process::Command::new("/bin/sh").arg(&script).current_dir(cwd).status();
+    match status {
+        Ok(s) if s.success() => println!("\n\x1b[32m✓ Script finished.\x1b[0m Press Enter to return to am…"),
+        Ok(s) => println!("\n\x1b[31m✗ Script exited with {s}.\x1b[0m Press Enter to return to am…"),
+        Err(e) => println!("\n\x1b[31m✗ Couldn't run script: {e}\x1b[0m Press Enter to return to am…"),
+    }
+    let mut line = String::new();
+    let _ = io::stdin().read_line(&mut line);
+    *terminal = ratatui::init();
+    terminal.clear()?;
     Ok(())
 }
