@@ -50,6 +50,8 @@ dependencies = [
  "insta",
  "ratatui",
  "rusqlite",
+ "serde_json",
+ "tempfile",
  "unicode-width",
 ]
 
