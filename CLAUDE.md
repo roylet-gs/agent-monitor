@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm test:e2e` — Run Docker-based E2E tests (builds containers, runs Playwright specs, exits)
 - `pnpm test:e2e:build` — Pre-build Docker images without running tests
 - `pnpm test:e2e:clean` — Tear down containers, remove images/volumes
+- `pnpm test:e2e:rust` — Same Docker E2E flow against the native Rust binaries (`tests/e2e/docker-rust/`); `test:e2e:rust:build` / `test:e2e:rust:clean` likewise
 - `cargo test` — Rust workspace tests (`crates/`)
 - `cargo install --path crates/am-hook` — install the native hook binary to `~/.cargo/bin`, then `am hooks install` to point Claude Code at it
 - `cargo install --path crates/am-cli` — install the native CLI as `am-rs` (becomes `am` at cut-over)
@@ -146,6 +147,37 @@ pnpm test:e2e:clean    # Tear down containers after
 Screenshots land in `tests/e2e/tmp/`. New specs are automatically picked up via Dockerfile `COPY` on rebuild.
 
 **Config:** `e2e/playwright.config.ts` — single Chromium worker, 30s timeout, 1 retry, screenshots on failure. Tests run sequentially (`workers: 1`) because they share a single TUI terminal.
+
+#### Rust variant (`am-tui` / `am-rs` / `am-hook`)
+The same mock-api + ttyd + Playwright setup drives the native binaries. It is fully separate from the TS suite above (which is still what ships until cut-over): different Dockerfile stages, profile-gated compose services, its own spec dir and Playwright config.
+
+- **Dockerfile:** `rust-build` (`rust:1-slim-bookworm`, `cargo build --release --locked -p am-tui -p am-cli -p am-hook` with BuildKit/Buildah cache mounts for the registry and `target/`; LTO off and 16 codegen units via `CARGO_PROFILE_RELEASE_*` env, since E2E doesn't need the shipping profile — a warm rebuild is ~40 s) → `app-rust` (`debian:bookworm-slim` + git, jq, sqlite3, ttyd, the fake `gh`; binaries in `/usr/local/bin`, `am` → `am-rs`). The `test` stage also copies `tests/e2e/docker-rust/` and `e2e/playwright.rust.config.ts`. A root `.dockerignore` keeps `target/`, `node_modules/` and `.git/` out of the build context.
+- **Seeding (`e2e/entrypoint-rust.sh`):** `/work` repo with a local bare `origin` (`/srv/origin.git`) holding `main` and an origin-only `feature/on-origin` (for the live "exists on origin" check, answered by `git ls-remote`), plus a linked worktree `feature/to-delete`; `am-rs repo add /work`; settings with `setupCompleted`, Linear on (mock key) and `linearAutoNickname: false` (the mock links every branch to ENG-123, which would otherwise rename every row). Agent state goes through the real hook path: `am-rs hook-event` UserPromptSubmit → SubagentStart/PreToolUse with `agent_id`/`agent_type` (description from a seeded `<session>/subagents/agent-<id>.meta.json`) → Stop, leaving `main` **delegating** with one running subagent; a hook event on the untracked `/home/user/my-project` creates the standalone session. No tsx/sqlite seeding needed.
+- **Two ttyd ports:** `7681` serves `am-tui` on the seeded data dir (host `7691`); `7682` (host `7692`) runs `am-tui-fresh`, which wipes `AM_DATA_DIR`/`HOME` on every connection so the first-run setup wizard always shows. Both use `-t disableLeaveAlert=true` so navigation never hits a "leave site?" dialog. ttyd spawns a new `am-tui` per connection, so `page.reload()` is a process restart (fresh circuit breakers, settings re-read from disk).
+- **Compose:** `app-rust` and `tests-rust` are in the `rust` profile, so `pnpm test:e2e` never builds or starts them. `tests-rust` gets `TUI_URL=http://app-rust:7681`, `TUI_FRESH_URL=http://app-rust:7682` and runs `e2e/playwright.rust.config.ts` (45 s timeout, 1 retry, 1 worker).
+- **Specs** (`tests/e2e/docker-rust/`, numbered so they run in a deliberate order against the one shared DB; each restores any setting it changes). `helpers/rust-tui.ts` extends the shared `TuiPage` (imported from `../docker/helpers/`) with `open()`, `openUrl()`, `statusBar()`, `contextLine()` (the row above the status bar, ` <branch> · ticket · PR · session`), `selectRow(branch)`, `waitForGone()`, `waitForMatch()` and re-exports `setupMock`/`resetMock`.
+
+| Spec | What it tests |
+|------|---------------|
+| `01-dashboard.spec.ts` | `[1] Worktrees` / `[2] Subagents` panes, repo header, j/k selection, tab/1/2/esc focus, `w` log pane |
+| `02-help.spec.ts` | `?` help overlay (keys + status legend) opens and closes |
+| `03-settings.spec.ts` | `s` settings editor; toggling "Resume last session on open" persists across a process restart (then restored) |
+| `04-pr-status.spec.ts` | Open (`#42✓`, `PR #42 open`), draft (`PR #43 draft`) and no-PR fixtures via the batched `gh api graphql` path; with no GitHub PR the Linear ticket's PR attachment stands in (`PR #42 open`, no checks), so the no-PR case also unlinks the ticket |
+| `05-linear.spec.ts` | ENG-123 column + context line, `— ticket —` cluster header; enabling Linear project as the top sort key in the sort editor renders `═ Dashboard Revamp ═` (headers take no selection index), then restores |
+| `06-offline-cache.spec.ts` | Mock outage → cached PR/ticket stay with `⚠ GitHub + Linear offline — cached`; `r` after recovery clears it |
+| `07-subagents.spec.ts` | Delegating `main` (◆ glyph, `◆1` badge, status-bar count, session id) and its running subagent (description, type, `└ Grep verifyToken`); `a` toggles this-worktree/all |
+| `08-standalone.spec.ts` | "Other sessions" group with the hook-created standalone session, selectable |
+| `09-new-worktree.spec.ts` | `n` form: live `✓ exists on origin` check + base `tracks origin/…`, Enter → "Branch exists" choices; creating a fresh worktree adds + selects the row; empty name refused |
+| `10-delete.spec.ts` | Delete dialog text + cancel; main checkout refused; create → delete (incl. local branch) end to end |
+| `11-setup-wizard.spec.ts` | Seeded dir skips the wizard; fresh dir walks Editor → hooks install → add `/work` → Integrations → dashboard |
+
+Screenshots are written as `tests/e2e/tmp/rust-*.png`.
+
+```bash
+pnpm test:e2e:rust        # build + run + exit with the tests-rust exit code
+pnpm test:e2e:rust:clean  # tear down (incl. profile services)
+```
+On this macOS setup `docker` is Podman (`docker compose` shells out to `docker-compose` v2 against the Podman socket); the Buildah backend honours the `--mount=type=cache` mounts.
 
 ## Evidence Capture & PR Workflow
 

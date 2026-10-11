@@ -1,0 +1,7 @@
+# Keep the E2E build context small: none of these are COPY'd by e2e/Dockerfile.
+target/
+node_modules/
+dist/
+.git/
+tests/e2e/tmp/
+.claude/

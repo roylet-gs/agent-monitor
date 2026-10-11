@@ -28,7 +28,7 @@ Phase 2 progress:
 Phase 3 progress:
 - [x] Audio cues + unseen markers, log pane (`w`), standalone sessions ("Other sessions"), suggest-a-feature (`f`), first-run setup wizard, `doctor`
 - [x] CI: Rust tests + clippy on Linux/macOS; manual `release-native` workflow; npm/Homebrew packaging scaffold in `npm/`
-- [ ] Docker E2E against the Rust binaries (in progress)
+- [x] Docker E2E against the Rust binaries: `pnpm test:e2e:rust`, 11 specs / 23 tests in `tests/e2e/docker-rust/` (TS suite untouched)
 
 Phase 4 (cut-over) — needs your go-ahead:
 - [ ] Bump the workspace to 2.0.0; rename `am-rs` → `am`; npm launcher + per-platform packages; first `release-native` run
