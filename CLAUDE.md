@@ -12,8 +12,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `INSTA_UPDATE=always cargo test -p am-tui` — accept changed insta snapshots (`crates/am-tui/src/snapshots/*.snap`); review the diff before committing
 - `cargo install --path crates/am-cli && cargo install --path crates/am-tui && cargo install --path crates/am-hook` — install all three binaries to `~/.cargo/bin`, then `am hooks install` to point Claude Code at `am-hook`
 - `cargo run -p am-core --example integrations_probe -- <repo> <branch>...` — manual GitHub/Linear fetch against a throwaway DB
-- `pnpm test:e2e` — Docker E2E: build images, run the Playwright specs against the real binaries, exit with the tests' exit code.
+- `pnpm test:e2e` — Docker E2E: build images, run the Playwright specs against the real binaries, exit with the tests' exit code. Safe to run from several worktrees at once (see Docker E2E Tests)
 - `pnpm test:e2e:build` — pre-build the Docker images only
+- `pnpm test:e2e:ports` / `bash e2e/run.sh logs` — host ports / container logs of this worktree's running E2E stack
 - `pnpm test:e2e:clean` — tear down containers, remove local images and volumes
 
 ## What This Is
@@ -119,6 +120,7 @@ The DB and `settings.json` are shared with 1.x in place, so never rename or drop
 ### Docker E2E Tests
 End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Linear mocked, driven by Playwright. Use them to capture screenshots and test full flows.
 
+**Parallel runs:** the `pnpm test:e2e*` scripts go through `e2e/run.sh`, which runs compose as project `am-e2e-<checkout dir name>` (override with `AM_E2E_PROJECT`). Containers, network, volumes and built images are prefixed with it, so worktrees never share a stack or overwrite each other's images. Host ports aren't fixed (Docker picks them; `pnpm test:e2e:ports` prints them), because the `tests` container reaches the others over the compose network. Always go through the scripts: a bare `docker compose -f e2e/docker-compose.yml …` uses the shared default project `e2e`.
 
 **Containers** (`e2e/docker-compose.yml`, `e2e/Dockerfile`):
 1. **`mock-api`** — `e2e/mock-api/server.ts` on port 4100, serving fixtures from `e2e/mock-api/fixtures/`.

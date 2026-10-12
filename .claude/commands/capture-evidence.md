@@ -20,7 +20,7 @@ Collect lint, test, and visual evidence that the current changes work. Uses the 
    3. If gaps exist, create new spec files in `tests/e2e/docker/` following the existing pattern: numbered `NN-name.spec.ts` (next free number), `import { RustTui, resetMock, setupMock } from "./helpers/rust-tui"`, `resetMock()` in `beforeEach`, `tui.open()`, navigate to the relevant view, assert on `getScreenText()` / `keyBar()` / `selectedRow()`, and `tui.screenshot("<name>")`. Specs share one seeded DB and run sequentially, so restore any setting or state a spec changes. Seed data comes from `e2e/entrypoint.sh`; mock GitHub/Linear responses from `e2e/mock-api/` (fixtures in `e2e/mock-api/fixtures/`). Look at existing specs for reference.
    4. Clean prior artifacts: `rm -rf tests/e2e/tmp/*.png tests/e2e/tmp/test-results`
    5. Run `pnpm test:e2e` — this builds the Docker images (compiles the release binaries in the `rust-build` stage and picks up new specs via `COPY`), runs all Playwright specs, and screenshots land in `tests/e2e/tmp/`
-   6. On failure: capture logs with `docker compose -f e2e/docker-compose.yml logs`, then clean up with `pnpm test:e2e:clean`
+   6. On failure: capture logs with `bash e2e/run.sh logs` (the stack is per-worktree, see `e2e/run.sh`), then clean up with `pnpm test:e2e:clean`
    7. On success: clean up with `pnpm test:e2e:clean`, return pass/fail summary + screenshot file list from `tests/e2e/tmp/`
    8. Upload screenshots: `bash .claude/scripts/upload-evidence.sh tests/e2e/tmp`
 
