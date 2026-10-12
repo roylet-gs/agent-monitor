@@ -25,6 +25,8 @@ pub enum Msg {
     Deleted(String, String, Result<Vec<String>, String>),
     /// Typed path, and the repo name or an error.
     RepoAdded(String, Result<String, String>),
+    /// A newer release exists (version without the `v`).
+    UpdateAvailable(String),
 }
 
 /// Long enough for the popup to register before the editor steals focus.
@@ -100,4 +102,24 @@ pub fn open_url(url: String, tx: Sender<Msg>) {
             .and_then(|s| if s.success() { Ok(()) } else { Err(format!("{opener} failed")) });
         report(&tx, r, format!("Opened {url}"));
     });
+}
+
+/// Checks for a newer release now and then every [`update_check::CHECK_INTERVAL`].
+/// Re-reads `checkForUpdates` each time, so turning it off stops the requests.
+pub fn spawn_update_check(tx: Sender<Msg>) {
+    use am_core::update_check;
+    let spawned = std::thread::Builder::new().name("update-check".into()).spawn(move || {
+        loop {
+            if am_core::settings::load().check_for_updates
+                && let Some(latest) = update_check::check(env!("CARGO_PKG_VERSION"))
+                && tx.send(Msg::UpdateAvailable(latest)).is_err()
+            {
+                return;
+            }
+            std::thread::sleep(update_check::CHECK_INTERVAL);
+        }
+    });
+    if let Err(e) = spawned {
+        am_core::debug!("update", "could not spawn update-check thread: {e}");
+    }
 }

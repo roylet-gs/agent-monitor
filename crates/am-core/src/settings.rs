@@ -81,6 +81,8 @@ pub struct Settings {
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,
+    /// Check GitHub Releases for a newer `am` and show it in the dashboard.
+    pub check_for_updates: bool,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -140,6 +142,7 @@ impl Default for Settings {
             resume_last_session: true,
             theme: "ansi".into(),
             nerd_fonts: false,
+            check_for_updates: true,
             raw: Default::default(),
         }
     }
@@ -274,6 +277,13 @@ mod tests {
         assert_eq!(view.keys().next().map(String::as_str), Some("ide"));
         assert_eq!(view.keys().next_back().map(String::as_str), Some("zeta"));
         assert_eq!(view["ide"], "vscode");
+    }
+
+    #[test]
+    fn check_for_updates_defaults_on_and_parses() {
+        assert!(Settings::parse("{}").check_for_updates);
+        assert!(!Settings::parse(r#"{"checkForUpdates":false}"#).check_for_updates);
+        assert_eq!(Settings::default().to_file_json()["checkForUpdates"], true);
     }
 
     #[test]

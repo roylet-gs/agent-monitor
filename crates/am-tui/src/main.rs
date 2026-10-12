@@ -84,6 +84,7 @@ fn main() -> io::Result<()> {
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data::Collector) -> io::Result<()> {
     let mut theme = theme::Theme::load(&app.settings.theme);
     let (launch_tx, launch_rx) = std::sync::mpsc::channel();
+    launcher::spawn_update_check(launch_tx.clone());
     let mut popup_since: Option<Instant> = None;
     let mut log_lines: Vec<String> = Vec::new();
     let mut dirty = true;
@@ -154,6 +155,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     Err(e) => app.modal = Some(modals::Modal::AddRepo { path, error: Some(e) }),
                 },
+                launcher::Msg::UpdateAvailable(latest) => app.update_available = Some(latest),
                 launcher::Msg::Deleted(id, label, result) => {
                     // The box may have been dismissed (delete in background)
                     // and replaced by something else; only close our own.

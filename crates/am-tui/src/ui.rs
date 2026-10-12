@@ -626,6 +626,15 @@ fn title<'a>(name: &'a str, theme: &Theme) -> Line<'a> {
 
 // ---------------------------------------------------------------- worktrees
 
+/// Top-right "update available" label: shortened on narrow panes, dropped
+/// when it would run into the `─Worktrees` title.
+fn update_label(app: &App, width: u16) -> Option<String> {
+    let latest = app.update_available.as_deref().filter(|_| app.settings.check_for_updates)?;
+    // Two corners, `─Worktrees `, and one border cell between the titles.
+    let room = (width as usize).saturating_sub(2 + "─Worktrees ".width() + 1);
+    [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room)
+}
+
 struct Columns {
     ticket: usize,
     pr: usize,
@@ -642,6 +651,9 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         block = block.title_bottom(
             Line::styled(format!(" {} of {} ", app.selected + 1, app.flat.len()), theme.faint()).alignment(Alignment::Right),
         );
+    }
+    if let Some(label) = update_label(app, area.width) {
+        block = block.title(Line::styled(label, theme.bold(theme.green)).alignment(Alignment::Right));
     }
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1310,6 +1322,24 @@ mod tests {
     #[test]
     fn dashboard_wide() {
         insta::assert_snapshot!(render(&fixture(), 120, 16));
+    }
+
+    #[test]
+    fn dashboard_update_available() {
+        let mut app = fixture();
+        app.update_available = Some("2.2.0".into());
+        insta::assert_snapshot!(render(&app, 120, 16));
+    }
+
+    #[test]
+    fn update_label_shrinks_then_hides_and_follows_the_setting() {
+        let mut app = fixture();
+        app.update_available = Some("2.2.0".into());
+        assert_eq!(update_label(&app, 120).as_deref(), Some(" ⬆ v2.2.0 available "));
+        assert_eq!(update_label(&app, 30).as_deref(), Some(" ⬆ v2.2.0 "));
+        assert_eq!(update_label(&app, 20), None);
+        app.settings.check_for_updates = false;
+        assert_eq!(update_label(&app, 120), None);
     }
 
     #[test]

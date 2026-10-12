@@ -74,6 +74,8 @@ pub struct App {
     pub show_help: bool,
     pub loaded: bool,
     pub notice: Option<String>,
+    /// Newer release found by the update check, shown top right of the pane.
+    pub update_available: Option<String>,
     /// Centered message box (e.g. "copied resume command"); any key closes it.
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
@@ -107,6 +109,7 @@ impl App {
             show_help: false,
             loaded: false,
             notice: None,
+            update_available: None,
             popup: None,
             show_log: false,
             settings_editor: None,
