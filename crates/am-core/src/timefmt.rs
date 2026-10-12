@@ -12,6 +12,12 @@ pub fn parse_sqlite(s: &str) -> Option<i64> {
     PrimitiveDateTime::parse(s.get(..19)?, fmt).ok().map(|t| t.assume_utc().unix_timestamp())
 }
 
+/// Unix seconds as SQLite UTC datetime text (`YYYY-MM-DD HH:MM:SS`).
+pub fn sqlite_from_unix(secs: i64) -> String {
+    let fmt = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    OffsetDateTime::from_unix_timestamp(secs).ok().and_then(|t| t.format(&fmt).ok()).unwrap_or_default()
+}
+
 /// Compact age: `12s`, `4m`, `3h`, `2d`, `5w`.
 pub fn short_age(secs: i64) -> String {
     let s = secs.max(0);

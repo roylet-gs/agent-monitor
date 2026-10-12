@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 40, 16)"
+---
+╭─Worktrees ───────────────────────────╮
+│agent-monitor ────────────────────────│
+│▌◑ feature/refactor ◆2        #127✓ ✔ │
+│ ◐ fix/offline-cache                  │
+│                                      │
+│gridsight ────────────────────────────│
+│ · main                               │
+│                                      │
+│                                      │
+│                                      │
+│                                      │
+│                                      │
+│                                      │
+│                                      │
+╰────────────────────────────── 1 of 3 ╯
+ ⏎ │ g l │ ? help  q

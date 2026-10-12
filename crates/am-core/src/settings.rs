@@ -81,6 +81,17 @@ pub struct Settings {
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,
+    /// Terminal `t` / `c` / terminal-mode Enter drive: `auto` (tmux inside
+    /// tmux, else `$TERM_PROGRAM`) or a fixed one (`terminal::BACKEND_CHOICES`).
+    pub terminal_backend: String,
+    /// Where they open: `tab`, `split` or `window`.
+    pub terminal_open_placement: String,
+    /// Desktop notification (OSC 9) when an agent starts waiting or finishes.
+    /// Off by default: Claude Code already notifies in Ghostty/iTerm2/kitty
+    /// when a session waits, and two notifications per event is noise.
+    pub terminal_notifications: bool,
+    /// Merge `claude agents --json` (background sessions) into the dashboard.
+    pub claude_agents_integration: bool,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -140,6 +151,10 @@ impl Default for Settings {
             resume_last_session: true,
             theme: "ansi".into(),
             nerd_fonts: false,
+            terminal_backend: "auto".into(),
+            terminal_open_placement: "tab".into(),
+            terminal_notifications: false,
+            claude_agents_integration: true,
             raw: Default::default(),
         }
     }

@@ -26,6 +26,7 @@
   - [Status Legend](#status-legend)
   - [Row Badges and Columns](#row-badges-and-columns)
   - [Stacked Branches](#stacked-branches)
+- [Terminal Integration](#terminal-integration)
 - [Worktree Management](#worktree-management)
 - [GitHub and Linear](#github-and-linear)
 - [Startup Scripts](#startup-scripts)
@@ -149,7 +150,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `Ctrl-d` / `Ctrl-u` (`PgDn` / `PgUp`) | Page down / up |
 | `Enter` | Open the worktree in your editor (and resume its last Claude session, see below) |
 | `t` | Open a terminal at the worktree (or focus the one already open there) |
-| `c` | Open a terminal running `claude --resume` for the worktree's latest session |
+| `c` | Open a terminal running `claude --resume` for the worktree's latest session (`claude attach` for a background session) |
 | `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
 | `l` | Open the Linear ticket |
 | `p` | Open the Linear project |
@@ -168,7 +169,9 @@ Agent status changes show up within about 200 ms of the hook firing.
 - **Terminal** mode: the new terminal runs `claude --resume <id>` directly.
 - **Cursor / VS Code** mode: `claude --resume <id>` is copied to the clipboard, a popup tells you so, and the editor opens. Paste it into the editor's terminal. am doesn't type into the editor's terminal for you, because that needs macOS Accessibility permission and fails silently without it.
 
-Supported terminals: Terminal.app, iTerm2, Ghostty and Warp on macOS (the one you run am in), and `x-terminal-emulator` on Linux.
+On a row with a background session (`bg`, see below), `Enter` and `c` run `claude attach <id>` instead.
+
+Terminals open as a tab, split or window of the terminal you run am in (`terminalOpenPlacement`): tmux (when am runs inside it), Ghostty, iTerm2, Terminal.app and Warp (no command support, so `c` falls back to Terminal.app) on macOS, and Ghostty or `x-terminal-emulator` on Linux. See [Terminal Integration](#terminal-integration).
 
 ### Status Legend
 
@@ -191,6 +194,7 @@ After the name (a nickname, if set, followed by the branch in dim text):
 - `•`: the status changed since you last selected this row
 - `▶`: processes such as dev servers are running in the worktree (with `showRunningProcesses` on)
 - `◆ 2 subagents` (`◆2` on narrow terminals): background subagents currently running
+- `bg` (`bg✗` when it failed): a `claude --bg` background session is running here, from `claude agents`. Its state shows when no hook-reported session is open, and `Enter` / `c` attach to it. Background sessions outside any tracked worktree appear under **Other sessions**
 
 Right-aligned columns, each of which can be turned off in settings:
 
@@ -213,6 +217,40 @@ If a worktree's branch is built on top of another worktree's branch, it's listed
 ```
 
 The parent comes from the open PR's base branch when it targets another worktree's branch (works with Graphite, `gh` stacks or manual stacks, and survives squash-rebases). Without such a PR, am uses git: the closest other worktree branch whose tip is among this branch's commits that aren't on `origin/<main>` yet.
+
+---
+
+## Terminal Integration
+
+am lives inside your terminal rather than next to it: a sidebar or popup you toggle, agent counts in the status bar, notifications, and worktrees opening in tabs or splits of the window you're in.
+
+**tmux.** With [TPM](https://github.com/tmux-plugins/tpm):
+
+```tmux
+set -g @plugin 'roylet-gs/agent-monitor'
+set -g status-right '#{agent_monitor} %H:%M'   # optional: agent counts, e.g. ◐1 ●2
+```
+
+| Key | Action |
+| --- | ------ |
+| `prefix A` | Dashboard in a popup; it closes once you open a worktree |
+| `prefix S` | Toggle the dashboard as a full-height sidebar |
+
+Options: `@am-popup-key` (`A`), `@am-sidebar-key` (`S`), `@am-sidebar-width` (`44`), `@am-sidebar-side` (`left`), `@am-passthrough` (`on`: sets `allow-passthrough` so notifications reach the outer terminal) and `@am-bin` (directory with `am` and `am-tui`, default `$PATH`). Without TPM, `am integrate tmux --install` writes the same bindings into `~/.tmux.conf` (`am integrate tmux` prints them). Inside tmux, `t`, `c` and terminal-mode `Enter` open new tmux windows (or splits) at the worktree, and focus the pane already there.
+
+**Ghostty** has no plugin API, so am drives it over AppleScript (Ghostty 1.3+, macOS; macOS asks once for Automation permission):
+
+- `t`, `c` and terminal-mode `Enter` open a tab (or split, or window) in the front Ghostty window, and focus the tab already at the worktree.
+- `am sidebar` toggles the dashboard as a split on the left. Ghostty keybinds can't run commands, so bind it in Raycast/Shortcuts, or see the commented keybind in `am integrate ghostty`.
+- `am integrate ghostty --install` turns on `desktop-notifications` in Ghostty's config.
+
+On Linux, Ghostty can only be asked for new windows.
+
+**Anywhere else**, run `am --sidebar` in a narrow split. Below 60 columns the dashboard drops the ticket, git and age columns on its own.
+
+**Status bars.** `am summary` prints the counts (`◐1 ●2 ✓1`: waiting, working, done) from the database alone, fast enough for a status bar. `--format tmux` adds colours, `--json` gives the numbers plus which sessions need you.
+
+**Notifications.** Turn on `terminalNotifications` for a desktop notification (OSC 9; OSC 777 in Warp) when an agent starts waiting or finishes. It's off by default because Claude Code already notifies in Ghostty, iTerm2 and kitty when a session waits.
 
 ---
 
@@ -283,6 +321,11 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
 | `defaultBaseBranch` | `"main"` | Default base branch for new worktrees |
 | `pollingIntervalMs` | `30000` | Full git refresh interval (min 5000); a worktree whose agent acts is refreshed immediately |
+| `terminalBackend` | `"auto"` | What `t`, `c` and terminal-mode `Enter` drive: `auto` (tmux inside tmux, else the terminal you're in), `tmux`, `ghostty`, `iterm2`, `warp`, `terminal`, `x-terminal-emulator` |
+| `terminalOpenPlacement` | `"tab"` | Open as a new `tab`, a `split` next to the current pane, or a new `window` |
+| `terminalNotifications` | `false` | Desktop notification through the terminal when an agent starts waiting or finishes |
+| `claudeAgentsIntegration` | `true` | Show `claude --bg` background sessions from `claude agents` |
+| `compactView` | `false` | Always use the compact (sidebar) row layout |
 | `theme` | `"ansi"` | `ansi` (follows your terminal's colours), `catppuccin-mocha`, `tokyonight`, `gruvbox` |
 | `worktreeSort` | main last › ticket › created (newest first) | Ordered sort criteria: `isMain`, `repo`, `linearTicket`, `linearProject`, `agentStatus`, `lastActivity`, `createdAt`, `branchName`, `prStatus`, `gitDirty`, each with a direction and on/off. Edit in the TUI |
 | `hideMainBranch` | `true` | Hide the `main`/`master` checkout |
@@ -312,7 +355,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `logLevel` | `"info"` | `debug`, `info`, `warn`, `error` |
 | `maxLogSizeMb` | `2` | `debug.log` is rotated to `debug.log.1` past this size |
 
-Keys from 1.x that the native app no longer uses (`compactView`, `autoSyncOnStartup`, `agentPermissionMode`, `agentClaudeArgs`) are kept in the file but ignored.
+Keys from 1.x that the native app no longer uses (`autoSyncOnStartup`, `agentPermissionMode`, `agentClaudeArgs`) are kept in the file but ignored.
 
 </details>
 
@@ -356,6 +399,10 @@ am --version
 | `am linear open [target]` | Open the ticket | `--repo` |
 | `am script edit` / `show` / `remove` | Manage the repo's startup script | `--repo` (`show` also `--json`) |
 | `am status --worktree <path>` | Show the stored agent status | `--set <status>` (`idle`, `executing`, `planning`, `waiting`, `delegating`, `done`) |
+| `am summary` | Agent counts for status bars (reads the database only) | `--format plain\|tmux`, `--json` |
+| `am sidebar` | Toggle the dashboard as a sidebar split (tmux, Ghostty on macOS) | `--width <cols>` (tmux, default 44), `--position left\|right` |
+| `am integrate <tmux\|ghostty>` | Print the terminal's config snippet, or write it into the config | `--install` |
+| `am --sidebar` | Open the dashboard in the compact sidebar layout | |
 
 </details>
 

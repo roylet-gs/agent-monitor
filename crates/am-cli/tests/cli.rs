@@ -702,3 +702,52 @@ fn cut_commands_are_gone() {
         assert_eq!(env.run(args).code, 1, "{args:?}");
     }
 }
+
+// --- terminal integrations ---
+
+#[test]
+fn summary_counts_open_sessions() {
+    let env = Env::new();
+    let (repo, wt) = env.seed_repo();
+    assert_eq!(env.ok(&["summary"]).stdout, "\n", "nothing running: empty segment");
+    env.ok(&["status", "-w", wt.to_str().unwrap(), "--set", "waiting"]);
+    env.ok(&["status", "-w", repo.to_str().unwrap(), "--set", "executing"]);
+    let v = env.ok(&["summary", "--json"]).json();
+    assert_eq!((v["waiting"].as_u64(), v["executing"].as_u64(), v["total"].as_u64()), (Some(1), Some(1), Some(2)));
+    assert_eq!(v["needsAttention"][0]["name"], "feature/login");
+    assert_eq!(env.ok(&["summary", "--format", "tmux"]).stdout, "#[fg=yellow]◐1 #[fg=green]●1#[default]\n");
+    assert_eq!(env.ok(&["summary"]).stdout, "◐1 ●1\n");
+    assert_eq!(env.run(&["summary", "--format", "xml"]).code, 1);
+}
+
+#[test]
+fn integrate_prints_and_installs_idempotently() {
+    let env = Env::new();
+    let printed = env.ok(&["integrate", "tmux"]).stdout;
+    assert!(printed.contains("bind-key A display-popup") && printed.contains("summary --format tmux"), "{printed}");
+    assert!(!env.home().join(".tmux.conf").exists(), "printing writes nothing");
+
+    let conf = env.home().join(".tmux.conf");
+    std::fs::write(&conf, "set -g mouse on\n").unwrap();
+    env.ok(&["integrate", "tmux", "--install"]);
+    let once = std::fs::read_to_string(&conf).unwrap();
+    assert!(once.starts_with("set -g mouse on\n\n# >>> agent-monitor >>>"), "{once}");
+    assert!(env.ok(&["integrate", "tmux", "--install"]).stdout.contains("already up to date"));
+    assert_eq!(std::fs::read_to_string(&conf).unwrap(), once);
+
+    env.ok(&["integrate", "ghostty", "--install"]);
+    let ghostty = std::fs::read_to_string(env.home().join(".config/ghostty/config")).unwrap();
+    assert!(ghostty.contains("desktop-notifications = true"), "{ghostty}");
+    assert_eq!(env.run(&["integrate", "alacritty"]).code, 1);
+}
+
+#[test]
+fn sidebar_refuses_terminals_it_cannot_split() {
+    let env = Env::new();
+    env.fake_bin("am-tui", "exit 0");
+    let mut c = env.command(&["sidebar"], None);
+    c.env_remove("TMUX").env("TERM_PROGRAM", "vscode");
+    let o = c.output().unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("am sidebar needs tmux or Ghostty"));
+}

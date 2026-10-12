@@ -180,6 +180,17 @@ pub struct Subagent {
     pub transcript_path: Option<String>,
 }
 
+/// A `claude --bg` session (from `claude agents --json`) in this worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackgroundAgent {
+    /// Short id for `claude attach <id>`.
+    pub id: String,
+    pub name: Option<String>,
+    pub failed: bool,
+    /// e.g. `permission prompt`.
+    pub waiting_for: Option<String>,
+}
+
 /// Everything the dashboard shows for one worktree.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorktreeView {
@@ -192,6 +203,8 @@ pub struct WorktreeView {
     pub has_terminal: bool,
     pub open_ide: Option<Ide>,
     pub running_processes: Vec<RunningProcess>,
+    /// A background session running here (`claudeAgentsIntegration`).
+    pub background: Option<BackgroundAgent>,
 }
 
 impl WorktreeView {

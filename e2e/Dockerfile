@@ -51,7 +51,7 @@ RUN --mount=type=cache,id=am-cargo-registry,target=/usr/local/cargo/registry \
 FROM docker.io/library/debian:bookworm-slim AS app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates jq sqlite3 procps \
+    git curl ca-certificates jq sqlite3 procps tmux \
   && rm -rf /var/lib/apt/lists/*
 
 ARG TTYD_VERSION=1.7.7
@@ -61,9 +61,13 @@ RUN ARCH=$(uname -m) \
 
 COPY --from=rust-build /out/am-tui /out/am /out/am-hook /usr/local/bin/
 
-# Install fake gh on PATH
+# Install fake gh and claude on PATH
 COPY e2e/bin/gh /usr/local/bin/gh
-RUN chmod +x /usr/local/bin/gh
+COPY e2e/bin/claude /usr/local/bin/claude
+RUN chmod +x /usr/local/bin/gh /usr/local/bin/claude
+
+# The tmux plugin, loaded by the 7683 session like TPM would.
+COPY agent-monitor.tmux /usr/local/share/agent-monitor/agent-monitor.tmux
 
 COPY e2e/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -73,7 +77,8 @@ ENV AM_MOCK_API_URL=http://mock-api:4100
 ENV AM_LINEAR_API_URL=http://mock-api:4100/linear
 
 # 7681: seeded dashboard. 7682: fresh data dir per connection (setup wizard).
-EXPOSE 7681 7682
+# 7683: tmux with the agent-monitor plugin, on the seeded data dir.
+EXPOSE 7681 7682 7683
 ENTRYPOINT ["/entrypoint.sh"]
 
 # ============================================================
@@ -96,6 +101,7 @@ COPY e2e/playwright.config.ts ./e2e/
 COPY tests/e2e/docker/ ./tests/e2e/docker/
 
 ENV TUI_URL=http://app:7681
+ENV TMUX_URL=http://app:7683
 ENV MOCK_API_URL=http://mock-api:4100
 
 CMD ["pnpm", "exec", "playwright", "test", "--config", "e2e/playwright.config.ts"]

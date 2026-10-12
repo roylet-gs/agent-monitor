@@ -135,6 +135,7 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
                 has_terminal: false,
                 open_ide: None,
                 running_processes: Vec::new(),
+                background: None,
             }
         })
         .collect();
@@ -360,7 +361,7 @@ pub fn open(target: &str, repo_path: Option<&str>) {
         Ok(true) => println!("Switched to branch {}", wt.branch),
         Ok(false) => {}
     }
-    if let Err(e) = launch::open_in_editor(path, IdeChoice::from_setting(&s.ide)) {
+    if let Err(e) = launch::open_in_editor(path, IdeChoice::from_setting(&s.ide), launch::TerminalTarget::from_settings(&s)) {
         fail(&e);
     }
     println!("Opened {} in {}", wt.branch, s.ide);

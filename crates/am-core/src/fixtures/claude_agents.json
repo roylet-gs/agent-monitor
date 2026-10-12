@@ -1,0 +1,57 @@
+[
+  {
+    "id": "bg-work",
+    "cwd": "/repo/src",
+    "kind": "background",
+    "startedAt": 1789605428243,
+    "sessionId": "sess-work",
+    "name": "refactor parser",
+    "state": "working"
+  },
+  {
+    "id": "bg-feat-work",
+    "cwd": "/repo/.claude/worktrees/feat",
+    "kind": "background",
+    "startedAt": 1789605428244,
+    "sessionId": "sess-feat-work",
+    "name": "write tests",
+    "state": "working"
+  },
+  {
+    "id": "bg-blocked",
+    "cwd": "/repo/.claude/worktrees/feat",
+    "kind": "background",
+    "startedAt": 1789605722446,
+    "sessionId": "sess-blocked",
+    "name": "branch state continuation",
+    "state": "blocked"
+  },
+  {
+    "id": "bg-failed",
+    "cwd": "/elsewhere",
+    "kind": "background",
+    "startedAt": 1789605722447,
+    "sessionId": "sess-failed",
+    "name": "rebase-implementation-after-squash",
+    "state": "failed"
+  },
+  {
+    "id": "bg-stopped",
+    "cwd": "/repo",
+    "kind": "background",
+    "startedAt": 1789605722448,
+    "sessionId": "sess-stopped",
+    "state": "stopped"
+  },
+  {
+    "pid": 19945,
+    "id": "f79c7d58",
+    "cwd": "/repo",
+    "kind": "interactive",
+    "startedAt": 1791793485507,
+    "sessionId": "f79c7d58-bbc7-4edf-b7de-3d306d232ab5",
+    "name": "resolve-pr-review-comments",
+    "status": "waiting",
+    "waitingFor": "permission prompt"
+  }
+]

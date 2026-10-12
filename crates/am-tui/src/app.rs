@@ -78,6 +78,12 @@ pub struct App {
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
     pub show_log: bool,
+    /// `--sidebar` (narrow split next to your work): compact rows regardless
+    /// of width, like the `compactView` setting.
+    pub sidebar: bool,
+    /// `--popup` (tmux `display-popup`): quit once a worktree was opened so
+    /// the popup gets out of the way.
+    pub popup_mode: bool,
     pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
     pub modal: Option<crate::modals::Modal>,
     pub setup: Option<crate::setup::Setup>,
@@ -88,6 +94,8 @@ pub struct App {
     seen_status: std::collections::HashMap<String, Option<Status>>,
     /// System sounds to play for this update (audio notifications).
     pub sounds: Vec<String>,
+    /// Desktop-notification bodies queued by status changes (`terminalNotifications`).
+    pub notifications: Vec<String>,
     /// Worktrees being deleted in the background → whether the job has
     /// finished. Their rows are greyed out and take no actions; a finished
     /// entry is dropped on the next snapshot, so the row doesn't flash back
@@ -109,6 +117,8 @@ impl App {
             notice: None,
             popup: None,
             show_log: false,
+            sidebar: false,
+            popup_mode: false,
             settings_editor: None,
             modal: None,
             setup: None,
@@ -116,6 +126,7 @@ impl App {
             unseen: Default::default(),
             seen_status: Default::default(),
             sounds: Vec::new(),
+            notifications: Vec::new(),
             deleting: Default::default(),
         }
     }
@@ -169,6 +180,19 @@ impl App {
             }
             if changed.iter().any(|(_, s)| *s == Some(Status::Done)) {
                 self.sounds.push(self.settings.audio_done_sound.clone());
+            }
+        }
+        if self.settings.terminal_notifications && !first_load {
+            let names = |want: Status| -> Vec<String> {
+                changed
+                    .iter()
+                    .filter(|(_, s)| *s == Some(want))
+                    .filter_map(|(id, _)| self.flat.iter().find(|v| v.worktree.id == *id))
+                    .map(|v| v.worktree.display_name().to_string())
+                    .collect()
+            };
+            if let Some(m) = crate::notify::message(&names(Status::Waiting), &names(Status::Done)) {
+                self.notifications.push(m);
             }
         }
         self.mark_selected_seen();

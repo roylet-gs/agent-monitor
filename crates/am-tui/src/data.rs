@@ -17,6 +17,7 @@ use am_core::integrations::{Integrations, RepoBranches};
 use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
+use am_core::claude_agents::{self, Agent};
 use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
 
@@ -34,6 +35,8 @@ const RECENT_SUBAGENT_MINUTES: u32 = 30;
 /// How far back a stopped subagent can still be "parked" (waiting on a
 /// background command); matches the stale cut-off for running ones.
 const PARKED_SUBAGENT_MINUTES: u32 = 120;
+/// `claude agents --json` (Claude Code's background sessions) poll interval.
+const CLAUDE_AGENTS_INTERVAL: Duration = Duration::from_secs(5);
 /// The tool a background subagent calls to hand its final report back.
 const HANDBACK_TOOL: &str = "SubagentHandback";
 
@@ -55,6 +58,7 @@ pub struct Collector {
     rx: Receiver<Snapshot>,
     cmd: Sender<Cmd>,
     int_cmd: Sender<Cmd>,
+    bg_cmd: Sender<Cmd>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -64,11 +68,18 @@ impl Collector {
         let (cmd, cmd_rx) = mpsc::channel();
         let (int_tx, int_rx) = mpsc::channel();
         let (int_cmd, int_cmd_rx) = mpsc::channel();
+        let (bg_tx, bg_rx) = mpsc::channel();
+        let (bg_cmd, bg_cmd_rx) = mpsc::channel();
         let int_settings = settings.clone();
         std::thread::Builder::new()
             .name("integrations".into())
             .spawn(move || run_integrations(int_settings, int_cmd_rx, int_tx))
             .expect("spawn integrations");
+        let bg_enabled = settings.claude_agents_integration;
+        std::thread::Builder::new()
+            .name("claude-agents".into())
+            .spawn(move || run_claude_agents(bg_enabled, bg_cmd_rx, bg_tx))
+            .expect("spawn claude-agents");
         let handle = std::thread::Builder::new()
             .name("collector".into())
             .spawn(move || {
@@ -79,10 +90,10 @@ impl Collector {
                         return;
                     }
                 };
-                Worker::new(settings, conn, tx, int_rx).run(cmd_rx);
+                Worker::new(settings, conn, tx, int_rx, bg_rx).run(cmd_rx);
             })
             .expect("spawn collector");
-        Collector { rx, cmd, int_cmd, handle: Some(handle) }
+        Collector { rx, cmd, int_cmd, bg_cmd, handle: Some(handle) }
     }
 
     pub fn try_recv(&self) -> Option<Snapshot> {
@@ -92,11 +103,13 @@ impl Collector {
 
     pub fn update_settings(&self, settings: Settings) {
         let _ = self.cmd.send(Cmd::Settings(Box::new(settings.clone())));
+        let _ = self.bg_cmd.send(Cmd::Settings(Box::new(settings.clone())));
         let _ = self.int_cmd.send(Cmd::Settings(Box::new(settings)));
     }
 
     pub fn refresh(&self, force: bool) {
         let _ = self.cmd.send(Cmd::Refresh { force });
+        let _ = self.bg_cmd.send(Cmd::Refresh { force });
         let _ = self.int_cmd.send(Cmd::Refresh { force });
     }
 
@@ -104,6 +117,7 @@ impl Collector {
         // The integrations thread may be mid-`gh` call; it exits on its next
         // loop and holds nothing that needs flushing, so it is not joined.
         let _ = self.int_cmd.send(Cmd::Quit);
+        let _ = self.bg_cmd.send(Cmd::Quit);
         let _ = self.cmd.send(Cmd::Quit);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
@@ -131,6 +145,9 @@ struct Worker {
     conn: Connection,
     tx: Sender<Snapshot>,
     integrations: Receiver<IntegrationUpdate>,
+    /// Latest `claude agents --json` list from the claude-agents thread.
+    claude_agents: Receiver<Vec<Agent>>,
+    bg_agents: Vec<Agent>,
     fields: Fields,
     health: Health,
     git: HashMap<String, GitData>,
@@ -149,12 +166,20 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(settings: Settings, conn: Connection, tx: Sender<Snapshot>, integrations: Receiver<IntegrationUpdate>) -> Worker {
+    fn new(
+        settings: Settings,
+        conn: Connection,
+        tx: Sender<Snapshot>,
+        integrations: Receiver<IntegrationUpdate>,
+        claude_agents: Receiver<Vec<Agent>>,
+    ) -> Worker {
         Worker {
             settings,
             conn,
             tx,
             integrations,
+            claude_agents,
+            bg_agents: Vec::new(),
             fields: HashMap::new(),
             health: Health::default(),
             git: HashMap::new(),
@@ -205,6 +230,12 @@ impl Worker {
             self.fields = u.fields;
             self.health = u.health;
             ints_changed = true;
+        }
+        while let Ok(list) = self.claude_agents.try_recv() {
+            if list != self.bg_agents {
+                self.bg_agents = list;
+                ints_changed = true;
+            }
         }
         let dv = db::data_version(&self.conn)?;
         if !full_due && !procs_due && !ints_changed && dv == self.data_version {
@@ -264,7 +295,7 @@ impl Worker {
             self.last_full = Some(Instant::now());
         }
 
-        let views: Vec<WorktreeView> = worktrees
+        let mut views: Vec<WorktreeView> = worktrees
             .into_iter()
             .map(|w| {
                 let g = self.git.get(&w.id).cloned().unwrap_or_default();
@@ -280,10 +311,14 @@ impl Worker {
                     has_terminal: p.has_terminal,
                     open_ide: p.open_ide,
                     running_processes: p.running,
+                    background: None,
                     worktree: w,
                 }
             })
             .collect();
+        // Background (`claude --bg`) sessions: badge + state for their worktree.
+        let bg_unmatched =
+            if self.settings.claude_agents_integration { claude_agents::merge(&mut views, &self.bg_agents) } else { Vec::new() };
 
         // A subagent waiting on a background command has *stopped* as far as
         // hooks go, but its work isn't done: keep it (and the worktree) going.
@@ -309,7 +344,7 @@ impl Worker {
         }
         let stack = self.infer_stacks(&views);
         let mut groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
-        if let Some(g) = self.standalone_group()? {
+        if let Some(g) = self.standalone_group(&bg_unmatched)? {
             groups.push(g);
         }
         let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone(), stack };
@@ -366,10 +401,10 @@ impl Worker {
 
     /// "Other sessions": open standalone sessions as pseudo-worktree rows so
     /// selection, Enter and `d` work on them like on any row.
-    fn standalone_group(&self) -> rusqlite::Result<Option<am_core::model::WorktreeGroup>> {
+    fn standalone_group(&self, background: &[Agent]) -> rusqlite::Result<Option<am_core::model::WorktreeGroup>> {
         use am_core::model::{Repository, STANDALONE_REPO_ID, WorktreeGroup};
         let home = am_core::paths::home_dir().to_string_lossy().into_owned();
-        let views: Vec<WorktreeView> = db::standalone_sessions(&self.conn)?
+        let mut views: Vec<WorktreeView> = db::standalone_sessions(&self.conn)?
             .into_iter()
             .filter(|(_, _, a)| grouping::is_open_now(Some(a)))
             .map(|(id, path, agent)| {
@@ -393,9 +428,36 @@ impl Worker {
                     has_terminal: false,
                     open_ide: None,
                     running_processes: Vec::new(),
+                    background: None,
                 }
             })
             .collect();
+        // Background sessions outside every tracked worktree.
+        for a in background {
+            let short = a.cwd.strip_prefix(&home).map(|p| format!("~{p}")).unwrap_or_else(|| a.cwd.clone());
+            let agent = claude_agents::agent_state(a);
+            views.push(WorktreeView {
+                worktree: Worktree {
+                    id: format!("bg:{}", a.id),
+                    repo_id: STANDALONE_REPO_ID.into(),
+                    path: a.cwd.clone(),
+                    branch: short.clone(),
+                    name: short,
+                    custom_name: a.name.clone(),
+                    is_main: false,
+                    created_at: agent.as_ref().map(|s| s.updated_at.clone()).unwrap_or_default(),
+                },
+                agent,
+                git: None,
+                last_commit: None,
+                pr: None,
+                linear: None,
+                has_terminal: false,
+                open_ide: None,
+                running_processes: Vec::new(),
+                background: Some(a.info()),
+            });
+        }
         Ok((!views.is_empty()).then(|| WorktreeGroup {
             repo: Repository { id: STANDALONE_REPO_ID.into(), path: String::new(), name: "Other sessions".into() },
             worktrees: views,
@@ -423,6 +485,46 @@ impl Worker {
                 (w.id.clone(), data)
             })
             .collect()
+    }
+}
+
+/// Polls `claude agents --json` off the collector thread (it takes 0.1–0.8 s).
+/// A failed poll keeps the last list rather than flickering rows away; the
+/// availability transition is logged once.
+fn run_claude_agents(mut enabled: bool, cmds: Receiver<Cmd>, tx: Sender<Vec<Agent>>) {
+    let mut available: Option<bool> = None;
+    loop {
+        if enabled {
+            let started = Instant::now();
+            match claude_agents::fetch() {
+                Ok(list) => {
+                    if available != Some(true) {
+                        info!("claude-agents", "claude agents available ({} active session(s))", list.len());
+                    }
+                    available = Some(true);
+                    debug!("claude-agents", "{} session(s) in {:?}", list.len(), started.elapsed());
+                    if tx.send(list).is_err() {
+                        return;
+                    }
+                }
+                Err(e) => {
+                    if available != Some(false) {
+                        debug!("claude-agents", "claude agents unavailable, background sessions not shown: {e}");
+                    }
+                    available = Some(false);
+                }
+            }
+        }
+        match cmds.recv_timeout(CLAUDE_AGENTS_INTERVAL) {
+            Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
+            Ok(Cmd::Settings(s)) => {
+                enabled = s.claude_agents_integration;
+                if !enabled && tx.send(Vec::new()).is_err() {
+                    return;
+                }
+            }
+            Ok(Cmd::Refresh { .. }) | Err(RecvTimeoutError::Timeout) => {}
+        }
     }
 }
 
@@ -639,6 +741,7 @@ mod tests {
             has_terminal: false,
             open_ide: None,
             running_processes: Vec::new(),
+            background: None,
         }
     }
 

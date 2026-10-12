@@ -36,6 +36,9 @@ struct Cli {
     /// Launch with log panel open
     #[arg(long)]
     watch: bool,
+    /// Launch the compact sidebar layout (for a narrow split)
+    #[arg(long)]
+    sidebar: bool,
     #[command(subcommand)]
     command: Option<Cmd>,
 }
@@ -110,6 +113,34 @@ enum Cmd {
         /// Hook is managed by Claude Code (accepted for compatibility)
         #[arg(long)]
         managed: bool,
+    },
+    /// Agent counts for status bars (tmux status-right, prompts); reads the DB only
+    Summary {
+        #[command(flatten)]
+        json: JsonOpt,
+        /// Output format: plain or tmux
+        #[arg(long, value_name = "format", default_value = "plain")]
+        format: String,
+    },
+    /// Toggle the dashboard as a sidebar split (tmux, Ghostty on macOS)
+    Sidebar {
+        /// Sidebar width in columns (tmux)
+        #[arg(long, value_name = "cols", default_value = "44")]
+        width: u16,
+        /// Which side: left or right
+        #[arg(long, value_name = "side", default_value = "left")]
+        position: String,
+        /// tmux pane to split next to (the plugin passes #{pane_id})
+        #[arg(long, value_name = "pane", hide = true)]
+        target: Option<String>,
+    },
+    /// Hook am into a terminal: print or install its config snippet (tmux, ghostty)
+    Integrate {
+        /// tmux or ghostty
+        terminal: String,
+        /// Write the snippet into the terminal's config file (default: print it)
+        #[arg(long)]
+        install: bool,
     },
     /// List worktrees (alias for: worktree list)
     Ls(ListArgs),
@@ -339,8 +370,10 @@ fn main() {
 
     use commands::*;
     match cli.command {
-        None => tui::launch(cli.watch, false),
-        Some(Cmd::Setup) => tui::launch(false, true),
+        None => tui::launch(cli.watch, false, cli.sidebar),
+        Some(Cmd::Setup) => tui::launch(false, true, false),
+        Some(Cmd::Sidebar { width, position, target }) => sidebar::run(width, &position, target.as_deref()),
+        Some(Cmd::Integrate { terminal, install }) => integrate::run(&terminal, install),
         Some(Cmd::Worktree(w)) => match w {
             WorktreeCmd::List(a) => worktree::list(a.repo.repo.as_deref(), a.json.json),
             WorktreeCmd::Create(a) => lifecycle::create(&a),
@@ -399,6 +432,7 @@ fn main() {
             clear: a.clear,
         }),
         Some(Cmd::Status { worktree, set }) => status::run(&worktree, set.as_deref()),
+        Some(Cmd::Summary { json, format }) => summary::run(json.json, &format),
         // Normally caught by the fast path above (e.g. reached via `am --watch hook-event`).
         Some(Cmd::HookEvent { worktree, event, managed: _ }) => am_hook::run_hook_event(&worktree, event.as_deref()),
     }

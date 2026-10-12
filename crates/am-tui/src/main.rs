@@ -8,6 +8,7 @@ mod app;
 mod data;
 mod launcher;
 mod modals;
+mod notify;
 mod ops;
 mod settings_ui;
 mod setup;
@@ -63,16 +64,25 @@ fn main() -> io::Result<()> {
     // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
     let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
     let show_log = args.iter().any(|a| a == "--log");
+    // `am sidebar` → `--sidebar`; the tmux plugin's popup → `--popup`.
+    let sidebar = args.iter().any(|a| a == "--sidebar");
+    let popup_mode = args.iter().any(|a| a == "--popup");
     let ide = settings.ide.clone();
     let mut app = App::new(settings);
     if first_run {
         app.setup = Some(setup::Setup::new(Vec::new(), &ide));
     }
     app.show_log = show_log;
+    app.sidebar = sidebar;
+    app.popup_mode = popup_mode;
 
     // ratatui::init enables raw mode + alt screen and installs a panic hook
     // that restores the terminal before printing the panic.
     let mut terminal = ratatui::init();
+    if app.sidebar {
+        // `am sidebar` finds this split again by its title (Ghostty).
+        let _ = execute!(io::stdout(), ratatui::crossterm::terminal::SetTitle("am sidebar"));
+    }
     let result = run(&mut terminal, &mut app, &collector);
     ratatui::restore();
     collector.shutdown();
@@ -93,6 +103,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             for sound in app.sounds.drain(..) {
                 play_sound(&sound);
             }
+            // Written between frames, never mid-draw.
+            for body in app.notifications.drain(..) {
+                notify::send(&body);
+            }
             dirty = true;
         }
         while let Ok(msg) = launch_rx.try_recv() {
@@ -105,6 +119,14 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     popup_since = Some(Instant::now());
                 }
                 launcher::Msg::Notice(n) => {
+                    app.notice = Some(n);
+                    notice_since = None;
+                }
+                launcher::Msg::Opened(n) => {
+                    if app.popup_mode {
+                        info!("tui", "{n}; closing (popup mode)");
+                        return Ok(());
+                    }
                     app.notice = Some(n);
                     notice_since = None;
                 }
@@ -214,8 +236,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             Action::Quit => return Ok(()),
                             Action::Refresh => collector.refresh(true),
                             Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
-                            Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
-                            Action::OpenClaude(v) => launcher::open_claude(*v, launch_tx.clone()),
+                            Action::OpenTerminal(v) => launcher::open_terminal(*v, &app.settings, launch_tx.clone()),
+                            Action::OpenClaude(v) => launcher::open_claude(*v, &app.settings, launch_tx.clone()),
                             Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
                             Action::SettingsChanged => {
                                 theme = theme::Theme::by_name(&app.settings.theme);

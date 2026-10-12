@@ -2,6 +2,7 @@
 //! schema, and the agent-status rules. The TS app shares the same DB in place
 //! during the migration, so every schema change here must stay readable by it.
 
+pub mod claude_agents;
 pub mod db;
 pub mod gitinfo;
 pub mod grouping;
@@ -15,5 +16,6 @@ pub mod procscan;
 pub mod settings;
 pub mod stacks;
 pub mod status;
+pub mod terminal;
 pub mod timefmt;
 pub mod worktrees;

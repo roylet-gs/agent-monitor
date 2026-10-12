@@ -1,0 +1,16 @@
+#!/bin/bash
+# Fake Claude Code CLI for the E2E container.
+# - `claude agents --json`: the seeded session list (/tmp/claude-agents.json),
+#   so am's background-session merge has something to show.
+# - anything else (e.g. `claude attach <id>` opened by `c`): print the args so
+#   a spec can see what ran, then return to the shell.
+#   Only for the seeded data dir: the fresh one (setup wizard) has no sessions.
+if [ "$1" = "agents" ]; then
+  if [ "$AM_DATA_DIR" = "/tmp/am-e2e" ]; then
+    cat /tmp/claude-agents.json 2>/dev/null || echo "[]"
+  else
+    echo "[]"
+  fi
+  exit 0
+fi
+echo "fake-claude $*"

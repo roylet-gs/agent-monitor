@@ -11,6 +11,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
+use crate::settings::Settings;
+use crate::terminal::{self, Backend, Placement, sh_quote};
 use crate::{info, paths, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,13 +127,6 @@ pub fn resolve_open_action(resume_last_session: bool, already_open: bool, ide: I
     OpenAction::CopyAndOpen(resume)
 }
 
-fn sh_quote(s: &str) -> String {
-    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@".contains(c)) {
-        return s.to_string();
-    }
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
 /// `claude --resume <id>` / `claude -c` / `claude`, optionally prefixed with a cd.
 pub fn claude_command(resume: &Resume) -> String {
     let cmd = match (&resume.session_id, resume.continue_session) {
@@ -143,6 +138,11 @@ pub fn claude_command(resume: &Resume) -> String {
         Some(dir) => format!("cd {} && {cmd}", sh_quote(dir)),
         None => cmd,
     }
+}
+
+/// `claude attach <id>`: open a running background (`claude --bg`) session.
+pub fn attach_command(id: &str) -> String {
+    format!("claude attach {}", sh_quote(id))
 }
 
 pub fn copy_to_clipboard(text: &str) -> bool {
@@ -176,11 +176,11 @@ fn run(cmd: &mut Command) -> Result<(), String> {
 
 /// Open the worktree in Cursor / VS Code via their CLI, falling back to
 /// `open -a` when the shell command isn't installed.
-pub fn open_in_editor(path: &Path, ide: IdeChoice) -> Result<(), String> {
+pub fn open_in_editor(path: &Path, ide: IdeChoice, target: TerminalTarget) -> Result<(), String> {
     let (cli, app) = match ide {
         IdeChoice::Cursor => ("cursor", "Cursor"),
         IdeChoice::Vscode => ("code", "Visual Studio Code"),
-        IdeChoice::Terminal => return open_terminal(path, None),
+        IdeChoice::Terminal => return open_terminal(path, None, target),
     };
     let result = run(Command::new(cli).arg(path)).or_else(|e| {
         if cfg!(target_os = "macos") {
@@ -196,76 +196,30 @@ pub fn open_in_editor(path: &Path, ide: IdeChoice) -> Result<(), String> {
     result.map_err(|e| format!("Couldn't open {app}: {e}"))
 }
 
-/// Which terminal app to drive. Inside an editor's integrated terminal
-/// (TERM_PROGRAM=vscode) there is no app to drive, so use Terminal.app.
-pub fn terminal_app() -> &'static str {
-    match std::env::var("TERM_PROGRAM").as_deref() {
-        Ok("iTerm.app") => "iTerm2",
-        Ok("ghostty") => "Ghostty",
-        Ok("WarpTerminal") => "Warp",
-        _ => "Terminal",
+/// Where `t` / `c` / terminal-mode Enter open: the detected (or configured)
+/// terminal backend and the `terminalOpenPlacement` setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalTarget {
+    pub backend: Backend,
+    pub placement: Placement,
+}
+
+impl TerminalTarget {
+    pub fn from_settings(s: &Settings) -> TerminalTarget {
+        TerminalTarget { backend: terminal::detect(&s.terminal_backend), placement: Placement::from_setting(&s.terminal_open_placement) }
     }
 }
 
-fn applescript_string(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+/// Open a new terminal tab / split / window at `path`, optionally running `command`.
+pub fn open_terminal(path: &Path, command: Option<&str>, target: TerminalTarget) -> Result<(), String> {
+    terminal::open(target.backend, path, command, target.placement)
 }
 
-/// Open a new terminal window/tab at `path`, optionally running `command`.
-pub fn open_terminal(path: &Path, command: Option<&str>) -> Result<(), String> {
-    let dir = path.to_string_lossy();
-    let shell_cmd = match command {
-        Some(c) => format!("cd {} && {c}", sh_quote(&dir)),
-        None => format!("cd {}", sh_quote(&dir)),
-    };
-    let app = terminal_app();
-    let result = if !cfg!(target_os = "macos") {
-        let mut c = Command::new("x-terminal-emulator");
-        c.arg(format!("--working-directory={dir}"));
-        if let Some(cmd) = command {
-            c.args(["-e", "sh", "-c", cmd]);
-        }
-        run(&mut c)
-    } else {
-        match app {
-            "iTerm2" => {
-                let cmd = applescript_string(&format!("/bin/zsh -lc {}", sh_quote(&format!("{shell_cmd}; exec $SHELL"))));
-                let script = format!(
-                    "tell application \"iTerm2\"\n activate\n if (count of windows) > 0 then\n  tell current window to create tab with default profile command {cmd}\n else\n  create window with default profile command {cmd}\n end if\nend tell"
-                );
-                run(Command::new("osascript").arg("-e").arg(script))
-            }
-            "Ghostty" => {
-                let mut c = Command::new("open");
-                c.args(["-na", "Ghostty", "--args"]).arg(format!("--working-directory={dir}"));
-                if let Some(cmd) = command {
-                    c.arg("-e").args(["/bin/zsh", "-lc", &format!("{cmd}; exec $SHELL")]);
-                }
-                run(&mut c)
-            }
-            "Warp" if command.is_none() => run(Command::new("open").args(["-a", "Warp"]).arg(path)),
-            _ => {
-                let script = format!(
-                    "tell application \"Terminal\"\n activate\n do script {}\nend tell",
-                    applescript_string(&shell_cmd)
-                );
-                run(Command::new("osascript").arg("-e").arg(script))
-            }
-        }
-    };
-    match &result {
-        Ok(()) => info!("launch", "Opened {app} at {dir} (command: {})", command.unwrap_or("-")),
-        Err(e) => warn!("launch", "Failed to open {app} at {dir}: {e}"),
-    }
-    result.map_err(|e| format!("Couldn't open {app}: {e}"))
-}
-
-/// Bring the terminal app forward (a terminal is already open at the worktree).
-pub fn focus_terminal_app() -> Result<(), String> {
-    if !cfg!(target_os = "macos") {
-        return Ok(());
-    }
-    run(Command::new("osascript").arg("-e").arg(format!("tell application \"{}\" to activate", terminal_app())))
+/// Bring forward the terminal already open at `path`: the exact pane / tab
+/// where the backend can list them (tmux, Ghostty), else the app. `Ok(false)`
+/// means no specific one was found.
+pub fn focus_terminal(path: &Path, target: TerminalTarget) -> Result<bool, String> {
+    terminal::focus(target.backend, path)
 }
 
 /// Resume info for a worktree: newest discovered session, else `-c` when the
@@ -309,6 +263,11 @@ mod tests {
     }
 
     #[test]
+    fn attach() {
+        assert_eq!(attach_command("ab12cd"), "claude attach ab12cd");
+    }
+
+    #[test]
     fn encodes_like_claude_code() {
         assert_eq!(encode_project_path("/Users/a/x.y/.claude/worktrees/f"), "-Users-a-x-y--claude-worktrees-f");
     }
@@ -337,6 +296,5 @@ mod tests {
     fn quoting() {
         assert_eq!(sh_quote("/plain/path-1.2"), "/plain/path-1.2");
         assert_eq!(sh_quote("it's"), "'it'\\''s'");
-        assert_eq!(applescript_string("a \"b\" \\c"), "\"a \\\"b\\\" \\\\c\"");
     }
 }

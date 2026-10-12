@@ -68,6 +68,33 @@ am status --worktree /work
 mkdir -p /home/user/my-project
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"sess-standalone-1"}' | hook /home/user/my-project
 
+# --- A `claude --bg` session on main (served by the fake `claude agents`) ---
+cat > /tmp/claude-agents.json <<'JSON'
+[
+  {"id": "bg-e2e", "cwd": "/work", "kind": "background", "startedAt": 1789605428243,
+   "sessionId": "sess-bg-e2e", "name": "nightly cleanup", "state": "working"}
+]
+JSON
+
+# 7683: tmux with the plugin loaded (as TPM would), status bar fed by
+# `am summary`. A fresh tmux server per connection so specs start clean.
+cat > /etc/am-tmux.conf <<'CONF'
+set -g status-right '#{agent_monitor} '
+set -g status-interval 1
+run-shell /usr/local/share/agent-monitor/agent-monitor.tmux
+CONF
+cat > /usr/local/bin/am-tmux <<'SH'
+#!/bin/bash
+# Own socket per connection: reusing one races the previous server's exit
+# ("server exited unexpectedly").
+cd /work
+# No locale in the image: without UTF-8, tmux draws ◑/● as `_`.
+export LANG=C.UTF-8
+exec tmux -u -L "e2e-$$" -f /etc/am-tmux.conf new-session -s e2e
+SH
+chmod +x /usr/local/bin/am-tmux
+ttyd -p 7683 --writable -t disableLeaveAlert=true am-tmux &
+
 # 7682: a fresh, empty data dir on every connection → first-run setup wizard.
 cat > /usr/local/bin/am-tui-fresh <<'SH'
 #!/bin/bash

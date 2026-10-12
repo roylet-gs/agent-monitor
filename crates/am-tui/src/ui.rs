@@ -480,6 +480,9 @@ fn title<'a>(name: &'a str, theme: &Theme) -> Line<'a> {
 
 // ---------------------------------------------------------------- worktrees
 
+/// Below this inner width the ticket, git and age columns are dropped.
+const COMPACT_WIDTH: u16 = 60;
+
 struct Columns {
     ticket: usize,
     pr: usize,
@@ -508,12 +511,14 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
 
     let s = &app.settings;
     let pr_words = inner.width >= 100;
+    // Sidebar / narrow: name, status and the PR glyph only.
+    let compact = app.sidebar || s.compact_view || inner.width < COMPACT_WIDTH;
     let cols = Columns {
-        ticket: if s.show_linear_ticket { app.flat.iter().map(|v| ticket_text(v).width()).max().unwrap_or(0) } else { 0 },
+        ticket: if s.show_linear_ticket && !compact { app.flat.iter().map(|v| ticket_text(v).width()).max().unwrap_or(0) } else { 0 },
         pr: if s.show_pr_status { app.flat.iter().map(|v| pr_text(v, pr_words).width()).max().unwrap_or(0) } else { 0 },
         pr_words,
-        git: if s.show_git_ahead_behind { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
-        age: if s.show_last_commit { 3 } else { 0 },
+        git: if s.show_git_ahead_behind && !compact { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
+        age: if s.show_last_commit && !compact { 3 } else { 0 },
     };
 
     // Keep the selected row in view; headers scroll with their rows.
@@ -618,6 +623,10 @@ fn worktree_line<'a>(
         } else {
             badge.push_str(&format!(" ◆{subagents}"));
         }
+    }
+    // A `claude --bg` session runs here (Enter / c attach to it).
+    if let Some(bg) = v.background.as_ref().filter(|_| !deleting) {
+        badge.push_str(if bg.failed { " bg✗" } else { " bg" });
     }
     let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + tree.width());
     // Nickname (e.g. from the Linear ticket) first, then the branch, dimmed.
@@ -901,7 +910,8 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
     let area = keys_area;
     let width = area.width as usize;
-    let render = |max_prio: u8| -> Vec<Span<'static>> {
+    // `short` (sidebar widths): keys only, except `? help` to find the rest.
+    let render = |max_prio: u8, short: bool| -> Vec<Span<'static>> {
         let mut spans = vec![Span::raw(" ")];
         let mut last_sep = true;
         for (k, label, prio) in KEYS {
@@ -915,22 +925,23 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 }
                 continue;
             }
+            let label = if short && *k != "?" { " ".to_string() } else { format!(" {label}  ") };
             // Actions the selected worktree can't take stay in place, dimmed.
             if app.key_available(k) {
                 spans.push(Span::styled(k.to_string(), theme.bold(theme.accent)));
-                spans.push(Span::styled(format!(" {label}  "), theme.faint()));
+                spans.push(Span::styled(label, theme.faint()));
             } else {
                 let off = theme.faint().add_modifier(Modifier::DIM);
                 spans.push(Span::styled(k.to_string(), off));
-                spans.push(Span::styled(format!(" {label}  "), off));
+                spans.push(Span::styled(label, off));
             }
             last_sep = false;
         }
         spans
     };
-    let mut spans = render(0);
+    let mut spans = render(0, true);
     for prio in (0..=3).rev() {
-        let candidate = render(prio);
+        let candidate = render(prio, false);
         if candidate.iter().map(|s| s.content.width()).sum::<usize>() <= width {
             spans = candidate;
             break;
@@ -1066,6 +1077,7 @@ mod tests {
             has_terminal: false,
             open_ide: None,
             running_processes: vec![],
+            background: None,
         }
     }
 
@@ -1163,6 +1175,29 @@ mod tests {
     #[test]
     fn dashboard_narrow_stacks_panes() {
         insta::assert_snapshot!(render(&fixture(), 80, 24));
+    }
+
+    #[test]
+    fn sidebar_drops_columns() {
+        let mut app = fixture();
+        app.sidebar = true;
+        insta::assert_snapshot!(render(&app, 40, 16));
+    }
+
+    #[test]
+    fn narrow_width_is_compact_without_the_flag() {
+        insta::assert_snapshot!(render(&fixture(), 55, 16));
+    }
+
+    #[test]
+    fn background_session_badge() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.groups[0].worktrees[1].background =
+            Some(am_core::model::BackgroundAgent { id: "ab12".into(), name: None, failed: false, waiting_for: None });
+        app.apply(snap);
+        let out = render(&app, 80, 8);
+        assert!(out.lines().any(|l| l.contains("fix/offline-cache bg")), "{out}");
     }
 
     #[test]

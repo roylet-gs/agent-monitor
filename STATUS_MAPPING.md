@@ -169,7 +169,30 @@ Rules:
 
 `is_open` is true from the first event until `SessionEnd`. For filtering ("never hide a row with a live session"), for listing standalone sessions under "Other sessions", and for deciding whether `Enter` should resume a session, a session counts as **effectively open** only if `is_open` is set and it isn't `idle` with no events for **10 minutes**.
 
-There is no display-time status override: the dashboard shows the stored status as is.
+Apart from parked subagents (above) and background sessions (below), there is no display-time status override: the dashboard shows the stored status as is.
+
+## Background Sessions (`claude agents`)
+
+Sessions started with `claude --bg` run under Claude Code's supervisor. With `claudeAgentsIntegration` on (the default), the TUI polls `claude agents --json` every 5 seconds on its own thread. That command lists every active session, but only `kind: "background"` entries are used, since hooks already cover interactive ones. Each entry maps to a status:
+
+| `claude agents` field | am status |
+| --------------------- | --------- |
+| `status: busy` | executing |
+| `status: waiting` | waiting |
+| `status: idle` | idle |
+| `state: working` (no `status`) | executing |
+| `state: blocked` | waiting |
+| `state: done` | done |
+| `state: failed` | done, with a `bg✗` badge |
+| `state: stopped`, anything else | ignored |
+
+Rules:
+
+- **Attribution.** An entry belongs to the most specific tracked worktree whose path contains its `cwd`. Entries that match none become rows under **Other sessions**.
+- **Several in one worktree.** The one needing attention wins: waiting, then working, then done.
+- **Hooks stay primary.** While the worktree has an effectively open hook session, its status is kept (it knows planning, delegating and subagents) and the background session only adds the `bg` badge. Otherwise the background session's status is shown, stamped with its `startedAt`.
+- **Display only.** Nothing is written to the DB, and `am summary` / the CLI don't call `claude agents`.
+- **Unavailable.** When `claude` is missing, too old or slow (3 s timeout), the last good list is kept and the failure is logged once at DEBUG.
 
 ## Subscribed Hook Events
 

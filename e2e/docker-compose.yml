@@ -28,6 +28,7 @@ services:
     ports:
       - "7681:7681" # seeded dashboard
       - "7682:7682" # fresh data dir per connection (setup wizard)
+      - "7683:7683" # tmux with the agent-monitor plugin
     environment:
       - AM_DATA_DIR=/tmp/am-e2e
       - AM_MOCK_API_URL=http://mock-api:4100
@@ -49,6 +50,7 @@ services:
     environment:
       - TUI_URL=http://app:7681
       - TUI_FRESH_URL=http://app:7682
+      - TMUX_URL=http://app:7683
       - MOCK_API_URL=http://mock-api:4100
     volumes:
       - ../tests/e2e/tmp:/work/tests/e2e/tmp

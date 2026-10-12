@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod doctor;
 pub mod hooks;
+pub mod integrate;
 pub mod lifecycle;
 pub mod linear;
 pub mod logs;
@@ -8,7 +9,9 @@ pub mod pr;
 pub mod repo;
 pub mod script;
 pub mod settings;
+pub mod sidebar;
 pub mod status;
+pub mod summary;
 pub mod tui;
 pub mod worktree;
 
