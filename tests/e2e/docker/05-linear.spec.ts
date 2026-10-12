@@ -20,11 +20,11 @@ test("Linear ticket column and ticket cluster header", async ({ page }) => {
   await tui.screenshot("linear-ticket");
 });
 
-/** Open Settings → Sort order (8th field) in the sort editor. */
+/** Open Settings → Sort order (9th field) in the sort editor. */
 async function openSortEditor(tui: RustTui) {
   await tui.sendKey("s");
   await tui.waitForText("esc close");
-  await tui.press("j", 7);
+  await tui.press("j", 8);
   await tui.waitForText("Criteria applied in order; first difference wins");
   await tui.sendKey("Enter");
   await tui.waitForText("Sort order — space on/off");
