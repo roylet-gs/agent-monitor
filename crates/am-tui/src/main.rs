@@ -249,7 +249,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                                 collector.refresh(false);
                             }
                             Action::RunScript { job, repo_id, worktree_path } => {
-                                ops::run_script(repo_id, worktree_path, job, launch_tx.clone());
+                                ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
                             }
                             Action::EditSettingsFile => {
                                 edit_settings_file(terminal)?;

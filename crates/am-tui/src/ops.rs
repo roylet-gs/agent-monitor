@@ -52,21 +52,25 @@ pub fn delete(view: WorktreeView, delete_branch: bool, job: u64, tx: Sender<Msg>
     });
 }
 
-/// Run a repo's startup script for a new worktree: in a new terminal window
-/// when one can be opened, else here with its output streamed to the job.
-pub fn run_script(repo_id: String, cwd: String, job: u64, tx: Sender<Msg>) {
+/// Run a repo's startup script for a new worktree. By default (and when no
+/// terminal window can be opened) it runs here with its output streamed to
+/// the job; with `in_window` (`startupScriptMode: window`) it opens in a new
+/// terminal window.
+pub fn run_script(repo_id: String, cwd: String, in_window: bool, job: u64, tx: Sender<Msg>) {
     std::thread::spawn(move || {
         let script = worktrees::script_path(&repo_id);
-        let cmd = format!("/bin/sh {}", launch::sh_quote(&script.to_string_lossy()));
-        let _ = tx.send(Msg::JobStep(job, "Opening a terminal for the startup script…".into()));
-        match launch::open_terminal(Path::new(&cwd), Some(&cmd)) {
-            Ok(()) => {
-                let app = if cfg!(target_os = "macos") { launch::terminal_app() } else { "x-terminal-emulator" };
-                let _ = tx.send(Msg::JobStep(job, format!("Running in a new {app} window")));
-                let _ = tx.send(Msg::ScriptDone(job, Ok(())));
-                return;
+        if in_window {
+            let cmd = format!("/bin/sh {}", launch::sh_quote(&script.to_string_lossy()));
+            let _ = tx.send(Msg::JobStep(job, "Opening a terminal for the startup script…".into()));
+            match launch::open_terminal(Path::new(&cwd), Some(&cmd)) {
+                Ok(()) => {
+                    let app = if cfg!(target_os = "macos") { launch::terminal_app() } else { "x-terminal-emulator" };
+                    let _ = tx.send(Msg::JobStep(job, format!("Running in a new {app} window")));
+                    let _ = tx.send(Msg::ScriptDone(job, Ok(())));
+                    return;
+                }
+                Err(e) => am_core::debug!("tui", "No terminal window for the startup script ({e}); running it in the jobs pane"),
             }
-            Err(e) => am_core::debug!("tui", "No terminal window for the startup script ({e}); running it here"),
         }
         let _ = tx.send(Msg::JobStep(job, format!("Running {}", script.display())));
         let result = run_script_piped(&script, &cwd, job, &tx);

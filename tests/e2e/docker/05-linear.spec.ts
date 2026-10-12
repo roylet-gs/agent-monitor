@@ -24,7 +24,11 @@ test("Linear ticket column and ticket cluster header", async ({ page }) => {
 async function openSortEditor(tui: RustTui) {
   await tui.sendKey("s");
   await tui.waitForText("esc close");
-  await tui.press("j", 6);
+  // Walk down to "Sort order" (its help line shows when it's selected), so
+  // adding a settings field above it doesn't break the spec.
+  for (let i = 0; i < 20 && !(await tui.getScreenText()).includes("Criteria applied in order; first difference wins"); i++) {
+    await tui.sendKey("j");
+  }
   await tui.waitForText("Criteria applied in order; first difference wins");
   await tui.sendKey("Enter");
   await tui.waitForText("Sort order — space on/off");

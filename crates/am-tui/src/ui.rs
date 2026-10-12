@@ -762,7 +762,8 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
             (Some(Question::RunScript { repo_id, .. }), _) => {
                 push(vec![Span::raw("   ")], "Run the repo's startup script?", theme.bold(theme.yellow));
                 push(vec![Span::raw("   ")], &am_core::worktrees::script_path(repo_id).display().to_string(), theme.faint());
-                push(choice("⏎ / y", false), "Run in a new terminal window", theme.fg(theme.text));
+                let where_ = if app.settings.startup_script_in_window() { "Run in a new terminal window" } else { "Run here (output below)" };
+                push(choice("⏎ / y", false), where_, theme.fg(theme.text));
                 push(choice("n", false), "Skip", theme.fg(theme.text));
             }
             _ => {}

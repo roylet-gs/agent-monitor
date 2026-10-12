@@ -81,6 +81,10 @@ pub struct Settings {
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,
+    /// Where a repo's startup script runs after creating a worktree: `pane`
+    /// (default; output streams into the TUI's jobs pane) or `window` (a new
+    /// terminal window, falling back to the pane when none can be opened).
+    pub startup_script_mode: String,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -140,12 +144,18 @@ impl Default for Settings {
             resume_last_session: true,
             theme: "ansi".into(),
             nerd_fonts: false,
+            startup_script_mode: "pane".into(),
             raw: Default::default(),
         }
     }
 }
 
 impl Settings {
+    /// Run startup scripts in a new terminal window rather than the jobs pane.
+    pub fn startup_script_in_window(&self) -> bool {
+        self.startup_script_mode == "window"
+    }
+
     pub fn log_level(&self) -> Level {
         Level::parse(&self.log_level).unwrap_or(Level::Info)
     }
@@ -240,6 +250,13 @@ mod tests {
         assert!(s.hide_main_branch);
         assert_eq!(s.worktree_sort.len(), 10);
         assert!(s.raw.contains_key("showIdeStatus"));
+    }
+
+    #[test]
+    fn startup_scripts_run_in_the_pane_unless_set_to_window() {
+        assert!(!Settings::default().startup_script_in_window());
+        assert!(!Settings::parse(r#"{"startupScriptMode":"bogus"}"#).startup_script_in_window());
+        assert!(Settings::parse(r#"{"startupScriptMode":"window"}"#).startup_script_in_window());
     }
 
     #[test]
