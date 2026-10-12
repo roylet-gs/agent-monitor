@@ -29,6 +29,71 @@ pub struct CachedCheck {
     pub latest: String,
 }
 
+/// How this copy of `am` was installed, guessed from the binary's real path,
+/// so the update hint can name the right command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallMethod {
+    Homebrew,
+    Npm,
+    Pnpm,
+    /// `cargo install --path …` into `~/.cargo/bin`.
+    Cargo,
+    /// Run straight from a checkout's `target/`.
+    DevBuild,
+    Unknown,
+}
+
+impl InstallMethod {
+    /// Detect from the running binary (symlinks resolved, so Homebrew's
+    /// `bin/am-tui` → `Cellar/…` and npm's shims are seen for what they are).
+    pub fn current() -> InstallMethod {
+        let exe = std::env::current_exe().ok().map(|e| e.canonicalize().unwrap_or(e));
+        exe.map_or(InstallMethod::Unknown, |e| Self::from_exe(&e))
+    }
+
+    pub fn from_exe(exe: &Path) -> InstallMethod {
+        let p = exe.to_string_lossy();
+        if p.contains("/Cellar/agent-monitor/") {
+            InstallMethod::Homebrew
+        } else if p.contains("/node_modules/@roylet-gs/agent-monitor") {
+            // pnpm's global store keeps packages under `.pnpm/`.
+            if p.contains("/.pnpm/") { InstallMethod::Pnpm } else { InstallMethod::Npm }
+        } else if p.contains("/.cargo/bin/") {
+            InstallMethod::Cargo
+        } else if p.contains("/target/debug/") || p.contains("/target/release/") {
+            InstallMethod::DevBuild
+        } else {
+            InstallMethod::Unknown
+        }
+    }
+
+    /// The command (or instruction) that installs the latest release.
+    pub fn upgrade_hint(self) -> String {
+        match self {
+            InstallMethod::Homebrew => "brew upgrade agent-monitor".into(),
+            InstallMethod::Npm => "npm install -g @roylet-gs/agent-monitor@latest".into(),
+            InstallMethod::Pnpm => "pnpm add -g @roylet-gs/agent-monitor@latest".into(),
+            InstallMethod::Cargo => "in your checkout: git pull, then cargo install --path crates/am-cli, crates/am-tui and crates/am-hook".into(),
+            InstallMethod::DevBuild => "git pull, then cargo build".into(),
+            InstallMethod::Unknown => format!("see https://github.com/{OWN_REPO}/releases/latest"),
+        }
+    }
+}
+
+/// A newer release, and how to get it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Update {
+    pub latest: String,
+    pub current: String,
+    pub hint: String,
+}
+
+impl Update {
+    pub fn new(latest: String, method: InstallMethod) -> Update {
+        Update { latest, current: env!("CARGO_PKG_VERSION").into(), hint: method.upgrade_hint() }
+    }
+}
+
 /// `Some(latest)` when a newer release than `current` exists. Uses the cache
 /// when it is fresh, otherwise asks GitHub. Blocking; call it off the UI thread.
 pub fn check(current: &str) -> Option<String> {
@@ -130,6 +195,26 @@ mod tests {
         assert!(!is_newer("garbage", "2.1.1"));
         assert!(!is_newer("2.2", "2.1.1"));
         assert!(is_newer("2.2.0-beta", "2.1.1"));
+    }
+
+    #[test]
+    fn detects_install_method_from_the_binary_path() {
+        use InstallMethod::*;
+        let cases = [
+            ("/opt/homebrew/Cellar/agent-monitor/2.1.1/bin/am-tui", Homebrew),
+            ("/usr/local/Cellar/agent-monitor/2.1.1/bin/am-tui", Homebrew),
+            ("/usr/local/lib/node_modules/@roylet-gs/agent-monitor/node_modules/@roylet-gs/agent-monitor-darwin-arm64/bin/am-tui", Npm),
+            ("/Users/me/.nvm/versions/node/v22.1.0/lib/node_modules/@roylet-gs/agent-monitor-linux-x64/bin/am-tui", Npm),
+            ("/Users/me/Library/pnpm/global/5/.pnpm/@roylet-gs+agent-monitor-darwin-arm64@2.1.1/node_modules/@roylet-gs/agent-monitor-darwin-arm64/bin/am-tui", Pnpm),
+            ("/Users/me/.cargo/bin/am-tui", Cargo),
+            ("/Users/me/src/agent-monitor/target/release/am-tui", DevBuild),
+            ("/usr/bin/am-tui", Unknown),
+        ];
+        for (path, want) in cases {
+            assert_eq!(InstallMethod::from_exe(Path::new(path)), want, "{path}");
+        }
+        assert_eq!(Homebrew.upgrade_hint(), "brew upgrade agent-monitor");
+        assert!(Unknown.upgrade_hint().contains("releases/latest"));
     }
 
     #[test]

@@ -33,6 +33,10 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
   // (b) Settings → Notifications → "Check for updates" off hides it at once.
   await tui.sendKey("s");
   await tui.waitForText("esc close");
+  // Settings opens with a banner naming the release and how to upgrade.
+  await tui.waitForText("⬆ am v9.9.9 is available");
+  expect(await tui.getScreenText()).toMatch(/Update: .*releases\/latest/);
+  await tui.screenshot("update-available-settings");
   expect(await checkValue(tui)).toBe("on");
   await tui.press("j", CHECK_INDEX);
   await tui.waitForText("Show a notice when a newer am release is on GitHub");

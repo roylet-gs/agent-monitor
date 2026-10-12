@@ -25,8 +25,8 @@ pub enum Msg {
     Deleted(String, String, Result<Vec<String>, String>),
     /// Typed path, and the repo name or an error.
     RepoAdded(String, Result<String, String>),
-    /// A newer release exists (version without the `v`).
-    UpdateAvailable(String),
+    /// A newer release exists.
+    UpdateAvailable(am_core::update_check::Update),
 }
 
 /// Long enough for the popup to register before the editor steals focus.
@@ -109,10 +109,12 @@ pub fn open_url(url: String, tx: Sender<Msg>) {
 pub fn spawn_update_check(tx: Sender<Msg>) {
     use am_core::update_check;
     let spawned = std::thread::Builder::new().name("update-check".into()).spawn(move || {
+        let method = update_check::InstallMethod::current();
+        am_core::debug!("update", "install method: {method:?}");
         loop {
             if am_core::settings::load().check_for_updates
                 && let Some(latest) = update_check::check(env!("CARGO_PKG_VERSION"))
-                && tx.send(Msg::UpdateAvailable(latest)).is_err()
+                && tx.send(Msg::UpdateAvailable(update_check::Update::new(latest, method))).is_err()
             {
                 return;
             }

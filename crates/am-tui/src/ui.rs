@@ -46,7 +46,7 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     if let Some(editor) = &app.settings_editor {
         match &editor.builder {
             Some(b) => draw_theme_builder(f, theme, area, b),
-            None => draw_settings(f, theme, area, editor),
+            None => draw_settings(f, theme, area, editor, shown_update(app)),
         }
     }
     if let Some(setup) = &app.setup {
@@ -60,10 +60,21 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     }
 }
 
-fn draw_settings(f: &mut Frame, theme: &Theme, area: Rect, ed: &crate::settings_ui::SettingsEditor) {
+fn draw_settings(
+    f: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    ed: &crate::settings_ui::SettingsEditor,
+    update: Option<&am_core::update_check::Update>,
+) {
     use crate::settings_ui::{FIELDS, Kind, sort_label};
     let w = 84.min(area.width.saturating_sub(2));
-    let h = area.height.saturating_sub(2).min(FIELDS.len() as u16 + 16);
+    // Headline, the (possibly wrapped) upgrade hint, then a blank line.
+    let banner_h = update.map_or(0, |u| {
+        let hint_w = " Update: ".width() + u.hint.width();
+        2 + hint_w.div_ceil((w as usize).saturating_sub(2).max(1)) as u16
+    });
+    let h = area.height.saturating_sub(2).min(FIELDS.len() as u16 + 16 + banner_h);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
     clear(f, theme, rect);
     let block = Block::bordered()
@@ -75,7 +86,18 @@ fn draw_settings(f: &mut Frame, theme: &Theme, area: Rect, ed: &crate::settings_
         );
     let inner = block.inner(rect);
     f.render_widget(block, rect);
-    let [list, help] = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).areas(inner);
+    let [banner, list, help] =
+        Layout::vertical([Constraint::Length(banner_h), Constraint::Min(3), Constraint::Length(2)]).areas(inner);
+    if let Some(u) = update {
+        let lines = vec![
+            Line::from(vec![
+                Span::styled(format!(" ⬆ am v{} is available", u.latest), theme.bold(theme.green)),
+                Span::styled(format!(" (you have v{})", u.current), theme.faint()),
+            ]),
+            Line::from(vec![Span::styled(" Update: ", theme.faint()), Span::styled(u.hint.clone(), theme.fg(theme.text))]),
+        ];
+        f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), banner);
+    }
 
     if let Some(sort) = &ed.sort {
         let mut lines = vec![
@@ -626,10 +648,15 @@ fn title<'a>(name: &'a str, theme: &Theme) -> Line<'a> {
 
 // ---------------------------------------------------------------- worktrees
 
+/// The update to advertise, unless `checkForUpdates` was turned off.
+fn shown_update(app: &App) -> Option<&am_core::update_check::Update> {
+    app.update_available.as_ref().filter(|_| app.settings.check_for_updates)
+}
+
 /// Top-right "update available" label: shortened on narrow panes, dropped
 /// when it would run into the `─Worktrees` title.
 fn update_label(app: &App, width: u16) -> Option<String> {
-    let latest = app.update_available.as_deref().filter(|_| app.settings.check_for_updates)?;
+    let latest = &shown_update(app)?.latest;
     // Two corners, `─Worktrees `, and one border cell between the titles.
     let room = (width as usize).saturating_sub(2 + "─Worktrees ".width() + 1);
     [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room)
@@ -1324,17 +1351,35 @@ mod tests {
         insta::assert_snapshot!(render(&fixture(), 120, 16));
     }
 
+    fn update(latest: &str) -> am_core::update_check::Update {
+        am_core::update_check::Update {
+            latest: latest.into(),
+            current: "2.1.1".into(),
+            hint: am_core::update_check::InstallMethod::Homebrew.upgrade_hint(),
+        }
+    }
+
+    #[test]
+    fn settings_show_update_banner_with_upgrade_command() {
+        let mut app = fixture();
+        app.update_available = Some(update("2.2.0"));
+        app.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&app.settings));
+        insta::assert_snapshot!(render(&app, 100, 24));
+        app.settings.check_for_updates = false;
+        assert!(!render(&app, 100, 24).contains("is available"));
+    }
+
     #[test]
     fn dashboard_update_available() {
         let mut app = fixture();
-        app.update_available = Some("2.2.0".into());
+        app.update_available = Some(update("2.2.0"));
         insta::assert_snapshot!(render(&app, 120, 16));
     }
 
     #[test]
     fn update_label_shrinks_then_hides_and_follows_the_setting() {
         let mut app = fixture();
-        app.update_available = Some("2.2.0".into());
+        app.update_available = Some(update("2.2.0"));
         assert_eq!(update_label(&app, 120).as_deref(), Some(" ⬆ v2.2.0 available "));
         assert_eq!(update_label(&app, 30).as_deref(), Some(" ⬆ v2.2.0 "));
         assert_eq!(update_label(&app, 20), None);

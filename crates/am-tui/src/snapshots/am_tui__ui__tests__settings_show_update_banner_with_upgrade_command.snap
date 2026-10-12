@@ -1,0 +1,28 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 24)"
+---
+╭─Worktrees ─────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available ╮
+│agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
+│▌◑ feat│ ⬆ am v2.2.0 is available (you have v2.1.1)                                       │±3  4m │
+│ ◐ fix/│ Update: brew upgrade agent-monitor                                               │    4m │
+│       │                                                                                  │       │
+│gridsig│ General                                                                          │───────│
+│ · main│▌  Open in                       cursor                                           │±3  4m │
+│       │   Resume last session on open   on                                               │       │
+│       │   Branch prefix                 feature/                                         │       │
+│       │   Base branch                   main                                             │       │
+│       │   Git refresh (ms)              30000                                            │       │
+│       │                                                                                  │       │
+│       │ Appearance                                                                       │       │
+│       │   Theme                         ansi                                             │       │
+│       │   Theme builder…                ⏎ open                                           │       │
+│       │                                                                                  │       │
+│       │ Dashboard                                                                        │       │
+│       │   Sort order                    none                                             │       │
+│       │   Hide main branch              on                                               │       │
+│       │   Hide merged/closed PRs        off                                              │       │
+│       │                                                                                  │       │
+│       │ Which editor/IDE Enter opens worktrees in                                        │       │
+╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
+ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

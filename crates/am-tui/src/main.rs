@@ -155,7 +155,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     Err(e) => app.modal = Some(modals::Modal::AddRepo { path, error: Some(e) }),
                 },
-                launcher::Msg::UpdateAvailable(latest) => app.update_available = Some(latest),
+                launcher::Msg::UpdateAvailable(update) => app.update_available = Some(update),
                 launcher::Msg::Deleted(id, label, result) => {
                     // The box may have been dismissed (delete in background)
                     // and replaced by something else; only close our own.

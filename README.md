@@ -299,7 +299,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
 | `audioWaitingSound` | `"Glass"` | Sound for waiting |
 | `audioDoneSound` | `"Funk"` | Sound for done |
-| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard |
+| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew upgrade`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
 | `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |
