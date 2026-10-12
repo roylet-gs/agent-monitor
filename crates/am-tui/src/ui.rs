@@ -18,7 +18,19 @@ use crate::theme::{Theme, status_glyph, status_label};
 
 
 pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[String]) {
+    // The theme builder previews its draft on the whole dashboard.
+    let draft;
+    let theme = match app.settings_editor.as_ref().and_then(|e| e.builder.as_ref()) {
+        Some(b) => {
+            draft = b.theme();
+            &draft
+        }
+        None => theme,
+    };
     let area = f.area();
+    if theme.background.is_some() {
+        f.render_widget(Block::new().style(theme.base()), area);
+    }
     let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
     let [body, log, keys] =
         Layout::vertical([Constraint::Min(5), Constraint::Length(log_h), Constraint::Length(1)]).areas(area);
@@ -32,7 +44,10 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
         draw_help(f, theme, area);
     }
     if let Some(editor) = &app.settings_editor {
-        draw_settings(f, theme, area, editor);
+        match &editor.builder {
+            Some(b) => draw_theme_builder(f, theme, area, b),
+            None => draw_settings(f, theme, area, editor),
+        }
     }
     if let Some(setup) = &app.setup {
         draw_setup(f, theme, area, setup);
@@ -50,7 +65,7 @@ fn draw_settings(f: &mut Frame, theme: &Theme, area: Rect, ed: &crate::settings_
     let w = 84.min(area.width.saturating_sub(2));
     let h = area.height.saturating_sub(2).min(FIELDS.len() as u16 + 16);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
-    f.render_widget(Clear, rect);
+    clear(f, theme, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme.bold(theme.border_focus))
@@ -132,6 +147,137 @@ fn draw_settings(f: &mut Frame, theme: &Theme, area: Rect, ed: &crate::settings_
         None => Line::styled(format!(" {}", field.help), theme.faint()),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// One colour as a swatch: a filled block, or a word for the special values.
+fn swatch(theme: &Theme, c: am_core::themes::ThemeColor) -> Span<'static> {
+    use am_core::themes::ThemeColor;
+    match c {
+        ThemeColor::Reverse => Span::styled("▒▒", theme.fg(theme.text).add_modifier(Modifier::REVERSED)),
+        ThemeColor::Default => Span::styled("··", theme.faint()),
+        other => Span::styled("██", theme.fg(crate::theme::to_color(other))),
+    }
+}
+
+fn draw_theme_builder(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::theme_builder::ThemeBuilder) {
+    use crate::theme_builder::{COLS, Mode};
+    use am_core::themes::Token;
+    let w = 100.min(area.width.saturating_sub(2));
+    let h = 24.min(area.height.saturating_sub(2));
+    let rect = modal_rect(area, w, h);
+    clear(f, theme, rect);
+    let hint = match b.mode {
+        Mode::Tokens => " ⏎ palette  ←→ nudge  # hex  x inherit  b base  n name  w save  esc close ",
+        Mode::Picker { .. } => " arrows move  ⏎ pick  # hex  esc back ",
+        Mode::Hex(_) | Mode::Name(_) => " ⏎ apply  esc cancel ",
+    };
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.bold(theme.border_focus))
+        .title(Line::from(vec![Span::styled("─", theme.bold(theme.border_focus)), Span::styled("Theme builder ", theme.bold(theme.text))]))
+        .title_bottom(Line::styled(hint, theme.faint()).alignment(Alignment::Right));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let [head, body, foot] = Layout::vertical([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)]).areas(inner);
+    let [left, right] = Layout::horizontal([Constraint::Length(46), Constraint::Min(20)]).areas(body);
+
+    let name = match &b.mode {
+        Mode::Name(buf) => Span::styled(format!("{buf}▏"), theme.bold(theme.accent)),
+        _ => Span::styled(b.name.clone(), theme.bold(theme.text)),
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Name ", theme.faint()),
+            name,
+            Span::styled("   Base ", theme.faint()),
+            Span::styled(b.base.clone(), theme.fg(theme.text)),
+            Span::styled(if b.dirty { "   • unsaved" } else { "" }, theme.fg(theme.yellow)),
+        ])),
+        head,
+    );
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, t) in Token::ALL.iter().enumerate() {
+        let (c, own) = b.color(*t);
+        let sel = i == b.cursor;
+        let value = match (&b.mode, sel) {
+            (Mode::Hex(buf), true) => Span::styled(format!("{buf}▏"), theme.bold(theme.accent)),
+            _ => Span::styled(format!("{c:<12}"), if own { theme.fg(theme.text) } else { theme.faint() }),
+        };
+        let line = Line::from(vec![
+            Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(format!(" {:<14}", t.key()), theme.fg(theme.text)),
+            swatch(theme, c),
+            Span::raw(" "),
+            value,
+            Span::styled(if own { "" } else { " base" }, theme.faint()),
+        ]);
+        lines.push(if sel && matches!(b.mode, Mode::Tokens | Mode::Hex(_)) { line.style(theme.selected()) } else { line });
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(format!("  {}: {}", b.token().key(), b.token().describe()), theme.faint()));
+    f.render_widget(Paragraph::new(lines), left);
+
+    if let Mode::Picker { cursor } = b.mode {
+        let pal = b.palette();
+        let mut lines = vec![Line::styled(format!(" {} — pick a colour", b.token().key()), theme.bold(theme.accent))];
+        for (row, chunk) in pal.chunks(COLS).enumerate() {
+            if row == 2 || row == 7 {
+                lines.push(Line::raw(""));
+            }
+            let mut spans = vec![Span::raw(" ")];
+            for (col, c) in chunk.iter().enumerate() {
+                let here = row * COLS + col == cursor;
+                spans.push(Span::styled(if here { "[" } else { " " }, theme.bold(theme.text)));
+                spans.push(swatch(theme, *c));
+                spans.push(Span::styled(if here { "]" } else { " " }, theme.bold(theme.text)));
+            }
+            lines.push(Line::from(spans));
+        }
+        lines.push(Line::raw(""));
+        if let Some(c) = pal.get(cursor) {
+            lines.push(Line::from(vec![Span::styled(" ", theme.faint()), swatch(theme, *c), Span::styled(format!(" {c}"), theme.fg(theme.text))]));
+        }
+        lines.push(Line::styled(" rows: terminal colours · curated · this theme", theme.faint()));
+        f.render_widget(Paragraph::new(lines), right);
+    } else {
+        f.render_widget(Paragraph::new(theme_preview(theme)).block(pane_block(theme, title("Preview", theme), false)), right);
+    }
+
+    let msg = match &b.error {
+        Some(e) => Line::styled(format!(" {e}"), theme.fg(theme.red)),
+        None => Line::styled(" Changes preview on the whole dashboard; w saves to themes/<name>.json and selects it", theme.faint()),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), msg]).wrap(Wrap { trim: false }), foot);
+}
+
+/// A few representative dashboard rows in the given theme.
+fn theme_preview(theme: &Theme) -> Vec<Line<'static>> {
+    let row = |status: Status, name: &str, extra: Vec<Span<'static>>| {
+        let mut spans = vec![
+            Span::raw(" "),
+            Span::styled(status_glyph(Some(status)), theme.fg(theme.status(Some(status)))),
+            Span::styled(format!(" {name:<16}"), theme.fg(theme.text)),
+        ];
+        spans.extend(extra);
+        Line::from(spans)
+    };
+    let mut selected = row(Status::Waiting, "fix/crash", vec![Span::styled("ENG-7  ", theme.fg(theme.blue)), Span::styled("#41✗ changes", theme.fg(theme.red))]);
+    selected.spans.insert(0, Span::styled("▌", theme.bold(theme.border_focus)));
+    selected.spans.remove(1);
+    vec![
+        Line::from(vec![Span::styled(" work ", theme.bold(theme.text)), Span::styled("───", theme.fg(theme.border))]),
+        Line::from(vec![Span::styled(" ═ ", theme.fg(theme.magenta)), Span::styled("Dashboard", theme.bold(theme.magenta)), Span::styled(" ═", theme.fg(theme.magenta))]),
+        row(Status::Executing, "feature/login", vec![Span::styled("ENG-123 ", theme.fg(theme.blue)), Span::styled("#42✓ ready", theme.fg(theme.green))]),
+        selected.style(theme.selected()),
+        row(Status::Delegating, "main", vec![Span::styled("◆ 1 subagent", theme.fg(theme.accent))]),
+        row(Status::Planning, "spike/api", vec![Span::styled("#43 draft", theme.faint())]),
+        row(Status::Done, "chore/deps", vec![Span::styled("#40⇡", theme.fg(theme.magenta)), Span::styled("  ↑2 ±3", theme.fg(theme.yellow))]),
+        row(Status::Idle, "old/branch", vec![Span::styled("3d ago", theme.faint())]),
+        Line::raw(""),
+        Line::styled(" [WARN] gh offline — cached", theme.fg(theme.yellow)),
+        Line::styled(" [ERROR] fetch failed", theme.fg(theme.red)),
+    ]
 }
 
 fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
@@ -327,7 +473,7 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = para.line_count(w.saturating_sub(4)) as u16 + 2;
     let rect = modal_rect(area, w, h);
-    f.render_widget(Clear, rect);
+    clear(f, theme, rect);
     f.render_widget(para.block(modal_block(theme, title, color, hint)), rect);
 }
 
@@ -415,7 +561,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
         }
     }
     let rect = modal_rect(area, 76, lines.len() as u16 + 4);
-    f.render_widget(Clear, rect);
+    clear(f, theme, rect);
     let block = modal_block(theme, "Welcome to agent-monitor".into(), theme.border_focus, hint).padding(ratatui::widgets::Padding::new(1, 1, 1, 0));
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
@@ -460,7 +606,7 @@ fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
     let error = msg.starts_with('✗');
     let border = if error { theme.bold(theme.red) } else { theme.bold(theme.green) };
-    f.render_widget(Clear, rect);
+    clear(f, theme, rect);
     let block = Block::bordered().border_type(BorderType::Rounded).border_style(border).padding(ratatui::widgets::Padding::horizontal(1));
     f.render_widget(para.block(block), rect);
 }
@@ -989,7 +1135,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
-    f.render_widget(Clear, rect);
+    clear(f, theme, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme.bold(theme.border_focus))
@@ -998,6 +1144,12 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/// Blank an overlay's area in the theme's own background.
+fn clear(f: &mut Frame, theme: &Theme, rect: Rect) {
+    f.render_widget(Clear, rect);
+    f.render_widget(Block::new().style(theme.base()), rect);
+}
 
 fn centered_line(r: Rect) -> Rect {
     Rect { y: r.y + r.height / 2, height: 1.min(r.height), ..r }
@@ -1147,7 +1299,7 @@ mod tests {
 
     fn render(app: &App, w: u16, h: u16) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-        term.draw(|f| draw(f, app, &Theme::by_name("ansi"), NOW, &[])).unwrap();
+        term.draw(|f| draw(f, app, &Theme::ansi(), NOW, &[])).unwrap();
         let buf = term.backend().buffer().clone();
         (0..h)
             .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>().trim_end().to_string())
@@ -1170,6 +1322,33 @@ mod tests {
         let mut app = fixture();
         app.on_key(Key::Char('?'));
         insta::assert_snapshot!(render(&app, 100, 20));
+    }
+
+    fn with_builder(current: &str) -> App {
+        use am_core::themes;
+        let mut app = fixture();
+        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
+        let catalog = themes::builtin_names().into_iter().filter_map(themes::builtin).collect();
+        ed.builder = Some(crate::theme_builder::ThemeBuilder::open(current, None, catalog));
+        app.settings_editor = Some(ed);
+        app
+    }
+
+    #[test]
+    fn theme_builder_overlay() {
+        let mut app = with_builder("catppuccin-mocha");
+        app.on_key(Key::Char('j'));
+        app.on_key(Key::Char('j'));
+        insta::assert_snapshot!(render(&app, 110, 28));
+    }
+
+    #[test]
+    fn theme_builder_palette_picker() {
+        let mut app = with_builder("ansi");
+        app.on_key(Key::Enter);
+        app.on_key(Key::Down);
+        app.on_key(Key::Down);
+        insta::assert_snapshot!(render(&app, 110, 28));
     }
 
     #[test]
@@ -1244,7 +1423,7 @@ mod tests {
 
     #[test]
     fn failing_pr_is_red_even_as_a_draft() {
-        let theme = Theme::by_name("ansi");
+        let theme = Theme::ansi();
         let mut v = fixture().flat[0].clone();
         let pr = v.pr.as_mut().unwrap();
         pr.is_draft = true;
@@ -1262,7 +1441,7 @@ mod tests {
 
     #[test]
     fn pr_review_state_tells_ready_from_approved_but_failing() {
-        let theme = Theme::by_name("ansi");
+        let theme = Theme::ansi();
         let mut v = fixture().flat[0].clone();
         let label = |v: &WorktreeView, words: bool| {
             let spans = pr_spans(v, &theme, 16, words);
@@ -1386,7 +1565,7 @@ mod tests {
         assert!(!app.key_available("⏎") && !app.key_available("t"));
 
         // Rendered: available keys are bold accent, unavailable ones dimmed.
-        let theme = Theme::by_name("ansi");
+        let theme = Theme::ansi();
         app.deleting.clear();
         let mut term = Terminal::new(TestBackend::new(100, 16)).unwrap();
         term.draw(|f| draw(f, &app, &theme, NOW, &[])).unwrap();
@@ -1405,7 +1584,7 @@ mod tests {
 
     #[test]
     fn delegating_is_a_green_half_circle() {
-        let theme = Theme::by_name("ansi");
+        let theme = Theme::ansi();
         assert_eq!(status_glyph(Some(Status::Delegating)), "◑");
         assert_eq!(theme.status(Some(Status::Delegating)), theme.green);
         assert_ne!(status_glyph(Some(Status::Delegating)), status_glyph(Some(Status::Waiting)));

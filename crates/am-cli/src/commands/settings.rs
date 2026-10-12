@@ -82,6 +82,13 @@ pub fn set(key: &str, value: &str) {
         );
     }
 
+    if key == "theme" && !am_core::themes::exists(value) {
+        fail(&format!(
+            "Unknown theme: {value}\nAvailable: {}",
+            am_core::themes::all_names().join(", ")
+        ));
+    }
+
     let defaults = Settings::default().to_view();
     let coerced = coerce(defaults.get(key), value).unwrap_or_else(|e| fail(&e));
 

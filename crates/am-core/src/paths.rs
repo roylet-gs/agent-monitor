@@ -31,3 +31,8 @@ pub fn socket_path() -> PathBuf {
 pub fn capture_dir() -> PathBuf {
     app_dir().join("hook-captures")
 }
+
+/// Custom themes, one `<name>.json` each.
+pub fn themes_dir() -> PathBuf {
+    app_dir().join("themes")
+}

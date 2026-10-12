@@ -9,6 +9,7 @@ pub mod repo;
 pub mod script;
 pub mod settings;
 pub mod status;
+pub mod theme;
 pub mod tui;
 pub mod worktree;
 
