@@ -37,6 +37,18 @@ echo ".claude/" > .git/info/exclude
 # Register the repo (also syncs its worktrees into the DB).
 am repo add /work
 
+# A startup script, so creating a worktree asks to run it in the jobs pane.
+# No terminal emulator here, so it runs in-process with its output piped
+# into the pane.
+REPO_ID=$(am repo list --json | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)
+mkdir -p "$AM_DATA_DIR/scripts"
+cat > "$AM_DATA_DIR/scripts/$REPO_ID.sh" <<'SH'
+#!/bin/sh
+echo "e2e startup script running in $(basename "$PWD")"
+printf '\033[32mcoloured line\033[0m\n'
+echo "e2e startup script done"
+SH
+
 # Skip the setup wizard, show main, enable Linear against the mock.
 # linearAutoNickname is off so rows keep their branch names (the mock links
 # every branch to the same ticket, which would rename them all).

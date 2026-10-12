@@ -39,7 +39,14 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
         draw_log(f, theme, log, log_lines);
     }
 
-    draw_worktrees(f, app, theme, body, now);
+    if app.jobs.visible() {
+        let pane_w = (body.width / 3).clamp(34, 60).min(body.width.saturating_sub(40));
+        let [list, jobs] = Layout::horizontal([Constraint::Min(40), Constraint::Length(pane_w)]).areas(body);
+        draw_worktrees(f, app, theme, list, now);
+        draw_jobs(f, app, theme, jobs, now);
+    } else {
+        draw_worktrees(f, app, theme, body, now);
+    }
     if app.show_help {
         draw_help(f, theme, area);
     }
@@ -309,10 +316,9 @@ fn key_line<'a>(theme: &Theme, key: &str, text: impl Into<String>, danger: bool)
 fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::Modal, now: i64) {
     use crate::modals::{DeleteStep, FormField, Modal};
     let (title, color, hint, lines): (String, _, &str, Vec<Line>) = match modal {
-        Modal::Busy { text, deleting } => {
+        Modal::Busy { text } => {
             let line = Line::from(vec![Span::styled(format!("{} ", spinner(now)), theme.fg(theme.accent)), Span::raw(text.clone())]);
-            let hint = if deleting.is_some() { "any key: continue in background" } else { "" };
-            ("Working".into(), theme.accent, hint, vec![line])
+            ("Working".into(), theme.accent, "", vec![line])
         }
         Modal::New(form) => {
             let field = |label: &str, value: String, which: FormField, note: Option<Line<'static>>| -> Vec<Line<'static>> {
@@ -355,29 +361,6 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                 lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
             }
             ("New worktree".into(), theme.border_focus, "tab next  ⏎ create  esc cancel", lines)
-        }
-        Modal::BranchExists { req, local, remote, .. } => {
-            let b = &req.branch;
-            let header = match (local, remote) {
-                (true, true) => format!("Branch \"{b}\" exists locally and on origin"),
-                (_, true) => format!("Branch \"{b}\" exists on origin"),
-                _ => format!("Branch \"{b}\" already exists locally"),
-            };
-            let mut lines = vec![Line::styled(header, theme.bold(theme.yellow)), Line::raw("")];
-            if *remote {
-                lines.push(key_line(theme, "⏎ / p", if *local { "Pull remote (reset local to origin)".to_string() } else { format!("Pull remote (track origin/{b})") }, false));
-                lines.push(key_line(
-                    theme,
-                    "c",
-                    if *local { "Create disconnected (deletes local, no tracking)" } else { "Create disconnected (new branch from base, no tracking)" },
-                    *local,
-                ));
-            } else {
-                lines.push(key_line(theme, "⏎ / r", "Reuse existing local branch", false));
-                lines.push(key_line(theme, "d", "Delete local branch and re-create from base", true));
-            }
-            lines.push(key_line(theme, "esc / n", "Go back", false));
-            ("Branch exists".into(), theme.yellow, "", lines)
         }
         Modal::Delete(d) => {
             let w = &d.view.worktree;
@@ -451,21 +434,6 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                 lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
             }
             ("Suggest a feature".into(), theme.border_focus, "tab next field  ⏎ submit  esc cancel", lines)
-        }
-        Modal::RunScript { repo_id, .. } => {
-            let path = am_core::worktrees::script_path(repo_id);
-            (
-                "Startup script".into(),
-                theme.green,
-                "",
-                vec![
-                    Line::raw("A startup script exists for this repository:"),
-                    Line::styled(path.display().to_string(), theme.faint()),
-                    Line::raw(""),
-                    key_line(theme, "⏎ / y", "Run script", false),
-                    key_line(theme, "esc / n", "Skip", false),
-                ],
-            )
         }
     };
     // Long names wrap rather than run off the edge; size the box to fit.
@@ -636,7 +604,7 @@ struct Columns {
 }
 
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
-    let focused = true;
+    let focused = !app.jobs.focused;
     let mut block = pane_block(theme, title("Worktrees", theme), focused);
     if !app.flat.is_empty() {
         block = block.title_bottom(
@@ -646,7 +614,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if app.flat.is_empty() {
+    if app.flat.is_empty() && !app.rows.iter().any(|r| matches!(r, Row::Pending(_))) {
         let msg = if app.loaded { "No worktrees yet — press A to add a repository" } else { "Loading…" };
         f.render_widget(Paragraph::new(Line::styled(msg, theme.faint())).alignment(Alignment::Center), centered_line(inner));
         return;
@@ -694,6 +662,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
             Row::Worktree(i) => {
                 worktree_line(app, theme, &app.flat[*i], &app.tree[*i], *i == app.selected, focused, &cols, inner.width, now)
             }
+            Row::Pending(id) => pending_line(app, theme, *id, inner.width, now),
         })
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
@@ -826,6 +795,160 @@ fn worktree_line<'a>(
         return line.style(theme.selected());
     }
     line
+}
+
+/// Placeholder row for a worktree being created: spinner, name, branch and
+/// the job's current stage.
+fn pending_line<'a>(app: &App, theme: &Theme, id: u64, width: u16, now: i64) -> Line<'a> {
+    let Some(job) = app.jobs.get(id) else { return Line::raw("") };
+    let Some((_, req, _)) = job.pending_create() else { return Line::raw("") };
+    let name = req.custom_name.clone().unwrap_or_else(|| req.branch.clone());
+    let branch = if req.custom_name.is_some() { format!("  {}", req.branch) } else { String::new() };
+    let what = if job.question.is_some() {
+        " waiting — ⇥ to answer".to_string()
+    } else {
+        format!(" creating…{}", job.current_step().map(|s| format!(" {s}")).unwrap_or_default())
+    };
+    let room = (width as usize).saturating_sub(4);
+    let name = truncate(&name, room);
+    let branch = truncate(&branch, room.saturating_sub(name.width()));
+    let what = truncate(&what, room.saturating_sub(name.width() + branch.width()));
+    let (glyph, color) = if job.question.is_some() { ("?", theme.yellow) } else { (spinner(now), theme.green) };
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(glyph, theme.fg(color)),
+        Span::raw(" "),
+        Span::styled(name, theme.faint()),
+        Span::styled(branch, theme.faint()),
+        Span::styled(what, theme.fg(color)),
+    ])
+}
+
+// --------------------------------------------------------------------- jobs
+
+/// Right-hand jobs pane: each create/delete job with its stages, any
+/// question it is waiting on (answered with Tab-focus + key), and output.
+fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
+    use crate::jobs::{JobKind, JobState, Question};
+    let jobs = &app.jobs;
+    let mut block = pane_block(theme, title("Jobs", theme), jobs.focused);
+    if jobs.waiting() && !jobs.focused {
+        block = block.border_style(theme.bold(theme.yellow)).title_bottom(Line::styled(" ⇥ answer ", theme.bold(theme.yellow)).alignment(Alignment::Right));
+    } else if jobs.focused {
+        block = block.title_bottom(Line::styled(" ⇥ back  x dismiss ", theme.faint()).alignment(Alignment::Right));
+    }
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let width = inner.width as usize;
+
+    let mut lines: Vec<Line> = Vec::new();
+    // `lead` (e.g. "   ✓ ") then `text`, wrapped with continuation lines
+    // indented under the text.
+    let mut push = |lead: Vec<Span<'static>>, text: &str, style: ratatui::style::Style| {
+        let indent: usize = lead.iter().map(|s| s.content.width()).sum();
+        let mut rows = wrap_words(text, width.saturating_sub(indent).max(8)).into_iter();
+        let mut first = lead;
+        first.push(Span::styled(rows.next().unwrap_or_default(), style));
+        lines.push(Line::from(first));
+        for r in rows {
+            lines.push(Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(r, style)]));
+        }
+    };
+    for (i, job) in jobs.list.iter().enumerate() {
+        if i > 0 {
+            push(Vec::new(), "", theme.faint());
+        }
+        let (glyph, color) = match &job.state {
+            JobState::Running => (spinner(now), theme.accent),
+            JobState::Waiting => ("?", theme.yellow),
+            JobState::Done => ("✓", theme.green),
+            JobState::Failed(_) => ("✗", theme.red),
+        };
+        let cursor = jobs.focused && i == jobs.cursor;
+        push(
+            vec![Span::styled(if cursor { "▌" } else { " " }, theme.bold(theme.border_focus)), Span::styled(format!("{glyph} "), theme.bold(color))],
+            &job.label,
+            theme.bold(theme.text),
+        );
+        for step in &job.steps {
+            let (g, style) = match (&job.state, step.done) {
+                (_, true) => ("✓".to_string(), theme.faint()),
+                (JobState::Running, false) => (spinner(now).to_string(), theme.fg(theme.text)),
+                (JobState::Failed(_), false) => ("✗".to_string(), theme.fg(theme.red)),
+                _ => ("·".to_string(), theme.faint()),
+            };
+            push(vec![Span::raw("   "), Span::styled(format!("{g} "), style)], &step.text, style);
+        }
+        if let JobState::Failed(e) = &job.state {
+            push(vec![Span::raw("   ")], e, theme.fg(theme.red));
+        }
+        let choice = |key: &str, danger: bool| -> Vec<Span<'static>> {
+            vec![Span::raw("   "), Span::styled(format!("{key:<6}"), theme.bold(if danger { theme.red } else { theme.yellow }))]
+        };
+        match (&job.question, &job.kind) {
+            (Some(Question::BranchExists { local, remote }), JobKind::Create { req, .. }) => {
+                let b = &req.branch;
+                let header = match (local, remote) {
+                    (true, true) => format!("Branch \"{b}\" exists locally and on origin"),
+                    (_, true) => format!("Branch \"{b}\" exists on origin"),
+                    _ => format!("Branch \"{b}\" already exists locally"),
+                };
+                push(vec![Span::raw("   ")], &header, theme.bold(theme.yellow));
+                if *remote {
+                    let pull = if *local { "Pull remote (reset local to origin)".to_string() } else { format!("Pull remote (track origin/{b})") };
+                    push(choice("⏎ / p", false), &pull, theme.fg(theme.text));
+                    let disc = if *local { "Create disconnected (deletes local, no tracking)" } else { "Create disconnected (new branch from base, no tracking)" };
+                    push(choice("c", *local), disc, theme.fg(theme.text));
+                } else {
+                    push(choice("⏎ / r", false), "Reuse existing local branch", theme.fg(theme.text));
+                    push(choice("d", true), "Delete local branch and re-create from base", theme.fg(theme.text));
+                }
+                push(choice("n", false), "Cancel", theme.fg(theme.text));
+            }
+            (Some(Question::RunScript { repo_id, .. }), _) => {
+                push(vec![Span::raw("   ")], "Run the repo's startup script?", theme.bold(theme.yellow));
+                push(vec![Span::raw("   ")], &am_core::worktrees::script_path(repo_id).display().to_string(), theme.faint());
+                let where_ = if app.settings.startup_script_in_window() { "Run in a new terminal window" } else { "Run here (output below)" };
+                push(choice("⏎ / y", false), where_, theme.fg(theme.text));
+                push(choice("n", false), "Skip", theme.fg(theme.text));
+            }
+            _ => {}
+        }
+        for l in job.log.iter().skip(job.log.len().saturating_sub(200)) {
+            push(vec![Span::raw("   ")], l, theme.faint());
+        }
+    }
+    // Keep the bottom (newest output) in view.
+    let scroll = (lines.len() as u16).saturating_sub(inner.height);
+    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
+}
+
+/// Greedy word wrap to `width` display columns; words longer than a line
+/// are split.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut out = vec![String::new()];
+    for word in text.split(' ') {
+        let cur = out.last_mut().unwrap();
+        let need = if cur.is_empty() { word.width() } else { cur.width() + 1 + word.width() };
+        if need <= width {
+            if !cur.is_empty() {
+                cur.push(' ');
+            }
+            cur.push_str(word);
+            continue;
+        }
+        if !cur.is_empty() {
+            out.push(String::new());
+        }
+        for ch in word.chars() {
+            let cur = out.last_mut().unwrap();
+            if cur.width() + unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) > width {
+                out.push(String::new());
+            }
+            out.last_mut().unwrap().push(ch);
+        }
+    }
+    out
 }
 
 fn ticket_text(v: &WorktreeView) -> String {
@@ -1047,10 +1170,20 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
     let area = keys_area;
     let width = area.width as usize;
+    // While jobs are showing, Tab moves between the list and the pane.
+    let mut keys: Vec<(&str, &str, u8)> = Vec::new();
+    if app.jobs.focused {
+        keys.extend([("⇥", "back to list", 0), ("j/k", "select job", 1), ("x", "dismiss", 1), ("|", "", 0), ("q", "quit", 0)]);
+    } else {
+        if app.jobs.visible() {
+            keys.extend([("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, 0), ("|", "", 0)]);
+        }
+        keys.extend(KEYS.iter().copied());
+    }
     let render = |max_prio: u8| -> Vec<Span<'static>> {
         let mut spans = vec![Span::raw(" ")];
         let mut last_sep = true;
-        for (k, label, prio) in KEYS {
+        for (k, label, prio) in &keys {
             if *prio > max_prio {
                 continue;
             }
@@ -1095,7 +1228,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("c", "terminal running claude --resume"),
         ("g / l / p", "open PR / Linear ticket / Linear project"),
         ("w", "toggle log pane"),
-        ("n / d", "new worktree / delete worktree"),
+        ("n / d / tab", "new / delete worktree / focus jobs pane"),
         ("A", "add repository"),
         ("f", "suggest a feature (files a GitHub issue)"),
         ("s", "settings"),
@@ -1515,7 +1648,7 @@ mod tests {
     }
 
     #[test]
-    fn long_delete_label_wraps_and_can_go_to_the_background() {
+    fn delete_runs_in_the_jobs_pane() {
         let mut app = fixture();
         let mut snap = app.snapshot.clone();
         let nick = "Confirm the results read and the limit basis against a real customer feeder";
@@ -1524,23 +1657,102 @@ mod tests {
         app.on_key(Key::Char('d'));
         // Fixture paths don't exist, so this is the one-step stale-entry delete.
         let action = app.on_key(Key::Enter);
-        assert!(matches!(action, crate::app::Action::Delete(..)));
-        let busy = render(&app, 100, 16);
-        assert!(busy.contains("customer feeder…"), "label wraps instead of being cut off:\n{busy}");
-        insta::assert_snapshot!("delete_busy_modal", busy);
+        let crate::app::Action::Delete(job, ..) = action else { panic!("{action:?}") };
+        assert!(app.modal.is_none(), "no blocking box");
+        app.jobs.step(job, "Removing worktree…".into());
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("Jobs") && screen.contains("feeder"), "label wraps in the pane:\n{screen}");
+        assert!(screen.contains("deleting…"), "{screen}");
+        assert!(screen.contains("⇥ jobs"), "{screen}");
+        insta::assert_snapshot!("delete_in_jobs_pane", screen);
 
-        // Any key hides the box; the row stays greyed and takes no actions.
-        assert_eq!(app.on_key(Key::Char('x')), crate::app::Action::None);
-        assert!(app.modal.is_none());
-        let row = render(&app, 100, 16);
-        assert!(row.contains("deleting…"), "{row}");
+        // The row stays greyed and takes no actions; other rows still work.
         assert_eq!(app.on_key(Key::Enter), crate::app::Action::None);
         assert_eq!(app.on_key(Key::Char('d')), crate::app::Action::None);
         assert!(app.modal.is_none(), "can't delete it twice");
-        // Other rows still work.
         app.on_key(Key::Char('j'));
         assert!(matches!(app.on_key(Key::Enter), crate::app::Action::Open(_)));
-        insta::assert_snapshot!("delete_in_background", row);
+
+        // Done: the pane lingers, then closes.
+        let t = std::time::Instant::now();
+        app.jobs.finish(job, Ok(()), t);
+        assert!(app.jobs.visible());
+        app.jobs.tick(t + crate::jobs::DONE_LINGER);
+        assert!(!app.jobs.visible());
+    }
+
+    fn start_create(app: &mut App, branch: &str) -> u64 {
+        let repo = app.snapshot.groups[0].repo.clone();
+        let req = am_core::worktrees::CreateRequest { branch: branch.into(), ..Default::default() };
+        let id = app.jobs.start_create(repo, req);
+        app.rebuild_rows();
+        id
+    }
+
+    #[test]
+    fn create_shows_a_placeholder_row_and_progress() {
+        let mut app = fixture();
+        let job = start_create(&mut app, "feature/new-thing");
+        app.jobs.step(job, "Fetching origin/main…".into());
+        app.jobs.step(job, "Adding worktree…".into());
+        app.rebuild_rows();
+        assert!(app.rows.contains(&Row::Pending(job)));
+        let before = app.flat.len();
+        app.on_key(Key::Char('G'));
+        assert_eq!(app.selected, before - 1, "the placeholder takes no selection index");
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("feature/new-thing creating… Adding worktree…"), "{screen}");
+        insta::assert_snapshot!("create_in_progress", screen);
+
+        // Once the worktree exists the placeholder stays until the snapshot lists it.
+        app.jobs.set_worktree(job, "w-new".into());
+        app.jobs.finish(job, Ok(()), std::time::Instant::now());
+        app.rebuild_rows();
+        assert!(app.rows.contains(&Row::Pending(job)));
+        let mut snap = app.snapshot.clone();
+        let mut v = snap.groups[0].worktrees[0].clone();
+        v.worktree.id = "w-new".into();
+        v.worktree.branch = "feature/new-thing".into();
+        snap.groups[0].worktrees.push(v);
+        app.apply(snap);
+        assert!(!app.rows.iter().any(|r| matches!(r, Row::Pending(_))));
+    }
+
+    #[test]
+    fn branch_exists_question_is_answered_in_the_pane() {
+        let mut app = fixture();
+        let job = start_create(&mut app, "feature/on-origin");
+        app.jobs.ask(job, crate::jobs::Question::BranchExists { local: false, remote: true });
+        let screen = render(&app, 120, 18);
+        assert!(screen.contains("Pull remote") && screen.contains("⇥ answer"), "{screen}");
+        insta::assert_snapshot!("create_branch_exists_question", screen);
+        // Dashboard keys still go to the list until Tab focuses the pane.
+        app.on_key(Key::Char('j'));
+        assert_eq!(app.selected, 1);
+        app.on_key(Key::Tab);
+        assert!(app.jobs.focused);
+        let action = app.on_key(Key::Char('p'));
+        assert!(
+            matches!(&action, crate::app::Action::Create(j, _, req) if *j == job && req.mode == am_core::worktrees::CreateMode::TrackRemote),
+            "{action:?}"
+        );
+        assert!(!app.jobs.focused);
+    }
+
+    #[test]
+    fn failed_job_stays_until_dismissed() {
+        let mut app = fixture();
+        let job = start_create(&mut app, "feature/broken");
+        app.jobs.step(job, "Adding worktree…".into());
+        app.jobs.finish(job, Err("git: fatal: invalid reference: nope".into()), std::time::Instant::now());
+        app.rebuild_rows();
+        assert!(!app.rows.iter().any(|r| matches!(r, Row::Pending(_))), "no placeholder for a failed create");
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("invalid reference"), "{screen}");
+        insta::assert_snapshot!("create_failed", screen);
+        app.on_key(Key::Tab);
+        app.on_key(Key::Char('x'));
+        assert!(!app.jobs.visible());
     }
 
     #[test]
@@ -1628,9 +1840,17 @@ mod tests {
                 Row::Project(_) => "project",
                 Row::Ticket(_) => "ticket",
                 Row::Worktree(_) => "wt",
+                Row::Pending(_) => "pending",
             })
             .collect();
         assert_eq!(kinds, ["repo", "project", "wt", "spacer", "project", "wt", "spacer", "repo", "project", "wt"]);
+    }
+
+    #[test]
+    fn wrap_words_wraps_and_splits_long_words() {
+        assert_eq!(wrap_words("one two three", 7), vec!["one two", "three"]);
+        assert_eq!(wrap_words("abcdefghij", 4), vec!["abcd", "efgh", "ij"]);
+        assert_eq!(wrap_words("", 4), vec![""]);
     }
 
     #[test]
