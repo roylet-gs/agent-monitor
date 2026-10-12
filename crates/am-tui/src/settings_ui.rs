@@ -36,6 +36,7 @@ const SOUNDS: &[&str] =
 pub const FIELDS: &[Field] = &[
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in", section: "General", kind: Kind::Choice(&["cursor", "vscode", "terminal"]) },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent Claude session", section: "General", kind: Kind::Bool },
+    Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
     Field { key: "defaultBranchPrefix", label: "Branch prefix", help: "Prefix for new worktree branches", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "defaultBaseBranch", label: "Base branch", help: "Default base branch for new worktrees", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "pollingIntervalMs", label: "Git refresh (ms)", help: "Full git sweep interval; agent activity refreshes its worktree immediately", section: "General", kind: Kind::Number { step: 5000, min: 5000 } },
@@ -93,6 +94,24 @@ impl SettingsEditor {
             _ => Map::new(),
         };
         SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, values, error: None }
+    }
+
+    /// A click on field `i`: selects it, or changes it (like ⏎) when it is
+    /// already selected. Ignored while the sort editor or theme builder is open.
+    pub fn click(&mut self, i: usize) -> Outcome {
+        if self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
+            return Outcome::None;
+        }
+        if i == self.cursor {
+            if self.editing.is_some() {
+                return Outcome::None;
+            }
+            return self.on_key(Key::Enter);
+        }
+        self.cursor = i;
+        self.editing = None;
+        self.error = None;
+        Outcome::None
     }
 
     pub fn field(&self) -> &'static Field {
@@ -374,6 +393,17 @@ mod tests {
 
     fn goto(ed: &mut SettingsEditor, key: &str) {
         ed.cursor = FIELDS.iter().position(|f| f.key == key).unwrap();
+    }
+
+    #[test]
+    fn click_selects_a_field_then_changes_it() {
+        let (_lock, _) = data_dir();
+        let mut ed = SettingsEditor::new(&Settings::default());
+        let i = FIELDS.iter().position(|f| f.key == "mouseEnabled").unwrap();
+        assert!(matches!(ed.click(i), Outcome::None));
+        assert_eq!(ed.cursor, i);
+        let Outcome::Changed(s) = ed.click(i) else { panic!("expected change") };
+        assert!(!s.mouse_enabled);
     }
 
     #[test]

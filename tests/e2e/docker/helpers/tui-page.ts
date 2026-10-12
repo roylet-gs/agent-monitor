@@ -81,8 +81,7 @@ export class TuiPage {
    * For special keys, uses Playwright key names (e.g. "Escape", "Enter", "ArrowUp").
    */
   async sendKey(key: string): Promise<void> {
-    // Focus the terminal
-    await this.page.click(".xterm-screen", { force: true });
+    await this.focus();
     await this.page.keyboard.press(key);
     // Small delay for the TUI to process the keystroke
     await this.page.waitForTimeout(300);
@@ -90,9 +89,25 @@ export class TuiPage {
 
   /** Type a string into the terminal. */
   async type(text: string): Promise<void> {
-    await this.page.click(".xterm-screen", { force: true });
+    await this.focus();
     await this.page.keyboard.type(text, { delay: 50 });
     await this.page.waitForTimeout(300);
+  }
+
+  /**
+   * Give the terminal keyboard focus without clicking it: am-tui captures
+   * the mouse, so a focus click would reach the app (select a row, close
+   * the help overlay…).
+   */
+  async focus(): Promise<void> {
+    await this.page.evaluate(() => {
+      const term =
+        (window as any).term?.terminal ??
+        (window as any).terminal ??
+        (window as any).term;
+      if (term?.focus) term.focus();
+      else (document.querySelector(".xterm-helper-textarea") as HTMLElement | null)?.focus();
+    });
   }
 
   /** Save a screenshot to the tmp directory. */

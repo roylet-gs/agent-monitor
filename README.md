@@ -23,6 +23,7 @@
 - [First Run](#first-run)
 - [The Dashboard](#the-dashboard)
   - [Keyboard Shortcuts](#keyboard-shortcuts)
+  - [Mouse](#mouse)
   - [Status Legend](#status-legend)
   - [Row Badges and Columns](#row-badges-and-columns)
   - [Stacked Branches](#stacked-branches)
@@ -164,6 +165,17 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `?` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
 
+### Mouse
+
+The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
+
+- **Scroll** to move the selection; **click** a row to select it; **double-click** to open it (same as `Enter`).
+- **Click a key-bar hint** (`n new`, `s settings`, `? help`…) to run that key.
+- In **Settings**, scroll to move, click a field to select it, and click it again to change it.
+- Any click closes a popup or the help overlay.
+
+While am captures the mouse, your terminal's click-and-drag text selection needs a modifier (usually `Shift`, or `Option` in iTerm2/Terminal.app). Turn `mouseEnabled` off to get plain selection back. The change applies immediately.
+
 **Resume last session.** With `resumeLastSession` on (the default), `Enter` also picks up the worktree's most recent Claude session (started at the worktree root or any subdirectory) unless one is already open:
 
 - **Terminal** mode: the new terminal runs `claude --resume <id>` directly.
@@ -281,6 +293,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | --- | ------- | ----------- |
 | `ide` | `"cursor"` | What `Enter` opens worktrees in: `cursor`, `vscode`, `terminal` |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest Claude session |
+| `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
 | `defaultBaseBranch` | `"main"` | Default base branch for new worktrees |
 | `pollingIntervalMs` | `30000` | Full git refresh interval (min 5000); a worktree whose agent acts is refreshed immediately |
