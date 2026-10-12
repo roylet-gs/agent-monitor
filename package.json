@@ -3,9 +3,10 @@
   "private": true,
   "description": "Dev tooling for the agent-monitor repo (E2E harness). The published npm packages are assembled from npm/ by .github/workflows/publish.yml.",
   "scripts": {
-    "test:e2e": "docker compose -f e2e/docker-compose.yml up --build --force-recreate --abort-on-container-exit --exit-code-from tests",
-    "test:e2e:build": "docker compose -f e2e/docker-compose.yml build",
-    "test:e2e:clean": "docker compose -f e2e/docker-compose.yml down -v --rmi local"
+    "test:e2e": "bash e2e/run.sh test",
+    "test:e2e:build": "bash e2e/run.sh build",
+    "test:e2e:clean": "bash e2e/run.sh clean",
+    "test:e2e:ports": "bash e2e/run.sh ports"
   },
   "devDependencies": {
     "@playwright/test": "1.50.0",

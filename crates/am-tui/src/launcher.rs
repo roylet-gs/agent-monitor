@@ -16,13 +16,16 @@ pub enum Msg {
     /// Short status-bar notice.
     Notice(String),
     BranchChecked(String, am_core::worktrees::BranchCheck),
-    Created(
-        Box<am_core::model::Repository>,
-        Box<am_core::worktrees::CreateRequest>,
-        Result<am_core::model::Worktree, am_core::worktrees::CreateError>,
-    ),
-    /// Worktree id, label, and warnings or an error.
-    Deleted(String, String, Result<Vec<String>, String>),
+    /// A job (jobs pane) started a new stage.
+    JobStep(u64, String),
+    /// A line of startup-script output for a job.
+    JobLog(u64, String),
+    /// Job id, and the created worktree or an error.
+    Created(u64, Result<am_core::model::Worktree, am_core::worktrees::CreateError>),
+    /// Job id, worktree id, label, and warnings or an error.
+    Deleted(u64, String, String, Result<Vec<String>, String>),
+    /// Startup script finished (or was handed to a new terminal window).
+    ScriptDone(u64, Result<(), String>),
     /// Typed path, and the repo name or an error.
     RepoAdded(String, Result<String, String>),
     /// A newer release exists.

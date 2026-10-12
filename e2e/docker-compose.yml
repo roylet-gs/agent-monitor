@@ -6,8 +6,10 @@ services:
       target: deps
     working_dir: /work
     command: ["npx", "tsx", "e2e/mock-api/server.ts"]
+    # Host ports are chosen by Docker so parallel stacks (one per worktree,
+    # see e2e/run.sh) don't collide; `pnpm test:e2e:ports` prints them.
     ports:
-      - "4100:4100"
+      - "4100"
     volumes:
       - ../e2e/mock-api:/work/e2e/mock-api:ro
     healthcheck:
@@ -26,8 +28,8 @@ services:
       mock-api:
         condition: service_healthy
     ports:
-      - "7681:7681" # seeded dashboard
-      - "7682:7682" # fresh data dir per connection (setup wizard)
+      - "7681" # seeded dashboard
+      - "7682" # fresh data dir per connection (setup wizard)
     environment:
       - AM_DATA_DIR=/tmp/am-e2e
       - AM_MOCK_API_URL=http://mock-api:4100

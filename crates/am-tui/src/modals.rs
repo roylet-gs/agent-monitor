@@ -1,7 +1,8 @@
 //! Worktree lifecycle dialogs: new worktree form (with the advisory live
-//! "does this branch exist?" check), branch-exists choices, delete
-//! confirmation, startup-script prompt, and a busy indicator. Pure state +
-//! key handling; the work itself runs in ops.rs.
+//! "does this branch exist?" check), delete confirmation, and a busy
+//! indicator. Pure state + key handling; the work itself runs in ops.rs.
+//! Follow-up questions (branch exists, startup script) are asked in the
+//! jobs pane (jobs.rs).
 
 use std::time::{Duration, Instant};
 
@@ -103,17 +104,13 @@ pub struct DeleteState {
 #[allow(clippy::large_enum_variant)] // one short-lived modal at a time
 pub enum Modal {
     New(NewForm),
-    BranchExists { repo: Repository, req: CreateRequest, local: bool, remote: bool },
     Delete(DeleteState),
-    RunScript { repo_id: String, worktree_path: String },
     /// `A`: register a repository by path (Tab completes directories).
     AddRepo { path: String, error: Option<String> },
     /// `f`: file a feature request as a GitHub issue on the app's repo.
     Suggest { title: String, body: String, on_body: bool, error: Option<String> },
-    /// Spinner while a background job runs. `deleting` is the worktree id
-    /// of a delete in flight: any key hides the box and the delete carries
-    /// on in the background (the row shows it).
-    Busy { text: String, deleting: Option<String> },
+    /// Spinner while a short job runs (add repo, feature request).
+    Busy { text: String },
 }
 
 pub enum Effect {
@@ -121,7 +118,6 @@ pub enum Effect {
     Close,
     Create(Repository, CreateRequest),
     Delete { view: Box<WorktreeView>, delete_branch: bool },
-    RunScript { repo_id: String, worktree_path: String },
     AddRepo(String),
     Suggest { title: String, body: String },
 }
@@ -176,7 +172,7 @@ impl Modal {
     }
 
     pub fn busy(text: String) -> Modal {
-        Modal::Busy { text, deleting: None }
+        Modal::Busy { text }
     }
 
     pub fn delete(view: WorktreeView) -> Modal {
@@ -189,7 +185,6 @@ impl Modal {
 
     pub fn on_key(&mut self, key: Key) -> Effect {
         match self {
-            Modal::Busy { deleting: Some(_), .. } => Effect::Close,
             Modal::Busy { .. } => Effect::None,
             Modal::New(f) => {
                 let fields = f.fields();
@@ -233,17 +228,6 @@ impl Modal {
                     f.field = FormField::Branch;
                 }
                 Effect::None
-            }
-            Modal::BranchExists { repo, req, local, remote } => {
-                let mode = match (key, *remote) {
-                    (Key::Esc | Key::Char('n'), _) => return Effect::Close,
-                    (Key::Enter | Key::Char('p'), true) => CreateMode::TrackRemote,
-                    (Key::Char('c'), true) => CreateMode::Disconnected,
-                    (Key::Enter | Key::Char('r'), false) if *local => CreateMode::ReuseLocal,
-                    (Key::Char('d'), false) if *local => CreateMode::DeleteAndRecreate,
-                    _ => return Effect::None,
-                };
-                Effect::Create(repo.clone(), CreateRequest { mode, ..req.clone() })
             }
             Modal::Delete(d) => match (&d.step, key) {
                 (_, Key::Esc) | (DeleteStep::Confirm, Key::Char('n')) => Effect::Close,
@@ -298,11 +282,6 @@ impl Modal {
                 }
                 Effect::None
             }
-            Modal::RunScript { repo_id, worktree_path, .. } => match key {
-                Key::Enter | Key::Char('y') => Effect::RunScript { repo_id: repo_id.clone(), worktree_path: worktree_path.clone() },
-                Key::Esc | Key::Char('n') => Effect::Close,
-                _ => Effect::None,
-            },
         }
     }
 
@@ -410,19 +389,5 @@ mod tests {
         assert_eq!(complete_dir(&format!("{base}/projects/al")), format!("{base}/projects/alp"));
         assert_eq!(complete_dir(&format!("{base}/projects/alph")), format!("{base}/projects/alpha/"));
         assert_eq!(complete_dir(&format!("{base}/nothing")), format!("{base}/nothing"));
-    }
-
-    #[test]
-    fn branch_exists_choices_match_ts() {
-        let req = CreateRequest { branch: "b".into(), ..Default::default() };
-        let r = repos()[0].clone();
-        let mut remote = Modal::BranchExists { repo: r.clone(), req: req.clone(), local: true, remote: true };
-        assert!(matches!(remote.on_key(Key::Enter), Effect::Create(_, CreateRequest { mode: CreateMode::TrackRemote, .. })));
-        assert!(matches!(remote.on_key(Key::Char('c')), Effect::Create(_, CreateRequest { mode: CreateMode::Disconnected, .. })));
-        assert!(matches!(remote.on_key(Key::Char('r')), Effect::None));
-        let mut local = Modal::BranchExists { repo: r, req, local: true, remote: false };
-        assert!(matches!(local.on_key(Key::Enter), Effect::Create(_, CreateRequest { mode: CreateMode::ReuseLocal, .. })));
-        assert!(matches!(local.on_key(Key::Char('d')), Effect::Create(_, CreateRequest { mode: CreateMode::DeleteAndRecreate, .. })));
-        assert!(matches!(local.on_key(Key::Esc), Effect::Close));
     }
 }

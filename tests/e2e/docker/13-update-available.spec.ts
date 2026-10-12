@@ -10,8 +10,17 @@ test.beforeEach(async () => {
 
 const NOTICE = "⬆ v9.9.9 available";
 const CHECK = /Check for updates\s+(on|off)/;
-// "Check for updates" sits 19 rows below the first field ("Open in").
-const CHECK_INDEX = 19;
+const CHECK_HELP = "Show a notice when a newer am release is on GitHub";
+
+// Move down until "Check for updates" is selected (its help line shows), so
+// fields added above it don't break the spec.
+async function selectCheckRow(tui: RustTui): Promise<void> {
+  for (let i = 0; i < 60; i++) {
+    if ((await tui.getScreenText()).includes(CHECK_HELP)) return;
+    await tui.press("j");
+  }
+  throw new Error("Check for updates row not found");
+}
 
 async function checkValue(tui: RustTui): Promise<string> {
   const m = CHECK.exec(await tui.getScreenText());
@@ -38,8 +47,7 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
   expect(await tui.getScreenText()).toMatch(/Update: .*releases\/latest/);
   await tui.screenshot("update-available-settings");
   expect(await checkValue(tui)).toBe("on");
-  await tui.press("j", CHECK_INDEX);
-  await tui.waitForText("Show a notice when a newer am release is on GitHub");
+  await selectCheckRow(tui);
   await tui.sendKey(" ");
   expect(await checkValue(tui)).toBe("off");
   await tui.sendKey("Escape");
@@ -51,8 +59,7 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
   // Restore: turning it back on shows the notice again.
   await tui.sendKey("s");
   await tui.waitForText("esc close");
-  await tui.press("j", CHECK_INDEX);
-  await tui.waitForText("Show a notice when a newer am release is on GitHub");
+  await selectCheckRow(tui);
   await tui.sendKey(" ");
   expect(await checkValue(tui)).toBe("on");
   await tui.sendKey("Escape");
