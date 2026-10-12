@@ -76,8 +76,8 @@ pub struct Settings {
     pub agent_claude_args: String,
     pub resume_last_session: bool,
     // --- Rust-only additions (ignored by the TS app) ---
-    /// Built-in theme name: `ansi` (default, follows the terminal palette),
-    /// `catppuccin-mocha`, `tokyonight`, `gruvbox`.
+    /// Theme name: a built-in (`ansi`, the default, follows the terminal
+    /// palette) or a custom `themes/<name>.json`; see `crate::themes`.
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,

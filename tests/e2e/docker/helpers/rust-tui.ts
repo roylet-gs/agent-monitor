@@ -125,6 +125,20 @@ export class RustTui extends TuiPage {
     await this.waitForGone("Run the repo's startup script?", 5_000);
   }
 
+  /**
+   * `s` → walk down the settings list until the field whose help line
+   * contains `help` is selected (only the selected field shows its help).
+   * Robust to fields being added above it, unlike a fixed `j` count.
+   */
+  async openSetting(help: string, max = 40): Promise<void> {
+    await this.sendKey("s");
+    await this.waitForText("esc close");
+    for (let i = 0; i < max && !(await this.getScreenText()).includes(help); i++) {
+      await this.sendKey("j");
+    }
+    await this.waitForText(help);
+  }
+
   /** Press a key `n` times. */
   async press(key: string, n = 1): Promise<void> {
     for (let i = 0; i < n; i++) await this.sendKey(key);

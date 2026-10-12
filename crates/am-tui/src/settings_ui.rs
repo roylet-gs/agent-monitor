@@ -3,9 +3,11 @@
 //! whole file in $EDITOR for anything not listed here.
 
 use am_core::settings::{Direction, SortCriterion, SortKey, Settings};
+use am_core::themes;
 use serde_json::{Map, Value};
 
 use crate::app::Key;
+use crate::theme_builder::{BuilderOutcome, ThemeBuilder};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Kind {
@@ -14,6 +16,10 @@ pub enum Kind {
     Number { step: u64, min: u64 },
     Text { secret: bool },
     Sort,
+    /// Built-in and custom themes, listed at runtime.
+    Theme,
+    /// Opens the theme builder.
+    ThemeBuilder,
 }
 
 pub struct Field {
@@ -34,7 +40,8 @@ pub const FIELDS: &[Field] = &[
     Field { key: "defaultBranchPrefix", label: "Branch prefix", help: "Prefix for new worktree branches", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "defaultBaseBranch", label: "Base branch", help: "Default base branch for new worktrees", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "pollingIntervalMs", label: "Git refresh (ms)", help: "Full git sweep interval; agent activity refreshes its worktree immediately", section: "General", kind: Kind::Number { step: 5000, min: 5000 } },
-    Field { key: "theme", label: "Theme", help: "ansi follows your terminal palette", section: "Appearance", kind: Kind::Choice(&["ansi", "catppuccin-mocha", "tokyonight", "gruvbox"]) },
+    Field { key: "theme", label: "Theme", help: "←→ to cycle; ansi follows your terminal palette", section: "Appearance", kind: Kind::Theme },
+    Field { key: "themeBuilder", label: "Theme builder…", help: "Make your own theme from the current one: pick colours, preview live, save", section: "Appearance", kind: Kind::ThemeBuilder },
     Field { key: "worktreeSort", label: "Sort order", help: "Criteria applied in order; first difference wins", section: "Dashboard", kind: Kind::Sort },
     Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout from the list", section: "Dashboard", kind: Kind::Bool },
     Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Unless the agent session is open", section: "Dashboard", kind: Kind::Bool },
@@ -75,6 +82,7 @@ pub struct SettingsEditor {
     pub cursor: usize,
     pub editing: Option<String>,
     pub sort: Option<SortEditor>,
+    pub builder: Option<ThemeBuilder>,
     pub values: Map<String, Value>,
     pub error: Option<String>,
 }
@@ -85,7 +93,7 @@ impl SettingsEditor {
             Ok(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        SettingsEditor { cursor: 0, editing: None, sort: None, values, error: None }
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, values, error: None }
     }
 
     pub fn field(&self) -> &'static Field {
@@ -100,6 +108,7 @@ impl SettingsEditor {
                 Some(s) if !s.is_empty() => format!("••••{}", &s[s.len().saturating_sub(4)..]),
                 _ => "not set".into(),
             },
+            Kind::ThemeBuilder => "⏎ open".into(),
             Kind::Sort => {
                 let crits: Vec<SortCriterion> = v.cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                 let on: Vec<&str> = crits.iter().filter(|c| c.enabled).map(|c| sort_label(c.key)).collect();
@@ -115,6 +124,21 @@ impl SettingsEditor {
     }
 
     pub fn on_key(&mut self, key: Key) -> Outcome {
+        if let Some(builder) = &mut self.builder {
+            match builder.on_key(key) {
+                BuilderOutcome::Stay => {}
+                BuilderOutcome::Close => self.builder = None,
+                BuilderOutcome::Save(spec) => match themes::save_custom(&spec) {
+                    Ok(path) => {
+                        am_core::info!("theme", "Saved theme {} (base {:?}) to {}", spec.name, spec.base, path.display());
+                        self.builder = None;
+                        return self.set("theme", Value::from(spec.name));
+                    }
+                    Err(e) => builder.error = Some(e),
+                },
+            }
+            return Outcome::None;
+        }
         if let Some(sort) = &mut self.sort {
             match sort.on_key(key) {
                 SortOutcome::Stay => return Outcome::None,
@@ -176,7 +200,11 @@ impl SettingsEditor {
                 let cur = self.values.get(f.key).and_then(Value::as_bool).unwrap_or(false);
                 self.set(f.key, Value::Bool(!cur))
             }
-            Kind::Choice(_) => self.step(1),
+            Kind::Choice(_) | Kind::Theme => self.step(1),
+            Kind::ThemeBuilder => {
+                self.builder = Some(open_builder(self.values.get("theme").and_then(Value::as_str).unwrap_or("ansi")));
+                Outcome::None
+            }
             Kind::Number { .. } => {
                 self.editing = Some(self.values.get(f.key).map(|v| v.to_string()).unwrap_or_default());
                 Outcome::None
@@ -203,6 +231,14 @@ impl SettingsEditor {
                 let next = (i + dir).rem_euclid(opts.len() as i64) as usize;
                 self.set(f.key, Value::from(opts[next]))
             }
+            Kind::Theme => {
+                let names = themes::all_names();
+                let cur = self.values.get(f.key).and_then(Value::as_str).unwrap_or("");
+                let cur = themes::builtin(cur).map(|t| t.name).unwrap_or_else(|| cur.to_string());
+                let i = names.iter().position(|n| *n == cur).map(|i| i as i64).unwrap_or(if dir > 0 { -1 } else { 0 });
+                let next = (i + dir).rem_euclid(names.len() as i64) as usize;
+                self.set(f.key, Value::from(names[next].clone()))
+            }
             Kind::Number { step, min } => {
                 let cur = self.values.get(f.key).and_then(Value::as_u64).unwrap_or(min);
                 let next = if dir > 0 { cur + step } else { cur.saturating_sub(step).max(min) };
@@ -223,6 +259,17 @@ impl SettingsEditor {
             }
         }
     }
+}
+
+/// Seed the builder: a custom theme is edited in place, a built-in is copied.
+/// Every theme is resolved here so the builder itself never reads files.
+fn open_builder(current: &str) -> ThemeBuilder {
+    let stored = (!themes::is_builtin(current))
+        .then(|| themes::read_custom_in(&am_core::paths::themes_dir(), current).ok())
+        .flatten();
+    let catalog = themes::all_names().iter().filter_map(|n| themes::load(n).ok()).collect();
+    am_core::debug!("theme", "Opening builder on {current} (custom: {})", stored.is_some());
+    ThemeBuilder::open(current, stored, catalog)
 }
 
 /// Write one key into settings.json, keeping every other key (known or not)
@@ -396,6 +443,58 @@ mod tests {
         goto(ed, "audioDoneSound");
         app.on_key(Key::Right); // Funk → Glass
         assert_eq!(app.sounds, vec!["Glass".to_string()]);
+    }
+
+    #[test]
+    fn theme_row_cycles_builtins_and_custom_themes() {
+        let (_lock, dir) = data_dir();
+        let _ = std::fs::remove_dir_all(dir.join("themes"));
+        let spec = themes::ThemeSpec { name: "zz-mine".into(), base: Some("nord".into()), colors: Default::default() };
+        themes::save_custom_in(&dir.join("themes"), &spec).unwrap();
+        let mut ed = SettingsEditor::new(&Settings::parse(r#"{"theme":"amber-phosphor"}"#));
+        goto(&mut ed, "theme");
+        let Outcome::Changed(s) = ed.on_key(Key::Right) else { panic!() };
+        assert_eq!(s.theme, "zz-mine", "custom themes follow the built-ins");
+        let Outcome::Changed(s) = ed.on_key(Key::Right) else { panic!() };
+        assert_eq!(s.theme, "ansi", "wraps around");
+        let Outcome::Changed(s) = ed.on_key(Key::Left) else { panic!() };
+        assert_eq!(s.theme, "zz-mine");
+        std::fs::remove_dir_all(dir.join("themes")).unwrap();
+    }
+
+    #[test]
+    fn builder_saves_the_theme_file_and_selects_it() {
+        let (_lock, dir) = data_dir();
+        let _ = std::fs::remove_dir_all(dir.join("themes"));
+        let mut ed = SettingsEditor::new(&Settings::parse(r#"{"theme":"dracula"}"#));
+        goto(&mut ed, "themeBuilder");
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::None));
+        let b = ed.builder.as_ref().expect("builder opens");
+        assert_eq!((b.name.as_str(), b.base.as_str()), ("dracula-custom", "dracula"));
+
+        ed.on_key(Key::Char('#'));
+        for _ in 0..7 {
+            ed.on_key(Key::Backspace);
+        }
+        for c in "#ff0000".chars() {
+            ed.on_key(Key::Char(c));
+        }
+        ed.on_key(Key::Enter);
+        let Outcome::Changed(s) = ed.on_key(Key::CtrlS) else { panic!("expected save") };
+        assert_eq!(s.theme, "dracula-custom");
+        assert!(ed.builder.is_none());
+        let saved = themes::read_custom_in(&dir.join("themes"), "dracula-custom").unwrap();
+        assert_eq!(saved.base.as_deref(), Some("dracula"));
+        assert_eq!(saved.get(themes::Token::Text), themes::ThemeColor::Rgb(0xff, 0, 0));
+
+        // Reopening edits the saved theme in place.
+        let mut ed = SettingsEditor::new(&s);
+        goto(&mut ed, "themeBuilder");
+        ed.on_key(Key::Enter);
+        let b = ed.builder.as_ref().unwrap();
+        assert_eq!(b.name, "dracula-custom");
+        assert_eq!(b.color(themes::Token::Text), (themes::ThemeColor::Rgb(0xff, 0, 0), true));
+        std::fs::remove_dir_all(dir.join("themes")).unwrap();
     }
 
     #[test]

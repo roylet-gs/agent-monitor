@@ -613,4 +613,5 @@ pub enum Key {
     CtrlC,
     CtrlD,
     CtrlU,
+    CtrlS,
 }

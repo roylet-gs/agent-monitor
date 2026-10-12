@@ -1,0 +1,32 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 110, 28)"
+---
+╭─Worktrees ─────────────────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ──────────────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ f╭─Theme builder ───────────────────────────────────────────────────────────────────────────────────╮ 4m │
+│ ◐ f│ Name ansi-custom   Base ansi                                                                     │ 4m │
+│    │                                                                                                  │    │
+│grid│▌ text          ·· default base                text — pick a colour                               │────│
+│ · m│  faint         ██ darkgray base                ██  ██  ██  ██  ██  ██  ██  ██                    │ 4m │
+│    │  accent        ██ cyan base                    ██  ██  ██  ██  ██  ██  ██  ██                    │    │
+│    │  border        ██ darkgray base                                                                  │    │
+│    │  borderFocus   ██ green base                   ██  ██  ██  ██  ██  ██  ██  ██                    │    │
+│    │  selection     ▒▒ reverse base                 ██  ██  ██  ██  ██  ██  ██  ██                    │    │
+│    │  background    ·· default base                 ██  ██  ██  ██  ██  ██  ██  ██                    │    │
+│    │  green         ██ green base                   ██  ██  ██  ██  ██  ██  ██  ██                    │    │
+│    │  yellow        ██ yellow base                  ██  ██  ██  ██  ██  ██  ██  ██                    │    │
+│    │  red           ██ red base                                                                       │    │
+│    │  blue          ██ blue base                   [··]                                               │    │
+│    │  magenta       ██ magenta base                                                                   │    │
+│    │  teal          ██ cyan base                   ·· default                                         │    │
+│    │                                               rows: terminal colours · curated · this theme      │    │
+│    │  text: body text                                                                                 │    │
+│    │                                                                                                  │    │
+│    │                                                                                                  │    │
+│    │                                                                                                  │    │
+│    │                                                                                                  │    │
+│    │ Changes preview on the whole dashboard; w saves to themes/<name>.json and selects it             │    │
+│    ╰──────────────────────────────────────────────────────────── arrows move  ⏎ pick  # hex  esc back ╯    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
