@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────││ ◐ Delete Confirm the results read and│
+│▌◐ Confirm the results…  feature/refactor deleting… ENG-412 #127✓ ✔ ↑2 ±3  4m ││   the limit basis against a real     │
+│ ◐ fix/offline-cache                                                       4m ││   customer feeder                    │
+│                                                                              ││   ◐ Removing worktree…               │
+│gridsight ────────────────────────────────────────────────────────────────────││                                      │
+│ · main                                                             ↑2 ±3  4m ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+╰────────────────────────────────────────────────────────────────────── 1 of 3 ╯╰──────────────────────────────────────╯
+ ⇥ jobs  │ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

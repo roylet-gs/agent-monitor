@@ -11,7 +11,7 @@ expression: "render(&app, 100, 20)"
 │ · main  │               c  terminal running claude --resume                            │2 ±3  4m │
 │         │       g / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane                                             │         │
-│         │           n / d  new worktree / delete worktree                              │         │
+│         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
 │         │               A  add repository                                              │         │
 │         │               f  suggest a feature (files a GitHub issue)                    │         │
 │         │               s  settings                                                    │         │

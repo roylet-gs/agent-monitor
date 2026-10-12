@@ -38,6 +38,7 @@ Collect lint, test, and visual evidence that the current changes work. Uses the 
    | `crates/am-tui/src/settings_ui.rs` (sort sub-editor) | `05-linear.spec.ts` |
    | `crates/am-tui/src/modals.rs`, `ops.rs` (new worktree form, live branch check, branch-exists choices, create) | `09-new-worktree.spec.ts` |
    | `crates/am-tui/src/modals.rs`, `ops.rs` (delete dialog, delete) | `10-delete.spec.ts` |
+   | `crates/am-tui/src/jobs.rs`, jobs pane in `ui.rs`, placeholder rows, startup script (`ops::run_script`) | `09-new-worktree.spec.ts`, `10-delete.spec.ts` |
    | `crates/am-tui/src/setup.rs` (first-run wizard) | `11-setup-wizard.spec.ts` |
    | `crates/am-tui/src/data.rs` (collector, standalone "Other sessions" group) | `01-dashboard.spec.ts`, `07-subagents.spec.ts`, `08-standalone.spec.ts` |
    | `crates/am-tui/src/data.rs` (integrations thread), `crates/am-core/src/integrations/{cache,breaker}.rs`, offline hint | `06-offline-cache.spec.ts` |

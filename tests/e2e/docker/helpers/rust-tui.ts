@@ -12,6 +12,8 @@ export const FRESH_URL = process.env.TUI_FRESH_URL || "http://localhost:7682";
  * on the last terminal row (` ⏎ open  t terminal … ? help  q quit`) with any
  * transient notice / offline hint right-aligned on it. The selected worktree
  * row starts with `▌` just inside the pane border (`│▌<tree>◆ main …`).
+ * While a create/delete job runs, a `─Jobs` pane sits to the right of the
+ * list; Tab moves focus between them.
  */
 export class RustTui extends TuiPage {
   constructor(private readonly pg: Page) {
@@ -46,7 +48,7 @@ export class RustTui extends TuiPage {
 
   /** The selected worktree row (the one marked `│▌`), or "" if none. */
   async selectedRow(): Promise<string> {
-    return (await this.lines()).find((l) => l.includes("│▌")) ?? "";
+    return (await this.lines()).find((l) => l.startsWith("│▌")) ?? "";
   }
 
   /**
@@ -94,8 +96,9 @@ export class RustTui extends TuiPage {
 
   /**
    * `n` → type the branch (after the default `feature/` prefix) → Enter, and
-   * wait until the new row exists. The "Working" modal (`Creating <branch>…`)
-   * also shows the branch name, so wait for it to close first.
+   * wait until the new row exists. The jobs pane and the placeholder row
+   * also show the branch name, so first wait for the create to finish (it
+   * asks about the seeded startup script, which is declined).
    */
   async createWorktree(suffix: string): Promise<string> {
     const branch = `feature/${suffix}`;
@@ -105,9 +108,21 @@ export class RustTui extends TuiPage {
     await this.waitForGone("checking…", 10_000);
     await this.sendKey("Enter");
     await this.waitForGone("New worktree", 10_000);
-    await this.waitForGone("Creating ", 30_000);
+    await this.skipStartupScript();
     await this.waitForMatch(new RegExp(`│[▌ ][│├└─ ]*\\S ${branch.replace(/[/.]/g, "\\$&")}\\s`), 15_000);
     return branch;
+  }
+
+  /**
+   * After a create: wait for the jobs pane to ask about the seeded startup
+   * script and decline (Tab focuses the pane, `n` skips). The placeholder
+   * row (`creating…`) is gone by then.
+   */
+  async skipStartupScript(): Promise<void> {
+    await this.waitForText("Run the repo's startup script?", 30_000);
+    await this.sendKey("Tab");
+    await this.sendKey("n");
+    await this.waitForGone("Run the repo's startup script?", 5_000);
   }
 
   /** Press a key `n` times. */

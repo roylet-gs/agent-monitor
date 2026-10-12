@@ -155,6 +155,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `p` | Open the Linear project |
 | `n` | New worktree (adds a repository first if none is tracked) |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
+| `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
 | `A` | Add a repository |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
@@ -223,7 +224,9 @@ Press `n` for the New Worktree form: repository (when you track several), branch
 - `✓ exists on origin — Enter will offer to pull it`: the base field is skipped, since the worktree will track `origin/<branch>`
 - `! exists locally only — Enter will offer to reuse it`
 
-If the branch exists, `Enter` offers the choices: pull the remote (track `origin/<branch>`, or reset the local branch to it), create disconnected (a new branch from the base with no tracking), reuse the existing local branch, or delete the local branch and re-create it from the base. Worktrees are created at `<repo>/.claude/worktrees/<branch>` (with `/` replaced by `-`), branching from `origin/<base>` when it exists.
+Creating and deleting run in the background: a **Jobs** pane opens on the right showing each step (fetch, `git worktree add`, sync…), the new worktree appears in the list straight away as a `creating…` placeholder, and the dashboard stays usable. Any follow-up question is asked in that pane; press `Tab` to focus it and answer (`Tab` again goes back to the list, `x` dismisses a finished or failed job). The pane closes by itself once nothing is running or waiting.
+
+If the branch exists, the Jobs pane offers the choices: pull the remote (track `origin/<branch>`, or reset the local branch to it), create disconnected (a new branch from the base with no tracking), reuse the existing local branch, or delete the local branch and re-create it from the base. Worktrees are created at `<repo>/.claude/worktrees/<branch>` (with `/` replaced by `-`), branching from `origin/<base>` when it exists.
 
 Press `d` to delete. The dialog warns about uncommitted changes and unpushed commits, then asks whether to delete the local branch too. The `main`/`master` checkout can't be deleted. A main checkout on a non-default branch offers to delete just that branch, and a row whose directory has disappeared is cleaned up as a stale entry.
 
