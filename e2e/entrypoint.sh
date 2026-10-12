@@ -56,6 +56,13 @@ SID="3f2a91c8-7b4d-4e0a-9c1f-8d2e5a6b7c90"
 mkdir -p "/tmp/claude-sessions/$SID/subagents"
 echo '{"description":"Survey auth module","agentType":"Explore"}' > "/tmp/claude-sessions/$SID/subagents/agent-a1b2c3d4.meta.json"
 hook() { am hook-event --worktree "$1" || true; }
+# Transcript with token usage for the context-window bar: 150k of the default
+# 200k window (75% used, so it renders yellow).
+mkdir -p "$HOME/.claude/projects/-work"
+cat > "$HOME/.claude/projects/-work/$SID.jsonl" <<JSONL
+{"type":"user","cwd":"/work","sessionId":"$SID","message":{"role":"user","content":"Refactor auth"}}
+{"type":"assistant","isSidechain":false,"cwd":"/work","sessionId":"$SID","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
+JSONL
 
 echo "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"$SID\",\"transcript_path\":\"/tmp/claude-sessions/$SID.jsonl\"}" | hook /work
 echo "{\"hook_event_name\":\"SubagentStart\",\"session_id\":\"$SID\",\"agent_id\":\"a1b2c3d4\",\"agent_type\":\"Explore\",\"transcript_path\":\"/tmp/claude-sessions/$SID.jsonl\"}" | hook /work

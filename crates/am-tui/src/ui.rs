@@ -5,7 +5,7 @@
 
 use am_core::model::{ChecksStatus, WorktreeView};
 use am_core::status::Status;
-use am_core::timefmt;
+use am_core::{context, timefmt};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::Modifier;
@@ -633,6 +633,9 @@ struct Columns {
     pr_words: bool,
     git: usize,
     age: usize,
+    /// Context bar cells (0 hides the column); the token count follows it.
+    ctx_bar: usize,
+    ctx_window: u64,
 }
 
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
@@ -660,6 +663,12 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         pr_words,
         git: if s.show_git_ahead_behind { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
         age: if s.show_last_commit { 3 } else { 0 },
+        ctx_bar: if s.show_context_window && app.flat.iter().any(|v| v.context.is_some()) {
+            if pr_words { 8 } else { 5 }
+        } else {
+            0
+        },
+        ctx_window: s.context_window_tokens,
     };
 
     // Keep the selected row in view; headers scroll with their rows.
@@ -733,6 +742,10 @@ fn worktree_line<'a>(
         let age = v.last_commit.as_ref().map(|c| timefmt::short_age(now - c.timestamp)).unwrap_or_default();
         right.push(Span::raw(" "));
         right.push(Span::styled(format!("{age:>3}"), theme.faint()));
+    }
+    if cols.ctx_bar > 0 {
+        right.push(Span::raw(" "));
+        right.extend(ctx_spans(v, theme, cols.ctx_bar, cols.ctx_window, deleting));
     }
     right.push(Span::raw(" "));
     let right_w: usize = right.iter().map(|s| s.content.width()).sum();
@@ -826,6 +839,41 @@ fn worktree_line<'a>(
         return line.style(theme.selected());
     }
     line
+}
+
+/// Context-window bar plus tokens used (`████▌░░░ 380k`). The fill and the
+/// count go green → yellow → red as the session nears its window.
+fn ctx_spans<'a>(v: &WorktreeView, theme: &Theme, bar_w: usize, configured: u64, deleting: bool) -> Vec<Span<'a>> {
+    let Some(u) = &v.context else { return vec![Span::raw(" ".repeat(bar_w + 5))] };
+    let window = context::window_for(u, configured);
+    let style = if deleting {
+        theme.faint()
+    } else {
+        match context::level(u.tokens, window) {
+            context::Level::Ok => theme.fg(theme.green),
+            context::Level::Warn => theme.fg(theme.yellow),
+            context::Level::Critical => theme.bold(theme.red),
+        }
+    };
+    let (filled, empty) = bar_cells(context::fraction(u.tokens, window), bar_w);
+    vec![
+        Span::styled(filled, style),
+        Span::styled(empty, theme.faint()),
+        Span::styled(format!(" {:>4}", context::short_tokens(u.tokens)), style),
+    ]
+}
+
+/// `frac` of `width` cells in eighth blocks: (filled part, `░` remainder).
+fn bar_cells(frac: f64, width: usize) -> (String, String) {
+    const EIGHTHS: [char; 8] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+    let eighths = (frac.clamp(0.0, 1.0) * (width * 8) as f64).round() as usize;
+    let mut filled = "█".repeat(eighths / 8);
+    let mut cells = eighths / 8;
+    if !eighths.is_multiple_of(8) {
+        filled.push(EIGHTHS[eighths % 8]);
+        cells += 1;
+    }
+    (filled, "░".repeat(width - cells))
 }
 
 fn ticket_text(v: &WorktreeView) -> String {
@@ -1185,6 +1233,7 @@ fn pad(s: &str, width: usize) -> String {
 mod tests {
     use super::*;
     use crate::app::{Key, Snapshot};
+    use am_core::context::ContextUsage;
     use am_core::model::*;
     use am_core::settings::Settings;
     use ratatui::{Terminal, backend::TestBackend};
@@ -1218,6 +1267,7 @@ mod tests {
             has_terminal: false,
             open_ide: None,
             running_processes: vec![],
+            context: None,
         }
     }
 
@@ -1268,8 +1318,10 @@ mod tests {
             project: None,
             pr_attachment: None,
         });
+        refactor.context = Some(ContextUsage { tokens: 121_000, model: Some("claude-opus-5-5".into()) });
         let mut waiting = view("w2", "r1", "fix/offline-cache", Some(Status::Waiting));
         waiting.git = Some(GitStatus::default());
+        waiting.context = Some(ContextUsage { tokens: 185_000, model: Some("claude-opus-5-5".into()) });
         let main = view("w3", "r2", "main", None);
         let snapshot = Snapshot {
             repos: vec![],
@@ -1419,6 +1471,35 @@ mod tests {
         let mut app = fixture();
         app.on_key(Key::Char('d'));
         insta::assert_snapshot!(render(&app, 100, 16));
+    }
+
+    #[test]
+    fn context_bar_turns_yellow_then_red_as_the_window_fills() {
+        let theme = Theme::ansi();
+        let mut v = fixture().flat[0].clone();
+        let at = |v: &mut WorktreeView, tokens| {
+            v.context = Some(ContextUsage { tokens, model: None });
+            let spans = ctx_spans(v, &theme, 8, 200_000, false);
+            let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+            (text, spans[0].style.fg, spans[2].style.fg)
+        };
+        assert_eq!(at(&mut v, 100_000), ("████░░░░ 100k".into(), Some(theme.green), Some(theme.green)));
+        assert_eq!(at(&mut v, 150_000), ("██████░░ 150k".into(), Some(theme.yellow), Some(theme.yellow)));
+        assert_eq!(at(&mut v, 190_000), ("███████▋ 190k".into(), Some(theme.red), Some(theme.red)));
+        // Past the configured window the bar rescales to 1M instead of pinning.
+        assert_eq!(at(&mut v, 250_000), ("██░░░░░░ 250k".into(), Some(theme.green), Some(theme.green)));
+        v.context = None;
+        let blank: String = ctx_spans(&v, &theme, 8, 200_000, false).iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(blank, " ".repeat(13), "rows without usage keep the column aligned");
+    }
+
+    #[test]
+    fn context_column_follows_its_setting() {
+        let mut app = fixture();
+        assert!(render(&app, 120, 16).contains("121k"));
+        app.settings.show_context_window = false;
+        let out = render(&app, 120, 16);
+        assert!(!out.contains("121k") && !out.contains('░'));
     }
 
     #[test]

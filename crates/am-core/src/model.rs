@@ -192,6 +192,8 @@ pub struct WorktreeView {
     pub has_terminal: bool,
     pub open_ide: Option<Ide>,
     pub running_processes: Vec<RunningProcess>,
+    /// Context window used by the agent's session (from its transcript).
+    pub context: Option<crate::context::ContextUsage>,
 }
 
 impl WorktreeView {

@@ -1,15 +1,14 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 1344
 expression: busy
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◐ Confirm the results read and the limit …  feature/refactor deleting… ENG-412 #127✓ ✔ ↑2 ±3  4m │
-│ ◐ fix/offline-cache                                                                           4m │
+│▌◐ Confirm the results read and…  feature/refactor deleting… ENG-412 #127✓ ✔ ↑2 ±3  4m ███░░ 121k │
+│ ◐ fix/offline-cache                                                                4m ████▋ 185k │
 │                                                                                                  │
 │gridsight ────────────────────────────────────────────────────────────────────────────────────────│
-│ · main      ╭─Working ─────────────────────────────────────────────────────────────╮   ↑2 ±3  4m │
+│ · main      ╭─Working ─────────────────────────────────────────────────────────────╮m            │
 │             │ ◐ Deleting Confirm the results read and the limit basis against a    │             │
 │             │ real customer feeder…                                                │             │
 │             ╰───────────────────────────────────── any key: continue in background ╯             │

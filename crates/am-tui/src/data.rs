@@ -17,6 +17,7 @@ use am_core::integrations::{Integrations, RepoBranches};
 use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
+use am_core::context::{self, ContextUsage};
 use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
 
@@ -135,6 +136,8 @@ struct Worker {
     health: Health,
     git: HashMap<String, GitData>,
     procs: HashMap<String, ProcData>,
+    /// Context usage per worktree id, re-read with the git data.
+    ctx: HashMap<String, Option<ContextUsage>>,
     last_procs: Option<Instant>,
     last_sync: Option<Instant>,
     /// Per repo: (branch-tips signature, trunk ref, git view) — rev-lists only
@@ -159,6 +162,7 @@ impl Worker {
             health: Health::default(),
             git: HashMap::new(),
             procs: HashMap::new(),
+            ctx: HashMap::new(),
             last_procs: None,
             parked: HashSet::new(),
             last_sync: None,
@@ -259,6 +263,11 @@ impl Worker {
             let fresh = collect_git(&stale);
             debug!("tui", "git refresh for {} worktree(s) in {:?}", fresh.len(), started.elapsed());
             self.git.extend(fresh);
+            for w in &stale {
+                let session = agents.get(&w.id).and_then(|a| a.session_id.as_deref());
+                let usage = session.and_then(|sid| context::usage_for(Path::new(&w.path), sid));
+                self.ctx.insert(w.id.clone(), usage);
+            }
         }
         if full_due {
             self.last_full = Some(Instant::now());
@@ -280,6 +289,7 @@ impl Worker {
                     has_terminal: p.has_terminal,
                     open_ide: p.open_ide,
                     running_processes: p.running,
+                    context: self.ctx.get(&w.id).cloned().flatten(),
                     worktree: w,
                 }
             })
@@ -366,17 +376,26 @@ impl Worker {
 
     /// "Other sessions": open standalone sessions as pseudo-worktree rows so
     /// selection, Enter and `d` work on them like on any row.
-    fn standalone_group(&self) -> rusqlite::Result<Option<am_core::model::WorktreeGroup>> {
+    fn standalone_group(&mut self) -> rusqlite::Result<Option<am_core::model::WorktreeGroup>> {
         use am_core::model::{Repository, STANDALONE_REPO_ID, WorktreeGroup};
         let home = am_core::paths::home_dir().to_string_lossy().into_owned();
         let views: Vec<WorktreeView> = db::standalone_sessions(&self.conn)?
             .into_iter()
             .filter(|(_, _, a)| grouping::is_open_now(Some(a)))
             .map(|(id, path, agent)| {
+                let key = format!("standalone:{id}");
+                // Re-read the transcript only when the session moved.
+                if self.agent_seen.get(&key) != Some(&agent.updated_at) {
+                    let sid = agent.session_id.as_deref();
+                    let usage = sid.and_then(|sid| context::usage_for(Path::new(&path), sid));
+                    self.ctx.insert(key.clone(), usage);
+                    self.agent_seen.insert(key.clone(), agent.updated_at.clone());
+                }
+                let context = self.ctx.get(&key).cloned().flatten();
                 let short = path.strip_prefix(&home).map(|p| format!("~{p}")).unwrap_or_else(|| path.clone());
                 WorktreeView {
                     worktree: Worktree {
-                        id: format!("standalone:{id}"),
+                        id: key,
                         repo_id: STANDALONE_REPO_ID.into(),
                         path,
                         branch: short.clone(),
@@ -393,6 +412,7 @@ impl Worker {
                     has_terminal: false,
                     open_ide: None,
                     running_processes: Vec::new(),
+                    context,
                 }
             })
             .collect();
@@ -639,6 +659,7 @@ mod tests {
             has_terminal: false,
             open_ide: None,
             running_processes: Vec::new(),
+            context: None,
         }
     }
 

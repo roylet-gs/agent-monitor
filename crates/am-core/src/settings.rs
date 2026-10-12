@@ -81,6 +81,11 @@ pub struct Settings {
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,
+    /// Context-window bar at the far right of each worktree row.
+    pub show_context_window: bool,
+    /// Context window the bar is scaled to. A session that uses more than
+    /// this is shown against 1M instead (see `crate::context::window_for`).
+    pub context_window_tokens: u64,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -140,6 +145,8 @@ impl Default for Settings {
             resume_last_session: true,
             theme: "ansi".into(),
             nerd_fonts: false,
+            show_context_window: true,
+            context_window_tokens: 200_000,
             raw: Default::default(),
         }
     }
