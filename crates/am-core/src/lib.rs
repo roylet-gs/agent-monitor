@@ -15,5 +15,6 @@ pub mod procscan;
 pub mod settings;
 pub mod stacks;
 pub mod status;
+pub mod themes;
 pub mod timefmt;
 pub mod worktrees;

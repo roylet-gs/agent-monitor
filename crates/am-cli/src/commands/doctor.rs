@@ -98,6 +98,22 @@ pub fn run(as_json: bool) {
         message: if ttyd { "Available (TUI screenshots enabled)".into() } else { "Not found. Install with: brew install ttyd".into() },
     });
 
+    // Theme files that don't parse fall back to ansi in the TUI; surface them.
+    let custom = am_core::themes::custom_names();
+    let broken: Vec<&String> = custom.iter().filter(|n| am_core::themes::load(n).is_err()).collect();
+    let theme_ok = am_core::themes::exists(&s.theme);
+    checks.push(Check {
+        name: "Theme",
+        status: if theme_ok && broken.is_empty() { "ok" } else { "warn" },
+        message: if !theme_ok {
+            format!("Unknown theme '{}' (the TUI uses ansi). Run: am theme list", s.theme)
+        } else if !broken.is_empty() {
+            format!("{} — unreadable files in {}: {}", s.theme, paths::themes_dir().display(), broken.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", "))
+        } else {
+            format!("{} ({} custom in {})", s.theme, custom.len(), paths::themes_dir().display())
+        },
+    });
+
     if s.linear_enabled {
         let has_key = !s.linear_api_key.is_empty();
         checks.push(Check {

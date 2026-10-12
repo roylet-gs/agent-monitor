@@ -1,0 +1,32 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 110, 28)"
+---
+╭─Worktrees ─────────────────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ──────────────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ f╭─Theme builder ───────────────────────────────────────────────────────────────────────────────────╮ 4m │
+│ ◐ f│ Name catppuccin-mocha-custom   Base catppuccin-mocha                                             │ 4m │
+│    │                                                                                                  │    │
+│grid│  text          ██ #cdd6f4 base               ╭─Preview ─────────────────────────────────────────╮│────│
+│ · m│  faint         ██ #7f849c base               │ work ───                                         ││ 4m │
+│    │▌ accent        ██ #89b4fa base               │ ═ Dashboard ═                                    ││    │
+│    │  border        ██ #585b70 base               │ ● feature/login   ENG-123 #42✓ ready             ││    │
+│    │  borderFocus   ██ #b4befe base               │▌◐ fix/crash       ENG-7  #41✗ changes            ││    │
+│    │  selection     ██ #313244 base               │ ◑ main            ◆ 1 subagent                   ││    │
+│    │  background    ·· default base               │ ◇ spike/api       #43 draft                      ││    │
+│    │  green         ██ #a6e3a1 base               │ ✓ chore/deps      #40⇡  ↑2 ±3                    ││    │
+│    │  yellow        ██ #f9e2af base               │ ○ old/branch      3d ago                         ││    │
+│    │  red           ██ #f38ba8 base               │                                                  ││    │
+│    │  blue          ██ #89b4fa base               │ [WARN] gh offline — cached                       ││    │
+│    │  magenta       ██ #cba6f7 base               │ [ERROR] fetch failed                             ││    │
+│    │  teal          ██ #94e2d5 base               │                                                  ││    │
+│    │                                              │                                                  ││    │
+│    │  accent: section titles, spinner             │                                                  ││    │
+│    │                                              │                                                  ││    │
+│    │                                              │                                                  ││    │
+│    │                                              ╰──────────────────────────────────────────────────╯│    │
+│    │                                                                                                  │    │
+│    │ Changes preview on the whole dashboard; w saves to themes/<name>.json and selects it             │    │
+│    ╰──────────────────────── ⏎ palette  ←→ nudge  # hex  x inherit  b base  n name  w save  esc close ╯    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
