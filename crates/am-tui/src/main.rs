@@ -85,6 +85,7 @@ fn main() -> io::Result<()> {
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data::Collector) -> io::Result<()> {
     let mut theme = theme::Theme::load(&app.settings.theme);
     let (launch_tx, launch_rx) = std::sync::mpsc::channel();
+    launcher::spawn_update_check(launch_tx.clone());
     let mut popup_since: Option<Instant> = None;
     let mut log_lines: Vec<String> = Vec::new();
     let mut dirty = true;
@@ -161,6 +162,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     Err(e) => app.modal = Some(modals::Modal::AddRepo { path, error: Some(e) }),
                 },
+                launcher::Msg::UpdateAvailable(update) => app.update_available = Some(update),
                 launcher::Msg::Deleted(job, id, label, result) => {
                     app.finish_delete(&id, result.is_ok());
                     match result {

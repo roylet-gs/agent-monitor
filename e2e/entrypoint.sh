@@ -62,6 +62,10 @@ cat > "$AM_DATA_DIR/settings.json" <<'JSON'
 }
 JSON
 
+# A fresh update-check cache naming a newer release, so the dashboard shows
+# "⬆ v9.9.9 available" without network (a cache < 6 h old is trusted).
+echo "{\"checkedAt\": $(date +%s), \"latest\": \"9.9.9\"}" > "$AM_DATA_DIR/update-check.json"
+
 # --- Agent activity on main, through the real hook path -------------------
 SID="3f2a91c8-7b4d-4e0a-9c1f-8d2e5a6b7c90"
 # Subagent description comes from Claude Code's <session>/subagents/agent-<id>.meta.json.
