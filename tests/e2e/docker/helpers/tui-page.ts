@@ -29,8 +29,8 @@ export class TuiPage {
       },
       { timeout: 15_000 }
     );
-    // Give the TUI a moment to finish rendering
-    await this.page.waitForTimeout(2000);
+    // No fixed settle time: callers wait for the text they need (RustTui.open
+    // waits for the first data frame).
   }
 
   /** Extract all visible text from the terminal buffer. */
@@ -81,18 +81,40 @@ export class TuiPage {
    * For special keys, uses Playwright key names (e.g. "Escape", "Enter", "ArrowUp").
    */
   async sendKey(key: string): Promise<void> {
-    // Focus the terminal
-    await this.page.click(".xterm-screen", { force: true });
+    await this.focus();
+    const before = await this.getScreenText();
     await this.page.keyboard.press(key);
-    // Small delay for the TUI to process the keystroke
-    await this.page.waitForTimeout(300);
+    await this.settle(before);
   }
 
   /** Type a string into the terminal. */
   async type(text: string): Promise<void> {
-    await this.page.click(".xterm-screen", { force: true });
+    await this.focus();
+    const before = await this.getScreenText();
     await this.page.keyboard.type(text, { delay: 50 });
-    await this.page.waitForTimeout(300);
+    await this.settle(before);
+  }
+
+  /** Focus xterm's input textarea, clicking the terminal only if needed. */
+  private async focus(): Promise<void> {
+    const focused = await this.page.evaluate(
+      () => document.activeElement?.classList.contains("xterm-helper-textarea") ?? false
+    );
+    if (!focused) await this.page.click(".xterm-screen", { force: true });
+  }
+
+  /**
+   * Wait for the TUI to redraw after input: return as soon as the screen
+   * differs from `before`, or after `max` ms for keys that change nothing
+   * (the old fixed delay). Callers that need a specific state still wait
+   * for its text.
+   */
+  private async settle(before: string, max = 300): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < max) {
+      await this.page.waitForTimeout(20);
+      if ((await this.getScreenText()) !== before) return;
+    }
   }
 
   /** Save a screenshot to the tmp directory. */

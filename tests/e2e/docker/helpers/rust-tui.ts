@@ -31,7 +31,18 @@ export class RustTui extends TuiPage {
   async openUrl(url: string): Promise<void> {
     await this.pg.goto(url);
     await this.pg.waitForSelector(".xterm-screen", { timeout: 15_000 });
-    await this.pg.waitForTimeout(1500);
+    await this.pg.waitForFunction(
+      () => {
+        const term = (window as any).term?.terminal ?? (window as any).terminal ?? (window as any).term;
+        const buf = term?.buffer?.active;
+        if (!buf) return false;
+        for (let i = 0; i < buf.length; i++) {
+          if (buf.getLine(i)?.translateToString(true).trim()) return true;
+        }
+        return false;
+      },
+      { timeout: 15_000 }
+    );
   }
 
   async lines(): Promise<string[]> {
@@ -67,8 +78,16 @@ export class RustTui extends TuiPage {
     for (let pass = 0; pass < 3; pass++) {
       await this.sendKey("Home");
       for (let i = 0; i < max; i++) {
-        if ((await this.selectedName()).startsWith(branch)) return;
+        const name = await this.selectedName();
+        if (name.startsWith(branch)) return;
         await this.sendKey("j");
+        // A redraw elsewhere (a job spinner) can end sendKey's wait before
+        // the selection moved, so wait for the selection itself. At the
+        // bottom of the list `j` changes nothing; give up after 500 ms.
+        const start = Date.now();
+        while (Date.now() - start < 500 && (await this.selectedName()) === name) {
+          await this.pg.waitForTimeout(20);
+        }
       }
     }
     throw new Error(`Row "${branch}" not found.\n${await this.getScreenText()}`);
