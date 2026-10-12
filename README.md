@@ -31,6 +31,7 @@
 - [GitHub and Linear](#github-and-linear)
 - [Startup Scripts](#startup-scripts)
 - [Settings](#settings)
+- [Themes](#themes)
 - [CLI Reference](#cli-reference)
 - [How It Works](#how-it-works)
 - [Upgrading from 1.x](#upgrading-from-1x)
@@ -326,7 +327,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `terminalNotifications` | `false` | Desktop notification through the terminal when an agent starts waiting or finishes |
 | `claudeAgentsIntegration` | `true` | Show `claude --bg` background sessions from `claude agents` |
 | `compactView` | `false` | Always use the compact (sidebar) row layout |
-| `theme` | `"ansi"` | `ansi` (follows your terminal's colours), `catppuccin-mocha`, `tokyonight`, `gruvbox` |
+| `theme` | `"ansi"` | A built-in theme or one of yours from `~/.agent-monitor/themes/`; see [Themes](#themes) |
 | `worktreeSort` | main last › ticket › created (newest first) | Ordered sort criteria: `isMain`, `repo`, `linearTicket`, `linearProject`, `agentStatus`, `lastActivity`, `createdAt`, `branchName`, `prStatus`, `gitDirty`, each with a direction and on/off. Edit in the TUI |
 | `hideMainBranch` | `true` | Hide the `main`/`master` checkout |
 | `hideMergedClosedPrs` | `false` | Hide worktrees whose PR is merged or closed |
@@ -358,6 +359,48 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 Keys from 1.x that the native app no longer uses (`autoSyncOnStartup`, `agentPermissionMode`, `agentClaudeArgs`) are kept in the file but ignored.
 
 </details>
+
+---
+
+## Themes
+
+Pick a theme in Settings (`s` → **Theme**, `←`/`→` to cycle) or with `am theme use <name>`. `ansi`, the default, uses your terminal's own 16 colours. The other themes set their own colours. Dark themes keep your terminal's background, while light and retro themes paint their own.
+
+| Family | Themes |
+| ------ | ------ |
+| Terminal | `ansi` |
+| Catppuccin | `catppuccin-mocha`, `catppuccin-macchiato`, `catppuccin-frappe`, `catppuccin-latte` (light) |
+| Dark | `tokyonight`, `tokyonight-storm`, `gruvbox`, `dracula`, `nord`, `one-dark`, `solarized-dark`, `rose-pine`, `kanagawa`, `everforest`, `github-dark`, `monokai`, `nightfox` |
+| Light | `solarized-light`, `github-light`, `gruvbox-light` |
+| Retro | `dos` (MS-DOS EDIT blue), `turbo-pascal` (Borland IDE), `ibm-3270` (mainframe terminal), `green-phosphor` and `amber-phosphor` (IBM 5151 monochrome) |
+
+### Theme builder
+
+**Settings → Theme builder…** starts from the current theme. A built-in theme is copied as `<name>-custom`, and a custom theme is edited in place. The whole dashboard redraws in the draft as you edit, and a preview pane shows every status, PR badge and header.
+
+| Key | Action |
+| --- | ------ |
+| `j` / `k` | Move between colour slots (text, faint, accent, border, borderFocus, selection, background, green, yellow, red, blue, magenta, teal) |
+| `Enter` | Open the palette: the 16 terminal colours, a curated grid of 40 colours, and the colours already in your theme. Arrow keys move, `Enter` picks |
+| `←` / `→` | Step the slot through the palette without opening it |
+| `#` | Type a hex colour (`#rgb` or `#rrggbb`) |
+| `x` / `X` | Clear this slot / all slots, so they come from the base again |
+| `b` / `B` | Change the base theme (your own colours are kept) |
+| `n` | Rename |
+| `w` / `Ctrl-S` | Save to `~/.agent-monitor/themes/<name>.json` and switch to it |
+| `Esc` | Close (press twice if there are unsaved changes) |
+
+A theme file stores only the colours you changed. Anything missing comes from `base`, then from `ansi`. Colours can be `#rrggbb`, a terminal colour name (`red`, `lightblue`, `darkgray`…), or `default`. `selection` can also be `reverse`.
+
+```json
+{
+  "name": "midnight",
+  "base": "tokyonight",
+  "colors": { "accent": "#f5c2e7", "background": "#11111b", "selection": "#313244" }
+}
+```
+
+To share a theme, run `am theme export <name> -o file.json` on your machine (this writes every colour, so built-ins make good templates), then `am theme import file.json` on the other.
 
 ---
 
@@ -418,7 +461,13 @@ am --version
 | `am settings get <key>` | Get one setting | `--json` |
 | `am settings set <key> <value>` | Set one setting (booleans and numbers are parsed) | |
 | `am settings reset` | Reset all settings to defaults (keeps `setupCompleted`) | |
-| `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, Linear | `--json` |
+| `am theme list` | Built-in and custom themes; `*` marks the active one | `--json` |
+| `am theme show <name>` | A theme's colours (with swatches in a terminal) | `--json` |
+| `am theme use <name>` | Switch theme (same as `am settings set theme <name>`) | |
+| `am theme export <name>` | Print a theme as a standalone JSON file | `-o, --output <file>` |
+| `am theme import <file>` | Validate a theme file and copy it into `~/.agent-monitor/themes/` | `--name <name>`, `--force` |
+| `am theme remove <name>` | Delete a custom theme (switches back to `ansi` if it was active) | |
+| `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear` |
 | `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run) | |
 | `am hook-event` | Receive a hook event on stdin (used by Claude Code; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>` |
@@ -545,3 +594,37 @@ pnpm test:e2e                                           # Docker E2E (Playwright
 ```
 
 Set `AM_DATA_DIR=/tmp/am-dev` to run against an isolated data directory. See [CLAUDE.md](./CLAUDE.md) for the architecture, test setup and release process.
+
+### Running a local build alongside the installed `am`
+
+The installed `am` (from npm, Homebrew or `cargo install`) is left alone. Build the checkout and run its binaries from `target/` directly:
+
+```sh
+cargo build --workspace                  # target/debug/{am,am-tui,am-hook}
+./target/debug/am                        # dashboard: runs the am-tui next to it, not the installed one
+./target/debug/am --watch                # same, with the log pane open
+./target/debug/am ls                     # any CLI command
+cargo run -p am-tui                      # or rebuild + launch the dashboard in one step
+```
+
+A handy alias while iterating: `alias amd="cargo build --workspace -q && ./target/debug/am"`.
+
+**Which data it uses.** By default the dev build reads and writes your real `~/.agent-monitor` (database, settings, themes). It sees your actual worktrees, and the installed `am` keeps working because schema changes are additive. To experiment without touching that data, use a throwaway directory:
+
+```sh
+export AM_DATA_DIR=/tmp/am-dev           # separate DB, settings.json, debug.log, themes/
+./target/debug/am repo add .             # track this repo in the scratch data dir
+./target/debug/am                        # the setup wizard runs on first launch
+```
+
+**Hooks.** Claude Code's hooks point at the *installed* `am-hook` by absolute path, so agent status still comes from the installed binary while you run a dev dashboard. That's fine unless you're changing the hook code (`crates/am-hook`, `am_core::status`). To test hook changes, point the hooks at your build and switch them back afterwards:
+
+```sh
+./target/debug/am hooks install          # hooks now run target/debug/am-hook
+#   … use Claude Code, watch the dashboard …
+am hooks install                         # back to the installed am-hook
+```
+
+You can also replay one event without touching `~/.claude`: `echo '{"hook_event_name":"Stop","session_id":"s1"}' | ./target/debug/am-hook hook-event --worktree "$PWD" --event Stop`.
+
+**Debug logging.** Run `./target/debug/am settings set logLevel debug` (or use Settings → Log level), then `./target/debug/am logs -f --module tui`, or press `w` in the dashboard. If you set `AM_DATA_DIR`, the log is in that directory.

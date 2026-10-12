@@ -751,3 +751,58 @@ fn sidebar_refuses_terminals_it_cannot_split() {
     assert_eq!(o.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&o.stderr).contains("am sidebar needs tmux or Ghostty"));
 }
+
+#[test]
+fn theme_list_show_export_import_use_remove() {
+    let env = Env::new();
+    let list = env.ok(&["theme", "list", "--json"]).json();
+    let names: Vec<&str> = list.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    for n in ["ansi", "dracula", "catppuccin-latte", "dos", "ibm-3270", "amber-phosphor"] {
+        assert!(names.contains(&n), "{n} missing from {names:?}");
+    }
+    assert_eq!(list[0]["active"], true, "ansi is the default");
+
+    let shown = env.ok(&["theme", "show", "dos", "--json"]).json();
+    assert_eq!(shown["colors"]["background"], "#0000aa");
+    assert!(env.ok(&["theme", "show", "nord"]).stdout.contains("accent"));
+    assert_eq!(env.run(&["theme", "show", "nope"]).code, 1);
+
+    // Export a built-in as a template, tweak it, import it as a custom theme.
+    let file = env.root().join("mine.json");
+    env.ok(&["theme", "export", "gruvbox", "-o", file.to_str().unwrap()]);
+    let mut t: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(t["colors"]["selection"], "#3c3836");
+    t["name"] = "mine".into();
+    t["colors"]["accent"] = "#ff00ff".into();
+    std::fs::write(&file, t.to_string()).unwrap();
+    env.ok(&["theme", "import", file.to_str().unwrap()]);
+    assert!(env.data().join("themes/mine.json").is_file());
+    assert_eq!(env.ok(&["theme", "show", "mine", "--json"]).json()["colors"]["accent"], "#ff00ff");
+    let o = env.run(&["theme", "import", file.to_str().unwrap()]);
+    assert!(o.code == 1 && o.stderr.contains("already exists"), "{}", o.stderr);
+    env.ok(&["theme", "import", file.to_str().unwrap(), "--force"]);
+
+    // Import is strict about typos.
+    let bad = env.root().join("bad.json");
+    std::fs::write(&bad, r##"{"name":"bad","colors":{"acent":"#fff","red":"crimson","green":"reverse"}}"##).unwrap();
+    let o = env.run(&["theme", "import", bad.to_str().unwrap()]);
+    assert_eq!(o.code, 1);
+    for needle in ["acent", "crimson", "only works for selection"] {
+        assert!(o.stderr.contains(needle), "{needle} not reported: {}", o.stderr);
+    }
+    let o = env.run(&["theme", "import", file.to_str().unwrap(), "--name", "nord"]);
+    assert!(o.code == 1 && o.stderr.contains("built-in"), "{}", o.stderr);
+
+    env.ok(&["theme", "use", "mine"]);
+    assert_eq!(env.settings()["theme"], "mine");
+    assert_eq!(env.settings()["setupCompleted"], true, "other keys kept");
+    let o = env.run(&["settings", "set", "theme", "bogus"]);
+    assert!(o.code == 1 && o.stderr.contains("Unknown theme"), "{}", o.stderr);
+    env.ok(&["settings", "set", "theme", "dracula"]);
+    env.ok(&["theme", "use", "mine"]);
+
+    assert_eq!(env.run(&["theme", "remove", "nord"]).code, 1);
+    env.ok(&["theme", "remove", "mine"]);
+    assert!(!env.data().join("themes/mine.json").exists());
+    assert_eq!(env.settings()["theme"], "ansi", "removing the active theme falls back to ansi");
+}

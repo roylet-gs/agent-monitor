@@ -87,6 +87,9 @@ enum Cmd {
     /// Manage startup scripts
     #[command(subcommand)]
     Script(ScriptCmd),
+    /// List, inspect and share colour themes
+    #[command(subcommand)]
+    Theme(ThemeCmd),
     /// Check system health (hooks, gh CLI, DB, etc.)
     Doctor(JsonOpt),
     /// Show recent logs
@@ -326,6 +329,41 @@ enum ScriptCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum ThemeCmd {
+    /// List built-in and custom themes
+    #[command(alias = "ls")]
+    List(JsonOpt),
+    /// Show a theme's colours
+    Show {
+        name: String,
+        #[command(flatten)]
+        json: JsonOpt,
+    },
+    /// Make a theme the active one
+    Use { name: String },
+    /// Print a theme as a standalone JSON file (a template for your own)
+    Export {
+        name: String,
+        /// Write to a file instead of stdout
+        #[arg(short, long, value_name = "file")]
+        output: Option<String>,
+    },
+    /// Copy a theme file into the themes directory
+    Import {
+        file: String,
+        /// Theme name (default: the file's "name", else its file name)
+        #[arg(long, value_name = "name")]
+        name: Option<String>,
+        /// Replace an existing custom theme with the same name
+        #[arg(long)]
+        force: bool,
+    },
+    /// Delete a custom theme
+    #[command(alias = "rm")]
+    Remove { name: String },
+}
+
 #[derive(Args)]
 struct LogsArgs {
     /// Number of log lines to show
@@ -422,6 +460,14 @@ fn main() {
             ScriptCmd::Edit(r) => script::edit(r.repo.as_deref()),
             ScriptCmd::Remove(r) => script::remove(r.repo.as_deref()),
             ScriptCmd::Show { repo, json } => script::show(repo.repo.as_deref(), json.json),
+        },
+        Some(Cmd::Theme(c)) => match c {
+            ThemeCmd::List(j) => theme::list(j.json),
+            ThemeCmd::Show { name, json } => theme::show(&name, json.json),
+            ThemeCmd::Use { name } => theme::use_theme(&name),
+            ThemeCmd::Export { name, output } => theme::export(&name, output.as_deref()),
+            ThemeCmd::Import { file, name, force } => theme::import(&file, name.as_deref(), force),
+            ThemeCmd::Remove { name } => theme::remove(&name),
         },
         Some(Cmd::Doctor(j)) => doctor::run(j.json),
         Some(Cmd::Logs(a)) => logs::run(logs::Options {

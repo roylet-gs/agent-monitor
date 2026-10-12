@@ -13,6 +13,7 @@ mod ops;
 mod settings_ui;
 mod setup;
 mod theme;
+mod theme_builder;
 mod ui;
 
 use std::io::{self, Write};
@@ -31,6 +32,7 @@ fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
         KeyCode::Char('c') if ctrl => Key::CtrlC,
         KeyCode::Char('d') if ctrl => Key::CtrlD,
         KeyCode::Char('u') if ctrl => Key::CtrlU,
+        KeyCode::Char('s') if ctrl => Key::CtrlS,
         KeyCode::Char(c) => Key::Char(c),
         KeyCode::Up => Key::Up,
         KeyCode::Left => Key::Left,
@@ -90,7 +92,7 @@ fn main() -> io::Result<()> {
 }
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data::Collector) -> io::Result<()> {
-    let mut theme = theme::Theme::by_name(&app.settings.theme);
+    let mut theme = theme::Theme::load(&app.settings.theme);
     let (launch_tx, launch_rx) = std::sync::mpsc::channel();
     let mut popup_since: Option<Instant> = None;
     let mut log_lines: Vec<String> = Vec::new();
@@ -240,7 +242,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             Action::OpenClaude(v) => launcher::open_claude(*v, &app.settings, launch_tx.clone()),
                             Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
                             Action::SettingsChanged => {
-                                theme = theme::Theme::by_name(&app.settings.theme);
+                                theme = theme::Theme::load(&app.settings.theme);
                                 collector.update_settings(app.settings.clone());
                             }
                             Action::Create(repo, req) => ops::create(app.settings.clone(), *repo, *req, launch_tx.clone()),
@@ -268,7 +270,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             Action::EditSettingsFile => {
                                 edit_settings_file(terminal)?;
                                 app.set_settings(settings::load());
-                                theme = theme::Theme::by_name(&app.settings.theme);
+                                theme = theme::Theme::load(&app.settings.theme);
                                 collector.update_settings(app.settings.clone());
                             }
                             Action::None => {}

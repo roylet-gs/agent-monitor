@@ -12,6 +12,7 @@ pub mod settings;
 pub mod sidebar;
 pub mod status;
 pub mod summary;
+pub mod theme;
 pub mod tui;
 pub mod worktree;
 
