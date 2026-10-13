@@ -43,7 +43,7 @@ test("Settings → Agent plugins lists the plugins and toggles one", async ({ pa
   const tui = new RustTui(page);
   await tui.open();
   await tui.openSetting("Turn agent CLIs on/off, install their hooks, pick the default agent");
-  await tui.waitForMatch(/Agent plugins…\s+claude, gemini(, toycli)? · default claude/);
+  await tui.waitForMatch(/Agent plugins…\s+claude, gemini · default claude/);
   await tui.sendKey("Enter");
   await tui.waitForText("Agent plugins — space on/off · i install hooks · d default · esc back");
   await tui.waitForMatch(/\[x\] Claude Code\s+built-in/);
@@ -59,7 +59,7 @@ test("Settings → Agent plugins lists the plugins and toggles one", async ({ pa
   await tui.sendKey(" ");
   await tui.waitForMatch(/\[x\] Gemini CLI/);
   await tui.sendKey("Escape");
-  await tui.waitForMatch(/Agent plugins…\s+claude, gemini(, toycli)? · default claude/);
+  await tui.waitForMatch(/Agent plugins…\s+claude, gemini · default claude/);
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
 });

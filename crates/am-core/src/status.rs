@@ -140,13 +140,6 @@ impl HookEvent {
     }
 }
 
-/// Tool names the status rules and summaries know (Claude Code's). A
-/// harness plugin maps its own tool names onto these in `tools`.
-pub const CANONICAL_TOOLS: [&str; 18] = [
-    "Bash", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS", "WebFetch", "WebSearch",
-    "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "Agent", "Task", "TodoWrite", "Skill",
-];
-
 /// How much a status needs the user, for picking the headline of several
 /// sessions in one worktree: waiting > executing > planning > delegating >
 /// done > idle.

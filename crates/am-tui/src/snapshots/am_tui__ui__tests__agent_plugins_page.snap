@@ -5,17 +5,17 @@ expression: "render(&app, 100, 24)"
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ Agent plugins — space on/off · i install hooks · d default · esc back            │░ 121k │
-│ ◐ fix/│ Training — T train a new harness plugin · e retrain · p publish · x remove       │░ 185k │
-│       │                                                                                  │       │
-│gridsig│  [x] Claude Code   built-in    hooks ✓      ★ default                            │───────│
-│ · main│▌ [x] Gemini CLI    built-in    hooks ✗                                           │       │
-│       │  [ ] My CLI        mycli.json  —                                                 │       │
-│       │  + Train a new harness plugin…                                                   │       │
+│ ◐ fix/│                                                                                  │░ 185k │
+│       │  [x] Claude Code   built-in    hooks ✓      ★ default                            │       │
+│gridsig│▌ [x] Gemini CLI    built-in    hooks ✗                                           │───────│
+│ · main│  [ ] My CLI        mycli.json  —                                                 │       │
 │       │                                                                                  │       │
 │       │ Skipped plugin files:                                                            │       │
 │       │   broken.json: expected value at line 1 column 3                                 │       │
 │       │                                                                                  │       │
-│       │ Add plugins as JSON manifests in ~/.agent-monitor/agents, or train one (T)       │       │
+│       │ Add plugins as JSON manifests in ~/.agent-monitor/agents                         │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │

@@ -251,10 +251,8 @@ fn draw_settings(
 
 /// Settings → Agent plugins.
 fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate::plugins_ui::PluginEditor) {
-    use crate::plugins_ui::Confirm;
     let mut lines = vec![
         Line::styled(" Agent plugins — space on/off · i install hooks · d default · esc back", theme.faint()),
-        Line::styled(" Training — T train a new harness plugin · e retrain · p publish · x remove", theme.faint()),
         Line::raw(""),
     ];
     for (i, r) in pl.rows.iter().enumerate() {
@@ -266,39 +264,15 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
             (false, false, _) => Span::styled("—            ", theme.faint()),
         };
         let default = if r.id == pl.default_agent { "★ default" } else { "" };
-        let mut spans = vec![
+        let line = Line::from(vec![
             Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
             Span::styled(if r.enabled { " [x] " } else { " [ ] " }, theme.fg(if r.enabled { theme.green } else { theme.faint })),
             Span::styled(format!("{:<14}", truncate(&r.name, 14)), if r.enabled { theme.fg(theme.text) } else { theme.faint() }),
             Span::styled(format!("{:<12}", truncate(&r.source, 12)), theme.faint()),
             hooks,
             Span::styled(format!("{default:<10}"), theme.fg(theme.accent)),
-        ];
-        if r.draft {
-            spans.push(Span::styled("✎ draft ", theme.fg(theme.yellow)));
-        }
-        if r.issues > 0 {
-            spans.push(Span::styled(format!("⚠ {}", r.issues), theme.fg(theme.red)));
-        }
-        let line = Line::from(spans);
+        ]);
         lines.push(if sel { line.style(theme.selected()) } else { line });
-    }
-    let sel = pl.on_train_row();
-    let train = Line::from(vec![
-        Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
-        Span::styled(" + Train a new harness plugin…", theme.fg(theme.accent)),
-    ]);
-    lines.push(if sel { train.style(theme.selected()) } else { train });
-    if let Some(cmd) = &pl.train {
-        lines.push(Line::raw(""));
-        lines.push(Line::from(vec![
-            Span::styled(" Command that starts it: ", theme.fg(theme.text)),
-            Span::styled(format!("{cmd}▏"), theme.bold(theme.accent)),
-        ]));
-        lines.push(Line::styled(
-            "   e.g. cursor-agent · it opens in a new terminal, prompt copied",
-            theme.faint(),
-        ));
     }
     if !pl.errors.is_empty() {
         lines.push(Line::raw(""));
@@ -309,28 +283,17 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
     }
     lines.push(Line::raw(""));
     lines.push(Line::styled(
-        format!(" Add plugins as JSON manifests in {}, or train one (T)", pl.plugins_dir),
+        format!(" Add plugins as JSON manifests in {}", pl.plugins_dir),
         theme.faint(),
     ));
     f.render_widget(Paragraph::new(lines), list);
-    let help_line = match (&pl.confirm, &pl.message, pl.selected()) {
-        (Some(Confirm::Publish(id)), _, _) => {
-            Line::styled(format!(" Publish {id}? Stops capturing, drops the draft badge · y yes · any key no"), theme.fg(theme.yellow))
-        }
-        (Some(Confirm::Remove(id)), _, _) => {
-            Line::styled(format!(" Remove {id} and its hooks? (rollback restores it) · y yes · any key no"), theme.fg(theme.yellow))
-        }
-        (None, Some((ok, m)), _) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
-        (None, None, Some(r)) if r.draft => Line::styled(
-            format!(" {} · draft · {} capture(s) · {} issue(s) · am harness issues {}", r.id, r.captures, r.issues, r.id),
-            theme.faint(),
-        ),
-        (None, None, Some(r)) => {
+    let help_line = match (&pl.message, pl.selected()) {
+        (Some((ok, m)), _) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
+        (None, Some(r)) => {
             let note = r.note.as_deref().map(|n| format!(" · {n}")).unwrap_or_default();
             Line::styled(format!(" {} · hooks in {}{note}", r.id, r.settings_path), theme.faint())
         }
-        (None, None, None) if pl.train.is_some() => Line::styled(" ⏎ start training · esc cancel", theme.faint()),
-        (None, None, None) => Line::styled(" ⏎ train a new harness plugin: the harness writes and tests its own plugin", theme.faint()),
+        (None, None) => Line::raw(""),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
 }
@@ -1053,12 +1016,6 @@ fn worktree_line<'a>(
         _ => String::new(),
     };
     badge.push_str(&agent_badge);
-    // A plugin still being trained (Settings → Agent plugins publishes it).
-    let draft_badge = match v.agent.as_ref().map(|a| a.agent) {
-        Some(kind) if !deleting && kind.is_draft() => if width >= 100 { " ✎ draft" } else { "✎" },
-        _ => "",
-    };
-    badge.push_str(draft_badge);
     if !deleting && subagents > 0 {
         if width >= 100 {
             badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
@@ -1110,10 +1067,6 @@ fn worktree_line<'a>(
     }
     if let Some(r) = rest.strip_prefix(agent_badge.as_str()).filter(|_| !agent_badge.is_empty()) {
         left.push(Span::styled(agent_badge.clone(), theme.fg(if listed { theme.magenta } else { theme.blue })));
-        rest = r;
-    }
-    if let Some(r) = rest.strip_prefix(draft_badge).filter(|_| !draft_badge.is_empty()) {
-        left.push(Span::styled(draft_badge, theme.fg(theme.yellow)));
         rest = r;
     }
     if let Some(r) = rest.strip_prefix(" deleting…") {
@@ -1800,10 +1753,6 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         Span::styled("⧉ 2 sessions", theme.fg(theme.magenta)),
         Span::styled(" agents in one worktree, each listed below it with its own status", theme.faint()),
     ]));
-    lines.push(Line::from(vec![
-        Span::styled("✎ draft", theme.fg(theme.yellow)),
-        Span::styled(" plugin still being trained (Settings → Agent plugins publishes it)", theme.faint()),
-    ]));
     let w = 80.min(area.width.saturating_sub(4));
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
@@ -2074,27 +2023,6 @@ mod tests {
     }
 
     #[test]
-    fn draft_plugin_rows_are_badged() {
-        use am_core::harness::manifest::{Manifest, ManifestProvider};
-        let manifest = Manifest::parse(
-            r#"{"id":"toycli","name":"Toy CLI","program":"toycli","status":"draft",
-                "hooks":{"settingsPath":"/tmp/toy.json","projectDirVar":"TOY_DIR"},"events":{"Done":"Stop"}}"#,
-        )
-        .unwrap();
-        let toy = HarnessKind::leak(Box::new(ManifestProvider { manifest, source: "/tmp/toycli.json".into() }));
-        assert!(toy.is_draft());
-        let mut app = fixture();
-        let mut snap = app.snapshot.clone();
-        snap.groups[0].worktrees[1].agent.as_mut().unwrap().agent = toy;
-        app.apply(snap);
-        let row = |w: u16| render(&app, w, 12).lines().find(|l| l.contains("fix/offline-cache")).unwrap().to_string();
-        assert!(row(120).contains("fix/offline-cache ✦ toycli ✎ draft"), "{}", row(120));
-        let narrow = row(90);
-        assert!(narrow.contains(" ✦✎") && !narrow.contains("draft"), "{narrow}");
-        assert!(!render(&app, 120, 12).lines().any(|l| l.contains("feature/refactor") && l.contains('✎')));
-    }
-
-    #[test]
     fn settings_changes_keep_the_plugin_page_open() {
         // Regression: toggling a plugin persists settings, and rebuilding the
         // editor on that change used to close the page under the user.
@@ -2134,10 +2062,6 @@ mod tests {
             present,
             settings_path: format!("~/.{id}/settings.json"),
             note: None,
-            builtin: source == "built-in",
-            draft: false,
-            issues: 0,
-            captures: 0,
         };
         let mut pl = PluginEditor::new(
             vec![
@@ -2153,47 +2077,6 @@ mod tests {
         ed.plugins = Some(pl);
         app.settings_editor = Some(ed);
         insta::assert_snapshot!(render(&app, 100, 24));
-    }
-
-    #[test]
-    fn agent_plugins_page_with_a_draft_in_training() {
-        use crate::plugins_ui::{Confirm, PluginEditor, PluginRow};
-        let mut app = fixture();
-        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
-        let row = |id: &str, name: &str, source: &str, draft: bool, issues: usize| PluginRow {
-            id: id.into(),
-            name: name.into(),
-            source: source.into(),
-            enabled: true,
-            hooks: true,
-            present: true,
-            settings_path: format!("~/.{id}/settings.json"),
-            note: None,
-            builtin: source == "built-in",
-            draft,
-            issues,
-            captures: 12,
-        };
-        let mut pl = PluginEditor::new(
-            vec![row("claude", "Claude Code", "built-in", false, 0), row("toycli", "Toy CLI", "toycli.json", true, 3)],
-            "claude",
-            vec![],
-            "~/.agent-monitor/agents".into(),
-        );
-        pl.cursor = 1;
-        ed.plugins = Some(pl);
-        app.settings_editor = Some(ed);
-        insta::assert_snapshot!("plugins_draft_selected", render(&app, 100, 20));
-
-        let pl = app.settings_editor.as_mut().unwrap().plugins.as_mut().unwrap();
-        pl.confirm = Some(Confirm::Publish("toycli".into()));
-        insta::assert_snapshot!("plugins_confirm_publish", render(&app, 100, 20));
-
-        let pl = app.settings_editor.as_mut().unwrap().plugins.as_mut().unwrap();
-        pl.confirm = None;
-        pl.cursor = 2;
-        pl.train = Some("cursor-agent".into());
-        insta::assert_snapshot!("plugins_train_new", render(&app, 100, 20));
     }
 
     #[test]

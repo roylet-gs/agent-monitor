@@ -71,9 +71,6 @@ enum Cmd {
     /// Manage agent hooks (Claude Code, Gemini CLI)
     #[command(subcommand)]
     Hooks(HooksCmd),
-    /// Harness plugins: list, validate, add, publish, and train new ones
-    #[command(subcommand, alias = "plugin", alias = "plugins")]
-    Harness(HarnessCmd),
     /// Install agent hooks (alias for: hooks install)
     InstallHooks(AgentOpt),
     /// Remove agent hooks (alias for: hooks uninstall)
@@ -259,108 +256,6 @@ enum HooksCmd {
     Status(JsonOpt),
 }
 
-#[derive(Subcommand)]
-enum HarnessCmd {
-    /// List harnesses with their status (draft/published), hooks and issue counts
-    #[command(alias = "ls")]
-    List(JsonOpt),
-    /// Show a harness: manifest, hook file, captures, issues
-    Show {
-        id: String,
-        #[command(flatten)]
-        json: JsonOpt,
-    },
-    /// Print the manifest reference (--json: the JSON Schema)
-    Schema(JsonOpt),
-    /// Validate a manifest file or a plugin id; lists every problem
-    Validate {
-        #[arg(value_name = "file|id")]
-        target: String,
-        #[command(flatten)]
-        json: JsonOpt,
-    },
-    /// Add a manifest as a draft plugin and install its hooks
-    Add {
-        file: String,
-        /// Replace an existing plugin with the same id (the old one is kept in the history)
-        #[arg(long)]
-        replace: bool,
-        /// Keep the file's own status instead of making it a draft
-        #[arg(long)]
-        keep_status: bool,
-        /// Don't install the hooks
-        #[arg(long)]
-        no_install: bool,
-    },
-    /// Hook events captured for a plugin (drafts capture every event)
-    Captures {
-        id: String,
-        /// Only this native event
-        #[arg(long, value_name = "name")]
-        event: Option<String>,
-        /// Only the newest N captures
-        #[arg(long, value_name = "N")]
-        last: Option<usize>,
-        /// Print whole captures instead of a summary
-        #[arg(long)]
-        full: bool,
-        /// Delete the captures
-        #[arg(long)]
-        clear: bool,
-        #[command(flatten)]
-        json: JsonOpt,
-    },
-    /// Replay captured events through a manifest and show the resulting statuses (writes nothing)
-    Test {
-        id: String,
-        /// Candidate manifest to test instead of the installed one
-        #[arg(long, value_name = "file")]
-        manifest: Option<String>,
-        /// Replay these capture files instead of all of the plugin's
-        #[arg(long = "capture", value_name = "file")]
-        captures: Vec<std::path::PathBuf>,
-        #[command(flatten)]
-        json: JsonOpt,
-    },
-    /// Problems recorded while a plugin was used
-    Issues {
-        id: String,
-        /// Delete the plugin's issues
-        #[arg(long)]
-        clear: bool,
-        #[command(flatten)]
-        json: JsonOpt,
-    },
-    /// Mark a plugin published (needs a clean validation; stops capturing)
-    Publish { id: String },
-    /// Mark a plugin draft again (captures every event)
-    Draft { id: String },
-    /// Uninstall a plugin's hooks and remove it (kept in the history)
-    Remove {
-        id: String,
-        /// Keep its captured events
-        #[arg(long)]
-        keep_captures: bool,
-    },
-    /// Restore a plugin's previous version
-    Rollback { id: String },
-    /// Start a training session: a terminal running the harness with a prompt to write or fix its plugin
-    Train {
-        /// How you start the harness to train (e.g. cursor-agent)
-        #[arg(long, value_name = "cmd")]
-        command: Option<String>,
-        /// Retrain an existing plugin
-        #[arg(long, value_name = "id")]
-        edit: Option<String>,
-        /// Print the prompt instead of starting
-        #[arg(long)]
-        print: bool,
-        /// Prepare the workspace but don't open a terminal
-        #[arg(long)]
-        no_open: bool,
-    },
-}
-
 #[derive(Args)]
 struct AgentOpt {
     /// Only this agent (claude, gemini); repeatable
@@ -523,24 +418,6 @@ fn main() {
             HooksCmd::Install(a) => hooks::install(&a.agents),
             HooksCmd::Uninstall(a) => hooks::uninstall(&a.agents),
             HooksCmd::Status(j) => hooks::status(j.json),
-        },
-        Some(Cmd::Harness(h)) => match h {
-            HarnessCmd::List(j) => harness::list(j.json),
-            HarnessCmd::Show { id, json } => harness::show(&id, json.json),
-            HarnessCmd::Schema(j) => harness::schema(j.json),
-            HarnessCmd::Validate { target, json } => harness::validate(&target, json.json),
-            HarnessCmd::Add { file, replace, keep_status, no_install } => harness::add(&file, replace, keep_status, no_install),
-            HarnessCmd::Captures { id, event, last, full, clear, json } => harness::captures(
-                &id,
-                &harness::CapturesArgs { event: event.as_deref(), last, full, json: json.json, clear },
-            ),
-            HarnessCmd::Test { id, manifest, captures, json } => harness::test(&id, manifest.as_deref(), &captures, json.json),
-            HarnessCmd::Issues { id, clear, json } => harness::issues(&id, json.json, clear),
-            HarnessCmd::Publish { id } => harness::set_status(&id, am_core::harness::manifest::PluginStatus::Published),
-            HarnessCmd::Draft { id } => harness::set_status(&id, am_core::harness::manifest::PluginStatus::Draft),
-            HarnessCmd::Remove { id, keep_captures } => harness::remove(&id, keep_captures),
-            HarnessCmd::Rollback { id } => harness::rollback(&id),
-            HarnessCmd::Train { command, edit, print, no_open } => harness::train(command.as_deref(), edit.as_deref(), print, no_open),
         },
         Some(Cmd::InstallHooks(a)) => hooks::install(&a.agents),
         Some(Cmd::UninstallHooks(a)) => hooks::uninstall(&a.agents),

@@ -15,15 +15,9 @@
 //! ([`manifest`]). Plugins can be disabled with the `disabledAgents`
 //! setting. See `docs/agent-providers.md`.
 
-pub mod capture;
 pub mod claude;
 pub mod gemini;
-pub mod issues;
-pub mod lifecycle;
 pub mod manifest;
-pub mod replay;
-pub mod training;
-pub mod validate;
 
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -65,20 +59,6 @@ pub trait Harness: Sync + Send {
     /// A caveat shown next to the hook status (`am doctor`, the plugin page).
     fn notes(&self) -> Option<&str> {
         None
-    }
-
-    /// The declarative manifest behind this harness, if it has one (manifest
-    /// plugins, and built-ins written as one such as Gemini).
-    fn manifest(&self) -> Option<&manifest::Manifest> {
-        None
-    }
-
-    /// `draft` while a plugin is being trained. Built-ins are published.
-    fn status(&self) -> manifest::PluginStatus {
-        match (self.origin(), self.manifest()) {
-            (Origin::Plugin(_), Some(m)) => m.status,
-            _ => manifest::PluginStatus::Published,
-        }
     }
 
     /// Whether this CLI has been used on this machine (its config dir exists;
@@ -180,15 +160,6 @@ impl HarnessKind {
 
     pub fn is_builtin(self) -> bool {
         self.0.origin() == Origin::BuiltIn
-    }
-
-    /// A handle on a provider that isn't registered (tests, previews). Leaks it.
-    pub fn leak(provider: Box<dyn Harness>) -> HarnessKind {
-        HarnessKind(Box::leak(provider))
-    }
-
-    pub fn is_draft(self) -> bool {
-        self.0.status() == manifest::PluginStatus::Draft
     }
 
     /// Look up a registered agent. Built-ins are checked first so the hook

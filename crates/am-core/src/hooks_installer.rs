@@ -165,11 +165,7 @@ fn invocation(native_bin: Option<&Path>) -> String {
 }
 
 pub fn build_hook_entry(agent: HarnessKind, event: &str, native_bin: Option<&Path>) -> Value {
-    entry_for(agent.provider(), event, native_bin)
-}
-
-fn entry_for(provider: &dyn Harness, event: &str, native_bin: Option<&Path>) -> Value {
-    provider.hook_entry(event, &invocation(native_bin), native_bin.is_some())
+    agent.provider().hook_entry(event, &invocation(native_bin), native_bin.is_some())
 }
 
 /// The settings file as a JSON object. A missing file is empty; a file that
@@ -225,12 +221,7 @@ fn hooks_of(settings: &Map<String, Value>) -> Map<String, Value> {
 /// Install `agent`'s hooks. Returns the binary they now point at (`None` =
 /// the `am hook-event` CLI fallback).
 pub fn install_hooks(agent: HarnessKind) -> std::io::Result<Option<PathBuf>> {
-    install_for(agent.provider())
-}
-
-/// [`install_hooks`] for any provider, registered or not (a manifest being
-/// added or published by `harness::lifecycle`).
-pub fn install_for(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> {
+    let provider = agent.provider();
     let path = provider.settings_path();
     let mut settings = read_settings(&path)?;
     let mut hooks = hooks_of(&settings);
@@ -240,7 +231,7 @@ pub fn install_for(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> {
     for event in provider.hook_events() {
         let existing = hooks.get(event.as_str()).and_then(Value::as_array).cloned().unwrap_or_default();
         let mut next = without_am_hooks(&existing);
-        next.push(entry_for(provider, &event, native.as_deref()));
+        next.push(build_hook_entry(agent, &event, native.as_deref()));
         hooks.insert(event, Value::Array(next));
     }
     settings.insert("hooks".into(), Value::Object(hooks));
@@ -256,11 +247,7 @@ pub fn install_for(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> {
 }
 
 pub fn uninstall_hooks(agent: HarnessKind) -> std::io::Result<()> {
-    uninstall_for(agent.provider())
-}
-
-/// [`uninstall_hooks`] for any provider, registered or not.
-pub fn uninstall_for(provider: &dyn Harness) -> std::io::Result<()> {
+    let provider = agent.provider();
     let path = provider.settings_path();
     if !path.exists() {
         return Ok(());
@@ -287,10 +274,7 @@ pub fn uninstall_for(provider: &dyn Harness) -> std::io::Result<()> {
 }
 
 pub fn is_hooks_installed(agent: HarnessKind) -> bool {
-    is_installed_for(agent.provider())
-}
-
-pub fn is_installed_for(provider: &dyn Harness) -> bool {
+    let provider = agent.provider();
     let hooks = hooks_of(&read_settings(&provider.settings_path()).unwrap_or_default());
     provider.hook_events().iter().any(|e| hooks.get(e.as_str()).and_then(Value::as_array).is_some_and(|ms| ms.iter().any(matcher_is_ours)))
 }

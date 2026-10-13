@@ -89,55 +89,6 @@ pub struct Manifest {
     /// A caveat shown next to the hook status, e.g. a trust requirement.
     #[serde(default)]
     pub notes: Option<String>,
-    /// `draft` while a plugin is being trained; absent = published.
-    #[serde(default)]
-    pub status: PluginStatus,
-    /// Training-mode metadata (see `docs/plans/plugin-training-mode.md`).
-    #[serde(default)]
-    pub training: Option<TrainingSpec>,
-    /// An editor hint (`am harness schema --json`); ignored.
-    #[serde(default, rename = "$schema")]
-    pub schema: Option<String>,
-    /// The manifest as written, for `am harness show`.
-    #[serde(skip)]
-    pub raw: Value,
-}
-
-/// Whether a plugin is still being trained. Drafts capture every hook event
-/// they fire and are badged in the TUI.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PluginStatus {
-    Draft,
-    #[default]
-    Published,
-}
-
-impl PluginStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PluginStatus::Draft => "draft",
-            PluginStatus::Published => "published",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TrainingSpec {
-    /// Extra native events hooked only while the plugin is a draft, so am
-    /// records them. Never mapped to a status.
-    #[serde(default)]
-    pub capture_events: Vec<String>,
-    /// Start the harness with an initial prompt; `{prompt}` is replaced.
-    #[serde(default)]
-    pub prompt_args: Vec<String>,
-    /// What the plugin was verified against, e.g. `mycli 1.7.2`.
-    #[serde(default)]
-    pub verified_with: Option<String>,
-    /// The training agent's own findings, carried into the edit prompt.
-    #[serde(default)]
-    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -194,13 +145,8 @@ pub fn expand_home(p: &str) -> PathBuf {
     }
 }
 
-pub fn valid_id(id: &str) -> bool {
+fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-}
-
-/// Event names end up in a shell command (`--event <name>`).
-pub fn valid_event_name(name: &str) -> bool {
-    !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.' || b == b':')
 }
 
 fn valid_var(v: &str) -> bool {
@@ -210,8 +156,7 @@ fn valid_var(v: &str) -> bool {
 impl Manifest {
     /// Parse and validate. Errors read as one line for the plugin list.
     pub fn parse(text: &str) -> Result<Manifest, String> {
-        let mut m: Manifest = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        m.raw = serde_json::from_str(text).unwrap_or_default();
+        let m: Manifest = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if !valid_id(&m.id) {
             return Err(format!("id \"{}\" must be 1-32 chars of a-z, 0-9, -", m.id));
         }
@@ -229,13 +174,8 @@ impl Manifest {
             if !CANONICAL_EVENTS.contains(&canon) {
                 return Err(format!("events.{native}: unknown canonical event \"{canon}\""));
             }
-            if !valid_event_name(native) {
+            if native.is_empty() || !native.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
                 return Err(format!("event name \"{native}\" must be alphanumeric"));
-            }
-        }
-        for native in m.capture_events() {
-            if !valid_event_name(native) {
-                return Err(format!("training.captureEvents: event name \"{native}\" must be alphanumeric"));
             }
         }
         Ok(m)
@@ -276,41 +216,8 @@ impl Manifest {
         }
     }
 
-    /// Native events to hook: the mapped ones, plus a draft's capture-only
-    /// events (deduplicated, mapped ones first).
     pub fn hook_events(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.events.keys().cloned().collect();
-        if self.status == PluginStatus::Draft {
-            for e in self.capture_events() {
-                if !out.iter().any(|o| o == e) {
-                    out.push(e.clone());
-                }
-            }
-        }
-        out
-    }
-
-    /// Native events listed in `training.captureEvents`.
-    pub fn capture_events(&self) -> &[String] {
-        self.training.as_ref().map(|t| t.capture_events.as_slice()).unwrap_or(&[])
-    }
-
-    /// Whether `native` is one of the mapped events.
-    pub fn maps_event(&self, native: &str) -> bool {
-        self.events.contains_key(native)
-    }
-
-    /// Whether `native` (a tool name as the harness sends it) has a mapping.
-    pub fn maps_tool(&self, native: &str) -> bool {
-        self.tools.contains_key(native)
-    }
-
-    /// The native event name in a payload: `--event`, else `hook_event_name`.
-    pub fn native_event(&self, v: &Value, event_override: Option<&str>) -> Option<String> {
-        event_override
-            .map(str::to_owned)
-            .or_else(|| v.get(self.field("hook_event_name")).and_then(Value::as_str).map(str::to_owned))
-            .filter(|e| !e.is_empty())
+        self.events.keys().cloned().collect()
     }
 
     pub fn hook_entry(&self, event: &str, invocation: &str) -> Value {
@@ -346,18 +253,11 @@ impl Manifest {
         let root_s = root.to_string_lossy();
         let argv: Vec<String> = spec.command.iter().map(|a| a.replace("{root}", &root_s)).collect();
         let Some((prog, args)) = argv.split_first() else { return Vec::new() };
-        let failed = |why: String| {
-            crate::debug!("agents", "{}: sessions command {why}", self.id);
-            let issue = super::issues::Issue::new(super::issues::DISCOVERY_FAILED, argv.join(" "), Some(why));
-            super::issues::record_now(&self.id, &[issue]);
-            Vec::new()
-        };
         let Some(out) = run_bounded(prog, args, Duration::from_secs(3)) else {
-            return failed("failed, exited non-zero or took over 3 s".into());
+            crate::debug!("agents", "{}: sessions command failed or timed out", self.id);
+            return Vec::new();
         };
-        let Ok(Value::Array(items)) = serde_json::from_slice::<Value>(&out) else {
-            return failed(format!("didn't print a JSON array: {}", crate::status::truncate(&String::from_utf8_lossy(&out), 200)));
-        };
+        let Ok(Value::Array(items)) = serde_json::from_slice::<Value>(&out) else { return Vec::new() };
         let mut sessions: Vec<Session> = items
             .iter()
             .filter_map(|it| {
@@ -423,9 +323,6 @@ impl Harness for ManifestProvider {
     }
     fn notes(&self) -> Option<&str> {
         self.manifest.notes.as_deref()
-    }
-    fn manifest(&self) -> Option<&Manifest> {
-        Some(&self.manifest)
     }
     fn is_present(&self) -> bool {
         self.manifest.config_dir.as_deref().is_some_and(|d| expand_home(d).is_dir())

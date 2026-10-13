@@ -104,21 +104,6 @@ pub fn run(as_json: bool) {
         });
     }
 
-    // Drafts are plugins still being trained: say so, with what they ran into.
-    let counts = am_core::db::open().ok().and_then(|c| am_core::db::plugin_issue_counts(&c).ok()).unwrap_or_default();
-    for &kind in am_core::harness::all().iter().filter(|k| k.is_draft()) {
-        let n = counts.get(kind.id()).copied().unwrap_or(0);
-        let captures = am_core::harness::capture::list(kind.id()).len();
-        checks.push(Check {
-            name: format!("{} (draft)", kind.provider().short_name()),
-            status: "warn",
-            message: format!(
-                "Draft plugin: {captures} capture(s), {n} issue(s). See `am harness issues {id}`; publish with `am harness publish {id}`",
-                id = kind.id()
-            ),
-        });
-    }
-
     let native = hi::find_native_hook_binary();
     checks.push(Check {
         name: "Native hook".into(),

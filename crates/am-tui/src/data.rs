@@ -159,7 +159,7 @@ struct Worker {
     /// Parked subagent ids last cycle, to log only when the set changes.
     parked: HashSet<String>,
     /// Newest change in the plugin dir; a new value reloads the registry (a
-    /// training session added, replaced or published a plugin).
+    /// manifest was added, edited or removed while the TUI runs).
     plugins_stamp: Option<std::time::SystemTime>,
 }
 
@@ -262,7 +262,7 @@ impl Worker {
             if stamp != self.plugins_stamp {
                 self.plugins_stamp = stamp;
                 am_core::harness::reload();
-                info!("tui", "Agent plugins changed on disk; reloaded ({} registered)", am_core::harness::all().len());
+                info!("tui", "Harness plugins changed on disk; reloaded ({} registered)", am_core::harness::all().len());
             }
             self.procs = self.collect_procs(&worktrees);
             self.last_procs = Some(Instant::now());
