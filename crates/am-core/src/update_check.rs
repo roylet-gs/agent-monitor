@@ -70,7 +70,7 @@ impl InstallMethod {
     /// The command (or instruction) that installs the latest release.
     pub fn upgrade_hint(self) -> String {
         match self {
-            InstallMethod::Homebrew => "brew upgrade agent-monitor".into(),
+            InstallMethod::Homebrew => "brew update && brew upgrade agent-monitor".into(),
             InstallMethod::Npm => "npm install -g @roylet-gs/agent-monitor@latest".into(),
             InstallMethod::Pnpm => "pnpm add -g @roylet-gs/agent-monitor@latest".into(),
             InstallMethod::Cargo => "in your checkout: git pull, then cargo install --path crates/am-cli, crates/am-tui and crates/am-hook".into(),
@@ -213,7 +213,7 @@ mod tests {
         for (path, want) in cases {
             assert_eq!(InstallMethod::from_exe(Path::new(path)), want, "{path}");
         }
-        assert_eq!(Homebrew.upgrade_hint(), "brew upgrade agent-monitor");
+        assert_eq!(Homebrew.upgrade_hint(), "brew update && brew upgrade agent-monitor");
         assert!(Unknown.upgrade_hint().contains("releases/latest"));
     }
 
