@@ -1,6 +1,8 @@
 # Agent Status Mapping
 
-How Claude Code hook events become a worktree's agent status. The rules live in `crates/am-core/src/status.rs` (`map_event_to_status`, unit-tested there); the hook handler that applies them is `crates/am-hook/src/lib.rs`.
+How hook events become a worktree's agent status. The rules live in `crates/am-core/src/status.rs` (`map_event_to_status`, unit-tested there); the hook handler that applies them is `crates/am-hook/src/lib.rs`.
+
+The rules are written against Claude Code's event vocabulary, which is am's **canonical** format. Other agent CLIs are translated into it by their provider (`crates/am-core/src/agents/`) before these rules run; see [Other agents](#other-agents) and `docs/agent-providers.md`.
 
 ## Status Types
 
@@ -190,3 +192,19 @@ Installed into `~/.claude/settings.json` by `am hooks install`, each as `"<path>
 | `PermissionRequest` | Claude Code 2.x managed permission prompt (installed with `--managed`) |
 
 Set `AM_HOOK_CAPTURE=1` in Claude Code's environment to save the latest raw payload per event and origin to `~/.agent-monitor/hook-captures/<Event>-<main|subagent>.json`, which is useful for checking which fields Claude Code actually sends.
+
+## Other agents
+
+`am-hook hook-event --agent <id>` selects a provider that normalises the native payload first; no flag means Claude. The status row records the agent (`agent` column, NULL = Claude).
+
+**Gemini CLI** (`--agent gemini`, hooks in `~/.gemini/settings.json`):
+
+| Gemini event | Canonical event | Resulting status (via the rules above) |
+| --- | --- | --- |
+| `SessionStart` / `SessionEnd` | same | `idle` |
+| `BeforeAgent` | `UserPromptSubmit` | `executing` |
+| `BeforeTool` / `AfterTool` | `PreToolUse` / `PostToolUse` | `executing` (tool names mapped: `ask_user`/`exit_plan_mode` → `waiting`, `enter_plan_mode` → `planning`) |
+| `Notification` (`ToolPermission`) | `Notification` (`permission_prompt`) | `waiting` |
+| `AfterAgent` | `Stop` (`prompt_response` → last response) | `done` after work, else `idle` |
+
+Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gemini sessions never reach `delegating` and record nothing in `subagents`.

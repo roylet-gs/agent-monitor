@@ -1,30 +1,14 @@
-//! Claude Code hook config in `~/.claude/settings.json`. Port of
-//! `src/lib/hooks-installer.ts`: same events, same entry shape, same
-//! "replace our entries, keep everyone else's" rules, so the TS and Rust
-//! installers can run against each other's output.
+//! Hook config in each agent CLI's settings file (`~/.claude/settings.json`,
+//! `~/.gemini/settings.json`). The entry shapes come from the providers in
+//! `crate::agents`; the rules are shared and ported from the TS
+//! `src/lib/hooks-installer.ts`: replace our entries, keep everyone else's, so
+//! the TS and Rust installers can run against each other's output.
 
 use std::path::{Path, PathBuf};
 
+use crate::agents::{AgentKind, AgentProvider};
 use crate::{info, paths};
-use serde_json::{Map, Value, json};
-
-pub const HOOK_EVENTS: [&str; 11] = [
-    "PreToolUse",
-    "PostToolUse",
-    "Stop",
-    "StopFailure",
-    "Notification",
-    "SessionStart",
-    "SessionEnd",
-    "UserPromptSubmit",
-    "SubagentStart",
-    "SubagentStop",
-    "PermissionRequest",
-];
-
-/// Events Claude Code rewrites to `--managed` with a 5-minute timeout; writing
-/// them in that shape keeps install idempotent.
-const MANAGED_HOOK_EVENTS: [&str; 1] = ["PermissionRequest"];
+use serde_json::{Map, Value};
 
 /// Whether a hook command is one of ours. Superset of the TS marker
 /// `/\bam(-hook"?)?\s+hook-event\b/`: also matches `am-rs` and a quoted
@@ -84,48 +68,44 @@ pub fn find_native_hook_binary() -> Option<PathBuf> {
     candidates.into_iter().find(|c| is_executable(c))
 }
 
-/// Appended to native hook commands; see `build_hook_entry`.
-pub const NATIVE_COMPAT_SUFFIX: &str = " # am hook-event (native)";
-
-pub fn build_hook_entry(event: &str, native_bin: Option<&Path>) -> Value {
-    let managed = MANAGED_HOOK_EVENTS.contains(&event);
-    let managed_flag = if managed { " --managed" } else { "" };
-    // The native binary reads stdin itself, so it doesn't need the `cat |` shim.
-    let invocation = match native_bin {
+/// The program part of a hook command: the native binary when there is one,
+/// else the `am` CLI (`cat |` shim kept from the TS app).
+fn invocation(native_bin: Option<&Path>) -> String {
+    match native_bin {
         Some(bin) => format!("\"{}\" hook-event", bin.display()),
         None => "cat | am hook-event".to_string(),
+    }
+}
+
+pub fn build_hook_entry(agent: AgentKind, event: &str, native_bin: Option<&Path>) -> Value {
+    agent.provider().hook_entry(event, &invocation(native_bin), native_bin.is_some())
+}
+
+/// The settings file as a JSON object. A missing file is empty; a file that
+/// exists but isn't a JSON object (Gemini allows comments) is an error, so we
+/// never overwrite what we couldn't read.
+pub fn read_settings(path: &Path) -> std::io::Result<Map<String, Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(e) => return Err(e),
     };
-    // Old TS releases (≤1.0.95) only recognise their hooks by the literal
-    // text `am hook-event`; without it they think hooks are missing and add a
-    // second, TS handler that races this one and overwrites `delegating`.
-    // A trailing shell comment keeps them seeing the native hook as "ours".
-    let compat = if native_bin.is_some() { NATIVE_COMPAT_SUFFIX } else { "" };
-    json!({
-        "hooks": [{
-            "type": "command",
-            "command": format!("{invocation} --worktree \"$CLAUDE_PROJECT_DIR\" --event {event}{managed_flag}{compat}"),
-            "timeout": if managed { 300_000 } else { 5_000 },
-        }]
-    })
+    if text.trim().is_empty() {
+        return Ok(Map::new());
+    }
+    match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Object(m)) => Ok(m),
+        Ok(_) => Err(std::io::Error::other(format!("{} is not a JSON object; not modifying it", path.display()))),
+        Err(e) => Err(std::io::Error::other(format!(
+            "can't parse {} ({e}); remove comments or fix it, then retry. Not modifying it",
+            path.display()
+        ))),
+    }
 }
 
-pub fn global_settings_path() -> PathBuf {
-    paths::home_dir().join(".claude").join("settings.json")
-}
-
-pub fn read_global_settings() -> Map<String, Value> {
-    std::fs::read_to_string(global_settings_path())
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| match v {
-            Value::Object(m) => Some(m),
-            _ => None,
-        })
-        .unwrap_or_default()
-}
-
-pub fn write_global_settings(settings: &Map<String, Value>) -> std::io::Result<()> {
-    let path = global_settings_path();
+/// Written in place (not temp + rename) so a symlinked settings file, common
+/// with dotfile managers, stays a symlink.
+pub fn write_settings(path: &Path, settings: &Map<String, Value>) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -151,38 +131,47 @@ fn hooks_of(settings: &Map<String, Value>) -> Map<String, Value> {
     }
 }
 
-/// Returns the binary the hooks now point at (`None` = the TS `am hook-event`).
-pub fn install_global_hooks() -> std::io::Result<Option<PathBuf>> {
-    let mut settings = read_global_settings();
+/// Install `agent`'s hooks. Returns the binary they now point at (`None` =
+/// the `am hook-event` CLI fallback).
+pub fn install_hooks(agent: AgentKind) -> std::io::Result<Option<PathBuf>> {
+    let provider = agent.provider();
+    let path = provider.settings_path();
+    let mut settings = read_settings(&path)?;
     let mut hooks = hooks_of(&settings);
     let native = find_native_hook_binary();
     // Replace (rather than skip) existing am entries so re-running install
     // switches between the TS command and the native binary.
-    for event in HOOK_EVENTS {
-        let existing = hooks.get(event).and_then(Value::as_array).cloned().unwrap_or_default();
+    for event in provider.hook_events() {
+        let existing = hooks.get(event.as_str()).and_then(Value::as_array).cloned().unwrap_or_default();
         let mut next = without_am_hooks(&existing);
-        next.push(build_hook_entry(event, native.as_deref()));
-        hooks.insert(event.to_string(), Value::Array(next));
+        next.push(build_hook_entry(agent, &event, native.as_deref()));
+        hooks.insert(event, Value::Array(next));
     }
     settings.insert("hooks".into(), Value::Object(hooks));
-    write_global_settings(&settings)?;
+    write_settings(&path, &settings)?;
     info!(
         "hooks",
-        "Installed global hooks into {} using {}",
-        global_settings_path().display(),
+        "Installed {} hooks into {} using {}",
+        provider.name(),
+        path.display(),
         native.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "am hook-event (TS)".into())
     );
     Ok(native)
 }
 
-pub fn uninstall_global_hooks() -> std::io::Result<()> {
-    let mut settings = read_global_settings();
+pub fn uninstall_hooks(agent: AgentKind) -> std::io::Result<()> {
+    let provider = agent.provider();
+    let path = provider.settings_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut settings = read_settings(&path)?;
     let mut hooks = hooks_of(&settings);
-    for event in HOOK_EVENTS {
-        let Some(existing) = hooks.get(event).and_then(Value::as_array).cloned() else { continue };
+    for event in provider.hook_events() {
+        let Some(existing) = hooks.get(event.as_str()).and_then(Value::as_array).cloned() else { continue };
         let kept = without_am_hooks(&existing);
         if kept.is_empty() {
-            hooks.shift_remove(event);
+            hooks.shift_remove(event.as_str());
         } else {
             hooks.insert(event.to_string(), Value::Array(kept));
         }
@@ -192,14 +181,28 @@ pub fn uninstall_global_hooks() -> std::io::Result<()> {
     } else {
         settings.insert("hooks".into(), Value::Object(hooks));
     }
-    write_global_settings(&settings)?;
-    info!("hooks", "Uninstalled global hooks from {}", global_settings_path().display());
+    write_settings(&path, &settings)?;
+    info!("hooks", "Uninstalled {} hooks from {}", provider.name(), path.display());
     Ok(())
 }
 
-pub fn is_global_hooks_installed() -> bool {
-    let hooks = hooks_of(&read_global_settings());
-    HOOK_EVENTS.iter().any(|e| hooks.get(*e).and_then(Value::as_array).is_some_and(|ms| ms.iter().any(matcher_is_ours)))
+pub fn is_hooks_installed(agent: AgentKind) -> bool {
+    let provider = agent.provider();
+    let hooks = hooks_of(&read_settings(&provider.settings_path()).unwrap_or_default());
+    provider.hook_events().iter().any(|e| hooks.get(e.as_str()).and_then(Value::as_array).is_some_and(|ms| ms.iter().any(matcher_is_ours)))
+}
+
+/// Display form of a provider's settings path (`~/.gemini/settings.json`).
+pub fn display_path(p: &dyn AgentProvider) -> String {
+    tilde(&p.settings_path())
+}
+
+/// A path with the home directory shown as `~`.
+pub fn tilde(path: &Path) -> String {
+    match path.strip_prefix(paths::home_dir()) {
+        Ok(rel) => format!("~/{}", rel.display()),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -225,15 +228,17 @@ mod tests {
     }
 
     #[test]
-    fn entry_shape_matches_ts() {
-        let e = build_hook_entry("PermissionRequest", Some(Path::new("/bin/am-hook")));
-        assert_eq!(
-            e["hooks"][0]["command"],
-            "\"/bin/am-hook\" hook-event --worktree \"$CLAUDE_PROJECT_DIR\" --event PermissionRequest --managed # am hook-event (native)"
-        );
-        assert_eq!(e["hooks"][0]["timeout"], 300_000);
-        let e = build_hook_entry("Stop", None);
-        assert_eq!(e["hooks"][0]["command"], "cat | am hook-event --worktree \"$CLAUDE_PROJECT_DIR\" --event Stop");
-        assert_eq!(e["hooks"][0]["timeout"], 5_000);
+    fn unparseable_settings_are_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("settings.json");
+        assert!(read_settings(&p).unwrap().is_empty());
+        std::fs::write(&p, "{ // comment\n \"a\": 1 }").unwrap();
+        assert!(read_settings(&p).is_err());
+        std::fs::write(&p, "[1]").unwrap();
+        assert!(read_settings(&p).is_err());
+        std::fs::write(&p, "{\"b\":1,\"a\":2}").unwrap();
+        let m = read_settings(&p).unwrap();
+        write_settings(&p, &m).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\n  \"b\": 1,\n  \"a\": 2\n}\n");
     }
 }

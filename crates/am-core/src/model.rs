@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::AgentKind;
 use crate::status::Status;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +27,7 @@ pub struct Worktree {
     pub created_at: String,
 }
 
-/// Synthetic repo id for the "Other sessions" group (Claude sessions running
+/// Synthetic repo id for the "Other sessions" group (agent sessions running
 /// outside any tracked worktree).
 pub const STANDALONE_REPO_ID: &str = "__standalone__";
 
@@ -48,6 +49,8 @@ pub struct AgentState {
     pub is_open: bool,
     pub active_subagents: i64,
     pub updated_at: String,
+    /// The agent CLI the session belongs to.
+    pub agent: AgentKind,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

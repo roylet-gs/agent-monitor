@@ -1,6 +1,5 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 1357
 expression: row
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
@@ -18,4 +17,4 @@ expression: row
 │                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

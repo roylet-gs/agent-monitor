@@ -20,11 +20,11 @@ test("Linear ticket column and ticket cluster header", async ({ page }) => {
   await tui.screenshot("linear-ticket");
 });
 
-/** Open Settings → Sort order (8th field) in the sort editor. */
+/** Open Settings → Sort order (9th field) in the sort editor. */
 async function openSortEditor(tui: RustTui) {
   await tui.sendKey("s");
   await tui.waitForText("esc close");
-  await tui.press("j", 7);
+  await tui.press("j", 8);
   await tui.waitForText("Criteria applied in order; first difference wins");
   await tui.sendKey("Enter");
   await tui.waitForText("Sort order — space on/off");
@@ -49,8 +49,8 @@ test("project headers when Linear project is the top sort key", async ({ page })
   await tui.waitForGone("esc close");
 
   await tui.waitForText("═ Dashboard Revamp ═", 10_000);
-  // Headers never take a selection index: still "N of 3" worktree rows.
-  expect(await tui.getScreenText()).toMatch(/ \d of 3 /);
+  // Headers never take a selection index: still "N of 4" rows (2 worktrees + 2 standalone sessions).
+  expect(await tui.getScreenText()).toMatch(/ \d of 4 /);
   await tui.screenshot("linear-project");
 
   // Restore the default order (disable it, move it back down).

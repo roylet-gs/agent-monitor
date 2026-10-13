@@ -48,8 +48,10 @@ pub fn create(a: &CreateArgs) {
         Err(e) => fail(&e.to_string()),
     };
 
-    if !hooks_installer::is_global_hooks_installed() && hooks_installer::install_global_hooks().is_ok() {
-        println!("Claude hooks installed automatically.");
+    for kind in am_core::agents::detected(&am_core::settings::load()) {
+        if !hooks_installer::is_hooks_installed(kind) && hooks_installer::install_hooks(kind).is_ok() {
+            println!("{} hooks installed automatically.", kind.provider().short_name());
+        }
     }
 
     let base = a.base.clone().unwrap_or_else(|| worktrees::main_branch(Path::new(&repo.path)).unwrap_or_else(|_| "main".into()));

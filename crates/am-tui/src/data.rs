@@ -631,6 +631,7 @@ mod tests {
                 is_open: true,
                 active_subagents: 0,
                 updated_at: "2026-10-11 21:00:00".into(),
+                agent: Default::default(),
             }),
             git: None,
             last_commit: None,

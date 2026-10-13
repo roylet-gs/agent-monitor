@@ -27,7 +27,7 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
   await tui.screenshot("setup-editor");
   await tui.sendKey("Enter");
 
-  // 2. Claude hooks: install into the (temporary) ~/.claude/settings.json.
+  // 2. Agent hooks: install into the (temporary) ~/.claude/settings.json.
   await tui.waitForText("Hooks are not installed yet");
   await tui.waitForMatch(/Native hook binary: \S*am-hook/);
   await tui.sendKey("y");

@@ -68,6 +68,13 @@ am status --worktree /work
 mkdir -p /home/user/my-project
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"sess-standalone-1"}' | hook /home/user/my-project
 
+# --- Gemini CLI session: native Gemini events through `--agent gemini` -------
+mkdir -p /home/user/gemini-project
+gemini_hook() { am hook-event --agent gemini --worktree /home/user/gemini-project --event "$1" || true; }
+echo '{"hook_event_name":"SessionStart","session_id":"gem-1","source":"startup","transcript_path":""}' | gemini_hook SessionStart
+echo '{"hook_event_name":"BeforeAgent","session_id":"gem-1","prompt":"add tests"}' | gemini_hook BeforeAgent
+echo '{"hook_event_name":"Notification","session_id":"gem-1","notification_type":"ToolPermission","message":"Allow run_shell_command?"}' | gemini_hook Notification
+
 # 7682: a fresh, empty data dir on every connection → first-run setup wizard.
 cat > /usr/local/bin/am-tui-fresh <<'SH'
 #!/bin/bash

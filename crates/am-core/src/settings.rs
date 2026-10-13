@@ -75,6 +75,12 @@ pub struct Settings {
     pub agent_permission_mode: String,
     pub agent_claude_args: String,
     pub resume_last_session: bool,
+    /// Agent CLI (`agents::AgentKind` id) that `c` starts in a worktree with
+    /// no session history yet.
+    pub default_agent: String,
+    /// Agent plugin ids switched off (`agents::is_enabled`): no hooks, no
+    /// session discovery, not installed by default.
+    pub disabled_agents: Vec<String>,
     // --- Rust-only additions (ignored by the TS app) ---
     /// Theme name: a built-in (`ansi`, the default, follows the terminal
     /// palette) or a custom `themes/<name>.json`; see `crate::themes`.
@@ -138,6 +144,8 @@ impl Default for Settings {
             agent_permission_mode: "acceptEdits".into(),
             agent_claude_args: String::new(),
             resume_last_session: true,
+            default_agent: "claude".into(),
+            disabled_agents: Vec::new(),
             theme: "ansi".into(),
             nerd_fonts: false,
             raw: Default::default(),
@@ -146,6 +154,10 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn default_agent(&self) -> crate::agents::AgentKind {
+        crate::agents::AgentKind::from_db(Some(&self.default_agent))
+    }
+
     pub fn log_level(&self) -> Level {
         Level::parse(&self.log_level).unwrap_or(Level::Info)
     }

@@ -359,6 +359,7 @@ pub(crate) mod tests {
                 is_open,
                 active_subagents: 0,
                 updated_at: updated_at.into(),
+                agent: Default::default(),
             });
             self
         }

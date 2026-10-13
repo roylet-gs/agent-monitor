@@ -1,4 +1,4 @@
-//! Opening a worktree: IDE / terminal launch, Claude session discovery and the
+//! Opening a worktree: IDE / terminal launch, agent session discovery and the
 //! "resume last session" decision. Ported from `src/lib/ide-launcher.ts` and
 //! `discoverWorktreeSessions` (`src/lib/claude-session.ts`).
 //!
@@ -6,12 +6,13 @@
 //! macOS Accessibility permission and fails silently (osascript error 1002)
 //! without it. Editors get the resume command via the clipboard instead.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
-use crate::{info, paths, warn};
+use crate::agents::{self, AgentKind};
+use crate::{info, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
@@ -19,60 +20,16 @@ pub struct Session {
     /// Directory the session was started in (the worktree root or a subdir).
     pub cwd: String,
     pub modified: SystemTime,
+    pub agent: AgentKind,
 }
 
-/// Claude Code's project-dir name for a cwd: every non-alphanumeric → `-`.
-pub fn encode_project_path(cwd: &str) -> String {
-    cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
-}
-
-fn is_within(child: &str, root: &str) -> bool {
-    child == root || child.strip_prefix(root).is_some_and(|rest| rest.starts_with('/'))
-}
-
-/// Every Claude session started at `root` or any subdirectory, newest first.
+/// Every session of every enabled agent started at `root` or any
+/// subdirectory, newest first.
 pub fn discover_sessions(root: &Path) -> Vec<Session> {
-    discover_sessions_in(&paths::home_dir().join(".claude").join("projects"), root)
-}
-
-pub fn discover_sessions_in(projects_dir: &Path, root: &Path) -> Vec<Session> {
-    let root = root.to_string_lossy();
-    let prefix = encode_project_path(&root);
-    let Ok(dirs) = std::fs::read_dir(projects_dir) else { return Vec::new() };
-    let mut sessions = Vec::new();
-    for dir in dirs.flatten() {
-        let name = dir.file_name().to_string_lossy().into_owned();
-        // Prefix match is only a cheap pre-filter: `-` also encodes `.` and `/`,
-        // so the real cwd inside the transcript is what decides.
-        if name != prefix && !name.starts_with(&format!("{prefix}-")) {
-            continue;
-        }
-        let Ok(files) = std::fs::read_dir(dir.path()) else { continue };
-        for f in files.flatten() {
-            let path = f.path();
-            if path.extension().is_none_or(|e| e != "jsonl") {
-                continue;
-            }
-            let Some(cwd) = transcript_cwd(&path) else { continue };
-            if !is_within(&cwd, &root) {
-                continue;
-            }
-            let modified = f.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
-            let id = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            sessions.push(Session { id, cwd, modified });
-        }
-    }
+    let enabled = agents::enabled(&crate::settings::load());
+    let mut sessions: Vec<Session> = enabled.iter().flat_map(|k| k.provider().discover_sessions(root)).collect();
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));
     sessions
-}
-
-/// First `cwd` stamped in a transcript (within the first 50 lines).
-fn transcript_cwd(file: &Path) -> Option<String> {
-    let reader = BufReader::new(std::fs::File::open(file).ok()?);
-    reader.lines().take(50).map_while(Result::ok).find_map(|line| {
-        let v: serde_json::Value = serde_json::from_str(&line).ok()?;
-        v.get("cwd")?.as_str().filter(|c| !c.is_empty()).map(str::to_owned)
-    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,8 +51,11 @@ impl IdeChoice {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resume {
+    /// Which agent CLI to start.
+    pub agent: AgentKind,
     pub session_id: Option<String>,
-    /// No exact id known, but the worktree has had a session: `claude -c`.
+    /// No exact id known, but the worktree has had a session: `claude -c` /
+    /// `gemini --resume latest`.
     pub continue_session: bool,
     /// Session start dir when it is a strict subdirectory of the worktree.
     pub cwd: Option<String>,
@@ -105,8 +65,8 @@ pub struct Resume {
 pub enum OpenAction {
     /// Just open the IDE/terminal.
     Plain,
-    /// Terminal mode: the new terminal runs claude itself.
-    TerminalClaude(Resume),
+    /// Terminal mode: the new terminal runs the agent itself.
+    TerminalAgent(Resume),
     /// Editor mode with a session: copy the resume command, then open.
     CopyAndOpen(Resume),
 }
@@ -117,7 +77,7 @@ pub fn resolve_open_action(resume_last_session: bool, already_open: bool, ide: I
         return OpenAction::Plain;
     }
     if ide == IdeChoice::Terminal {
-        return OpenAction::TerminalClaude(resume);
+        return OpenAction::TerminalAgent(resume);
     }
     if resume.session_id.is_none() && !resume.continue_session {
         return OpenAction::Plain;
@@ -132,13 +92,15 @@ fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// `claude --resume <id>` / `claude -c` / `claude`, optionally prefixed with a cd.
-pub fn claude_command(resume: &Resume) -> String {
-    let cmd = match (&resume.session_id, resume.continue_session) {
-        (Some(id), _) => format!("claude --resume {}", sh_quote(id)),
-        (None, true) => "claude -c".to_string(),
-        (None, false) => "claude".to_string(),
-    };
+/// The agent's resume command (`claude --resume <id>`, `gemini --resume
+/// latest`, plain `claude`…), optionally prefixed with a cd.
+pub fn agent_command(resume: &Resume) -> String {
+    let provider = resume.agent.provider();
+    let mut cmd = provider.program().to_string();
+    for arg in provider.resume_args(resume.session_id.as_deref(), resume.continue_session) {
+        cmd.push(' ');
+        cmd.push_str(&sh_quote(&arg));
+    }
     match &resume.cwd {
         Some(dir) => format!("cd {} && {cmd}", sh_quote(dir)),
         None => cmd,
@@ -268,15 +230,21 @@ pub fn focus_terminal_app() -> Result<(), String> {
     run(Command::new("osascript").arg("-e").arg(format!("tell application \"{}\" to activate", terminal_app())))
 }
 
-/// Resume info for a worktree: newest discovered session, else `-c` when the
-/// hooks have seen a session there.
-pub fn resume_for(root: &Path, known_session: bool) -> Resume {
-    let newest = discover_sessions(root).into_iter().next();
+/// Resume info for a worktree. `known` is the agent the hooks last saw a
+/// session from: its newest saved session, else "continue latest". With no
+/// hook history, the newest session of any agent; with none at all, a fresh
+/// `default_agent` session.
+pub fn resume_for(root: &Path, known: Option<AgentKind>, default_agent: AgentKind) -> Resume {
+    let newest = match known {
+        Some(agent) => agent.provider().discover_sessions(root).into_iter().next(),
+        None => discover_sessions(root).into_iter().next(),
+    };
     let root_s = root.to_string_lossy();
     Resume {
+        agent: newest.as_ref().map(|s| s.agent).or(known).unwrap_or(default_agent),
         cwd: newest.as_ref().map(|s| s.cwd.clone()).filter(|c| c.as_str() != root_s),
         session_id: newest.map(|s| s.id),
-        continue_session: known_session,
+        continue_session: known.is_some(),
     }
 }
 
@@ -285,7 +253,7 @@ mod tests {
     use super::*;
 
     fn resume(id: Option<&str>, cont: bool) -> Resume {
-        Resume { session_id: id.map(str::to_owned), continue_session: cont, cwd: None }
+        Resume { session_id: id.map(str::to_owned), continue_session: cont, ..Default::default() }
     }
 
     #[test]
@@ -294,43 +262,22 @@ mod tests {
         assert_eq!(resolve_open_action(false, false, Vscode, resume(Some("s"), true)), OpenAction::Plain);
         assert_eq!(resolve_open_action(true, true, Vscode, resume(Some("s"), true)), OpenAction::Plain);
         assert_eq!(resolve_open_action(true, false, Vscode, resume(None, false)), OpenAction::Plain);
-        assert_eq!(resolve_open_action(true, false, Terminal, resume(None, false)), OpenAction::TerminalClaude(resume(None, false)));
+        assert_eq!(resolve_open_action(true, false, Terminal, resume(None, false)), OpenAction::TerminalAgent(resume(None, false)));
         assert_eq!(resolve_open_action(true, false, Cursor, resume(Some("s"), false)), OpenAction::CopyAndOpen(resume(Some("s"), false)));
         assert_eq!(resolve_open_action(true, false, Vscode, resume(None, true)), OpenAction::CopyAndOpen(resume(None, true)));
     }
 
     #[test]
-    fn claude_commands() {
-        assert_eq!(claude_command(&resume(Some("abc-123"), true)), "claude --resume abc-123");
-        assert_eq!(claude_command(&resume(None, true)), "claude -c");
-        assert_eq!(claude_command(&resume(None, false)), "claude");
+    fn agent_commands() {
+        assert_eq!(agent_command(&resume(Some("abc-123"), true)), "claude --resume abc-123");
+        assert_eq!(agent_command(&resume(None, true)), "claude -c");
+        assert_eq!(agent_command(&resume(None, false)), "claude");
         let r = Resume { cwd: Some("/w/my pkg".into()), ..resume(Some("x"), false) };
-        assert_eq!(claude_command(&r), "cd '/w/my pkg' && claude --resume x");
-    }
-
-    #[test]
-    fn encodes_like_claude_code() {
-        assert_eq!(encode_project_path("/Users/a/x.y/.claude/worktrees/f"), "-Users-a-x-y--claude-worktrees-f");
-    }
-
-    #[test]
-    fn discovers_sessions_at_root_and_subdirs_newest_first() {
-        let projects = tempfile::tempdir().unwrap();
-        let root = "/w/repo";
-        let mk = |dir: &str, id: &str, cwd: &str| {
-            let d = projects.path().join(dir);
-            std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join(format!("{id}.jsonl")), format!("{{\"type\":\"x\"}}\n{{\"cwd\":\"{cwd}\"}}\n")).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(15));
-        };
-        mk("-w-repo", "old", "/w/repo");
-        mk("-w-repo-pkg", "sub", "/w/repo/pkg");
-        mk("-w-repo-other", "sibling", "/w/repo-other"); // prefix collision, other dir
-        mk("-w-elsewhere", "nope", "/w/elsewhere");
-        let s = discover_sessions_in(projects.path(), Path::new(root));
-        let ids: Vec<&str> = s.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, ["sub", "old"]);
-        assert_eq!(s[0].cwd, "/w/repo/pkg");
+        assert_eq!(agent_command(&r), "cd '/w/my pkg' && claude --resume x");
+        let g = |id: Option<&str>, cont| Resume { agent: AgentKind::GEMINI, ..resume(id, cont) };
+        assert_eq!(agent_command(&g(Some("u-1"), true)), "gemini --resume u-1");
+        assert_eq!(agent_command(&g(None, true)), "gemini --resume latest");
+        assert_eq!(agent_command(&g(None, false)), "gemini");
     }
 
     #[test]

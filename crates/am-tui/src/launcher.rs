@@ -1,5 +1,6 @@
 //! Runs the open actions off the UI thread and reports back as messages.
-//! Port of `handleOpen` / `handleOpenClaude` in `src/app.tsx`.
+//! Port of `handleOpen` / `handleOpenClaude` in `src/app.tsx`, generalised to
+//! any agent CLI (`am_core::agents`).
 
 use std::path::Path;
 use std::sync::mpsc::Sender;
@@ -30,9 +31,15 @@ pub enum Msg {
 /// Long enough for the popup to register before the editor steals focus.
 const POPUP_BEFORE_OPEN: Duration = Duration::from_millis(600);
 
+/// The agent the hooks last saw a session from, if any.
+fn known_agent(v: &WorktreeView) -> Option<am_core::agents::AgentKind> {
+    v.agent.as_ref().filter(|a| a.session_id.is_some()).map(|a| a.agent)
+}
+
 pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
     let ide = IdeChoice::from_setting(&settings.ide);
     let resume_on = settings.resume_last_session;
+    let default_agent = settings.default_agent();
     std::thread::spawn(move || {
         let path = Path::new(&v.worktree.path);
         let label = v.worktree.display_name().to_string();
@@ -42,13 +49,16 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
             return;
         }
         let already_open = grouping::is_open_now(v.agent.as_ref());
-        let known = v.agent.as_ref().is_some_and(|a| a.session_id.is_some());
-        let resume = if resume_on && !already_open { launch::resume_for(path, known) } else { Default::default() };
+        let resume = if resume_on && !already_open {
+            launch::resume_for(path, known_agent(&v), default_agent)
+        } else {
+            Default::default()
+        };
         let result = match launch::resolve_open_action(resume_on, already_open, ide, resume) {
             OpenAction::Plain => launch::open_in_editor(path, ide),
-            OpenAction::TerminalClaude(r) => launch::open_terminal(path, Some(&launch::claude_command(&r))),
+            OpenAction::TerminalAgent(r) => launch::open_terminal(path, Some(&launch::agent_command(&r))),
             OpenAction::CopyAndOpen(r) => {
-                let cmd = launch::claude_command(&r);
+                let cmd = launch::agent_command(&r);
                 let msg = if launch::copy_to_clipboard(&cmd) {
                     format!("✓ Copied to clipboard — paste in the editor's terminal to resume:\n\n{cmd}\n\nTurn off with the resumeLastSession setting.")
                 } else {
@@ -71,11 +81,11 @@ pub fn open_terminal(v: WorktreeView, tx: Sender<Msg>) {
     });
 }
 
-pub fn open_claude(v: WorktreeView, tx: Sender<Msg>) {
+pub fn open_agent(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
+    let default_agent = settings.default_agent();
     std::thread::spawn(move || {
         let path = Path::new(&v.worktree.path);
-        let known = v.agent.as_ref().is_some_and(|a| a.session_id.is_some());
-        let cmd = launch::claude_command(&launch::resume_for(path, known));
+        let cmd = launch::agent_command(&launch::resume_for(path, known_agent(&v), default_agent));
         report(&tx, launch::open_terminal(path, Some(&cmd)), format!("Started `{cmd}`"));
     });
 }
