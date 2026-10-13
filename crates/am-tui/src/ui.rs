@@ -631,7 +631,7 @@ fn spinner(now: i64) -> &'static str {
 
 #[allow(clippy::needless_late_init)] // each arm builds lines then picks its hint
 fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup) {
-    use crate::setup::{CONTEXT_CHOICES, CONTEXT_CUSTOM, IDES, Step};
+    use crate::setup::{CONTEXT_CHOICES, CONTEXT_CUSTOM, IDE_CUSTOM, IDES, Step};
     let steps = [
         (Step::Editor, "Editor"),
         (Step::Hooks, "Agent hooks"),
@@ -656,10 +656,25 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
             lines.push(Line::raw(""));
             for (i, (_, label)) in IDES.iter().enumerate() {
                 let sel = i == s.ide;
-                lines.push(Line::from(vec![
+                let mut row = Line::from(vec![
                     Span::styled(if sel { "  ● " } else { "  ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
                     Span::styled(*label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
-                ]));
+                ]);
+                if i == IDE_CUSTOM {
+                    let text = if s.ide_command.is_empty() && !sel {
+                        "e.g. idea, subl -n".to_string()
+                    } else {
+                        format!("{}{}", s.ide_command, if sel { "▏" } else { "" })
+                    };
+                    row.spans.push(Span::styled(format!(": {text}"), theme.faint()));
+                }
+                lines.push(row);
+            }
+            if s.ide == IDE_CUSTOM {
+                lines.push(Line::styled("    Runs with the worktree path appended, or in place of {path}", theme.faint()));
+            }
+            if let Some(e) = &s.ide_error {
+                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
             }
             hint = "↑↓ choose  ⏎ next";
         }
@@ -2435,6 +2450,8 @@ mod tests {
         app.setup = Some(crate::setup::Setup {
             step: crate::setup::Step::Context,
             ide: 0,
+            ide_command: String::new(),
+            ide_error: None,
             hooks_installed: true,
             agents: vec![(am_core::harness::HarnessKind::CLAUDE, true)],
             hook_binary: None,
@@ -2450,6 +2467,32 @@ mod tests {
         });
         let out = render(&app, 100, 20);
         assert!(out.contains("✓ Integrations  ›  Context"), "breadcrumbs cut off:\n{out}");
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn setup_editor_step_takes_a_custom_command() {
+        let mut app = fixture();
+        app.setup = Some(crate::setup::Setup {
+            step: crate::setup::Step::Editor,
+            ide: crate::setup::IDE_CUSTOM,
+            ide_command: "subl -n".into(),
+            ide_error: None,
+            hooks_installed: true,
+            agents: vec![(am_core::harness::HarnessKind::CLAUDE, true)],
+            hook_binary: None,
+            repo_input: "~/".into(),
+            repos_added: vec![],
+            repo_error: None,
+            gh: true,
+            linear_key: String::new(),
+            integration_field: 0,
+            ctx_choice: 0,
+            ctx_input: String::new(),
+            ctx_error: None,
+        });
+        let out = render(&app, 100, 22);
+        assert!(out.contains("● Custom command: subl -n▏"), "{out}");
         insta::assert_snapshot!(out);
     }
 
