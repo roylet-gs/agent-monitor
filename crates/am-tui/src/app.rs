@@ -40,6 +40,10 @@ pub enum Row {
     /// Placeholder for a worktree being created (jobs-pane job id). Like
     /// headers, it takes no selection index.
     Pending(u64),
+    /// One of several live agent sessions in a worktree, listed under it:
+    /// (`flat` index, index into its `sessions`). No selection index either;
+    /// a click selects its worktree.
+    Session(usize, usize),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +163,17 @@ impl App {
                 Some(prev) if prev != now => changed.push((v.worktree.id.clone(), now)),
                 _ => {}
             }
+            // Each listed session counts too: one finishing while another
+            // keeps the headline busy still marks the worktree and plays.
+            if v.sessions.len() > 1 {
+                for s in &v.sessions {
+                    let key = format!("{}\u{1f}{}", v.worktree.id, s.session_id);
+                    match self.seen_status.insert(key, Some(s.status)) {
+                        Some(prev) if prev != Some(s.status) => changed.push((v.worktree.id.clone(), Some(s.status))),
+                        _ => {}
+                    }
+                }
+            }
         }
         let first_load = !self.loaded;
         for (id, _) in &changed {
@@ -249,7 +264,11 @@ impl App {
                     }
                     top_pos += 1;
                 }
-                self.rows.push(Row::Worktree(self.flat.len()));
+                let i = self.flat.len();
+                self.rows.push(Row::Worktree(i));
+                if v.sessions.len() > 1 {
+                    self.rows.extend((0..v.sessions.len()).map(|k| Row::Session(i, k)));
+                }
                 self.flat.push(v.clone());
                 self.tree.push(prefix);
             }
@@ -321,6 +340,15 @@ impl App {
 
     pub fn running_subagents_for(&self, worktree_id: &str) -> usize {
         self.snapshot.subagents.iter().filter(|(w, s)| s.running && w.as_deref() == Some(worktree_id)).count()
+    }
+
+    /// Running subagents of one session in a worktree.
+    pub fn running_subagents_in(&self, worktree_id: &str, session_id: &str) -> usize {
+        self.snapshot
+            .subagents
+            .iter()
+            .filter(|(w, s)| s.running && w.as_deref() == Some(worktree_id) && s.session_id == session_id)
+            .count()
     }
 
 

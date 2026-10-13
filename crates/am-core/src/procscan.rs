@@ -187,6 +187,25 @@ impl ProcessSnapshot {
         out
     }
 
+    /// Agent CLI processes per worktree root, by harness id: how many sessions
+    /// of each harness are really running there (attributed to the
+    /// most-specific root, like `running_processes`). A CLI that relaunches
+    /// itself (its parent is the same harness) counts once.
+    pub fn agent_sessions(&self, worktree_roots: &[PathBuf]) -> HashMap<PathBuf, HashMap<&'static str, usize>> {
+        let roots: Vec<PathBuf> = worktree_roots.iter().map(|r| canonical(r)).collect();
+        let mut out: HashMap<PathBuf, HashMap<&'static str, usize>> = HashMap::new();
+        for p in self.procs.values() {
+            let Some(id) = agent_cli(p) else { continue };
+            if self.procs.get(&p.ppid).and_then(agent_cli) == Some(id) {
+                continue;
+            }
+            let Some(cwd) = p.cwd.as_deref() else { continue };
+            let Some(idx) = most_specific_root(cwd, &roots) else { continue };
+            *out.entry(worktree_roots[idx].clone()).or_default().entry(id).or_default() += 1;
+        }
+        out
+    }
+
     /// Why `p` is not a user process worth showing, if it isn't.
     fn exclusion(&self, p: &ProcInfo) -> Option<Cow<'static, str>> {
         if is_shell(p) {
@@ -853,6 +872,26 @@ mod tests {
         assert_eq!(pids(snap.running_processes(&r, "node_modules/.bin").get(Path::new("/wt/a"))), [1000]);
         assert!(snap.running_processes(&r, "nomatch").is_empty());
         assert_eq!(pids(snap.running_processes(&r, "   ").get(Path::new("/wt/a"))), [1000, 1004]);
+    }
+
+    #[test]
+    fn counts_agent_sessions_per_root_and_harness() {
+        let snap = ProcessSnapshot::from_processes(
+            [
+                proc(1, 0, "/usr/local/bin/claude", "/wt/main", &["claude"]),
+                proc(2, 0, "/usr/local/bin/claude", "/wt/main/crates", &["claude", "--resume", "x"]),
+                proc(3, 0, "/usr/local/bin/claude", "/wt/main/.claude/worktrees/feat", &["claude"]),
+                // Gemini relaunches itself: parent + child are one session.
+                proc(4, 0, "/usr/local/bin/node", "/wt/main", &["node", "/opt/gemini/bin/gemini"]),
+                proc(5, 4, "/usr/local/bin/node", "/wt/main", &["node", "/opt/gemini/bin/gemini"]),
+                proc(6, 0, "/usr/bin/vite", "/wt/main", &["vite"]),
+            ],
+            99_999,
+        );
+        let map = snap.agent_sessions(&roots(&["/wt/main", "/wt/main/.claude/worktrees/feat"]));
+        let main = &map[Path::new("/wt/main")];
+        assert_eq!((main.get("claude"), main.get("gemini")), (Some(&2), Some(&1)));
+        assert_eq!(map[Path::new("/wt/main/.claude/worktrees/feat")].get("claude"), Some(&1));
     }
 
     #[test]

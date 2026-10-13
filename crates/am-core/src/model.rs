@@ -197,6 +197,21 @@ pub struct WorktreeView {
     pub running_processes: Vec<RunningProcess>,
     /// Context window used by the agent's session (from its transcript).
     pub context: Option<crate::context::ContextUsage>,
+    /// Live agent sessions here, oldest first. The dashboard lists them under
+    /// the row when there are two or more; `agent` is their headline.
+    pub sessions: Vec<SessionView>,
+}
+
+/// One live agent session in a worktree, with its own status.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionView {
+    pub agent: HarnessKind,
+    pub session_id: String,
+    pub status: Status,
+    pub last_response: Option<String>,
+    pub started_at: String,
+    pub updated_at: String,
+    pub context: Option<crate::context::ContextUsage>,
 }
 
 impl WorktreeView {

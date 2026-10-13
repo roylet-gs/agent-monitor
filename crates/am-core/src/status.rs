@@ -140,9 +140,34 @@ impl HookEvent {
     }
 }
 
-/// Map an event to the worktree's new status. `None` means "leave it alone".
-/// `running_subagents` is the number of live (non-internal) subagents for the
-/// worktree *after* this event's bookkeeping has been applied.
+/// How much a status needs the user, for picking the headline of several
+/// sessions in one worktree: waiting > executing > planning > delegating >
+/// done > idle.
+pub fn urgency(s: Status) -> u8 {
+    match s {
+        Status::Waiting => 5,
+        Status::Executing => 4,
+        Status::Planning => 3,
+        Status::Delegating => 2,
+        Status::Done => 1,
+        Status::Idle => 0,
+    }
+}
+
+/// The headline of several sessions given newest first: the most urgent open
+/// one (the newest on a tie), else the newest. `key` is (is_open, status).
+pub fn headline<T>(sessions: &[T], key: impl Fn(&T) -> (bool, Status)) -> Option<&T> {
+    sessions
+        .iter()
+        .rev()
+        .filter(|s| key(s).0)
+        .max_by_key(|s| urgency(key(s).1))
+        .or_else(|| sessions.first())
+}
+
+/// Map an event to a session's new status. `None` means "leave it alone".
+/// `running_subagents` is the number of live (non-internal) subagents of the
+/// session *after* this event's bookkeeping has been applied.
 pub fn map_event_to_status(
     event: &HookEvent,
     current: Option<Status>,
@@ -303,6 +328,17 @@ pub fn truncate(s: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headline_is_the_most_urgent_open_session_newest_first() {
+        use Status::*;
+        // Newest first.
+        let s = [(true, Done), (true, Waiting), (false, Executing), (true, Waiting)];
+        let pick = |v: &[(bool, Status)]| headline(v, |x| *x).map(|x| v.iter().position(|y| std::ptr::eq(x, y)).unwrap());
+        assert_eq!(pick(&s), Some(1), "waiting beats done; the newer of two waiting wins; closed ones don't count");
+        assert_eq!(pick(&[(false, Done), (false, Executing)]), Some(0), "nothing open: the newest");
+        assert_eq!(pick(&[]), None);
+    }
     use Status::*;
 
     fn ev(name: &str) -> HookEvent {

@@ -1,6 +1,6 @@
 # Agent Status Mapping
 
-How hook events become a worktree's agent status. The rules live in `crates/am-core/src/status.rs` (`map_event_to_status`, unit-tested there); the hook handler that applies them is `crates/am-hook/src/lib.rs`.
+How hook events become an agent session's status, and a worktree's. The rules live in `crates/am-core/src/status.rs` (`map_event_to_status`, unit-tested there); the hook handler that applies them is `crates/am-hook/src/lib.rs`.
 
 The rules are written against Claude Code's event vocabulary, which is am's **canonical** format. Other agent CLIs are translated into it by their provider (`crates/am-core/src/harness/`) before these rules run; see [Other agents](#other-agents) and `docs/agent-providers.md`.
 
@@ -156,7 +156,7 @@ Subagents are tracked individually in the `subagents` table, keyed by `(session_
 | `SubagentStop` | Mark it `done` with `ended_at`, transcript path and last message (truncated to 500 chars). Repeats are idempotent; a stop for an unknown id creates a finished row |
 | `PreToolUse` from a subagent | Record the tool name and a one-line summary of its input (Bash description or command, file path, search pattern, URL, …), bump the tool count, keep it `running` (a missed `SubagentStart` is recovered here) |
 | `PostToolUse` from a subagent | Keeps it alive (refreshes `updated_at`) |
-| `SessionStart` | Close running subagents of *other* sessions for this owner (they can't still be running) |
+| `SessionStart` | Close running subagents of *other* sessions for this owner that are no longer open (a session that ended, or one from before schema v4). A second live session in the same worktree keeps its subagents |
 | `SessionEnd` | Close running subagents of this session |
 
 Rules:
@@ -164,8 +164,16 @@ Rules:
 - **Internal agents are ignored.** Agents with an empty `agent_type` (prompt suggestions, `/btw`, …) aren't user-visible work and never count as running.
 - **Stale protection.** A `running` row only counts if it was updated within the last **2 hours**, so a missed `SubagentStop` (crash, killed session) can't pin a worktree on `delegating` forever.
 - **Descriptions.** On the first event for a subagent, am reads Claude Code's `<session>/subagents/agent-<id>.meta.json` (next to the subagent transcript) for the Agent tool's `description` and `agentType`. This is best effort, since the file is undocumented.
-- **Running count** = running, non-stale rows for the owner. The dashboard shows it as `◆ N subagents` next to the worktree name, and it is the `running` input to the rules above.
-- **Parked subagents (dashboard only).** A background subagent that starts a long command (`run_in_background`) ends its turn while it waits, so Claude Code sends `SubagentStop`, and a fresh `SubagentStart` when the command finishes and wakes it. Its work isn't done in between. The TUI collector treats a subagent as **parked**, and so still running, when all of these hold: it belongs to the worktree's current session, it stopped within the last 2 hours, its last tool isn't `SubagentHandback` (the call that delivers a background subagent's final report), and a Claude Code shell command (`<shell> -c source ~/.claude/shell-snapshots/…`) is still running in the worktree. Parked subagents count in `◆ N subagents`, and a worktree that is `done` with one shows as `delegating`. This is display only: the DB keeps the hook-driven status, and the CLI doesn't apply it.
+- **Running count** = running, non-stale rows of the event's **session**: that is the `running` input to the rules above, so one session's subagents never make another `delegating`. The dashboard shows it as `◆ N subagents` on the session's row, or on the worktree row when it has one session. `agent_status.active_subagents` mirrors the owner-wide count for 1.x.
+- **Parked subagents (dashboard only).** A background subagent that starts a long command (`run_in_background`) ends its turn while it waits, so Claude Code sends `SubagentStop`, and a fresh `SubagentStart` when the command finishes and wakes it. Its work isn't done in between. The TUI collector treats a subagent as **parked**, and so still running, when all of these hold: it belongs to one of the worktree's live sessions, it stopped within the last 2 hours, its last tool isn't `SubagentHandback` (the call that delivers a background subagent's final report), and a Claude Code shell command (`<shell> -c source ~/.claude/shell-snapshots/…`) is still running in the worktree. Parked subagents count in `◆ N subagents`, and a session (and worktree) that is `done` with one shows as `delegating`. This is display only: the DB keeps the hook-driven status, and the CLI doesn't apply it.
+
+## Several Sessions per Worktree
+
+Every event carrying a `session_id` updates that session's row in the `sessions` table (schema v4, keyed by `(agent, session_id)`): the rules above run against **that session's** previous status and subagent count. So two sessions in one worktree, from one harness or several, never overwrite each other. A `Stop` in one doesn't end the other's turn, and one session's tool calls don't hide another `waiting` on the user.
+
+The owner's `agent_status` / `standalone_sessions` row is then rewritten as the **headline**: the most urgent open session (`waiting` > `executing` > `planning` > `delegating` > `done` > `idle`; the newest on a tie), or the newest session when none is open. Filters, sort, `am status` and 1.x read that row. An event without a `session_id` updates the owner's row directly, as before.
+
+The dashboard lists a worktree's live sessions under its row when there are two or more. A session is live when it is effectively open (below). When the process scan sees fewer CLIs of a harness running in the worktree than that harness has open sessions, only the most recently active ones are kept, which drops sessions killed without `SessionEnd`. Closed sessions are pruned after a day.
 
 ## Open Sessions
 

@@ -11,7 +11,7 @@ use crate::harness::HarnessKind;
 use crate::paths;
 use crate::status::Status;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// A subagent counts as running only if it reported something recently;
 /// protects the count from a missed SubagentStop (crash, killed session).
@@ -81,6 +81,28 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
                 tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN agent TEXT"))?;
             }
         }
+    }
+    if v < 4 {
+        // One row per agent session, so several sessions in one worktree each
+        // keep their own status. `agent_status` / `standalone_sessions` stay as
+        // the per-owner headline (most urgent session) for 1.x and older 2.x.
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS sessions (
+               agent TEXT NOT NULL,
+               session_id TEXT NOT NULL,
+               worktree_id TEXT REFERENCES worktrees(id) ON DELETE CASCADE,
+               standalone_path TEXT,
+               status TEXT NOT NULL DEFAULT 'idle',
+               last_response TEXT,
+               is_open INTEGER NOT NULL DEFAULT 1,
+               started_at TEXT NOT NULL DEFAULT (datetime('now')),
+               updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+               ended_at TEXT,
+               PRIMARY KEY (agent, session_id)
+             );
+             CREATE INDEX IF NOT EXISTS sessions_worktree ON sessions(worktree_id, is_open);
+             CREATE INDEX IF NOT EXISTS sessions_standalone ON sessions(standalone_path, is_open);",
+        )?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
@@ -410,16 +432,36 @@ pub fn subagent_has_description(conn: &Connection, key: &SubagentKey) -> rusqlit
 }
 
 /// Close out subagents that can no longer be running: on SessionEnd for that
-/// session, and on SessionStart for every *other* session at this owner.
+/// session, and on SessionStart for every *other* session at this owner that
+/// isn't still open. Another session running in the same worktree keeps its
+/// subagents; one that ended (or was never recorded in `sessions`, like a
+/// session from before schema v4) loses them.
 pub fn end_subagents(conn: &Connection, owner: &Owner, session_id: &str, other_sessions: bool) -> rusqlite::Result<usize> {
     let (owner_sql, key) = owner_where(owner);
-    let cmp = if other_sessions { "!=" } else { "=" };
+    let which = if other_sessions {
+        "session_id != ?2 AND session_id NOT IN (SELECT session_id FROM sessions WHERE is_open = 1)"
+    } else {
+        "session_id = ?2"
+    };
     conn.execute(
         &format!(
             "UPDATE subagents SET status = 'done', ended_at = COALESCE(ended_at, datetime('now')), updated_at = datetime('now')
-             WHERE {owner_sql} AND status = 'running' AND session_id {cmp} ?2"
+             WHERE {owner_sql} AND status = 'running' AND {which}"
         ),
         params![key, session_id],
+    )
+}
+
+/// Live subagents of one session at this owner.
+pub fn running_subagents_in(conn: &Connection, owner: &Owner, session_id: &str) -> rusqlite::Result<u32> {
+    let (owner_sql, key) = owner_where(owner);
+    conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM subagents
+             WHERE {owner_sql} AND session_id = ?2 AND status = 'running' AND updated_at > {STALE_SUBAGENT_SQL}"
+        ),
+        params![key, session_id],
+        |r| r.get(0),
     )
 }
 
@@ -444,6 +486,120 @@ pub fn touch_status(conn: &Connection, owner: &Owner) -> rusqlite::Result<()> {
         }
     };
     Ok(())
+}
+
+// --- Sessions (schema v4) ---
+
+/// One agent session's stored state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRow {
+    pub agent: HarnessKind,
+    pub session_id: String,
+    pub status: Status,
+    pub last_response: Option<String>,
+    pub is_open: bool,
+    pub started_at: String,
+    pub updated_at: String,
+}
+
+fn row_to_session(r: &rusqlite::Row) -> rusqlite::Result<SessionRow> {
+    Ok(SessionRow {
+        agent: HarnessKind::from_db(r.get::<_, Option<String>>(0)?.as_deref()),
+        session_id: r.get(1)?,
+        status: r.get::<_, Option<String>>(2)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle),
+        last_response: r.get(3)?,
+        is_open: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
+        started_at: r.get(5)?,
+        updated_at: r.get(6)?,
+    })
+}
+
+const SESSION_COLS: &str = "agent, session_id, status, last_response, is_open, started_at, updated_at";
+
+pub fn get_session(conn: &Connection, agent: HarnessKind, session_id: &str) -> rusqlite::Result<Option<SessionRow>> {
+    conn.query_row(
+        &format!("SELECT {SESSION_COLS} FROM sessions WHERE agent = ?1 AND session_id = ?2"),
+        params![agent.id(), session_id],
+        row_to_session,
+    )
+    .optional()
+}
+
+/// Insert or update one session. `last_response = None` keeps the stored
+/// one; the owner follows the latest event (a session can move worktree).
+pub fn upsert_session(
+    conn: &Connection,
+    owner: &Owner,
+    agent: HarnessKind,
+    session_id: &str,
+    status: Status,
+    last_response: Option<&str>,
+    is_open: bool,
+) -> rusqlite::Result<()> {
+    let (wt, sp) = owner_cols(owner);
+    conn.execute(
+        "INSERT INTO sessions (agent, session_id, worktree_id, standalone_path, status, last_response, is_open, ended_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CASE WHEN ?7 = 0 THEN datetime('now') END)
+         ON CONFLICT(agent, session_id) DO UPDATE SET
+           worktree_id = excluded.worktree_id,
+           standalone_path = excluded.standalone_path,
+           status = excluded.status,
+           last_response = COALESCE(excluded.last_response, sessions.last_response),
+           is_open = excluded.is_open,
+           ended_at = CASE WHEN excluded.is_open = 0 THEN COALESCE(sessions.ended_at, datetime('now')) END,
+           updated_at = datetime('now')",
+        params![agent.id(), session_id, wt, sp, status.as_str(), last_response, is_open as i64],
+    )?;
+    Ok(())
+}
+
+pub fn touch_session(conn: &Connection, agent: HarnessKind, session_id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE sessions SET updated_at = datetime('now') WHERE agent = ?1 AND session_id = ?2",
+        params![agent.id(), session_id],
+    )?;
+    Ok(())
+}
+
+/// Every session recorded at this owner, most recently active first.
+pub fn sessions_at(conn: &Connection, owner: &Owner) -> rusqlite::Result<Vec<SessionRow>> {
+    let (owner_sql, key) = owner_where(owner);
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_COLS} FROM sessions WHERE {owner_sql} ORDER BY updated_at DESC, started_at DESC"
+    ))?;
+    let rows = stmt.query_map([key], row_to_session)?;
+    rows.collect()
+}
+
+/// Open sessions of every tracked worktree for the dashboard: worktree id →
+/// sessions, oldest first (so rows keep their order as sessions update).
+pub fn open_worktree_sessions(conn: &Connection) -> rusqlite::Result<std::collections::HashMap<String, Vec<SessionRow>>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT worktree_id, {SESSION_COLS} FROM sessions
+         WHERE worktree_id IS NOT NULL AND is_open = 1
+         ORDER BY started_at, session_id"
+    ))?;
+    let mut out: std::collections::HashMap<String, Vec<SessionRow>> = std::collections::HashMap::new();
+    let mut rows = stmt.query([])?;
+    while let Some(r) = rows.next()? {
+        let wt: String = r.get(0)?;
+        let s = SessionRow {
+            agent: HarnessKind::from_db(r.get::<_, Option<String>>(1)?.as_deref()),
+            session_id: r.get(2)?,
+            status: r.get::<_, Option<String>>(3)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle),
+            last_response: r.get(4)?,
+            is_open: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
+            started_at: r.get(6)?,
+            updated_at: r.get(7)?,
+        };
+        out.entry(wt).or_default().push(s);
+    }
+    Ok(out)
+}
+
+/// Closed sessions idle for a day are history; drop them so the table stays small.
+pub fn prune_sessions(conn: &Connection) -> rusqlite::Result<usize> {
+    conn.execute("DELETE FROM sessions WHERE is_open = 0 AND updated_at < datetime('now', '-1 day')", [])
 }
 
 /// Opportunistic, non-blocking checkpoint so the WAL can't grow unbounded

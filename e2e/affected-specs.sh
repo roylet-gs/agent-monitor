@@ -53,17 +53,17 @@ specs_for() {
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs | crates/am-tui/src/jobs.rs) echo 09 10 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 ;;
-    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 ;;
+    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 ;;
     crates/am-tui/src/launcher.rs) echo - ;; # opens IDEs/terminals: unit tests only
 
     # --- am-core ----------------------------------------------------------
     crates/am-core/src/lib.rs | crates/am-core/src/db.rs | crates/am-core/src/settings.rs | \
     crates/am-core/src/model.rs | crates/am-core/src/paths.rs) echo ALL ;;
-    crates/am-core/src/grouping.rs) echo 01 05 08 ;;
+    crates/am-core/src/grouping.rs) echo 01 05 08 18 ;;
     crates/am-core/src/gitinfo.rs) echo 01 ;;
     crates/am-core/src/timefmt.rs) echo 01 17 ;;
     crates/am-core/src/log.rs) echo 01 ;; # `w` log pane
-    crates/am-core/src/status.rs) echo 07 08 16 ;;
+    crates/am-core/src/status.rs) echo 07 08 16 18 ;;
     # Agent plugins: hook normalisation seeds every agent row; the installer
     # runs in the wizard; the plugin page and Gemini row are spec 16.
     crates/am-core/src/harness/claude/transcript.rs) echo 14 ;;  # Claude's context reader
@@ -81,8 +81,8 @@ specs_for() {
     crates/am-core/src/launch.rs | crates/am-core/src/procscan.rs | \
     crates/am-core/src/stacks.rs) echo - ;; # unit / snapshot tests only
 
-    # --- am-hook: seeds the delegating main and the standalone session ----
-    crates/am-hook/src/*) echo 07 08 16 ;;
+    # --- am-hook: seeds the delegating main, feature/pair and the standalone sessions
+    crates/am-hook/src/*) echo 07 08 16 18 ;;
 
     # --- am-cli: the entrypoint runs `repo add/list`, `hook-event`, `status` ---
     crates/am-cli/src/main.rs | crates/am-cli/src/commands/mod.rs | \

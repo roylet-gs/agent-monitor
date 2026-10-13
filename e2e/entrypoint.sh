@@ -32,6 +32,9 @@ git fetch --quiet origin
 
 # A second worktree for the delete dialog (the main checkout can't be deleted).
 git worktree add --quiet /work/.claude/worktrees/feature-to-delete -b feature/to-delete
+# Three agents at once in one worktree (18-multi-session.spec.ts). Added after
+# feature/to-delete, so it sorts first (newest) and to-delete → main stays adjacent.
+git worktree add --quiet /work/.claude/worktrees/feature-pair -b feature/pair
 echo ".claude/" > .git/info/exclude
 
 # Register the repo (also syncs its worktrees into the DB).
@@ -97,6 +100,34 @@ echo "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"$SID\",\"agent_id\":\
 # Main turn stops while the subagent still runs → "delegating".
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"transcript_path\":\"/tmp/claude-sessions/$SID.jsonl\"}" | hook /work
 am status --worktree /work
+
+# --- Three agents in one worktree (18-multi-session.spec.ts) ----------------
+# Two Claude sessions and a Gemini one in feature/pair, each with its own
+# status. Claude #3a7c: executing, one running subagent, a 300k transcript.
+# Claude #9e41: turn ended with two subagents still running → delegating.
+# Gemini: turn finished → done. (Gemini CLI's hooks carry no subagent events.)
+PAIR=/work/.claude/worktrees/feature-pair
+C1=3a7c9d10-1111-4a2b-9c3d-000000000001
+C2=9e41b2c7-2222-4b3c-8d4e-000000000002
+mkdir -p "$HOME/.claude/projects/-work--claude-worktrees-feature-pair"
+cat > "$HOME/.claude/projects/-work--claude-worktrees-feature-pair/$C1.jsonl" <<JSONL
+{"type":"user","cwd":"/work/.claude/worktrees/feature-pair","sessionId":"$C1","message":{"role":"user","content":"Write the migration"}}
+{"type":"assistant","isSidechain":false,"cwd":"/work/.claude/worktrees/feature-pair","sessionId":"$C1","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":298000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
+JSONL
+claude_pair() { echo "{\"hook_event_name\":\"$2\",\"session_id\":\"$1\"$3}" | hook "$PAIR"; }
+claude_pair "$C1" SessionStart ',"source":"startup"'
+claude_pair "$C1" UserPromptSubmit
+claude_pair "$C1" SubagentStart ',"agent_id":"p1","agent_type":"Explore"'
+claude_pair "$C1" PreToolUse ',"tool_name":"Bash","tool_input":{"command":"cargo test"}'
+claude_pair "$C2" SessionStart ',"source":"startup"'
+claude_pair "$C2" UserPromptSubmit
+claude_pair "$C2" SubagentStart ',"agent_id":"q1","agent_type":"general-purpose"'
+claude_pair "$C2" SubagentStart ',"agent_id":"q2","agent_type":"Explore"'
+claude_pair "$C2" Stop
+pair_gemini() { am hook-event --agent gemini --worktree "$PAIR" --event "$1" || true; }
+echo '{"hook_event_name":"SessionStart","session_id":"pair-gem","source":"startup","transcript_path":""}' | pair_gemini SessionStart
+echo '{"hook_event_name":"BeforeAgent","session_id":"pair-gem","prompt":"review the diff"}' | pair_gemini BeforeAgent
+echo '{"hook_event_name":"AfterAgent","session_id":"pair-gem","prompt_response":"Looks good"}' | pair_gemini AfterAgent
 
 # --- Standalone session ("Other sessions"): hook-event on an untracked dir --
 mkdir -p /home/user/my-project

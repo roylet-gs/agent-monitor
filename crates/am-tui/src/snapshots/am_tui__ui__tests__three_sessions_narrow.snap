@@ -1,0 +1,15 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 90, 11)"
+---
+╭─Worktrees ─────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ──────────────────────────────────────────────────────────────────────────│
+│▌◐ feature/refactor ⧉3                             ENG-412 #127✓ ✔ ↑2 ±3  4m            │
+│ ├ ◑ claude #s  delegating · 2m ◆2                                           ▋░░░░ 121k │
+│ ├ ● claude #7b1e  executing · 10s ◆1                                        █▌░░░ 310k │
+│ └ ◐ gemini  waiting · 30s ◆1                                                ▎░░░░  40k │
+│ ◐ fix/offline-cache                                                      4m ▉░░░░ 185k │
+│                                                                                        │
+│gridsight ──────────────────────────────────────────────────────────────────────────────│
+╰──────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

@@ -136,6 +136,7 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
                 open_ide: None,
                 running_processes: Vec::new(),
                 context: None,
+                sessions: Vec::new(),
             }
         })
         .collect();
