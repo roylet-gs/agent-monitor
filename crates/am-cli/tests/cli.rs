@@ -367,6 +367,31 @@ fn hooks_install_prefers_am_hook_next_to_the_binary() {
 }
 
 #[test]
+fn hooks_install_prefers_an_installed_am_hook_over_a_dev_build() {
+    // The test binary lives in cargo's target/ dir, i.e. a dev build that may
+    // sit in a worktree about to be deleted.
+    let env = Env::new();
+    env.fake_bin("am-hook", "exit 0");
+    env.ok(&["hooks", "install"]);
+    let v: Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home().join(".claude/settings.json")).unwrap()).unwrap();
+    let cmd = v["hooks"]["Stop"][0]["hooks"][0]["command"].as_str().unwrap();
+    assert!(cmd.starts_with(&format!("\"{}\" hook-event", env.bin().join("am-hook").display())), "{cmd}");
+}
+
+#[test]
+fn doctor_flags_hooks_pointing_at_a_missing_binary() {
+    let env = Env::new();
+    let claude_settings = env.home().join(".claude/settings.json");
+    std::fs::create_dir_all(claude_settings.parent().unwrap()).unwrap();
+    let cmd = "\"/gone/target/debug/am-hook\" hook-event --worktree \"$CLAUDE_PROJECT_DIR\" --event Stop # am hook-event (native)";
+    std::fs::write(&claude_settings, json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": cmd}]}]}}).to_string())
+        .unwrap();
+    let out = env.ok(&["doctor"]).stdout;
+    assert!(out.contains("[WARN]  Claude hooks: Hooks in ~/.claude/settings.json run a missing /gone/target/debug/am-hook"), "{out}");
+}
+
+#[test]
 fn hooks_for_gemini() {
     let mut env = Env::new();
     let fake_hook = env.bin().join("my-am-hook");

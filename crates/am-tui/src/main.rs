@@ -73,6 +73,13 @@ fn main() -> io::Result<()> {
     let mut app = App::new(settings);
     app.setup = setup;
     app.show_log = show_log;
+    // Hooks pointing at a deleted am-hook (removed worktree, upgraded install)
+    // fail on every agent event; re-point them at the current binary.
+    let repaired = am_core::hooks_installer::repair_dangling_hooks();
+    if !repaired.is_empty() {
+        let names: Vec<_> = repaired.iter().map(|k| k.provider().name()).collect();
+        app.notice = Some(format!("Repaired {} hooks (am-hook had moved)", names.join(" + ")));
+    }
 
     // ratatui::init enables raw mode + alt screen and installs a panic hook
     // that restores the terminal before printing the panic.
