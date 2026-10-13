@@ -95,6 +95,9 @@ pub struct Manifest {
     /// Training-mode metadata (see `docs/plans/plugin-training-mode.md`).
     #[serde(default)]
     pub training: Option<TrainingSpec>,
+    /// An editor hint (`am harness schema --json`); ignored.
+    #[serde(default, rename = "$schema")]
+    pub schema: Option<String>,
     /// The manifest as written, for `am harness show`.
     #[serde(skip)]
     pub raw: Value,

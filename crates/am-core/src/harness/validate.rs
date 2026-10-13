@@ -56,6 +56,11 @@ impl Report {
     }
 }
 
+/// The manifest reference printed by `am harness schema`.
+pub const REFERENCE: &str = include_str!("manifest-reference.md");
+/// JSON Schema of a manifest (`am harness schema --json`).
+pub const JSON_SCHEMA: &str = include_str!("manifest.schema.json");
+
 /// Top-level keys a manifest may have.
 pub const KNOWN_KEYS: [&str; 17] = [
     "id", "name", "shortName", "program", "configDir", "hooks", "events", "tools", "fields", "notificationTypes",
@@ -269,6 +274,28 @@ mod tests {
 
     fn run(v: &Value) -> Report {
         validate(&v.to_string(), &Context { others: BUILTIN.to_vec(), captures: &[] })
+    }
+
+    #[test]
+    fn schema_reference_and_loader_agree() {
+        let schema: Value = serde_json::from_str(JSON_SCHEMA).unwrap();
+        let props: BTreeSet<&str> = schema["properties"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(props, KNOWN_KEYS.into_iter().collect::<BTreeSet<_>>());
+        let required: Vec<&str> = schema["required"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(required, REQUIRED);
+        let canon: Vec<&str> = schema["properties"]["events"]["additionalProperties"]["enum"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert_eq!(canon, CANONICAL_EVENTS);
+        // The reference's example and the built-in Gemini manifest load and validate.
+        let example = REFERENCE.split("```json\n").nth(1).unwrap().split("```").next().unwrap();
+        let m = Manifest::parse(example).expect("reference example parses");
+        assert_eq!(m.capture_events(), ["BeforeModel"]);
+        for text in [example, include_str!("gemini.json")] {
+            let v: Value = serde_json::from_str(text).unwrap();
+            for k in v.as_object().unwrap().keys() {
+                assert!(props.contains(k.as_str()), "{k} not in the schema");
+            }
+        }
+        assert!(Manifest::parse(r#"{"$schema":"x","id":"a","name":"A","program":"a","hooks":{"settingsPath":"/s","projectDirVar":"A"},"events":{"E":"Stop"}}"#).is_ok());
     }
 
     #[test]

@@ -93,7 +93,7 @@ pub fn hook_issues(m: &Manifest, native: Option<&str>, payload: &Value, ev: &Hoo
         && !CANONICAL_TOOLS.contains(&t)
         && !t.starts_with("mcp")
     {
-        out.push(Issue::new(UNMAPPED_TOOL, t, Some(ev.tool_input.as_ref().map(Value::to_string).unwrap_or_default())));
+        out.push(Issue::new(UNMAPPED_TOOL, t, ev.tool_input.as_ref().map(Value::to_string)));
     }
     if !payload.is_null() && native.is_some_and(|n| m.maps_event(n)) {
         if ev.session_id.is_none() {

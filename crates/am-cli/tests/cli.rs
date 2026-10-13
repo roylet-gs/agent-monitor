@@ -504,6 +504,117 @@ fn manifest_plugins_need_no_code() {
     assert!(o.stderr.contains("My CLI is disabled"), "{}", o.stderr);
 }
 
+// --- harness plugins / training mode ---
+
+fn toy_manifest(env: &Env, extra: Value) -> PathBuf {
+    let mut m = json!({
+        "id": "toycli", "name": "Toy CLI", "program": "sh", "configDir": "~/.toycli",
+        "hooks": { "settingsPath": "~/.toycli/hooks.json", "projectDirVar": "TOY_DIR" },
+        "events": { "Prompt": "UserPromptSubmit", "ToolStart": "PreToolUse", "Done": "Stop" },
+        "tools": { "shell": "Bash", "ask": "AskUserQuestion" },
+        "process": { "names": ["toycli"] },
+        "training": { "captureEvents": ["Thinking"] }
+    });
+    if let (Some(m), Value::Object(x)) = (m.as_object_mut(), extra) {
+        m.extend(x);
+    }
+    let p = env.root().join("manifest.json");
+    std::fs::write(&p, serde_json::to_string_pretty(&m).unwrap()).unwrap();
+    p
+}
+
+fn hook(env: &Env, agent: &str, event: &str, payload: Value) {
+    let ws = env.root().join("ws");
+    let mut c = env.command(&["hook-event", "--agent", agent, "--worktree", ws.to_str().unwrap(), "--event", event], None);
+    let mut child = c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success() && out.stdout.is_empty(), "{out:?}");
+}
+
+#[test]
+fn harness_training_loop_add_capture_test_publish_rollback() {
+    let env = Env::new();
+    std::fs::create_dir_all(env.home().join(".toycli")).unwrap();
+    std::fs::create_dir_all(env.root().join("ws/.git")).unwrap();
+
+    // validate reports every error with its path, and fails.
+    let bad = toy_manifest(&env, json!({ "id": "Toy CLI", "surprise": 1 }));
+    let o = env.run(&["harness", "validate", bad.to_str().unwrap(), "--json"]);
+    assert_eq!(o.code, 1);
+    let paths: Vec<String> = o.json()["errors"].as_array().unwrap().iter().map(|e| e["path"].as_str().unwrap().to_owned()).collect();
+    assert!(paths.contains(&"/id".into()) && paths.contains(&"/surprise".into()), "{paths:?}");
+    assert_eq!(env.run(&["plugin", "add", bad.to_str().unwrap()]).code, 1, "`plugin` is an alias");
+
+    // add → a draft with its capture-only events hooked.
+    let file = toy_manifest(&env, json!({}));
+    let o = env.ok(&["harness", "add", file.to_str().unwrap()]);
+    assert!(o.stdout.contains("Added toycli (draft)"), "{}", o.stdout);
+    let hooks: Value = serde_json::from_str(&std::fs::read_to_string(env.home().join(".toycli/hooks.json")).unwrap()).unwrap();
+    let events: Vec<&String> = hooks["hooks"].as_object().unwrap().keys().collect();
+    assert_eq!(events, ["Prompt", "ToolStart", "Done", "Thinking"]);
+    let list = env.ok(&["harness", "list", "--json"]).json();
+    let toy = list["harnesses"].as_array().unwrap().iter().find(|h| h["id"] == "toycli").unwrap().clone();
+    assert_eq!((toy["status"].as_str(), toy["hooks"].as_bool()), (Some("draft"), Some(true)));
+
+    // The harness fires events: every one is captured, issues are recorded.
+    for (e, tool) in [("Prompt", None), ("Thinking", None), ("ToolStart", Some("grep_files")), ("Done", None)] {
+        let mut p = json!({ "hook_event_name": e, "session_id": "s1", "cwd": "/w" });
+        if let Some(t) = tool {
+            p["tool_name"] = t.into();
+        }
+        hook(&env, "toycli", e, p);
+    }
+    let caps = env.ok(&["harness", "captures", "toycli", "--json"]).json();
+    let seen: Vec<&str> = caps["events"].as_array().unwrap().iter().map(|e| e["event"].as_str().unwrap()).collect();
+    assert_eq!(seen, ["Prompt", "Thinking", "ToolStart", "Done"]);
+    let full = env.ok(&["harness", "captures", "toycli", "--full", "--last", "1", "--json"]).json();
+    assert_eq!(full[0]["nativeEvent"], "Done");
+
+    // test replays them; a candidate manifest fixes the tool.
+    let t = env.ok(&["harness", "test", "toycli"]).stdout;
+    assert!(t.contains("Done → Stop [s1]  executing → done"), "{t}");
+    assert!(t.contains("tools not mapped: grep_files"), "{t}");
+    let fixed = toy_manifest(&env, json!({ "tools": { "shell": "Bash", "ask": "AskUserQuestion", "grep_files": "Grep" } }));
+    let t = env.ok(&["harness", "test", "toycli", "--manifest", fixed.to_str().unwrap(), "--json"]).json();
+    assert!(t["coverage"]["unmappedTools"].as_array().unwrap().is_empty());
+
+    let issues = env.ok(&["harness", "issues", "toycli", "--json"]).json();
+    let kinds: Vec<&str> = issues.as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap()).collect();
+    assert!(kinds.contains(&"unmapped_tool") && kinds.contains(&"unmapped_event"), "{kinds:?}");
+    assert!(env.ok(&["doctor"]).stdout.contains("Toy CLI (draft): Draft plugin: 4 capture(s), 2 issue(s)"));
+
+    // Replace with the fix (the old version goes to the history), publish, roll back.
+    env.ok(&["harness", "add", fixed.to_str().unwrap(), "--replace"]);
+    env.ok(&["harness", "publish", "toycli"]);
+    let hooks: Value = serde_json::from_str(&std::fs::read_to_string(env.home().join(".toycli/hooks.json")).unwrap()).unwrap();
+    assert!(hooks["hooks"].get("Thinking").is_none(), "published plugins don't hook capture events");
+    assert!(env.ok(&["harness", "show", "toycli", "--json"]).json()["status"] == "published");
+    env.ok(&["harness", "rollback", "toycli"]);
+    assert!(env.ok(&["harness", "show", "toycli", "--json"]).json()["status"] == "draft");
+
+    // remove uninstalls; a built-in can't be published or removed.
+    env.ok(&["harness", "remove", "toycli"]);
+    assert!(!std::fs::read_to_string(env.home().join(".toycli/hooks.json")).unwrap().contains("hook-event"));
+    assert!(env.run(&["harness", "remove", "gemini"]).stderr.contains("built in"));
+}
+
+#[test]
+fn harness_schema_and_train_prompt() {
+    let env = Env::new();
+    assert!(env.ok(&["harness", "schema"]).stdout.contains("captureEvents"));
+    let schema = env.ok(&["harness", "schema", "--json"]).json();
+    assert_eq!(schema["required"][0], "id");
+    let prompt = env.ok(&["harness", "train", "--command", "toycli --x", "--print"]).stdout;
+    assert!(prompt.starts_with("# Teach agent-monitor"));
+    assert!(prompt.contains(&env.data().join("training/toycli").display().to_string()), "{prompt}");
+    assert!(prompt.contains(env!("CARGO_BIN_EXE_am")), "the prompt names this am binary");
+    assert!(env.data().join("training/toycli/TRAINING.md").exists());
+    let o = env.ok(&["harness", "train", "--command", "toycli", "--no-open"]);
+    assert!(o.stdout.contains("Read ./TRAINING.md"), "{}", o.stdout);
+    assert_eq!(env.run(&["harness", "train"]).code, 1);
+}
+
 // --- status ---
 
 #[test]
