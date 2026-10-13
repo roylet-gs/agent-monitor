@@ -98,6 +98,17 @@ pub trait AgentProvider: Sync + Send {
         None
     }
 
+    /// Transcript files modified at or after `since` that may hold token
+    /// usage (subagent transcripts included). Feeds today's token total.
+    fn usage_files(&self, _since: std::time::SystemTime) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    /// The token usage recorded on one transcript line, if any.
+    fn usage_record(&self, _line: &str) -> Option<crate::usage::UsageRecord> {
+        None
+    }
+
     /// Whether a process (name + argv) is this CLI. Its processes, and tools
     /// it spawns directly, are not shown as a worktree's running processes.
     fn matches_process(&self, _name: &str, _argv: &[String]) -> bool {

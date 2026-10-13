@@ -22,6 +22,9 @@ pub struct Snapshot {
     pub health: Health,
     /// Stacked branches: child worktree id → parent worktree id.
     pub stack: std::collections::HashMap<String, String>,
+    /// Tokens used today (`showDailyTokens`/`dailyTokensScope`); `None` when
+    /// the setting is off.
+    pub today_tokens: Option<u64>,
 }
 
 /// A visual row of the worktree list. Headers never take a selection index:

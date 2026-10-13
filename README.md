@@ -216,6 +216,8 @@ Right-aligned columns, each of which can be turned off in settings:
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
 - **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's Claude Code transcript, so it updates after every turn. It is measured against `contextWindowTokens` (1M by default). A session that has gone past that is measured against the setting doubled until it fits (200k → 400k → 800k …), whatever model it runs. The bar clears after a compaction until the next turn
 
+At the bottom right of the list, `today 182M` is the number of tokens your agents have used today (local day). It covers input, cache writes, cache reads and output, subagents included, because each of these is billed. It is read incrementally from the session transcripts, so a refresh costs a few milliseconds. With `dailyTokensScope` set to `visible` it counts only sessions under a row on screen (`today (visible) 4.1M`), so filters and hidden rows change it. Turn it off with `showDailyTokens`.
+
 When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
 ### Stacked Branches
@@ -318,6 +320,8 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `showLastCommit` | `true` | Show the last-commit age |
 | `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
 | `contextWindowTokens` | `1000000` | Context window the bar is scaled to. A session past it is shown against this value doubled until it fits. In the settings editor `⏎` takes `128k`/`1m` and `←→` step through common sizes; `am settings set contextWindowTokens 200k` works too |
+| `showDailyTokens` | `true` | Show today's token usage at the bottom right of the list |
+| `dailyTokensScope` | `"all"` | What that total counts: `all` (every session today) or `visible` (only sessions under a row on screen) |
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
 | `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |

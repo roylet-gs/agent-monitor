@@ -67,9 +67,14 @@ pub trait AgentProvider: Sync + Send {
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent;
     fn discover_sessions(&self, root: &Path) -> Vec<Session>;
     fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>;
+    fn context_usage(&self, root: &Path, session_id: &str) -> Option<ContextUsage>; // default None
+    fn usage_files(&self, since: SystemTime) -> Vec<PathBuf>;           // default empty
+    fn usage_record(&self, line: &str) -> Option<UsageRecord>;          // default None
     fn matches_process(&self, name: &str, argv: &[String]) -> bool;
 }
 ```
+
+`usage_files` and `usage_record` feed today's token total (`am_core::usage`). The first lists transcript files modified since local midnight, subagent transcripts included. The second parses one line into `{ id, at, cwd, tokens }`, with `tokens` summing every billed class (input, cache creation, cache read, output). The tracker reads only appended bytes, de-duplicates by `id`, and attributes each `cwd` to the most specific worktree root. Claude implements both. Gemini and manifest plugins use the defaults for now, so their sessions don't count yet.
 
 `AgentKind` is a copyable handle to a registered provider, compared by id. `agents::all()` returns the built-ins followed by manifest plugins, which are loaded once per process. `AgentKind::get(id)` checks the built-ins first, so a Claude or Gemini hook never reads the plugin directory.
 

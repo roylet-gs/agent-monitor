@@ -96,6 +96,11 @@ pub struct Settings {
     /// this is shown against the setting doubled until it fits (see
     /// `crate::context::window_for`).
     pub context_window_tokens: u64,
+    /// Today's token usage at the bottom right of the worktree list.
+    pub show_daily_tokens: bool,
+    /// What that total counts: `"all"` of today's usage, or only the usage of
+    /// the rows currently `"visible"`. Unknown values count all.
+    pub daily_tokens_scope: String,
     /// Check GitHub Releases for a newer `am` and show it in the dashboard.
     pub check_for_updates: bool,
     /// Where a repo's startup script runs after creating a worktree: `pane`
@@ -166,6 +171,8 @@ impl Default for Settings {
             mouse_enabled: true,
             show_context_window: true,
             context_window_tokens: 1_000_000,
+            show_daily_tokens: true,
+            daily_tokens_scope: "all".into(),
             check_for_updates: true,
             startup_script_mode: "pane".into(),
             raw: Default::default(),
@@ -181,6 +188,11 @@ impl Settings {
     /// Run startup scripts in a new terminal window rather than the jobs pane.
     pub fn startup_script_in_window(&self) -> bool {
         self.startup_script_mode == "window"
+    }
+
+    /// Today's token total counts only the visible rows.
+    pub fn daily_tokens_visible_only(&self) -> bool {
+        self.daily_tokens_scope == "visible"
     }
 
     pub fn log_level(&self) -> Level {
@@ -292,6 +304,15 @@ mod tests {
         assert!(!Settings::default().startup_script_in_window());
         assert!(!Settings::parse(r#"{"startupScriptMode":"bogus"}"#).startup_script_in_window());
         assert!(Settings::parse(r#"{"startupScriptMode":"window"}"#).startup_script_in_window());
+    }
+
+    #[test]
+    fn daily_tokens_are_shown_for_all_usage_by_default() {
+        let d = Settings::parse("{}");
+        assert!(d.show_daily_tokens && !d.daily_tokens_visible_only());
+        assert!(!Settings::parse(r#"{"dailyTokensScope":"bogus"}"#).daily_tokens_visible_only());
+        assert!(Settings::parse(r#"{"dailyTokensScope":"visible"}"#).daily_tokens_visible_only());
+        assert!(!Settings::parse(r#"{"showDailyTokens":false}"#).show_daily_tokens);
     }
 
     #[test]
