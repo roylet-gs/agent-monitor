@@ -3,7 +3,7 @@
 //! default agent. Pure state and keys; `settings_ui` performs the effects
 //! and hands back fresh rows.
 
-use am_core::agents::{self, Origin};
+use am_core::harness::{self, Origin};
 use am_core::settings::Settings;
 
 use crate::app::Key;
@@ -47,7 +47,7 @@ pub struct PluginEditor {
 
 /// Snapshot every registered plugin's state (reads the hook settings files).
 pub fn load_rows(settings: &Settings) -> Vec<PluginRow> {
-    agents::all()
+    harness::all()
         .iter()
         .map(|&k| {
             let p = k.provider();
@@ -58,9 +58,9 @@ pub fn load_rows(settings: &Settings) -> Vec<PluginRow> {
                     Origin::BuiltIn => "built-in".into(),
                     Origin::Plugin(path) => path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
                 },
-                enabled: agents::is_enabled(k, settings),
+                enabled: harness::is_enabled(k, settings),
                 hooks: am_core::hooks_installer::is_hooks_installed(k),
-                present: k == am_core::agents::AgentKind::CLAUDE || p.is_present(),
+                present: k == am_core::harness::HarnessKind::CLAUDE || p.is_present(),
                 settings_path: am_core::hooks_installer::display_path(p),
                 note: p.notes().map(str::to_owned),
             }

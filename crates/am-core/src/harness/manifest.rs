@@ -40,7 +40,7 @@ use std::time::{Duration, SystemTime};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{AgentKind, AgentProvider, Origin, ProcessSpec};
+use super::{Harness, HarnessKind, Origin, ProcessSpec};
 use crate::launch::Session;
 use crate::paths;
 use crate::status::HookEvent;
@@ -248,7 +248,7 @@ impl Manifest {
     }
 
     /// Run `sessions.command` (bounded to 3 s) and parse its JSON array.
-    pub fn command_sessions(&self, kind: AgentKind, root: &Path) -> Vec<Session> {
+    pub fn command_sessions(&self, kind: HarnessKind, root: &Path) -> Vec<Session> {
         let Some(spec) = &self.sessions else { return Vec::new() };
         let root_s = root.to_string_lossy();
         let argv: Vec<String> = spec.command.iter().map(|a| a.replace("{root}", &root_s)).collect();
@@ -305,7 +305,7 @@ pub struct ManifestProvider {
     pub source: PathBuf,
 }
 
-impl AgentProvider for ManifestProvider {
+impl Harness for ManifestProvider {
     fn id(&self) -> &str {
         &self.manifest.id
     }
@@ -340,7 +340,7 @@ impl AgentProvider for ManifestProvider {
         self.manifest.normalize(payload, event_override)
     }
     fn discover_sessions(&self, root: &Path) -> Vec<Session> {
-        match AgentKind::get(self.id()) {
+        match HarnessKind::get(self.id()) {
             Some(kind) => self.manifest.command_sessions(kind, root),
             None => Vec::new(),
         }
@@ -477,7 +477,7 @@ mod tests {
         let mut v: Value = serde_json::from_str(EXAMPLE).unwrap();
         v["sessions"] = json!({ "command": [script.to_string_lossy(), "{root}"] });
         let m = Manifest::parse(&v.to_string()).unwrap();
-        let s = m.command_sessions(AgentKind::CLAUDE, Path::new("/w/repo"));
+        let s = m.command_sessions(HarnessKind::CLAUDE, Path::new("/w/repo"));
         let ids: Vec<&str> = s.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["new", "old"]);
         assert_eq!(s[0].cwd, "/w/repo/pkg");

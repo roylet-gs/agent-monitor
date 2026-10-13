@@ -7,7 +7,7 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
-use crate::agents::AgentKind;
+use crate::harness::HarnessKind;
 use crate::paths;
 use crate::status::Status;
 
@@ -74,7 +74,7 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
         )?;
     }
     if v < 3 {
-        // Which agent CLI (`crate::agents::AgentKind` id) the session belongs
+        // Which agent CLI (`crate::harness::HarnessKind` id) the session belongs
         // to. NULL = Claude: every row 1.x or an older 2.x wrote.
         for table in ["agent_status", "standalone_sessions"] {
             if !has_column(&tx, table, "agent")? {
@@ -185,7 +185,7 @@ pub struct StatusRow {
     pub session_id: Option<String>,
     pub is_open: bool,
     pub active_subagents: i64,
-    pub agent: AgentKind,
+    pub agent: HarnessKind,
 }
 
 pub fn find_worktree(conn: &Connection, path: &str) -> rusqlite::Result<Option<Owner>> {
@@ -214,7 +214,7 @@ pub fn get_status(conn: &Connection, owner: &Owner) -> rusqlite::Result<Option<S
             session_id: r.get(1)?,
             is_open: r.get::<_, Option<i64>>(2)?.unwrap_or(0) != 0,
             active_subagents: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
-            agent: AgentKind::from_db(r.get::<_, Option<String>>(4)?.as_deref()),
+            agent: HarnessKind::from_db(r.get::<_, Option<String>>(4)?.as_deref()),
         })
     })
     .optional()
@@ -223,7 +223,7 @@ pub fn get_status(conn: &Connection, owner: &Owner) -> rusqlite::Result<Option<S
 pub struct StatusUpdate<'a> {
     pub status: Status,
     /// The agent that sent the event; `None` keeps the stored one.
-    pub agent: Option<AgentKind>,
+    pub agent: Option<HarnessKind>,
     pub session_id: Option<&'a str>,
     pub last_response: Option<&'a str>,
     pub transcript_summary: Option<&'a str>,
@@ -234,7 +234,7 @@ pub struct StatusUpdate<'a> {
 /// null fields keep the existing value.
 pub fn upsert_status(conn: &Connection, owner: &Owner, u: &StatusUpdate) -> rusqlite::Result<()> {
     let open = u.is_open as i64;
-    let agent = u.agent.map(AgentKind::id);
+    let agent = u.agent.map(HarnessKind::id);
     match owner {
         Owner::Worktree { id, .. } => conn.execute(
             "INSERT INTO agent_status (worktree_id, status, session_id, last_response, transcript_summary, is_open, agent, updated_at)
@@ -494,7 +494,7 @@ pub fn agent_states(conn: &Connection) -> rusqlite::Result<std::collections::Has
                 is_open: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
                 active_subagents: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                 updated_at: r.get(6)?,
-                agent: AgentKind::from_db(r.get::<_, Option<String>>(7)?.as_deref()),
+                agent: HarnessKind::from_db(r.get::<_, Option<String>>(7)?.as_deref()),
             },
         ))
     })?;
@@ -701,7 +701,7 @@ pub fn standalone_sessions(conn: &Connection) -> rusqlite::Result<Vec<(String, S
                 is_open: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
                 active_subagents: r.get::<_, Option<i64>>(6)?.unwrap_or(0),
                 updated_at: r.get(7)?,
-                agent: AgentKind::from_db(r.get::<_, Option<String>>(8)?.as_deref()),
+                agent: HarnessKind::from_db(r.get::<_, Option<String>>(8)?.as_deref()),
             },
         ))
     })?;
@@ -847,13 +847,13 @@ mod tests {
             Owner::Standalone { .. } => unreachable!(),
         };
         up(&wt(), None);
-        assert_eq!(agent_states(&conn).unwrap()[&id(&wt())].agent, AgentKind::CLAUDE);
-        up(&wt(), Some(AgentKind::GEMINI));
+        assert_eq!(agent_states(&conn).unwrap()[&id(&wt())].agent, HarnessKind::CLAUDE);
+        up(&wt(), Some(HarnessKind::GEMINI));
         up(&wt(), None); // e.g. `am status --set`: keeps the agent
-        assert_eq!(agent_states(&conn).unwrap()[&id(&wt())].agent, AgentKind::GEMINI);
+        assert_eq!(agent_states(&conn).unwrap()[&id(&wt())].agent, HarnessKind::GEMINI);
         let standalone = Owner::Standalone { path: "/elsewhere".into() };
-        up(&standalone, Some(AgentKind::GEMINI));
-        assert_eq!(standalone_sessions(&conn).unwrap()[0].2.agent, AgentKind::GEMINI);
+        up(&standalone, Some(HarnessKind::GEMINI));
+        assert_eq!(standalone_sessions(&conn).unwrap()[0].2.agent, HarnessKind::GEMINI);
     }
 
     #[test]

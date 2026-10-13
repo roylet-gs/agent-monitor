@@ -75,10 +75,10 @@ pub struct Settings {
     pub agent_permission_mode: String,
     pub agent_claude_args: String,
     pub resume_last_session: bool,
-    /// Agent CLI (`agents::AgentKind` id) that `c` starts in a worktree with
+    /// Agent CLI (`harness::HarnessKind` id) that `c` starts in a worktree with
     /// no session history yet.
     pub default_agent: String,
-    /// Agent plugin ids switched off (`agents::is_enabled`): no hooks, no
+    /// Agent plugin ids switched off (`harness::is_enabled`): no hooks, no
     /// session discovery, not installed by default.
     pub disabled_agents: Vec<String>,
     // --- Rust-only additions (ignored by the TS app) ---
@@ -174,8 +174,8 @@ impl Default for Settings {
 }
 
 impl Settings {
-    pub fn default_agent(&self) -> crate::agents::AgentKind {
-        crate::agents::AgentKind::from_db(Some(&self.default_agent))
+    pub fn default_agent(&self) -> crate::harness::HarnessKind {
+        crate::harness::HarnessKind::from_db(Some(&self.default_agent))
     }
 
     /// Run startup scripts in a new terminal window rather than the jobs pane.

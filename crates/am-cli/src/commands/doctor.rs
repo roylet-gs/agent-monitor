@@ -67,12 +67,12 @@ pub fn run(as_json: bool) {
     });
 
     let s = settings::load();
-    for &kind in am_core::agents::all() {
+    for &kind in am_core::harness::all() {
         let p = kind.provider();
         let hooks = hi::is_hooks_installed(kind);
-        let enabled = am_core::agents::is_enabled(kind, &s);
+        let enabled = am_core::harness::is_enabled(kind, &s);
         // Claude is always checked (1.x output); other agents once they are in use.
-        if kind != am_core::agents::AgentKind::CLAUDE && !hooks && !(enabled && p.is_present()) {
+        if kind != am_core::harness::HarnessKind::CLAUDE && !hooks && !(enabled && p.is_present()) {
             continue;
         }
         let path = hi::display_path(p);
@@ -95,12 +95,12 @@ pub fn run(as_json: bool) {
         };
         checks.push(Check { name: format!("{} hooks", p.short_name()), status, message });
     }
-    let plugin_errors = am_core::agents::plugin_errors();
+    let plugin_errors = am_core::harness::plugin_errors();
     if !plugin_errors.is_empty() {
         checks.push(Check {
             name: "Agent plugins".into(),
             status: "warn",
-            message: format!("Skipped in {}: {}", am_core::agents::plugins_dir().display(), plugin_errors.join("; ")),
+            message: format!("Skipped in {}: {}", am_core::harness::plugins_dir().display(), plugin_errors.join("; ")),
         });
     }
 

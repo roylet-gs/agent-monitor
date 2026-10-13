@@ -39,7 +39,7 @@ pub enum Origin {
 }
 
 /// One agent CLI.
-pub trait AgentProvider: Sync + Send {
+pub trait Harness: Sync + Send {
     /// Stable id: the `--agent` flag, the DB `agent` column, settings values.
     fn id(&self) -> &str;
 
@@ -88,7 +88,7 @@ pub trait AgentProvider: Sync + Send {
     /// Sessions started at `root` or any subdirectory, newest first.
     fn discover_sessions(&self, root: &Path) -> Vec<Session>;
 
-    /// Arguments after [`program`](AgentProvider::program): resume `session_id`,
+    /// Arguments after [`program`](Harness::program): resume `session_id`,
     /// else continue the latest session (`continue_latest`), else start fresh.
     fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>;
 
@@ -133,13 +133,13 @@ impl ProcessSpec {
 
 /// A handle on a registered provider; cheap to copy, compared by id.
 #[derive(Clone, Copy)]
-pub struct AgentKind(&'static dyn AgentProvider);
+pub struct HarnessKind(&'static dyn Harness);
 
-impl AgentKind {
-    pub const CLAUDE: AgentKind = AgentKind(&claude::Claude);
-    pub const GEMINI: AgentKind = AgentKind(&gemini::Gemini);
+impl HarnessKind {
+    pub const CLAUDE: HarnessKind = HarnessKind(&claude::Claude);
+    pub const GEMINI: HarnessKind = HarnessKind(&gemini::Gemini);
 
-    pub fn provider(self) -> &'static dyn AgentProvider {
+    pub fn provider(self) -> &'static dyn Harness {
         self.0
     }
 
@@ -153,49 +153,49 @@ impl AgentKind {
 
     /// Look up a registered agent. Built-ins are checked first so the hook
     /// path never reads the plugin directory for them.
-    pub fn get(id: &str) -> Option<AgentKind> {
+    pub fn get(id: &str) -> Option<HarnessKind> {
         BUILTIN.iter().copied().find(|k| k.id() == id).or_else(|| all().iter().copied().find(|k| k.id() == id))
     }
 
     /// Lenient form for DB values and settings: unknown (a removed plugin) or
     /// missing → Claude, which is what NULL meant before plugins existed.
-    pub fn from_db(s: Option<&str>) -> AgentKind {
-        s.and_then(AgentKind::get).unwrap_or_default()
+    pub fn from_db(s: Option<&str>) -> HarnessKind {
+        s.and_then(HarnessKind::get).unwrap_or_default()
     }
 }
 
-impl Default for AgentKind {
+impl Default for HarnessKind {
     fn default() -> Self {
-        AgentKind::CLAUDE
+        HarnessKind::CLAUDE
     }
 }
 
-impl PartialEq for AgentKind {
+impl PartialEq for HarnessKind {
     fn eq(&self, other: &Self) -> bool {
         self.id() == other.id()
     }
 }
 
-impl Eq for AgentKind {}
+impl Eq for HarnessKind {}
 
-impl std::hash::Hash for AgentKind {
+impl std::hash::Hash for HarnessKind {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id().hash(state);
     }
 }
 
-impl std::fmt::Debug for AgentKind {
+impl std::fmt::Debug for HarnessKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AgentKind({})", self.id())
+        write!(f, "HarnessKind({})", self.id())
     }
 }
 
 /// Compiled-in providers, in display order. To add one: a module here and
 /// one entry in this list.
-pub const BUILTIN: [AgentKind; 2] = [AgentKind::CLAUDE, AgentKind::GEMINI];
+pub const BUILTIN: [HarnessKind; 2] = [HarnessKind::CLAUDE, HarnessKind::GEMINI];
 
 struct Registry {
-    agents: Vec<AgentKind>,
+    agents: Vec<HarnessKind>,
     errors: Vec<String>,
 }
 
@@ -208,7 +208,7 @@ fn registry() -> &'static Registry {
         for p in plugins {
             crate::debug!("agents", "Loaded agent plugin {} from {}", p.manifest.id, p.source.display());
             // Lives for the whole process, like the built-in unit structs.
-            agents.push(AgentKind(Box::leak(Box::new(p))));
+            agents.push(HarnessKind(Box::leak(Box::new(p))));
         }
         Registry { agents, errors }
     })
@@ -221,7 +221,7 @@ pub fn plugins_dir() -> PathBuf {
 
 /// Every registered agent: built-ins, then plugins (by file name). Plugins
 /// are read once per process.
-pub fn all() -> &'static [AgentKind] {
+pub fn all() -> &'static [HarnessKind] {
     &registry().agents
 }
 
@@ -234,20 +234,20 @@ pub fn ids() -> Vec<&'static str> {
     all().iter().map(|k| k.id()).collect()
 }
 
-pub fn is_enabled(kind: AgentKind, settings: &Settings) -> bool {
+pub fn is_enabled(kind: HarnessKind, settings: &Settings) -> bool {
     !settings.disabled_agents.iter().any(|d| d == kind.id())
 }
 
 /// Agents not switched off in settings.
-pub fn enabled(settings: &Settings) -> Vec<AgentKind> {
+pub fn enabled(settings: &Settings) -> Vec<HarnessKind> {
     all().iter().copied().filter(|k| is_enabled(*k, settings)).collect()
 }
 
 /// Enabled agents that look installed; what `am hooks install` and the
 /// wizard install by default. Claude is always included (when enabled): it is
 /// am's original target and its hooks are harmless without Claude Code.
-pub fn detected(settings: &Settings) -> Vec<AgentKind> {
-    enabled(settings).into_iter().filter(|k| *k == AgentKind::CLAUDE || k.provider().is_present()).collect()
+pub fn detected(settings: &Settings) -> Vec<HarnessKind> {
+    enabled(settings).into_iter().filter(|k| *k == HarnessKind::CLAUDE || k.provider().is_present()).collect()
 }
 
 pub(crate) fn home_join(rel: &str) -> PathBuf {
@@ -266,21 +266,21 @@ mod tests {
     #[test]
     fn builtins_are_registered_and_resolvable() {
         for k in BUILTIN {
-            assert_eq!(AgentKind::get(k.id()), Some(k));
+            assert_eq!(HarnessKind::get(k.id()), Some(k));
             assert!(k.is_builtin());
         }
-        assert_eq!(AgentKind::from_db(None), AgentKind::CLAUDE);
-        assert_eq!(AgentKind::from_db(Some("nope")), AgentKind::CLAUDE);
-        assert_eq!(AgentKind::from_db(Some("gemini")), AgentKind::GEMINI);
+        assert_eq!(HarnessKind::from_db(None), HarnessKind::CLAUDE);
+        assert_eq!(HarnessKind::from_db(Some("nope")), HarnessKind::CLAUDE);
+        assert_eq!(HarnessKind::from_db(Some("gemini")), HarnessKind::GEMINI);
     }
 
     #[test]
     fn disabled_agents_drop_out() {
         let s = Settings::parse(r#"{"disabledAgents":["gemini"]}"#);
-        assert!(!is_enabled(AgentKind::GEMINI, &s));
-        assert!(enabled(&s).contains(&AgentKind::CLAUDE));
-        assert!(!enabled(&s).contains(&AgentKind::GEMINI));
-        assert!(!detected(&s).contains(&AgentKind::GEMINI));
+        assert!(!is_enabled(HarnessKind::GEMINI, &s));
+        assert!(enabled(&s).contains(&HarnessKind::CLAUDE));
+        assert!(!enabled(&s).contains(&HarnessKind::GEMINI));
+        assert!(!detected(&s).contains(&HarnessKind::GEMINI));
     }
 
     #[test]

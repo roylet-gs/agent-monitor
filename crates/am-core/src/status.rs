@@ -1,7 +1,7 @@
 //! Agent-status rules: map a canonical hook event onto a worktree status.
 //!
 //! The canonical event vocabulary is Claude Code's; other agents' hooks are
-//! translated into it by their provider (`crate::agents`) before they get here.
+//! translated into it by their provider (`crate::harness`) before they get here.
 //!
 //! Ported from `src/commands/hook-event.ts` (`mapEventToStatus`) with one
 //! structural change: events are classified by *origin*. Claude Code tags

@@ -147,7 +147,7 @@ impl SettingsEditor {
             Kind::Tokens { .. } => v.and_then(Value::as_u64).map(context::short_tokens).unwrap_or_else(|| "—".into()),
             Kind::Plugins => {
                 let s = self.settings();
-                let on: Vec<&str> = am_core::agents::enabled(&s).iter().map(|k| k.id()).collect();
+                let on: Vec<&str> = am_core::harness::enabled(&s).iter().map(|k| k.id()).collect();
                 let on = if on.is_empty() { "none".to_string() } else { on.join(", ") };
                 format!("{on} · default {}", s.default_agent().id())
             }
@@ -265,8 +265,8 @@ impl SettingsEditor {
             }
             Kind::Plugins => {
                 let s = self.settings();
-                let errors = am_core::agents::plugin_errors().to_vec();
-                let dir = am_core::hooks_installer::tilde(&am_core::agents::plugins_dir());
+                let errors = am_core::harness::plugin_errors().to_vec();
+                let dir = am_core::hooks_installer::tilde(&am_core::harness::plugins_dir());
                 self.plugins = Some(PluginEditor::new(plugins_ui::load_rows(&s), &s.default_agent, errors, dir));
                 Outcome::None
             }
@@ -346,7 +346,7 @@ impl SettingsEditor {
     /// Apply an agent-plugins action: persist `disabledAgents` /
     /// `defaultAgent`, install or remove the plugin's hooks, refresh the rows.
     fn plugin_effect(&mut self, out: PluginOutcome) -> Outcome {
-        use am_core::agents::AgentKind;
+        use am_core::harness::HarnessKind;
         use am_core::hooks_installer as hi;
         let (id, mut outcome) = match &out {
             PluginOutcome::Stay => return Outcome::None,
@@ -356,7 +356,7 @@ impl SettingsEditor {
             }
             PluginOutcome::SetEnabled(id, _) | PluginOutcome::InstallHooks(id) | PluginOutcome::SetDefault(id) => (id.clone(), Outcome::None),
         };
-        let Some(kind) = AgentKind::get(&id) else { return Outcome::None };
+        let Some(kind) = HarnessKind::get(&id) else { return Outcome::None };
         let p = kind.provider();
         let message = match out {
             PluginOutcome::SetEnabled(_, on) => {
@@ -370,12 +370,12 @@ impl SettingsEditor {
                 let s = self.settings();
                 // The default must stay usable: hand it to the first enabled agent.
                 if !on && s.default_agent().id() == id
-                    && let Some(next) = am_core::agents::enabled(&s).first()
+                    && let Some(next) = am_core::harness::enabled(&s).first()
                 {
                     outcome = self.set("defaultAgent", Value::from(next.id()));
                 }
                 match (on, hi::is_hooks_installed(kind)) {
-                    (true, _) if kind == AgentKind::CLAUDE || p.is_present() => match hi::install_hooks(kind) {
+                    (true, _) if kind == HarnessKind::CLAUDE || p.is_present() => match hi::install_hooks(kind) {
                         Ok(_) => (true, format!("{} on · hooks installed into {}", p.name(), hi::display_path(p))),
                         Err(e) => (false, format!("{} on, but hooks failed: {e}", p.name())),
                     },
@@ -721,7 +721,7 @@ mod tests {
         // Install Gemini's hooks, then switch it off: hooks go, and so does the default.
         ed.on_key(Key::Char('j'));
         ed.on_key(Key::Char('i'));
-        let gemini = am_core::agents::AgentKind::GEMINI;
+        let gemini = am_core::harness::HarnessKind::GEMINI;
         assert!(am_core::hooks_installer::is_hooks_installed(gemini));
         let Outcome::Changed(s) = ed.on_key(Key::Char(' ')) else { panic!("expected change") };
         assert_eq!(s.disabled_agents, ["gemini"]);

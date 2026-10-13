@@ -8,14 +8,14 @@
 //!   am-hook hook-event [--agent <id>] --worktree <path> [--event <name>] [--managed]
 //!
 //! `--agent` (default `claude`) picks the provider that translates the native
-//! payload into the canonical event (`am_core::agents`). Never write to stdout
+//! payload into the canonical event (`am_core::harness`). Never write to stdout
 //! or stderr: Gemini shows any hook output to the user.
 
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use am_core::agents::AgentKind;
+use am_core::harness::HarnessKind;
 use am_core::db::{self, Owner, StatusUpdate, SubagentKey};
 use am_core::status::{self, HookEvent};
 use am_core::{debug, info, paths, settings, warn};
@@ -34,7 +34,8 @@ pub struct HookArgs {
 }
 
 /// Parse the flags that follow the `hook-event` word: `-w/--worktree <path>`,
-/// `-e/--event <name>`, `-a/--agent <id>`, `--managed`, and the `--flag=value` forms. Unknown
+/// `-e/--event <name>`, `-a/--agent <id>` (alias `--harness`), `--managed`, and the
+/// `--flag=value` forms. Unknown
 /// flags are ignored so a newer hook command can't break an older binary.
 pub fn parse_hook_args(args: impl IntoIterator<Item = String>) -> Result<HookArgs, String> {
     let mut args = args.into_iter();
@@ -43,14 +44,14 @@ pub fn parse_hook_args(args: impl IntoIterator<Item = String>) -> Result<HookArg
         match a.as_str() {
             "-w" | "--worktree" => worktree = args.next(),
             "-e" | "--event" => event = args.next(),
-            "-a" | "--agent" => agent = args.next(),
+            "-a" | "--agent" | "--harness" => agent = args.next(),
             "--managed" => {} // accepted for compatibility with Claude Code's rewritten entries
             other => {
                 if let Some(v) = other.strip_prefix("--worktree=") {
                     worktree = Some(v.to_owned());
                 } else if let Some(v) = other.strip_prefix("--event=") {
                     event = Some(v.to_owned());
-                } else if let Some(v) = other.strip_prefix("--agent=") {
+                } else if let Some(v) = other.strip_prefix("--agent=").or_else(|| other.strip_prefix("--harness=")) {
                     agent = Some(v.to_owned());
                 }
             }
@@ -80,8 +81,8 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) 
             Value::Null
         })
     };
-    let kind = AgentKind::from_db(agent);
-    if agent.is_some_and(|a| AgentKind::get(a).is_none()) {
+    let kind = HarnessKind::from_db(agent);
+    if agent.is_some_and(|a| HarnessKind::get(a).is_none()) {
         warn!(MODULE, "Unknown --agent {agent:?}; treating the event as Claude's");
     }
     let event = kind.provider().normalize(&payload, event);
@@ -94,7 +95,7 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) 
 }
 
 
-fn handle(worktree_arg: &str, kind: AgentKind, ev: &HookEvent) -> rusqlite::Result<()> {
+fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Result<()> {
     info!(
         MODULE,
         "[{}] event={} tool={} agent={} stop_hook_active={} permission_mode={} for {}",
@@ -265,7 +266,7 @@ fn worktree_root(start: &Path) -> Option<PathBuf> {
 /// `AM_HOOK_CAPTURE=1` saves raw payloads (one file per event name, newest
 /// wins) so field names can be verified against what each agent really sends.
 /// Claude's files keep their old names; other agents' get an `<id>-` prefix.
-fn maybe_capture(kind: AgentKind, ev: &HookEvent, raw: &str) {
+fn maybe_capture(kind: HarnessKind, ev: &HookEvent, raw: &str) {
     if std::env::var_os("AM_HOOK_CAPTURE").is_none_or(|v| v.is_empty() || v == "0") {
         return;
     }
@@ -274,6 +275,28 @@ fn maybe_capture(kind: AgentKind, ev: &HookEvent, raw: &str) {
         return;
     }
     let origin = if ev.from_subagent() { "subagent" } else { "main" };
-    let prefix = if kind == AgentKind::CLAUDE { String::new() } else { format!("{}-", kind.id()) };
+    let prefix = if kind == HarnessKind::CLAUDE { String::new() } else { format!("{}-", kind.id()) };
     let _ = std::fs::write(dir.join(format!("{prefix}{}-{origin}.json", ev.event)), raw);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> HookArgs {
+        parse_hook_args(args.iter().map(|s| s.to_string())).unwrap()
+    }
+
+    #[test]
+    fn harness_is_an_alias_for_agent() {
+        assert_eq!(parse(&["--harness", "codex", "-w", "/r"]).agent.as_deref(), Some("codex"));
+        assert_eq!(parse(&["--harness=codex", "-w", "/r"]).agent.as_deref(), Some("codex"));
+        assert_eq!(parse(&["--agent", "gemini", "-w", "/r"]).agent.as_deref(), Some("gemini"));
+    }
+
+    #[test]
+    fn unknown_flags_are_ignored_and_worktree_is_required() {
+        assert_eq!(parse(&["--future", "-w", "/r", "-e", "Stop"]).event.as_deref(), Some("Stop"));
+        assert!(parse_hook_args(["--event".to_string(), "Stop".to_string()]).is_err());
+    }
 }
