@@ -207,6 +207,7 @@ After the name (a nickname, if set, followed by the branch in dim text):
 - `•`: the status changed since you last selected this row
 - `▶`: processes such as dev servers are running in the worktree (with `showRunningProcesses` on)
 - `◆ 2 subagents` (`◆2` on narrow terminals): background subagents currently running
+- `⧉ 2 sessions` (`⧉2`): two or more agents are working in this worktree at once (see below)
 
 Right-aligned columns, each of which can be turned off in settings:
 
@@ -217,6 +218,18 @@ Right-aligned columns, each of which can be turned off in settings:
 - **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's Claude Code transcript, so it updates after every turn. It is measured against `contextWindowTokens` (1M by default). A session that has gone past that is measured against the setting doubled until it fits (200k → 400k → 800k …), whatever model it runs. The bar clears after a compaction until the next turn
 
 When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
+
+### Several Agents in One Worktree
+
+Each agent session keeps its own status, so two agents in the same worktree never overwrite each other. That holds for two Claude Code sessions as well as different harnesses. With two or more live sessions, the row shows `⧉ N sessions` and lists each one under it:
+
+```
+● feature/api ⧉ 2 sessions                       ENG-412 #127✓ ↑2  4m
+ ├ ● claude  executing · 2m ◆ 1 subagent                       ███░░░░░ 300k
+ └ ✓ gemini  done · 30s
+```
+
+Each session row has its own status glyph, harness, status and age, subagent badge and context bar. The worktree row's glyph is its most urgent session: waiting, then executing, planning, delegating, done, idle. Session rows aren't selectable, and clicking one selects its worktree. A session killed without ending properly drops off once am's process scan sees fewer agent CLIs running in the worktree than it has open sessions.
 
 ### Stacked Branches
 
