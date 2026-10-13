@@ -44,7 +44,8 @@ const SOUNDS: &[&str] =
     &["Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"];
 
 pub const FIELDS: &[Field] = &[
-    Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in", section: "General", kind: Kind::Choice(&["cursor", "vscode", "terminal"]) },
+    Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
+    Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
     Field { key: "agentPlugins", label: "Agent plugins…", help: "Turn agent CLIs on/off, install their hooks, pick the default agent", section: "General", kind: Kind::Plugins },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },

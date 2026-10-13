@@ -1,0 +1,26 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: out
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▋░░░░ 121k │
+│ ◐ fix/o╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮░░ 185k │
+│        │                                                                                │        │
+│gridsigh│  Editor  ›  Agent hooks  ›  Repositories  ›  Integrations  ›  Context          │────────│
+│ · main │                                                                                │        │
+│        │ Where should Enter open a worktree?                                            │        │
+│        │                                                                                │        │
+│        │   ○ VS Code                                                                    │        │
+│        │   ○ Cursor                                                                     │        │
+│        │   ○ Zed                                                                        │        │
+│        │   ○ Windsurf                                                                   │        │
+│        │   ○ Terminal                                                                   │        │
+│        │   ● Custom command: subl -n▏                                                   │        │
+│        │     Runs with the worktree path appended, or in place of {path}                │        │
+│        │                                                                                │        │
+│        ╰───────────────────────────────────────────────────────────── ↑↓ choose  ⏎ next ╯        │
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

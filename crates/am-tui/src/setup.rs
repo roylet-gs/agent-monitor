@@ -21,7 +21,10 @@ pub enum Step {
 #[derive(Debug, Clone)]
 pub struct Setup {
     pub step: Step,
+    /// Index into `IDES`; the last one (`custom`) takes a typed command.
     pub ide: usize,
+    pub ide_command: String,
+    pub ide_error: Option<String>,
     /// True once every agent in `agents` has hooks.
     pub hooks_installed: bool,
     /// Agent CLIs the hooks step installs for, and whether each has hooks.
@@ -39,7 +42,8 @@ pub struct Setup {
     pub ctx_error: Option<String>,
 }
 
-pub const IDES: [(&str, &str); 3] = [("cursor", "Cursor"), ("vscode", "VS Code"), ("terminal", "Terminal")];
+pub const IDES: [(&str, &str); 6] = am_core::launch::IdeChoice::ALL;
+pub const IDE_CUSTOM: usize = IDES.len() - 1;
 
 /// Context-window presets offered by the wizard; a third row takes a typed value.
 pub const CONTEXT_CHOICES: [(u64, &str); 2] = [(1_000_000, "1M (default)"), (200_000, "200k")];
@@ -64,6 +68,8 @@ impl Setup {
         Setup {
             step: Step::Editor,
             ide: IDES.iter().position(|(k, _)| *k == ide).unwrap_or(0),
+            ide_command: settings.ide_command.clone(),
+            ide_error: None,
             agents,
             hooks_installed,
             hook_binary: am_core::hooks_installer::find_native_hook_binary().map(|p| p.display().to_string()),
@@ -81,12 +87,28 @@ impl Setup {
 
     pub fn on_key(&mut self, key: Key) -> SetupEffect {
         match self.step {
-            Step::Editor => match key {
-                Key::Left | Key::Up | Key::Char('k') | Key::Char('h') => self.ide = (self.ide + IDES.len() - 1) % IDES.len(),
-                Key::Right | Key::Down | Key::Char('j') | Key::Char('l') | Key::Tab => self.ide = (self.ide + 1) % IDES.len(),
-                Key::Enter => self.step = Step::Hooks,
-                _ => {}
-            },
+            Step::Editor => {
+                self.ide_error = None;
+                let custom = self.ide == IDE_CUSTOM;
+                let up = |i: usize| (i + IDES.len() - 1) % IDES.len();
+                let down = |i: usize| (i + 1) % IDES.len();
+                match key {
+                    Key::Up => self.ide = up(self.ide),
+                    Key::Down | Key::Tab => self.ide = down(self.ide),
+                    // On the custom row letters are the command, so only arrows move.
+                    Key::Left | Key::Char('k') | Key::Char('h') if !custom => self.ide = up(self.ide),
+                    Key::Right | Key::Char('j') | Key::Char('l') if !custom => self.ide = down(self.ide),
+                    Key::Backspace if custom => {
+                        self.ide_command.pop();
+                    }
+                    Key::Char(c) if custom => self.ide_command.push(c),
+                    Key::Enter if custom && self.ide_command.trim().is_empty() => {
+                        self.ide_error = Some("Type the command that opens a folder, e.g. idea or subl -n".into());
+                    }
+                    Key::Enter => self.step = Step::Hooks,
+                    _ => {}
+                }
+            }
             Step::Hooks => match key {
                 Key::Enter | Key::Char('y') if !self.hooks_installed => return SetupEffect::InstallHooks,
                 Key::Enter | Key::Char('n') => self.step = Step::Repos,
@@ -150,14 +172,18 @@ impl Setup {
                             },
                         };
                         let key = self.linear_key.trim().to_string();
-                        return SetupEffect::Finish(vec![
-                            ("ide", Value::from(IDES[self.ide].0)),
+                        let mut keys = vec![("ide", Value::from(IDES[self.ide].0))];
+                        if self.ide == IDE_CUSTOM {
+                            keys.push(("ideCommand", Value::from(self.ide_command.trim())));
+                        }
+                        keys.extend([
                             ("ghPrStatus", Value::Bool(self.gh)),
                             ("linearEnabled", Value::Bool(!key.is_empty())),
                             ("linearApiKey", Value::from(key)),
                             ("contextWindowTokens", Value::from(tokens)),
                             ("setupCompleted", Value::Bool(true)),
                         ]);
+                        return SetupEffect::Finish(keys);
                     }
                     _ => {}
                 }
@@ -211,6 +237,8 @@ mod tests {
         Setup {
             step: Step::Editor,
             ide: 0,
+            ide_command: String::new(),
+            ide_error: None,
             hooks_installed: false,
             agents: vec![(HarnessKind::CLAUDE, false), (HarnessKind::GEMINI, true)],
             hook_binary: None,
@@ -254,10 +282,37 @@ mod tests {
         assert!(matches!(s.on_key(Key::Enter), SetupEffect::None));
         assert_eq!(s.step, Step::Context);
         let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
-        assert!(v.contains(&("ide", Value::from("vscode"))));
+        assert!(v.contains(&("ide", Value::from("cursor"))));
+        assert!(!v.iter().any(|(k, _)| *k == "ideCommand"));
         assert!(v.contains(&("linearEnabled", Value::Bool(true))));
         assert!(v.contains(&("contextWindowTokens", Value::from(1_000_000u64))));
         assert!(v.contains(&("setupCompleted", Value::Bool(true))));
+    }
+
+    #[test]
+    fn editor_step_takes_a_custom_command() {
+        let mut s = setup();
+        s.on_key(Key::Up); // wraps to the custom row
+        assert_eq!(s.ide, IDE_CUSTOM);
+        s.on_key(Key::Enter);
+        assert!(s.ide_error.is_some(), "an empty command is refused");
+        assert_eq!(s.step, Step::Editor);
+        for c in "subl -n".chars() {
+            s.on_key(Key::Char(c)); // `l` is input here, not "next"
+        }
+        assert_eq!((s.ide, s.ide_command.as_str()), (IDE_CUSTOM, "subl -n"));
+        s.on_key(Key::Enter);
+        assert_eq!(s.step, Step::Hooks);
+        s.step = Step::Context;
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        assert!(v.contains(&("ide", Value::from("custom"))));
+        assert!(v.contains(&("ideCommand", Value::from("subl -n"))));
+    }
+
+    #[test]
+    fn new_preselects_vscode() {
+        let s = Setup::new(vec![], &am_core::settings::Settings::default());
+        assert_eq!(IDES[s.ide].0, "vscode");
     }
 
     #[test]

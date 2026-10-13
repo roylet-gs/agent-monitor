@@ -311,7 +311,8 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
-| `ide` | `"cursor"` | What `Enter` opens worktrees in: `cursor`, `vscode`, `terminal` |
+| `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, or `custom` |
+| `ideCommand` | `""` | The command `ide: "custom"` runs, through `sh`. `{path}` is replaced by the quoted worktree path, or the path is appended when there's no `{path}`. E.g. `idea`, `subl -n`, `open -a Nova {path}` |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
 | `defaultAgent` | `"claude"` | Agent plugin `Enter` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
 | `disabledAgents` | `[]` | Agent plugins switched off: no hooks, no session discovery (Settings → Agent plugins) |

@@ -45,6 +45,7 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
     let ide = IdeChoice::from_setting(&settings.ide);
     let resume_on = settings.resume_last_session;
     let default_agent = settings.default_agent();
+    let ide_command = settings.ide_command.clone();
     std::thread::spawn(move || {
         let path = Path::new(&v.worktree.path);
         let label = v.worktree.display_name().to_string();
@@ -60,7 +61,7 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
             Default::default()
         };
         let result = match launch::resolve_open_action(resume_on, already_open, ide, resume) {
-            OpenAction::Plain => launch::open_in_editor(path, ide),
+            OpenAction::Plain => launch::open_in_editor(path, ide, &ide_command),
             OpenAction::TerminalAgent(r) => launch::open_terminal(path, Some(&launch::agent_command(&r))),
             OpenAction::CopyAndOpen(r) => {
                 let cmd = launch::agent_command(&r);
@@ -71,7 +72,7 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
                 };
                 let _ = tx.send(Msg::Popup(msg));
                 std::thread::sleep(POPUP_BEFORE_OPEN);
-                launch::open_in_editor(path, ide)
+                launch::open_in_editor(path, ide, &ide_command)
             }
         };
         report(&tx, result, format!("Opened {label}"));

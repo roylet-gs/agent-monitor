@@ -92,6 +92,10 @@ pub fn set(key: &str, value: &str) {
         fail(&format!("Unknown agent: {value}\nAvailable: {}", am_core::harness::ids().join(", ")));
     }
 
+    if key == "ide" && !am_core::launch::IdeChoice::IDS.contains(&value) {
+        fail(&format!("Invalid value for ide: {value}. Use one of: {}.", am_core::launch::IdeChoice::IDS.join(", ")));
+    }
+
     if key == "dailyTokensScope" && !["all", "visible"].contains(&value) {
         fail(&format!("Invalid value for dailyTokensScope: {value}. Use all or visible."));
     }
