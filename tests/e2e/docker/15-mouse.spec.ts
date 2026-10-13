@@ -78,7 +78,7 @@ test("Mouse can be turned off in settings by clicking it", async ({ page }) => {
   // Restore (keyboard: the mouse is off).
   await tui.sendKey("s");
   await tui.waitForText("esc close");
-  // Open in → Editor command → Resume last session → Agent plugins… → Mouse.
+  // Open in → Editor command → Resume last session → Harness plugins… → Mouse.
   await tui.sendKey("j");
   await tui.sendKey("j");
   await tui.sendKey("j");

@@ -98,7 +98,7 @@ pub fn run(as_json: bool) {
     let plugin_errors = am_core::harness::plugin_errors();
     if !plugin_errors.is_empty() {
         checks.push(Check {
-            name: "Agent plugins".into(),
+            name: "Harness plugins".into(),
             status: "warn",
             message: format!("Skipped in {}: {}", am_core::harness::plugins_dir().display(), plugin_errors.join("; ")),
         });

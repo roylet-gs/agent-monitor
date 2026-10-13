@@ -80,7 +80,7 @@ pub struct Settings {
     /// Agent CLI (`harness::HarnessKind` id) that Enter starts in a worktree with
     /// no session history yet.
     pub default_agent: String,
-    /// Agent plugin ids switched off (`harness::is_enabled`): no hooks, no
+    /// Harness plugin ids switched off (`harness::is_enabled`): no hooks, no
     /// session discovery, not installed by default.
     pub disabled_agents: Vec<String>,
     // --- Rust-only additions (ignored by the TS app) ---

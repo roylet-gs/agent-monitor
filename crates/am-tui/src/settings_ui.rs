@@ -25,7 +25,7 @@ pub enum Kind {
     Theme,
     /// Opens the theme builder.
     ThemeBuilder,
-    /// Opens the agent plugins page.
+    /// Opens the harness plugins page.
     Plugins,
 }
 
@@ -47,7 +47,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
-    Field { key: "agentPlugins", label: "Agent plugins…", help: "Turn agent CLIs on/off, install their hooks, pick the default agent", section: "General", kind: Kind::Plugins },
+    Field { key: "agentPlugins", label: "Harness plugins…", help: "Turn harnesses on/off, install their hooks, pick the default", section: "General", kind: Kind::Plugins },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
     Field { key: "startupScriptMode", label: "Run startup script in", help: "pane: output in the Jobs pane; window: a new terminal window", section: "General", kind: Kind::Choice(&["pane", "window"]) },
     Field { key: "defaultBranchPrefix", label: "Branch prefix", help: "Prefix for new worktree branches", section: "General", kind: Kind::Text { secret: false } },
@@ -116,7 +116,7 @@ impl SettingsEditor {
     }
 
     /// A click on field `i`: selects it, or changes it (like ⏎) when it is
-    /// already selected. Ignored while a sub-page (agent plugins, sort editor,
+    /// already selected. Ignored while a sub-page (harness plugins, sort editor,
     /// theme builder) covers the field list.
     pub fn click(&mut self, i: usize) -> Outcome {
         if self.plugins.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {

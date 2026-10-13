@@ -314,8 +314,8 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, or `custom` |
 | `ideCommand` | `""` | The command `ide: "custom"` runs, through `sh`. `{path}` is replaced by the quoted worktree path, or the path is appended when there's no `{path}`. E.g. `idea`, `subl -n`, `open -a Nova {path}` |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
-| `defaultAgent` | `"claude"` | Agent plugin `Enter` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
-| `disabledAgents` | `[]` | Agent plugins switched off: no hooks, no session discovery (Settings → Agent plugins) |
+| `defaultAgent` | `"claude"` | Harness plugin `Enter` starts in a worktree with no session yet (set it in Settings → Harness plugins) |
+| `disabledAgents` | `[]` | Harness plugins switched off: no hooks, no session discovery (Settings → Harness plugins) |
 | `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
@@ -538,7 +538,7 @@ You can also press `w` in the dashboard to see the log live.
 
 - `am hooks status` should report the hooks as installed; if not, run `am hooks install`.
 - After upgrading from 1.x, run `am hooks install` once so the hooks use `am-hook`.
-- **Agent plugins:** `s` → **Agent plugins…** lists every agent plugin (Claude Code, Gemini CLI, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
+- **Harness plugins:** `s` → **Harness plugins…** lists every harness plugin (Claude Code, Gemini CLI, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
 - **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.
 - Check `am logs --module hook-event` while the agent is working. No lines means the hooks aren't firing; for more detail, `am settings set logLevel debug`.
 - A session in a directory am doesn't track shows up under **Other sessions**. Add the repository with `A` or `am repo add <path>`.

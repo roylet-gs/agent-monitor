@@ -1,4 +1,4 @@
-//! Settings → Agent plugins: one row per registered agent plugin (built-in
+//! Settings → Harness plugins: one row per registered harness plugin (built-in
 //! and manifest), to switch it on/off, (re)install its hooks and pick the
 //! default agent. Pure state and keys; `settings_ui` performs the effects
 //! and hands back fresh rows.

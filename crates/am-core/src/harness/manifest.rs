@@ -1,4 +1,4 @@
-//! Declarative agent plugins: a JSON manifest in `<app dir>/agents/<id>.json`
+//! Declarative harness plugins: a JSON manifest in `<app dir>/agents/<id>.json`
 //! describes an agent CLI whose hooks follow the common Claude-style shape,
 //! so adding one needs no code and no rebuild. Gemini's built-in provider is
 //! this same manifest format (`gemini.json`) plus custom session discovery.
@@ -374,7 +374,7 @@ pub fn load_dir(dir: &Path, taken: &[&str]) -> (Vec<ManifestProvider>, Vec<Strin
         }
     }
     for e in &errors {
-        crate::warn!("agents", "Skipping agent plugin {e}");
+        crate::warn!("agents", "Skipping harness plugin {e}");
     }
     (out, errors)
 }

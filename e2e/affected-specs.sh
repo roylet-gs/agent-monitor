@@ -49,7 +49,7 @@ specs_for() {
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 ;;
     crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 ;;
-    crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Agent plugins
+    crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs | crates/am-tui/src/jobs.rs) echo 09 10 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 ;;
@@ -64,7 +64,7 @@ specs_for() {
     crates/am-core/src/timefmt.rs) echo 01 17 ;;
     crates/am-core/src/log.rs) echo 01 ;; # `w` log pane
     crates/am-core/src/status.rs) echo 07 08 16 18 ;;
-    # Agent plugins: hook normalisation seeds every agent row; the installer
+    # Harness plugins: hook normalisation seeds every agent row; the installer
     # runs in the wizard; the plugin page and Gemini row are spec 16.
     crates/am-core/src/harness/claude/transcript.rs) echo 14 ;;  # Claude's context reader
     crates/am-core/src/harness/*|crates/am-core/src/agents/*) echo 07 08 11 16 17 ;; # agents/ = pre-rename paths

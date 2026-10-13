@@ -36,7 +36,7 @@ Gemini is built as **both**. Its mapping, hooks, resume arguments and process pa
 
 ### Managing plugins
 
-- **Settings → Agent plugins…** (TUI sub-page, `crates/am-tui/src/plugins_ui.rs`) lists every registered plugin with its source (`built-in` or the manifest file), whether it is on, its hook status and the default marker. It also shows manifest files that failed to load.
+- **Settings → Harness plugins…** (TUI sub-page, `crates/am-tui/src/plugins_ui.rs`) lists every registered plugin with its source (`built-in` or the manifest file), whether it is on, its hook status and the default marker. It also shows manifest files that failed to load.
   - **space** turns a plugin on or off. Off removes am's hooks from that CLI, and on installs them (when the CLI is set up on this machine).
   - **i** (re)installs the hooks.
   - **d** makes the plugin the default agent that `Enter` starts in a worktree with no session yet.
@@ -205,7 +205,7 @@ The fields are:
 - **`process`**: matches the CLI's processes so they are excluded from "running processes".
 - **`notes`** (optional): a caveat shown next to the hook status.
 
-Invalid files are skipped and reported on the plugin page and in `am doctor`. Then turn the plugin on (it is on by default) and install its hooks from **Settings → Agent plugins**, or with `am hooks install --agent mycli`.
+Invalid files are skipped and reported on the plugin page and in `am doctor`. Then turn the plugin on (it is on by default) and install its hooks from **Settings → Harness plugins**, or with `am hooks install --agent mycli`.
 
 ### As a built-in (when a manifest isn't enough)
 

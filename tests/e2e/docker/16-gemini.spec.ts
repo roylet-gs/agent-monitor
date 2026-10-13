@@ -34,18 +34,18 @@ test("a Gemini CLI session shows its status and a ✦ gemini badge", async ({ pa
 
   // The help overlay explains the badge.
   await tui.sendKey("?");
-  await tui.waitForText("session from another agent plugin, by id (no badge: Claude Code)");
+  await tui.waitForText("session from another harness plugin, by id (no badge: Claude Code)");
   await tui.screenshot("gemini-help");
   await tui.sendKey("?");
 });
 
-test("Settings → Agent plugins lists the plugins and toggles one", async ({ page }) => {
+test("Settings → Harness plugins lists the plugins and toggles one", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
-  await tui.openSetting("Turn agent CLIs on/off, install their hooks, pick the default agent");
-  await tui.waitForMatch(/Agent plugins…\s+claude, gemini · default claude/);
+  await tui.openSetting("Turn harnesses on/off, install their hooks, pick the default");
+  await tui.waitForMatch(/Harness plugins…\s+claude, gemini · default claude/);
   await tui.sendKey("Enter");
-  await tui.waitForText("Agent plugins — space on/off · i install hooks · d default · esc back");
+  await tui.waitForText("Harness plugins — space on/off · i install hooks · d default · esc back");
   await tui.waitForMatch(/\[x\] Claude Code\s+built-in/);
   await tui.waitForMatch(/\[x\] Gemini CLI\s+built-in/);
   await tui.screenshot("agent-plugins");
@@ -59,7 +59,7 @@ test("Settings → Agent plugins lists the plugins and toggles one", async ({ pa
   await tui.sendKey(" ");
   await tui.waitForMatch(/\[x\] Gemini CLI/);
   await tui.sendKey("Escape");
-  await tui.waitForMatch(/Agent plugins…\s+claude, gemini · default claude/);
+  await tui.waitForMatch(/Harness plugins…\s+claude, gemini · default claude/);
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
 });

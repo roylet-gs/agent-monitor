@@ -461,7 +461,7 @@ fn hooks_for_gemini() {
     assert!(o.stderr.contains("Unknown agent: codex. Valid agents: claude, gemini"), "{}", o.stderr);
 }
 
-/// A JSON manifest in `<data>/agents/` is a full agent plugin: no code.
+/// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
 #[test]
 fn manifest_plugins_need_no_code() {
     let mut env = Env::new();
@@ -502,7 +502,7 @@ fn manifest_plugins_need_no_code() {
     // Doctor reports the plugin's hooks and the file it skipped.
     let doctor = env.ok(&["doctor"]).stdout;
     assert!(doctor.contains("MyCLI hooks: Installed in ~/.mycli/hooks.json"), "{doctor}");
-    assert!(doctor.contains("Agent plugins: Skipped in") && doctor.contains("broken.json"), "{doctor}");
+    assert!(doctor.contains("Harness plugins: Skipped in") && doctor.contains("broken.json"), "{doctor}");
 
     // Disabled plugins are left out of a default install and refuse an explicit one.
     env.ok(&["settings", "set", "defaultAgent", "claude"]);

@@ -1,4 +1,4 @@
-//! Agent plugins: everything specific to one coding-agent CLI.
+//! Harness plugins: everything specific to one coding-agent CLI.
 //!
 //! am tracks agents through their CLI's hooks. Each provider knows how to
 //! - install its hook entries into the CLI's own settings file,
@@ -217,7 +217,7 @@ fn load_registry() -> &'static Registry {
     let (plugins, errors) = manifest::load_dir(&plugins_dir(), &taken);
     let mut agents = BUILTIN.to_vec();
     for p in plugins {
-        crate::debug!("agents", "Loaded agent plugin {} from {}", p.manifest.id, p.source.display());
+        crate::debug!("agents", "Loaded harness plugin {} from {}", p.manifest.id, p.source.display());
         // Lives for the whole process, like the built-in unit structs.
         agents.push(HarnessKind(Box::leak(Box::new(p))));
     }

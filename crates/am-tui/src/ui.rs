@@ -249,10 +249,10 @@ fn draw_settings(
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
 }
 
-/// Settings → Agent plugins.
+/// Settings → Harness plugins.
 fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate::plugins_ui::PluginEditor) {
     let mut lines = vec![
-        Line::styled(" Agent plugins — space on/off · i install hooks · d default · esc back", theme.faint()),
+        Line::styled(" Harness plugins — space on/off · i install hooks · d default · esc back", theme.faint()),
         Line::raw(""),
     ];
     for (i, r) in pl.rows.iter().enumerate() {
@@ -1743,7 +1743,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
     lines.push(Line::from(pr_legend));
     lines.push(Line::from(vec![
         Span::styled("✦ gemini", theme.fg(theme.blue)),
-        Span::styled(" session from another agent plugin, by id (no badge: Claude Code)", theme.faint()),
+        Span::styled(" session from another harness plugin, by id (no badge: Claude Code)", theme.faint()),
     ]));
     lines.push(Line::from(vec![
         Span::styled("today 4.1M", theme.faint()),
