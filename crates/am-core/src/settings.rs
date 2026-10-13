@@ -109,6 +109,10 @@ pub struct Settings {
     /// (default; output streams into the TUI's jobs pane) or `window` (a new
     /// terminal window, falling back to the pane when none can be opened).
     pub startup_script_mode: String,
+    /// Dashboard key overrides: TUI command id (`newWorktree`, `moveDown`…) →
+    /// key (`N`, `ctrl-d`, `enter`, `none`). Only changed keys are stored;
+    /// the TUI's `keymap` resolves and validates them.
+    pub key_bindings: std::collections::BTreeMap<String, String>,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -178,6 +182,7 @@ impl Default for Settings {
             daily_tokens_scope: "all".into(),
             check_for_updates: true,
             startup_script_mode: "pane".into(),
+            key_bindings: Default::default(),
             raw: Default::default(),
         }
     }
@@ -292,6 +297,18 @@ mod tests {
         assert!(s.hide_main_branch);
         assert_eq!(s.worktree_sort.len(), 10);
         assert!(s.raw.contains_key("showIdeStatus"));
+    }
+
+    #[test]
+    fn key_bindings_default_empty_and_round_trip() {
+        assert!(Settings::parse("{}").key_bindings.is_empty());
+        let s = Settings::parse(r#"{"keyBindings":{"newWorktree":"N"},"hideMainBranch":false}"#);
+        assert_eq!(s.key_bindings.get("newWorktree").map(String::as_str), Some("N"));
+        assert!(!s.hide_main_branch);
+        // A bad value is dropped without resetting the rest.
+        let bad = Settings::parse(r#"{"keyBindings":["N"],"hideMainBranch":false}"#);
+        assert!(bad.key_bindings.is_empty() && !bad.hide_main_branch);
+        assert_eq!(s.to_file_json()["keyBindings"]["newWorktree"], "N");
     }
 
     #[test]

@@ -251,6 +251,9 @@ fn settings_set_coerces_and_validates() {
     let o = env.run(&["settings", "set", "worktreeSort", "x"]);
     assert_eq!(o.code, 1);
     assert!(o.stderr.contains("can't be set from the CLI"));
+    let o = env.run(&["settings", "set", "keyBindings", "x"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Key bindings"));
 
     assert_eq!(env.settings()["contextWindowTokens"], 1_000_000, "1M by default");
     for (input, expected) in [("200k", 200_000), ("1.5m", 1_500_000), ("128000", 128_000)] {
