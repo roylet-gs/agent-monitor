@@ -153,8 +153,29 @@ export class RustTui extends TuiPage {
     throw new Error(`"${text}" not on screen.\n${lines.join("\n")}`);
   }
 
+  /**
+   * Wait until the screen has not changed for `quiet` ms (at most `max` ms).
+   * Rows can still shift just after `open()` (e.g. a `— ENG-123 —` header
+   * appears when Linear data lands), which would move a click target.
+   */
+  async waitForStableScreen(quiet = 300, max = 3_000): Promise<void> {
+    const start = Date.now();
+    let last = await this.getScreenText();
+    let since = Date.now();
+    while (Date.now() - start < max && Date.now() - since < quiet) {
+      await this.pg.waitForTimeout(50);
+      const now = await this.getScreenText();
+      if (now !== last) {
+        last = now;
+        since = Date.now();
+      }
+    }
+  }
+
   /** Left-click (or double-click) the first occurrence of `text`. */
   async clickText(text: string, opts: { double?: boolean } = {}): Promise<void> {
+    // Clicks are aimed by position, so don't aim at a layout that's moving.
+    await this.waitForStableScreen();
     const { col, row } = await this.findCell(text);
     const { x, y } = await this.cellCenter(col, row);
     if (opts.double) await this.pg.mouse.dblclick(x, y);
