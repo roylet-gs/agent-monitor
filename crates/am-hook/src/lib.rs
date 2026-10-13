@@ -167,8 +167,9 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent, issues: &mut Ve
     // A harness without a project-dir variable leaves `--worktree ""`: use the payload's cwd.
     let dir = if worktree_arg.trim().is_empty() { ev.cwd.as_deref().unwrap_or("") } else { worktree_arg };
     let found = worktree_root(Path::new(dir));
-    if found.is_none() && !kind.is_builtin() {
-        issues.push(Issue::new(am_core::harness::issues::NO_WORKTREE, dir, None));
+    // Outside git is fine (a standalone session); no directory at all is not.
+    if dir.is_empty() && !kind.is_builtin() {
+        issues.push(Issue::new(am_core::harness::issues::NO_WORKTREE, "(no directory)", Some("--worktree was empty and the payload has no cwd".into())));
     }
     if !kind.is_builtin() {
         am_core::harness::issues::record(&conn, kind.id(), issues);

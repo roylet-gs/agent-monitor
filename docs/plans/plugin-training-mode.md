@@ -337,7 +337,7 @@ Where the build differs from the plan above:
 - **Badge:** `✎ draft`, not `◇draft`, because `◇` is already the *planning* status glyph.
 - **Schema:** `plugin_issues` is **v4** on this branch, since nothing else has taken v4 yet. Whichever of this and PR 2's `sessions` table lands second renumbers its step.
 - **Train UI:** the command input and the publish/remove confirmations live inside the plugins page (`plugins_ui.rs`), not in `modals.rs`.
-- **Issue kinds built:** `unmapped_event`, `unmapped_tool`, `missing_field`, `no_worktree`, `bad_payload`, `unknown_plugin`, `discovery_failed`.
+- **Issue kinds built:** `unmapped_event`, `unmapped_tool`, `missing_field`, `no_worktree`, `bad_payload`, `unknown_plugin`, `discovery_failed`. `no_worktree` only fires when there is no directory at all (empty `--worktree` and no payload `cwd`). A session outside git is a legitimate standalone session, so it isn't an issue.
 - **Issue kinds not built yet:**
   - `discovery_empty` and `process_unmatched` need PR 2's per-session rows.
   - `resume_failed`: am can't observe a resume failing in a detached terminal.

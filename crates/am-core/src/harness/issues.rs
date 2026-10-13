@@ -19,7 +19,8 @@ pub const UNMAPPED_EVENT: &str = "unmapped_event";
 pub const UNMAPPED_TOOL: &str = "unmapped_tool";
 /// `session_id` or `cwd` missing after normalisation.
 pub const MISSING_FIELD: &str = "missing_field";
-/// No `.git` above the session's directory.
+/// No directory for the session: `--worktree` was empty (the harness didn't
+/// set `projectDirVar`) and the payload has no `cwd`.
 pub const NO_WORKTREE: &str = "no_worktree";
 /// The payload wasn't JSON.
 pub const BAD_PAYLOAD: &str = "bad_payload";
