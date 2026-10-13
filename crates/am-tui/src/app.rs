@@ -34,6 +34,9 @@ pub enum Row {
     Project(String),
     Ticket(String),
     Worktree(usize),
+    /// Placeholder for a worktree being created (jobs-pane job id). Like
+    /// headers, it takes no selection index.
+    Pending(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,9 +56,11 @@ pub enum Action {
     SettingsChanged,
     /// `e` in settings: open settings.json in $EDITOR.
     EditSettingsFile,
-    Create(Box<Repository>, Box<am_core::worktrees::CreateRequest>),
-    Delete(Box<WorktreeView>, bool),
-    RunScript { repo_id: String, worktree_path: String },
+    /// Job id, repo and request.
+    Create(u64, Box<Repository>, Box<am_core::worktrees::CreateRequest>),
+    /// Job id, worktree, and whether to delete the branch too.
+    Delete(u64, Box<WorktreeView>, bool),
+    RunScript { job: u64, repo_id: String, worktree_path: String },
     /// `d` on an "Other sessions" row: stop tracking it.
     RemoveStandalone(String),
     AddRepo(String),
@@ -74,6 +79,9 @@ pub struct App {
     pub show_help: bool,
     pub loaded: bool,
     pub notice: Option<String>,
+    /// Newer release found by the update check: top right of the pane, and
+    /// a banner with the upgrade command at the top of Settings.
+    pub update_available: Option<am_core::update_check::Update>,
     /// Centered message box (e.g. "copied resume command"); any key closes it.
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
@@ -93,6 +101,8 @@ pub struct App {
     /// entry is dropped on the next snapshot, so the row doesn't flash back
     /// to normal before the refresh removes it.
     pub deleting: std::collections::HashMap<String, bool>,
+    /// Background create/delete jobs (right-hand jobs pane).
+    pub jobs: crate::jobs::Jobs,
 }
 
 impl App {
@@ -107,6 +117,7 @@ impl App {
             show_help: false,
             loaded: false,
             notice: None,
+            update_available: None,
             popup: None,
             show_log: false,
             settings_editor: None,
@@ -117,6 +128,7 @@ impl App {
             seen_status: Default::default(),
             sounds: Vec::new(),
             deleting: Default::default(),
+            jobs: Default::default(),
         }
     }
 
@@ -180,12 +192,25 @@ impl App {
         }
     }
 
-    fn rebuild_rows(&mut self) {
+    /// Re-derive the visual rows (placeholder rows follow the jobs). `flat`
+    /// keeps its order, so the selection index stays valid.
+    pub fn rebuild_rows(&mut self) {
         let by_project = am_core::grouping::top_sort_key(&self.settings) == Some(SortKey::LinearProject);
         let multi_repo = self.snapshot.groups.len() > 1;
         self.flat.clear();
         self.rows.clear();
         self.tree.clear();
+        // Creates whose worktree isn't in the snapshot yet: (job, repo id, repo name).
+        let listed = |id: &str| self.snapshot.groups.iter().any(|g| g.worktrees.iter().any(|v| v.worktree.id == id));
+        let mut pending: Vec<(u64, String, String)> = self
+            .jobs
+            .list
+            .iter()
+            .filter_map(|j| {
+                let (repo, _, wt) = j.pending_create()?;
+                (!wt.is_some_and(listed)).then(|| (j.id, repo.id.clone(), repo.name.clone()))
+            })
+            .collect();
         for group in &self.snapshot.groups {
             if group.worktrees.is_empty() {
                 continue;
@@ -229,6 +254,26 @@ impl App {
                 self.flat.push(v.clone());
                 self.tree.push(prefix);
             }
+            pending.retain(|(job, repo_id, _)| {
+                let here = *repo_id == group.repo.id;
+                if here {
+                    self.rows.push(Row::Pending(*job));
+                }
+                !here
+            });
+        }
+        // Creates in a repo with no visible rows yet get their own section.
+        pending.sort_by(|a, b| a.1.cmp(&b.1));
+        let mut last_repo: Option<String> = None;
+        for (job, repo_id, name) in pending {
+            if last_repo.as_ref() != Some(&repo_id) {
+                if !self.rows.is_empty() {
+                    self.rows.push(Row::Spacer);
+                }
+                self.rows.push(Row::Repo(name));
+                last_repo = Some(repo_id);
+            }
+            self.rows.push(Row::Pending(job));
         }
     }
 
@@ -322,17 +367,17 @@ impl App {
                     Action::None
                 }
                 Effect::Create(repo, req) => {
-                    self.modal = Some(crate::modals::Modal::busy(format!("Creating {}…", req.branch)));
-                    Action::Create(Box::new(repo), Box::new(req))
+                    self.modal = None;
+                    let job = self.jobs.start_create(repo.clone(), req.clone());
+                    self.rebuild_rows();
+                    Action::Create(job, Box::new(repo), Box::new(req))
                 }
                 Effect::Delete { view, delete_branch } => {
+                    self.modal = None;
                     let id = view.worktree.id.clone();
                     self.deleting.insert(id.clone(), false);
-                    self.modal = Some(crate::modals::Modal::Busy {
-                        text: format!("Deleting {}…", view.worktree.display_name()),
-                        deleting: Some(id),
-                    });
-                    Action::Delete(view, delete_branch)
+                    let job = self.jobs.start_delete(id, view.worktree.display_name());
+                    Action::Delete(job, view, delete_branch)
                 }
                 Effect::Suggest { title, body } => {
                     self.modal = Some(crate::modals::Modal::busy("Filing feature request…".into()));
@@ -341,10 +386,6 @@ impl App {
                 Effect::AddRepo(path) => {
                     self.modal = Some(crate::modals::Modal::busy(format!("Adding {path}…")));
                     Action::AddRepo(path)
-                }
-                Effect::RunScript { repo_id, worktree_path } => {
-                    self.modal = None;
-                    Action::RunScript { repo_id, worktree_path }
                 }
             };
         }
@@ -378,6 +419,16 @@ impl App {
             }
             return Action::None;
         }
+        if self.jobs.focused {
+            use crate::jobs::JobEffect;
+            let effect = self.jobs.on_key(key);
+            self.rebuild_rows();
+            return match effect {
+                JobEffect::None => Action::None,
+                JobEffect::Create(job, repo, req) => Action::Create(job, repo, req),
+                JobEffect::RunScript { job, repo_id, worktree_path } => Action::RunScript { job, repo_id, worktree_path },
+            };
+        }
         let row_action = matches!(key, Key::Enter | Key::Char('t' | 'c' | 'g' | 'o' | 'l' | 'p' | 'd'));
         if row_action && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
             self.notice = Some("Deleting in the background…".into());
@@ -405,6 +456,7 @@ impl App {
                 "No Linear project",
             ),
             Key::Char('w') => self.show_log = !self.show_log,
+            Key::Tab if self.jobs.visible() => self.jobs.focus(),
             Key::Char('n') => {
                 if self.snapshot.repos.is_empty() {
                     self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None });

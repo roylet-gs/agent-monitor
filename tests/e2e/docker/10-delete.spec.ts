@@ -43,18 +43,18 @@ test("create then delete a worktree end to end (incl. its local branch)", async 
   await tui.sendKey("y");
   await tui.waitForText(`Also delete local branch ${branch}?`);
   await tui.sendKey("y");
-  // Gone from the list, the "Deleting …" modal and the "Deleted …" notice.
+  // Gone from the list, the jobs pane and the "Deleted …" notice.
   await tui.waitForGone(branch, 20_000);
   await tui.screenshot("worktree-deleted");
 });
 
-test("long name wraps in the Working box; any key continues the delete in the background", async ({ page }) => {
+test("a long-named delete runs in the jobs pane while the list stays usable", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
   const id = Date.now() % 1_000_000;
   const branch = `feature/e2e-wrap-${id}`;
   const first = `Wrap${id}`;
-  const nickname = `${first} a deliberately long nickname so the Working box must wrap it onto another line zebrafinale`;
+  const nickname = `${first} a deliberately long nickname so the jobs pane must wrap it onto another line zebrafinale`;
   expect(nickname.length).toBeGreaterThan(72);
 
   // New worktree with a custom Name (Tab moves from Branch to Name).
@@ -66,8 +66,9 @@ test("long name wraps in the Working box; any key continues the delete in the ba
   await tui.type(nickname);
   await tui.sendKey("Enter");
   await tui.waitForGone("New worktree", 10_000);
-  await tui.waitForGone("Creating ", 30_000);
+  await tui.skipStartupScript();
   await tui.waitForMatch(new RegExp(`│[▌ ][│├└─ ]*\\S ${first}\\s`), 15_000);
+  await tui.waitForGone("─Jobs", 10_000);
 
   await tui.selectRow(first);
   await tui.sendKey("d");
@@ -76,9 +77,9 @@ test("long name wraps in the Working box; any key continues the delete in the ba
   await tui.waitForText(`Also delete local branch ${branch}?`);
 
   // A local `git worktree remove` can finish before a 250 ms poll sees the
-  // busy box, so watch xterm's write path: once a complete frame shows the
-  // Working box, keep that frame's text and hold later writes (test side
-  // only, released right after) so the screenshot shows it too.
+  // running job, so watch xterm's write path: once a complete frame shows
+  // the jobs pane with the delete, keep that frame's text and hold later
+  // writes (test side only, released right after) so the screenshot shows it.
   await page.evaluate(() => {
     const w = window as any;
     const term = w.term?.terminal ?? w.terminal ?? w.term;
@@ -100,7 +101,7 @@ test("long name wraps in the Working box; any key continues the delete in the ba
         const lines: string[] = [];
         for (let i = 0; i < buf.length; i++) lines.push(buf.getLine(i)?.translateToString(true) ?? "");
         const text = lines.join("\n");
-        if (text.includes("─Working") && text.includes("Deleting")) {
+        if (text.includes("─Jobs") && text.includes("Delete ")) {
           w.__e2e.frame = text;
           w.__e2e.hold = true;
         }
@@ -119,25 +120,26 @@ test("long name wraps in the Working box; any key continues the delete in the ba
 
   await tui.sendKey("y");
   await page.waitForFunction(() => Boolean((window as any).__e2e.frame), undefined, { timeout: 10_000 });
-  const busy: string = await page.evaluate(() => (window as any).__e2e.frame);
-  // The whole name is there, wrapped: its last word made it into the box.
-  expect(busy).toContain(`Deleting ${first}`);
-  expect(busy).toContain("zebrafinale");
-  expect(busy).toContain("any key: continue in background");
-  expect(busy.split("\n").some((l) => l.includes("zebrafinale") && !l.includes(first))).toBe(true);
-  await tui.screenshot("delete-busy-wrapped");
+  const frame: string = await page.evaluate(() => (window as any).__e2e.frame);
+  // No blocking box; the whole name is in the pane, wrapped onto more lines.
+  expect(frame).not.toContain("─Working");
+  expect(frame).toContain(`Delete ${first}`);
+  expect(frame).toContain("zebrafinale");
+  // Only the pane half of each line (the list row beside it carries the name too).
+  const pane = frame.split("\n").map((l) => l.split("││")[1] ?? "");
+  expect(pane.some((l) => l.includes("zebrafinale") && !l.includes(first))).toBe(true);
+  await tui.screenshot("delete-jobs-pane");
   await release();
 
-  // Any key hides the box (if the delete is still running); it carries on.
-  await tui.sendKey("x");
-  await tui.waitForGone("─Working", 5_000);
-  // Only worktree rows (inside the pane border); the key bar's right-aligned
+  // The list keeps its keys while the job runs or lingers.
+  await tui.sendKey("Home");
+  // Only worktree rows (the list's left border); the key bar's right-aligned
   // "Deleted <name>" notice also carries the name once the delete is done.
-  const rowWith = async () => (await tui.lines()).find((l) => /^│[▌ ]/.test(l) && l.includes(first));
+  const rowWith = async () => (await tui.lines()).find((l) => /^│[▌ ]/.test(l) && l.split("││")[0].includes(first));
   const rowLine = await rowWith();
   // Either still running (row badged `deleting…`) or already gone.
   if (rowLine) expect(rowLine).toContain("deleting…");
-  await tui.screenshot("delete-in-background");
 
   await expect.poll(rowWith, { timeout: 30_000 }).toBeUndefined();
+  await tui.waitForGone("─Jobs", 10_000);
 });

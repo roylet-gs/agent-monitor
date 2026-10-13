@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────││ ◐ Create feature/new-thing           │
+│ ◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ███░░ 121k ││   ✓ Fetching origin/main…            │
+│ ◐ fix/offline-cache                                            4m ████▋ 185k ││   ◐ Adding worktree…                 │
+│ ◐ feature/new-thing creating… Adding worktree…                               ││                                      │
+│                                                                              ││                                      │
+│gridsight ────────────────────────────────────────────────────────────────────││                                      │
+│▌· main                                                  ↑2 ±3  4m            ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+╰────────────────────────────────────────────────────────────────────── 3 of 3 ╯╰──────────────────────────────────────╯
+ ⇥ jobs  │ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
