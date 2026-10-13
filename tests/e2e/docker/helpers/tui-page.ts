@@ -29,8 +29,8 @@ export class TuiPage {
       },
       { timeout: 15_000 }
     );
-    // Give the TUI a moment to finish rendering
-    await this.page.waitForTimeout(2000);
+    // No fixed settle time: callers wait for the text they need (RustTui.open
+    // waits for the first data frame).
   }
 
   /** Extract all visible text from the terminal buffer. */
@@ -82,16 +82,31 @@ export class TuiPage {
    */
   async sendKey(key: string): Promise<void> {
     await this.focus();
+    const before = await this.getScreenText();
     await this.page.keyboard.press(key);
-    // Small delay for the TUI to process the keystroke
-    await this.page.waitForTimeout(300);
+    await this.settle(before);
   }
 
   /** Type a string into the terminal. */
   async type(text: string): Promise<void> {
     await this.focus();
+    const before = await this.getScreenText();
     await this.page.keyboard.type(text, { delay: 50 });
-    await this.page.waitForTimeout(300);
+    await this.settle(before);
+  }
+
+  /**
+   * Wait for the TUI to redraw after input: return as soon as the screen
+   * differs from `before`, or after `max` ms for keys that change nothing
+   * (the old fixed delay). Callers that need a specific state still wait
+   * for its text.
+   */
+  private async settle(before: string, max = 300): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < max) {
+      await this.page.waitForTimeout(20);
+      if ((await this.getScreenText()) !== before) return;
+    }
   }
 
   /**

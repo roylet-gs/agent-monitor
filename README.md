@@ -569,7 +569,8 @@ cargo run -p am-tui                                     # the dashboard
 cargo run -p am-cli -- ls                               # the CLI
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-pnpm test:e2e                                           # Docker E2E (Playwright against the real binaries)
+pnpm test:e2e                                           # Docker E2E: only the specs this branch affects
+pnpm test:e2e:all                                       # Docker E2E: every spec
 ```
 
 Set `AM_DATA_DIR=/tmp/am-dev` to run against an isolated data directory. See [CLAUDE.md](./CLAUDE.md) for the architecture, test setup and release process.
