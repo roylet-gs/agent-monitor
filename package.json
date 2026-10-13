@@ -4,6 +4,7 @@
   "description": "Dev tooling for the agent-monitor repo (E2E harness). The published npm packages are assembled from npm/ by .github/workflows/publish.yml.",
   "scripts": {
     "test:e2e": "bash e2e/run.sh test",
+    "test:e2e:all": "bash e2e/run.sh test --all",
     "test:e2e:build": "bash e2e/run.sh build",
     "test:e2e:clean": "bash e2e/run.sh clean",
     "test:e2e:ports": "bash e2e/run.sh ports"
