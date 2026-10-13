@@ -22,7 +22,7 @@ test("? opens the key help overlay and closes it again", async ({ page }) => {
     expect(text).toContain(s);
   }
   // PR review-state legend.
-  expect(text).toContain("PR ready=approved+CI");
+  expect(text).toContain("PR approved=CI ✓  approved=CI ✗/◌");
   // The `t` terminal and `c` agent actions are gone.
   expect(text).not.toContain("terminal at worktree");
   expect(text).not.toContain("terminal resuming the agent");
