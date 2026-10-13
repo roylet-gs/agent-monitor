@@ -365,7 +365,7 @@ fn dispatch(
         Action::EditSettingsFile => {
             let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
             if ide != am_core::launch::IdeChoice::Terminal {
-                launcher::open_settings_file(am_core::paths::settings_path(), ide, launch_tx.clone());
+                launcher::open_settings_file(am_core::paths::settings_path(), ide, app.settings.ide_command.clone(), launch_tx.clone());
                 return Ok(false);
             }
             edit_settings_file(terminal, mouse_before)?;

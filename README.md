@@ -299,7 +299,7 @@ Press `s` to open the settings editor:
 | `j` / `k` | Move |
 | `Enter` / `Space` | Toggle, cycle a choice, or edit a text or number field |
 | `←` / `→` (`h` / `l`) | Step a choice backwards or forwards |
-| `e` | Open `settings.json` in your IDE (Cursor / VS Code; the dashboard reloads it when saved), or in `$VISUAL` / `$EDITOR` (default `vi`) when the IDE setting is `terminal`, for anything not listed |
+| `e` | Open `settings.json` in your IDE (the `ide` setting, incl. a custom command; the dashboard reloads it when saved), or in `$VISUAL` / `$EDITOR` (default `vi`) when the IDE setting is `terminal`, for anything not listed |
 | `Esc` / `q` / `s` | Close |
 
 Changes are saved immediately. The **Sort order** field opens a sub-editor: `j`/`k` move, `Space` turns a criterion on or off, `d` flips its direction, `J`/`K` move it down/up, `Enter` saves, `Esc` cancels. Criteria apply in order, and the first one that tells two rows apart decides their order.

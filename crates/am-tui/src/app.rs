@@ -57,7 +57,7 @@ pub enum Action {
     OpenUrl(String),
     /// A setting was saved; theme/collector need to pick it up.
     SettingsChanged,
-    /// `e` in settings: open settings.json in the `ide` (Cursor/VS Code), or
+    /// `e` in settings: open settings.json in the `ide` (editor or custom command), or
     /// `$EDITOR` in this terminal when `ide` is `terminal`.
     EditSettingsFile,
     /// Job id, repo and request.

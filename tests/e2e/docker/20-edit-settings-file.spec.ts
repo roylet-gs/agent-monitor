@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { RustTui, resetMock } from "./helpers/rust-tui";
 
 // `e` in Settings opens settings.json in the configured `ide` (default
-// cursor). The container has no `cursor` CLI (and no macOS `open`), so the
+// vscode). The container has no editor CLI (and no macOS `open`), so the
 // launch fails: the TUI must stay up and show the error popup rather than
 // handing the terminal to $EDITOR. The live reload of an externally edited
 // settings.json is exercised with two connections (two am-tui processes on
@@ -32,7 +32,7 @@ test("e with the default ide reports the failed launch and keeps the TUI", async
 
   // No IDE in the container: the launch fails on a background thread and the
   // error shows as a popup; the dashboard and settings are still on screen.
-  await tui.waitForText("✗ Couldn't open Cursor");
+  await tui.waitForText("✗ Couldn't open");
   const screen = await tui.getScreenText();
   expect(screen).toContain("─Worktrees");
   expect(screen).not.toContain("~\n~"); // not vi's empty-buffer tildes
@@ -40,7 +40,7 @@ test("e with the default ide reports the failed launch and keeps the TUI", async
 
   // Any key closes the popup; the settings editor is still open underneath.
   await tui.sendKey("Escape");
-  await tui.waitForGone("Couldn't open Cursor");
+  await tui.waitForGone("Couldn't open");
   await tui.waitForText("esc close");
   await tui.screenshot("edit-settings-file-after");
   await tui.sendKey("Escape");
