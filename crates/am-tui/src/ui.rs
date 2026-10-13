@@ -1664,8 +1664,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
     lines.push(Line::from(vec![
         Span::styled("✦ gemini", theme.fg(theme.blue)),
         Span::styled(" session from another agent plugin, by id (no badge: Claude Code)", theme.faint()),
-        Span::styled("  ✎ draft", theme.fg(theme.yellow)),
-        Span::styled(" plugin still being trained", theme.faint()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("✎ draft", theme.fg(theme.yellow)),
+        Span::styled(" plugin still being trained (Settings → Agent plugins publishes it)", theme.faint()),
     ]));
     let w = 80.min(area.width.saturating_sub(4));
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });

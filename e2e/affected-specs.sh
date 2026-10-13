@@ -48,13 +48,13 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 ;;
-    crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Agent plugins
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 18 ;;
+    crates/am-tui/src/plugins_ui.rs) echo 16 18 ;;   # Settings → Agent plugins + training mode
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs | crates/am-tui/src/jobs.rs) echo 09 10 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 ;;
     crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 ;;
-    crates/am-tui/src/launcher.rs) echo - ;; # opens IDEs/terminals: unit tests only
+    crates/am-tui/src/launcher.rs) echo 18 ;; # opens IDEs/terminals; 18 covers the training popup
 
     # --- am-core ----------------------------------------------------------
     crates/am-core/src/lib.rs | crates/am-core/src/db.rs | crates/am-core/src/settings.rs | \
@@ -66,9 +66,9 @@ specs_for() {
     # Agent plugins: hook normalisation seeds every agent row; the installer
     # runs in the wizard; the plugin page and Gemini row are spec 16.
     crates/am-core/src/harness/claude/transcript.rs) echo 14 ;;  # Claude's context reader
-    crates/am-core/src/harness/*|crates/am-core/src/agents/*) echo 07 08 11 16 ;; # agents/ = pre-rename paths
+    crates/am-core/src/harness/*|crates/am-core/src/agents/*) echo 07 08 11 16 18 ;; # agents/ = pre-rename paths
     crates/am-core/src/worktrees.rs) echo 09 10 11 ;;
-    crates/am-core/src/hooks_installer.rs) echo 11 16 ;;
+    crates/am-core/src/hooks_installer.rs) echo 11 16 18 ;;
     crates/am-core/src/context.rs) echo 14 ;;      # context-window bar
     crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice
     crates/am-core/src/themes.rs | crates/am-core/src/themes/*) echo 12 ;;
@@ -80,7 +80,7 @@ specs_for() {
     crates/am-core/src/stacks.rs) echo - ;; # unit / snapshot tests only
 
     # --- am-hook: seeds the delegating main and the standalone session ----
-    crates/am-hook/src/*) echo 07 08 16 ;;
+    crates/am-hook/src/*) echo 07 08 16 18 ;;
 
     # --- am-cli: the entrypoint runs `repo add/list`, `hook-event`, `status` ---
     crates/am-cli/src/main.rs | crates/am-cli/src/commands/mod.rs | \
