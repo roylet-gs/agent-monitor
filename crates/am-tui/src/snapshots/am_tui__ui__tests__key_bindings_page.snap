@@ -1,0 +1,38 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 34)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
+│▌◑ feat│ Key bindings — ⏎ change · x reset · R reset all · esc back                       │░ 121k │
+│ ◐ fix/│                                                                                  │░ 185k │
+│       │   Open worktree           ⏎                                                      │       │
+│gridsig│   Open PR                 g                                                      │───────│
+│ · main│   Open Linear ticket      l                                                      │       │
+│       │   Open Linear project     p                                                      │       │
+│       │▌  New worktree            N       (default n)                                    │       │
+│       │   Delete worktree         d                                                      │       │
+│       │   Add repository          A                                                      │       │
+│       │   Toggle log pane         w                                                      │       │
+│       │   Settings                s                                                      │       │
+│       │   Suggest a feature       f                                                      │       │
+│       │   Refresh now             r                                                      │       │
+│       │   Help                    ?                                                      │       │
+│       │   Quit                    q                                                      │       │
+│       │   Move down               j                                                      │       │
+│       │   Move up                 k                                                      │       │
+│       │   Page down               ctrl-d                                                 │       │
+│       │   Page up                 ctrl-u                                                 │       │
+│       │   Jump to top             —                                                      │       │
+│       │   Jump to bottom          G                                                      │       │
+│       │                                                                                  │       │
+│       │ Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit      │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │ New worktree form                                                                │       │
+╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
+ ⏎ open  │ g PR  l linear  p project  │ N new  d delete  │ s settings  r refresh  ? help  q quit

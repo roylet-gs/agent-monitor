@@ -7,6 +7,8 @@
 mod app;
 mod data;
 mod jobs;
+mod keymap;
+mod keys_ui;
 mod launcher;
 mod modals;
 mod ops;
@@ -121,6 +123,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     let mut last_second = am_core::timefmt::now_unix();
     let mut notice_since: Option<Instant> = None;
     let mut last_click: Option<(u16, Instant)> = None;
+    let mut settings_mtime = settings_file_mtime();
     loop {
         while let Some(snapshot) = collector.try_recv() {
             app.apply(snapshot);
@@ -227,6 +230,22 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             // Elapsed/age labels tick once a second; the diff renderer only
             // rewrites the cells that actually changed.
             last_second = now;
+            // settings.json edited outside the TUI (e.g. `e` opened it in the IDE).
+            let mtime = settings_file_mtime();
+            if mtime != settings_mtime {
+                settings_mtime = mtime;
+                let loaded = settings::load();
+                if loaded != app.settings {
+                    info!("settings", "settings.json changed on disk, reloading");
+                    let mouse_before = app.settings.mouse_enabled;
+                    app.set_settings(loaded);
+                    theme = theme::Theme::load(&app.settings.theme);
+                    collector.update_settings(app.settings.clone());
+                    if app.settings.mouse_enabled != mouse_before {
+                        set_mouse(app.settings.mouse_enabled);
+                    }
+                }
+            }
             if app.jobs.tick(Instant::now()) {
                 app.rebuild_rows();
             }
@@ -345,6 +364,11 @@ fn dispatch(
             ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
         }
         Action::EditSettingsFile => {
+            let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
+            if ide != am_core::launch::IdeChoice::Terminal {
+                launcher::open_settings_file(am_core::paths::settings_path(), ide, app.settings.ide_command.clone(), launch_tx.clone());
+                return Ok(false);
+            }
             edit_settings_file(terminal, mouse_before)?;
             app.set_settings(settings::load());
             *theme = theme::Theme::load(&app.settings.theme);
@@ -400,6 +424,10 @@ fn tail_log(n: usize) -> Vec<String> {
     let buf = String::from_utf8_lossy(&bytes);
     let lines: Vec<String> = buf.lines().map(str::to_owned).collect();
     lines[lines.len().saturating_sub(n)..].to_vec()
+}
+
+fn settings_file_mtime() -> Option<std::time::SystemTime> {
+    std::fs::metadata(am_core::paths::settings_path()).and_then(|m| m.modified()).ok()
 }
 
 /// Hand the terminal to $EDITOR (default `vi`) for settings.json, then take it back.

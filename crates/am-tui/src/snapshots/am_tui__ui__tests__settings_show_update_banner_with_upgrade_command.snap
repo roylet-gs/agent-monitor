@@ -12,6 +12,7 @@ expression: "render(&app, 100, 24)"
 │       │   Editor command                —                                                │       │
 │       │   Resume last session on open   on                                               │       │
 │       │   Harness plugins…              7 of 7 on · default claude                       │       │
+│       │   Key bindings…                 defaults                                         │       │
 │       │   Mouse                         on                                               │       │
 │       │   Run startup script in         pane                                             │       │
 │       │   Branch prefix                 feature/                                         │       │
@@ -21,7 +22,6 @@ expression: "render(&app, 100, 24)"
 │       │ Appearance                                                                       │       │
 │       │   Theme                         ansi                                             │       │
 │       │   Theme builder…                ⏎ open                                           │       │
-│       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │ Which editor/IDE Enter opens worktrees in; custom runs Editor command            │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
