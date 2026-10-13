@@ -149,7 +149,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 | `11-setup-wizard.spec.ts` | The seeded dir skips the wizard; a fresh dir (7682) walks Editor → hooks install → add `/work` → Integrations → dashboard |
 | `12-themes.spec.ts` | The Theme row cycles built-ins (latte, amber-phosphor and dos screenshots); the theme builder picks from the palette, takes a typed hex, renames, saves as `e2e-theme`, and the theme persists across a restart (then restored to `ansi`) |
 | `13-update-available.spec.ts` | `⬆ v9.9.9 available` on the `─Worktrees` top border (from the seeded cache); Settings opens with the `⬆ am v9.9.9 is available` + `Update: …` banner; turning "Check for updates" off hides it at once, then restored |
-| `14-gemini.spec.ts` | Gemini standalone session seeded through `am hook-event --agent gemini` (native events, ends on a `ToolPermission` notification → waiting) shows `✦ gemini`; the Claude standalone row stays unbadged; `?` explains the badge; Settings → Agent plugins lists both built-ins and toggles Gemini off/on |
+| `15-gemini.spec.ts` | Gemini standalone session seeded through `am hook-event --agent gemini` (native events, ends on a `ToolPermission` notification → waiting) shows `✦ gemini`; the Claude standalone row stays unbadged; `?` explains the badge; Settings → Agent plugins lists both built-ins and toggles Gemini off/on |
 
 **Writing a spec:**
 ```typescript
