@@ -791,6 +791,18 @@ fn update_label(app: &App, width: u16) -> Option<String> {
     [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room)
 }
 
+/// Bottom-right ` today 4.1M ` (` today (visible) 4.1M ` for the visible
+/// scope), shortened or dropped when it doesn't fit beside ` N of M `.
+fn tokens_label(app: &App, width: u16) -> Option<String> {
+    let tokens = app.snapshot.today_tokens.filter(|_| app.settings.show_daily_tokens)?;
+    let n = context::short_tokens(tokens);
+    let pos = if app.flat.is_empty() { 0 } else { format!(" {} of {} ", app.selected + 1, app.flat.len()).width() };
+    // Two corners, one border cell on the left and one between the titles.
+    let room = (width as usize).saturating_sub(2 + 1 + pos + 1);
+    let long = app.settings.daily_tokens_visible_only().then(|| format!(" today (visible) {n} "));
+    long.into_iter().chain([format!(" today {n} ")]).find(|l| l.width() <= room)
+}
+
 struct Columns {
     ticket: usize,
     pr: usize,
@@ -810,6 +822,9 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         block = block.title_bottom(
             Line::styled(format!(" {} of {} ", app.selected + 1, app.flat.len()), theme.faint()).alignment(Alignment::Right),
         );
+    }
+    if let Some(label) = tokens_label(app, area.width) {
+        block = block.title_bottom(Line::styled(label, theme.faint()).alignment(Alignment::Right));
     }
     if let Some(label) = update_label(app, area.width) {
         block = block.title(Line::styled(label, theme.bold(theme.green)).alignment(Alignment::Right));
@@ -1618,6 +1633,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         Span::styled("✦ gemini", theme.fg(theme.blue)),
         Span::styled(" session from another agent plugin, by id (no badge: Claude Code)", theme.faint()),
     ]));
+    lines.push(Line::from(vec![
+        Span::styled("today 4.1M", theme.faint()),
+        Span::styled(" tokens used today incl. cache (s → token usage: all / visible rows)", theme.faint()),
+    ]));
     let w = 80.min(area.width.saturating_sub(4));
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
@@ -1782,6 +1801,7 @@ mod tests {
             ],
             health: Default::default(),
             stack: Default::default(),
+            today_tokens: None,
         };
         let settings = Settings { worktree_sort: vec![], ..Settings::default() };
         let mut app = App::new(settings);
@@ -1838,6 +1858,32 @@ mod tests {
         assert_eq!(update_label(&app, 20), None);
         app.settings.check_for_updates = false;
         assert_eq!(update_label(&app, 120), None);
+    }
+
+    #[test]
+    fn tokens_label_names_the_scope_then_shrinks_and_hides() {
+        let mut app = fixture();
+        assert_eq!(tokens_label(&app, 120), None, "no total yet");
+        let mut snap = app.snapshot.clone();
+        snap.today_tokens = Some(4_120_000);
+        app.apply(snap);
+        assert_eq!(tokens_label(&app, 120).as_deref(), Some(" today 4.1M "));
+        app.settings.daily_tokens_scope = "visible".into();
+        assert_eq!(tokens_label(&app, 120).as_deref(), Some(" today (visible) 4.1M "));
+        // ` 1 of 3 ` (8) + borders (4) + ` today 4.1M ` (12) = 24.
+        assert_eq!(tokens_label(&app, 30).as_deref(), Some(" today 4.1M "));
+        assert_eq!(tokens_label(&app, 23), None);
+        app.settings.show_daily_tokens = false;
+        assert_eq!(tokens_label(&app, 120), None);
+    }
+
+    #[test]
+    fn dashboard_shows_todays_tokens_bottom_right() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.today_tokens = Some(182_400_000);
+        app.apply(snap);
+        insta::assert_snapshot!(render(&app, 120, 16));
     }
 
     #[test]
