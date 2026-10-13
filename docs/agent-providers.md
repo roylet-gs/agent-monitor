@@ -192,13 +192,16 @@ The fields are:
 - **`id`**: `[a-z0-9-]{1,32}`. It can't reuse a built-in or another plugin's id.
 - **`program`**: the executable to resume or start.
 - **`configDir`**: the plugin's hooks are installed by default only when this directory exists.
-- **`hooks`**: the CLI must support command hooks in Claude Code's `{"hooks": {"<Event>": [{"matcher", "hooks": [{"type": "command", …}]}]}}` shape, with a JSON payload on stdin.
+- **`hooks`**: the CLI must run a command per hook event with a JSON payload on stdin, configured in a JSON file.
   - `settingsPath` is the file am writes the hooks into.
-  - `projectDirVar` is the env var the CLI sets to the session directory.
+  - `projectDirVar` (optional) is the env var the CLI sets to the session directory. Without it the command passes `--worktree ""` and am-hook uses the payload's `cwd`.
+  - `layout`: `nested` (default) writes Claude Code's `{"matcher", "hooks": [{"type": "command", "command", "timeout"}]}` per event; `flat` writes one `{"command", "timeout"}` object per entry (Cursor, Copilot).
+  - `commandKey` / `timeoutKey` (default `command` / `timeout`) rename those keys; `timeoutUnit` is `ms` (default) or `s`; `entry` adds keys to every hook object (`{"type": "command"}`).
+  - `file` adds top-level keys when they're missing, e.g. `{"version": 1}`. `hooksKey` (default `hooks`) is the key holding the events; `""` means the file itself is keyed by event (Factory Droid).
   - `matcher`, `timeoutMs` and `name` are optional.
 - **`events`**: maps native event names to canonical ones (`SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `StopFailure`, `Notification`, `PermissionRequest`, `SubagentStart`, `SubagentStop`). Hooks are installed for exactly these keys, in this order.
 - **`tools`**: maps native tool names to Claude's (`Bash`, `Read`, `Edit`, `AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`, `Agent`…), so the waiting and planning rules apply.
-- **`fields`**: renames canonical payload keys (`session_id`, `transcript_path`, `cwd`, `tool_name`, `tool_input`, `last_assistant_message`, `message`, `notification_type`, `stop_hook_active`, `permission_mode`, `agent_id`, `agent_type`…) to the CLI's own. Keys you don't list are read as-is. A CLI that sends `agent_id` and `agent_type` gets subagent tracking for free.
+- **`fields`**: renames canonical payload keys (`session_id`, `transcript_path`, `cwd`, `tool_name`, `tool_input`, `last_assistant_message`, `message`, `notification_type`, `stop_hook_active`, `permission_mode`, `agent_id`, `agent_type`…) to the CLI's own. Keys you don't list are read as-is. A value starting with `/` is a JSON pointer into the payload (`"cwd": "/workspace_roots/0"`). A CLI that sends `agent_id` and `agent_type` gets subagent tracking for free.
 - **`notificationTypes`**: maps native notification types to canonical ones. Map whatever means "the user is being asked" to `permission_prompt`.
 - **`resume`**: `{id}` is replaced by the session id. `continue` holds the arguments for "latest session".
 - **`sessions.command`** (optional): prints a JSON array of `{"id", "cwd", "modified"}` (modified is unix seconds) for `{root}`. It is killed after 3 s. Without it, am resumes with `resume.continue`.
@@ -209,7 +212,34 @@ Invalid files are skipped and reported on the plugin page and in `am doctor`. Th
 
 ### As a built-in (when a manifest isn't enough)
 
-1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. Start from a manifest, as `gemini.rs` does, if most of the agent is declarative.
+1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. If most of the agent is declarative, make it an `Embedded` (`embedded.rs`): a compiled-in manifest plus optional Rust session discovery, as `gemini.rs` and `codex.rs` do. Without discovery, resume offers the sessions am's hooks recorded.
 2. Add one entry to `harness::BUILTIN`. Nothing else in am changes.
 3. Give it unit tests next to the module: normalisation, a full turn through `map_event_to_status`, the hook entry shape, and session discovery against a temp dir. Add an `am-hook` integration test that replays native payloads.
 4. Update this file, `README.md`, `CLAUDE.md` and `STATUS_MAPPING.md`.
+
+## Built-in harnesses and the survey behind them (Oct 2026)
+
+Most coding-agent CLIs now copy Claude Code's hook design: a command per event, JSON on stdin, Claude-style event names and `session_id`/`cwd`/`tool_name` keys. That's why the canonical event stays Claude's vocabulary, and why each built-in below is a manifest (plus Rust discovery for Codex). The details come from each tool's official hook docs.
+
+| Harness | Hook file and shape | Payload notes | Waiting | Resume |
+|---|---|---|---|---|
+| Codex CLI (`codex`) | `~/.codex/hooks.json`, nested, timeout in s | Claude keys; shell = `Bash`, edits = `apply_patch`; no project-dir variable (payload `cwd`); `Interrupt` ends a turn | `PermissionRequest` | `codex resume <id>` / `--last`; rollouts `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| Qwen Code (`qwen`) | `~/.qwen/settings.json`, nested, s, `$QWEN_PROJECT_DIR` | Claude keys, runtime tool ids (`run_shell_command`…), subagent events | `Notification` `permission_prompt`, `PermissionRequest` | `qwen --resume <id>` / `--continue` |
+| Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
+| GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
+| Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+
+Not built in, and why:
+
+- **JetBrains Junie CLI**: Claude-shaped hooks in `~/.junie/config.json`, but they're Early Access, there's no project-dir variable, and `Stop` carries no `session_id` or `cwd`, so the end of a turn can't be attributed.
+- **Augment Auggie CLI**: hook `command` must be the path of a `.sh` script (no arguments), and payloads use `conversation_id`/`workspace_roots`. It would need a generated wrapper script per install.
+- **Kiro CLI**: two hook formats (per-agent JSON in 2.x, `.kiro/hooks/*.json` in v3) and no waiting signal.
+- **Goose**: hooks exist only inside plugin directories, and the payload names the event `event`.
+- **Windsurf / Devin Desktop**: no session, stop or permission events; the only turn end is the async `post_cascade_response`.
+- **Crush**: `PreToolUse` only.
+- **Cline**: one executable file per hook, and current docs point to in-process SDK plugins.
+- **OpenCode, Amp**: JS/TS plugins only; supporting them means shipping a small bridge plugin that runs `am-hook`.
+- **Aider**: no hooks, only a `--notifications-command` with no payload.
+- **Mistral Vibe**: TOML config with tool and `post_agent` events only.
+
+Any of these can still be added as a manifest where its hooks fit the format above.

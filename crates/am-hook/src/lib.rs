@@ -1,6 +1,6 @@
 //! Hook-event handling shared by the `am-hook` binary and `am hook-event`.
 //!
-//! The agent CLI (Claude Code, Gemini CLI…) runs this on every hook event (at
+//! The agent CLI (Claude Code, Codex, Gemini CLI, Cursor…) runs this on every hook event (at
 //! least twice per tool call), so it must start fast: no runtime, no TUI code,
 //! one SQLite connection. Usage mirrors the TS command so installed hooks can
 //! switch over unchanged:
@@ -84,6 +84,12 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) 
     let kind = HarnessKind::from_db(agent);
     if agent.is_some_and(|a| HarnessKind::get(a).is_none()) {
         warn!(MODULE, "Unknown --agent {agent:?}; treating the event as Claude's");
+    }
+    // Cursor runs Claude Code's hooks too (third-party hooks, on by default);
+    // its own hooks (`--agent cursor`) report those sessions.
+    if kind == HarnessKind::CLAUDE && payload.get("cursor_version").is_some() {
+        debug!(MODULE, "Ignoring a Claude hook fired by Cursor (event {event:?})");
+        return;
     }
     let event = kind.provider().normalize(&payload, event);
     maybe_capture(kind, &event, &raw);

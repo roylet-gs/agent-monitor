@@ -30,7 +30,7 @@ pub fn fail_stdout(msg: &str) -> ! {
     name = "am",
     bin_name = "am",
     version,
-    about = "Agent Monitor — TUI dashboard for git worktrees & coding agents (Claude Code, Gemini CLI)"
+    about = "Agent Monitor — TUI dashboard for git worktrees & coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, …)"
 )]
 struct Cli {
     /// Launch with log panel open
@@ -68,7 +68,7 @@ enum Cmd {
     /// View and modify settings
     #[command(subcommand)]
     Settings(SettingsCmd),
-    /// Manage agent hooks (Claude Code, Gemini CLI)
+    /// Manage agent hooks (Claude Code, Codex, Gemini CLI, Cursor, …)
     #[command(subcommand)]
     Hooks(HooksCmd),
     /// Install agent hooks (alias for: hooks install)
@@ -113,7 +113,7 @@ enum Cmd {
         /// Hook is managed by Claude Code (accepted for compatibility)
         #[arg(long)]
         managed: bool,
-        /// Agent CLI that sent the event (claude, gemini); default claude
+        /// Harness that sent the event (claude, gemini, codex, qwen, droid, copilot, cursor, or a plugin id); default claude
         #[arg(short, long, value_name = "id")]
         agent: Option<String>,
     },
@@ -258,7 +258,7 @@ enum HooksCmd {
 
 #[derive(Args)]
 struct AgentOpt {
-    /// Only this agent (claude, gemini); repeatable
+    /// Only this agent (claude, gemini, codex, qwen, droid, copilot, cursor, …); repeatable
     #[arg(short, long = "agent", value_name = "id")]
     agents: Vec<String>,
 }

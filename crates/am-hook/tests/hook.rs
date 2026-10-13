@@ -68,6 +68,28 @@ impl Env {
         assert!(out.stdout.is_empty() && out.stderr.is_empty(), "hook printed: {out:?}");
     }
 
+    /// A hook exactly as a harness sends it: no added keys, any `--worktree`.
+    fn send_raw(&self, agent: &str, event: &str, worktree: &str, payload: Value) {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_am-hook"))
+            .args(["hook-event", "--agent", agent, "--worktree", worktree, "--event", event])
+            .env("AM_DATA_DIR", self.data.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success() && out.stdout.is_empty() && out.stderr.is_empty(), "hook printed: {out:?}");
+    }
+
+    /// Status rows written so far (0 before the binary first migrated the DB).
+    fn status_rows(&self) -> i64 {
+        let db = self.db();
+        let exists: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name = 'agent_status'", [], |r| r.get(0)).unwrap();
+        if exists == 0 { 0 } else { db.query_row("SELECT COUNT(*) FROM agent_status", [], |r| r.get(0)).unwrap() }
+    }
+
     fn agent(&self) -> Option<String> {
         self.db().query_row("SELECT agent FROM agent_status WHERE worktree_id = 'w'", [], |r| r.get(0)).unwrap()
     }
@@ -222,6 +244,46 @@ fn a_manifest_plugin_is_tracked_with_no_code() {
         .query_row("SELECT last_response, session_id FROM agent_status WHERE worktree_id = 'w'", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
     assert_eq!((last.as_str(), session.as_str()), ("All set.", "m-1"));
+}
+
+#[test]
+fn a_codex_session_is_found_from_the_payload_cwd() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Codex has no project-dir variable: the hook passes `--worktree ""`.
+    let codex = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "t-1", "cwd": cwd, "model": "gpt-5" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("codex", event, "", p);
+    };
+    codex("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("codex")));
+    codex("PermissionRequest", json!({ "tool_name": "Bash", "tool_input": { "command": "rm -rf target" } }));
+    assert_eq!(env.status().0, "waiting");
+    codex("PostToolUse", json!({ "tool_name": "Bash" }));
+    codex("Stop", json!({ "last_assistant_message": "Done.", "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("t-1").0, "done");
+}
+
+#[test]
+fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
+    let env = Env::new();
+    let root = env.root();
+    let payload = |event: &str| {
+        json!({ "hook_event_name": event, "conversation_id": "conv-1", "generation_id": "g1",
+                "cursor_version": "2.4.0", "workspace_roots": [root], "model": "gpt-5" })
+    };
+    // Cursor firing the user's Claude Code hooks: not a Claude session.
+    env.send_raw("claude", "UserPromptSubmit", &root, payload("UserPromptSubmit"));
+    assert_eq!(env.status_rows(), 0);
+
+    env.send_raw("cursor", "beforeSubmitPrompt", &root, payload("beforeSubmitPrompt"));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("cursor")));
+    env.send_raw("cursor", "stop", &root, payload("stop"));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("conv-1").0, "done");
 }
 
 #[test]

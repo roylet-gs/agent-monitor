@@ -149,6 +149,16 @@ cat > "$HOME/.claude/projects/-home-user-gemini-project/gem-1.jsonl" <<'JSONL'
 {"type":"assistant","isSidechain":false,"cwd":"/home/user/gemini-project","sessionId":"gem-1","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
 JSONL
 
+# --- Codex CLI session: Claude-shaped events through `--agent codex` --------
+# Codex has no project-dir variable, so its hooks pass `--worktree ""` and
+# am-hook finds the directory from the payload's cwd. Ends on a permission
+# request → waiting (16-gemini.spec.ts).
+mkdir -p /home/user/codex-project
+codex_hook() { am hook-event --agent codex --worktree "" --event "$1" || true; }
+echo '{"hook_event_name":"SessionStart","session_id":"cdx-1","cwd":"/home/user/codex-project","source":"startup","model":"gpt-5"}' | codex_hook SessionStart
+echo '{"hook_event_name":"UserPromptSubmit","session_id":"cdx-1","cwd":"/home/user/codex-project","prompt":"bump deps","model":"gpt-5"}' | codex_hook UserPromptSubmit
+echo '{"hook_event_name":"PermissionRequest","session_id":"cdx-1","cwd":"/home/user/codex-project","tool_name":"Bash","tool_input":{"command":"cargo update"},"model":"gpt-5"}' | codex_hook PermissionRequest
+
 # 7682: a fresh, empty data dir on every connection → first-run setup wizard.
 cat > /usr/local/bin/am-tui-fresh <<'SH'
 #!/bin/bash

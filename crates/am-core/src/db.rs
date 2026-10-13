@@ -587,6 +587,21 @@ pub fn sessions_at(conn: &Connection, owner: &Owner) -> rusqlite::Result<Vec<Ses
     rows.collect()
 }
 
+/// Every session of `agent` the hooks recorded, with the directory it ran in
+/// (its worktree's path, else the standalone path) and when it last reported,
+/// most recent first. Resume discovery for harnesses whose own session store
+/// am can't read.
+pub fn recorded_sessions(conn: &Connection, agent: HarnessKind) -> rusqlite::Result<Vec<(String, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT s.session_id, COALESCE(w.path, s.standalone_path), s.updated_at
+         FROM sessions s LEFT JOIN worktrees w ON w.id = s.worktree_id
+         WHERE s.agent = ?1 AND COALESCE(w.path, s.standalone_path) IS NOT NULL
+         ORDER BY s.updated_at DESC, s.started_at DESC",
+    )?;
+    let rows = stmt.query_map(params![agent.id()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    rows.collect()
+}
+
 /// Open sessions of every tracked worktree for the dashboard: worktree id →
 /// sessions, oldest first (so rows keep their order as sessions update).
 pub fn open_worktree_sessions(conn: &Connection) -> rusqlite::Result<std::collections::HashMap<String, Vec<SessionRow>>> {

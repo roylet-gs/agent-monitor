@@ -16,7 +16,13 @@
 //! setting. See `docs/agent-providers.md`.
 
 pub mod claude;
+pub mod codex;
+pub mod copilot;
+pub mod cursor;
+pub mod droid;
+pub mod embedded;
 pub mod gemini;
+pub mod qwen;
 pub mod manifest;
 
 use std::path::{Path, PathBuf};
@@ -75,7 +81,19 @@ pub trait Harness: Sync + Send {
     /// Native event names am registers a hook for.
     fn hook_events(&self) -> Vec<String>;
 
-    /// One matcher entry for `hooks.<event>` in the settings file.
+    /// The key holding `event → entries` in the settings file; empty when the
+    /// file is that map itself.
+    fn hooks_key(&self) -> &str {
+        "hooks"
+    }
+
+    /// Top-level keys the hook file needs besides `hooks` (e.g. Cursor's
+    /// `"version": 1`), added when missing.
+    fn hook_file_defaults(&self) -> serde_json::Map<String, Value> {
+        serde_json::Map::new()
+    }
+
+    /// One entry for `hooks.<event>` in the settings file.
     /// `invocation` is the program part (`"/path/am-hook" hook-event`).
     fn hook_entry(&self, event: &str, invocation: &str, native: bool) -> Value;
 
@@ -148,7 +166,12 @@ pub struct HarnessKind(&'static dyn Harness);
 
 impl HarnessKind {
     pub const CLAUDE: HarnessKind = HarnessKind(&claude::Claude);
-    pub const GEMINI: HarnessKind = HarnessKind(&gemini::Gemini);
+    pub const GEMINI: HarnessKind = HarnessKind(&gemini::GEMINI);
+    pub const CODEX: HarnessKind = HarnessKind(&codex::CODEX);
+    pub const QWEN: HarnessKind = HarnessKind(&qwen::QWEN);
+    pub const DROID: HarnessKind = HarnessKind(&droid::DROID);
+    pub const COPILOT: HarnessKind = HarnessKind(&copilot::COPILOT);
+    pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -203,7 +226,15 @@ impl std::fmt::Debug for HarnessKind {
 
 /// Compiled-in providers, in display order. To add one: a module here and
 /// one entry in this list.
-pub const BUILTIN: [HarnessKind; 2] = [HarnessKind::CLAUDE, HarnessKind::GEMINI];
+pub const BUILTIN: [HarnessKind; 7] = [
+    HarnessKind::CLAUDE,
+    HarnessKind::GEMINI,
+    HarnessKind::CODEX,
+    HarnessKind::QWEN,
+    HarnessKind::DROID,
+    HarnessKind::COPILOT,
+    HarnessKind::CURSOR,
+];
 
 struct Registry {
     agents: Vec<HarnessKind>,

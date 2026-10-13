@@ -255,6 +255,8 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
         Line::styled(" Harness plugins — space on/off · i install hooks · d default · esc back", theme.faint()),
         Line::raw(""),
     ];
+    // Wide enough for the longest name ("GitHub Copilot CLI") plus a gap.
+    let name_w = pl.rows.iter().map(|r| r.name.chars().count() + 1).max().unwrap_or(0).clamp(14, 24);
     for (i, r) in pl.rows.iter().enumerate() {
         let sel = i == pl.cursor;
         let hooks = match (r.enabled, r.hooks, r.present) {
@@ -267,7 +269,7 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
         let line = Line::from(vec![
             Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
             Span::styled(if r.enabled { " [x] " } else { " [ ] " }, theme.fg(if r.enabled { theme.green } else { theme.faint })),
-            Span::styled(format!("{:<14}", truncate(&r.name, 14)), if r.enabled { theme.fg(theme.text) } else { theme.faint() }),
+            Span::styled(format!("{:<name_w$}", truncate(&r.name, name_w - 1)), if r.enabled { theme.fg(theme.text) } else { theme.faint() }),
             Span::styled(format!("{:<12}", truncate(&r.source, 12)), theme.faint()),
             hooks,
             Span::styled(format!("{default:<10}"), theme.fg(theme.accent)),

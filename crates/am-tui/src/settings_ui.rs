@@ -150,9 +150,9 @@ impl SettingsEditor {
             Kind::Tokens { .. } => v.and_then(Value::as_u64).map(context::short_tokens).unwrap_or_else(|| "—".into()),
             Kind::Plugins => {
                 let s = self.settings();
-                let on: Vec<&str> = am_core::harness::enabled(&s).iter().map(|k| k.id()).collect();
-                let on = if on.is_empty() { "none".to_string() } else { on.join(", ") };
-                format!("{on} · default {}", s.default_agent().id())
+                // A count: there are too many built-ins to name; the page lists them.
+                let on = am_core::harness::enabled(&s).len();
+                format!("{on} of {} on · default {}", am_core::harness::all().len(), s.default_agent().id())
             }
             Kind::Sort => {
                 let crits: Vec<SortCriterion> = v.cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
@@ -715,10 +715,13 @@ mod tests {
 
         let mut ed = SettingsEditor::new(&Settings::parse(r#"{"defaultAgent":"gemini"}"#));
         goto(&mut ed, "agentPlugins");
-        assert_eq!(ed.display(ed.field()), "claude, gemini · default gemini");
+        assert_eq!(ed.display(ed.field()), "7 of 7 on · default gemini");
         ed.on_key(Key::Enter);
         let rows = &ed.plugins.as_ref().unwrap().rows;
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["claude", "gemini"]);
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["claude", "gemini", "codex", "qwen", "droid", "copilot", "cursor"]
+        );
         assert!(rows.iter().all(|r| r.enabled && !r.hooks));
 
         // Install Gemini's hooks, then switch it off: hooks go, and so does the default.

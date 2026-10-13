@@ -20,77 +20,24 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 use std::time::SystemTime;
 
 use serde_json::Value;
 
-use super::manifest::{Manifest, expand_home};
-use super::{Harness, HarnessKind, home_join, is_within};
+use super::embedded::Embedded;
+use super::manifest::Manifest;
+use super::{HarnessKind, home_join, is_within};
 use crate::launch::Session;
 use crate::status::HookEvent;
 
-static MANIFEST: LazyLock<Manifest> =
-    LazyLock::new(|| Manifest::parse(include_str!("gemini.json")).expect("built-in gemini.json is valid"));
+pub static GEMINI: Embedded = Embedded::new(|| Manifest::builtin(include_str!("gemini.json")), Some(discover));
 
-pub struct Gemini;
-
-impl Harness for Gemini {
-    fn id(&self) -> &str {
-        &MANIFEST.id
-    }
-
-    fn name(&self) -> &str {
-        &MANIFEST.name
-    }
-
-    fn short_name(&self) -> &str {
-        MANIFEST.short_name.as_deref().unwrap_or(&MANIFEST.name)
-    }
-
-    fn program(&self) -> &str {
-        &MANIFEST.program
-    }
-
-    fn notes(&self) -> Option<&str> {
-        MANIFEST.notes.as_deref()
-    }
-
-    fn is_present(&self) -> bool {
-        gemini_dir().is_dir()
-    }
-
-    fn settings_path(&self) -> PathBuf {
-        expand_home(&MANIFEST.hooks.settings_path)
-    }
-
-    fn hook_events(&self) -> Vec<String> {
-        MANIFEST.hook_events()
-    }
-
-    fn hook_entry(&self, event: &str, invocation: &str, _native: bool) -> Value {
-        MANIFEST.hook_entry(event, invocation)
-    }
-
-    fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent {
-        MANIFEST.normalize(payload, event_override)
-    }
-
-    fn discover_sessions(&self, root: &Path) -> Vec<Session> {
-        discover_sessions_in(&gemini_dir(), root)
-    }
-
-    fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String> {
-        MANIFEST.resume_args(session_id, continue_latest)
-    }
-
-    fn matches_process(&self, name: &str, argv: &[String]) -> bool {
-        MANIFEST.process.matches(name, argv)
-    }
+fn discover(root: &Path) -> Vec<Session> {
+    discover_sessions_in(&gemini_dir(), root)
 }
 
 pub fn normalize(v: &Value, event_override: Option<&str>) -> HookEvent {
-    MANIFEST.normalize(v, event_override)
+    GEMINI.manifest().normalize(v, event_override)
 }
 
 fn gemini_dir() -> PathBuf {
@@ -147,6 +94,7 @@ fn main_session_id(file: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::Harness;
     use crate::status::{Status, map_event_to_status};
     use serde_json::json;
 
@@ -204,7 +152,7 @@ mod tests {
 
     #[test]
     fn hook_entry_shape() {
-        let e = Gemini.hook_entry("BeforeTool", "\"/bin/am-hook\" hook-event", true);
+        let e = GEMINI.hook_entry("BeforeTool", "\"/bin/am-hook\" hook-event", true);
         assert_eq!(e["matcher"], "*");
         assert_eq!(e["hooks"][0]["name"], "agent-monitor");
         assert_eq!(e["hooks"][0]["timeout"], 5_000);
@@ -215,9 +163,9 @@ mod tests {
 
     #[test]
     fn resume_args() {
-        assert_eq!(Gemini.resume_args(Some("u-1"), false), ["--resume", "u-1"]);
-        assert_eq!(Gemini.resume_args(None, true), ["--resume", "latest"]);
-        assert!(Gemini.resume_args(None, false).is_empty());
+        assert_eq!(GEMINI.resume_args(Some("u-1"), false), ["--resume", "u-1"]);
+        assert_eq!(GEMINI.resume_args(None, true), ["--resume", "latest"]);
+        assert!(GEMINI.resume_args(None, false).is_empty());
     }
 
     #[test]

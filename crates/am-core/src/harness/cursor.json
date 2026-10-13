@@ -1,0 +1,27 @@
+{
+  "id": "cursor",
+  "name": "Cursor",
+  "program": "cursor-agent",
+  "configDir": "~/.cursor",
+  "hooks": {
+    "settingsPath": "~/.cursor/hooks.json",
+    "layout": "flat",
+    "file": { "version": 1 },
+    "projectDirVar": "CURSOR_PROJECT_DIR",
+    "timeoutMs": 5000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "sessionStart": "SessionStart",
+    "sessionEnd": "SessionEnd",
+    "beforeSubmitPrompt": "UserPromptSubmit",
+    "preToolUse": "PreToolUse",
+    "postToolUse": "PostToolUse",
+    "stop": "Stop"
+  },
+  "fields": { "session_id": "/conversation_id", "cwd": "/workspace_roots/0" },
+  "tools": { "Shell": "Bash" },
+  "resume": { "session": ["--resume", "{id}"], "continue": ["resume"] },
+  "process": { "names": ["cursor-agent"], "argvContains": ["/cursor-agent/"] },
+  "notes": "Covers the Cursor editor's agent and the cursor-agent CLI (which may skip some hooks); Cursor has no permission hook, so it never shows waiting"
+}

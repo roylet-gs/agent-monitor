@@ -1,5 +1,5 @@
 //! `am agent attach <target>`: resume the worktree's latest agent session
-//! (Claude Code, Gemini CLI…) in this terminal. The TS version attached to am's own managed (`claude -p`)
+//! (Claude Code, Codex, Gemini CLI, Cursor…) in this terminal. The TS version attached to am's own managed (`claude -p`)
 //! session; those are cut, so this resumes whatever session was last active
 //! at the worktree (root or any subdirectory) — the same one the TUI's `c` uses.
 
