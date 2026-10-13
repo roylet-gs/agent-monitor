@@ -1,7 +1,7 @@
 <h1 align="center">Agent Monitor</h1>
 
 <p align="center">
-  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Gemini CLI)</strong>
+  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid)</strong>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code or Gemini CLI) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
+  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code or Factory Droid) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
 </p>
 
 ---
@@ -34,6 +34,7 @@
 - [Themes](#themes)
 - [CLI Reference](#cli-reference)
 - [How It Works](#how-it-works)
+  - [Supported harnesses](#supported-harnesses)
 - [Upgrading from 1.x](#upgrading-from-1x)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
@@ -54,7 +55,7 @@ brew install agent-monitor
 am
 ```
 
-On first launch a setup wizard picks your editor, installs the agent hooks (Claude Code, plus Gemini CLI when `~/.gemini` exists), adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
+On first launch a setup wizard picks your editor, installs the agent hooks (Claude Code, plus every other supported harness whose config dir exists, e.g. `~/.gemini`, `~/.codex`, `~/.cursor`), adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
 
 ---
 
@@ -62,7 +63,7 @@ On first launch a setup wizard picks your editor, installs the agent hooks (Clau
 
 - **macOS or Linux** (arm64 or x64)
 - **git**
-- **Claude Code** and/or **Gemini CLI** (a version with hooks), for agent monitoring
+- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code** or **Factory Droid**
 - **gh CLI** (optional), for PR and CI status ([install](https://cli.github.com)); run `gh auth login` once
 - **Linear API key** (optional), for ticket tracking
 - **Node.js >= 18** only if you install through npm (the package is a small launcher for the native binary)
@@ -128,7 +129,7 @@ Prebuilt tarballs for each platform (with `SHA256SUMS`) are also attached to eve
 Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walks through:
 
 1. **Editor**: Cursor, VS Code or Terminal (what `Enter` opens worktrees in)
-2. **Agent hooks**: installs am's hooks into `~/.claude/settings.json` (and `~/.gemini/settings.json` when Gemini CLI is in use), pointing at the native `am-hook`
+2. **Agent hooks**: installs am's hooks into `~/.claude/settings.json` and into each other harness in use (see [Supported harnesses](#supported-harnesses)), pointing at the native `am-hook`
 3. **Repositories**: type a path (Tab completes) to start tracking a repo and its worktrees
 4. **Integrations**: GitHub PR status (needs `gh`) and an optional Linear API key
 5. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
@@ -139,7 +140,7 @@ Everything can be changed later: `s` for settings, `A` to add a repository, `am 
 
 ## The Dashboard
 
-One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for agent sessions running in directories am doesn't track. Gemini CLI sessions carry a blue `✦ gemini` badge; Claude Code sessions have none. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
+One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for agent sessions running in directories am doesn't track. Sessions from other harnesses carry a blue badge with their id (`✦ gemini`, `✦ codex`, `✦ cursor`…); Claude Code sessions have none. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
 
 Agent status changes show up within about 200 ms of the hook firing.
 
@@ -179,7 +180,7 @@ The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
 
 While am captures the mouse, your terminal's click-and-drag text selection needs a modifier (usually `Shift`, or `Option` in iTerm2/Terminal.app). Turn `mouseEnabled` off to get plain selection back. The change applies immediately.
 
-**Resume last session.** With `resumeLastSession` on (the default), `Enter` also picks up the worktree's most recent agent session (Claude Code or Gemini CLI, whichever ran last; started at the worktree root or any subdirectory) unless one is already open:
+**Resume last session.** With `resumeLastSession` on (the default), `Enter` also picks up the worktree's most recent agent session (of whichever harness ran last; started at the worktree root or any subdirectory) unless one is already open:
 
 - **Terminal** mode: the new terminal runs `claude --resume <id>` directly.
 - **Cursor / VS Code** mode: `claude --resume <id>` is copied to the clipboard, a popup tells you so, and the editor opens. Paste it into the editor's terminal. am doesn't type into the editor's terminal for you, because that needs macOS Accessibility permission and fails silently without it.
@@ -316,8 +317,8 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, or `custom` |
 | `ideCommand` | `""` | The command `ide: "custom"` runs, through `sh`. `{path}` is replaced by the quoted worktree path, or the path is appended when there's no `{path}`. E.g. `idea`, `subl -n`, `open -a Nova {path}` |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
-| `defaultAgent` | `"claude"` | Agent plugin `Enter` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
-| `disabledAgents` | `[]` | Agent plugins switched off: no hooks, no session discovery (Settings → Agent plugins) |
+| `defaultAgent` | `"claude"` | Harness plugin `Enter` starts in a worktree with no session yet (set it in Settings → Harness plugins) |
+| `disabledAgents` | `[]` | Harness plugins switched off: no hooks, no session discovery (Settings → Harness plugins) |
 | `keyBindings` | `{}` | Dashboard keys you changed: action id (`open`, `openPr`, `openLinear`, `openProject`, `newWorktree`, `deleteWorktree`, `addRepo`, `toggleLog`, `settings`, `feedback`, `refresh`, `help`, `quit`, `moveDown`, `moveUp`, `pageDown`, `pageUp`, `top`, `bottom`) → key. Edit it in Settings → Key bindings…; see [Keyboard Shortcuts](#keyboard-shortcuts) |
 | `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
@@ -343,7 +344,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
 | `audioWaitingSound` | `"Glass"` | Sound for waiting |
 | `audioDoneSound` | `"Funk"` | Sound for done |
-| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew upgrade`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
+| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
 | `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |
@@ -482,7 +483,7 @@ Agent CLI hook ──▶ am-hook ─▶ SQLite (WAL) ◀── am-tui collector 
            gh / Linear ─▶ integrations thread (cached in the DB)
 ```
 
-1. **The agent CLI runs `am-hook`** on every hook event (Claude Code: 11 events covering tool use, prompts, stops, notifications, permission requests, session and subagent lifecycle; Gemini CLI: 7, run with `--agent gemini`). It takes about 3 ms, translates the agent's native event into am's canonical one, maps it to a status and writes it to SQLite. It never blocks or fails the agent. See `docs/agent-providers.md`.
+1. **The agent CLI runs `am-hook`** on every hook event (Claude Code: 11 events covering tool use, prompts, stops, notifications, permission requests, session and subagent lifecycle; other harnesses run it with `--agent <id>`, e.g. Gemini CLI's 7 events with `--agent gemini`). It takes about 3 ms, translates the agent's native event into am's canonical one, maps it to a status and writes it to SQLite. It never blocks or fails the agent. See `docs/agent-providers.md`.
 2. **Subagents are tracked individually** by their agent id, so a background subagent's tool calls don't overwrite the parent's status, and the worktree shows **delegating** until the last one finishes.
 3. **The dashboard** watches SQLite's change counter, so a hook write shows up within about 200 ms. Git status is refreshed for worktrees whose agent just acted, plus a full sweep every `pollingIntervalMs`. Terminals, editor windows and dev servers are detected with a native process scan every 2 seconds.
 4. **GitHub and Linear** are fetched on a background thread, batched per repository, and cached in the database so the data survives restarts and outages.
@@ -497,6 +498,22 @@ Everything is local: the database, settings and logs live in `~/.agent-monitor/`
 | `scripts/<repo-id>.sh` | Per-repo startup scripts |
 
 See [CLAUDE.md](./CLAUDE.md) for the full architecture.
+
+### Supported harnesses
+
+A harness is the CLI or editor that runs the agent and fires the hooks. `am hooks install` (or the setup wizard) installs into every one whose config dir exists; `am hooks install --agent <id>` picks one.
+
+| Harness | id | Hooks written to | Waiting shown for | Resume |
+| ------- | -- | ---------------- | ----------------- | ------ |
+| Claude Code | `claude` | `~/.claude/settings.json` | permission prompts, questions | `claude --resume <id>` |
+| Gemini CLI | `gemini` | `~/.gemini/settings.json` | tool permission, questions | `gemini --resume <id>` |
+| Codex CLI | `codex` | `~/.codex/hooks.json` (trust it in `/hooks`) | permission requests | `codex resume <id>` |
+| Qwen Code | `qwen` | `~/.qwen/settings.json` | permission prompts | `qwen --resume <id>` |
+| Factory Droid | `droid` | `~/.factory/hooks.json` (or `settings.json` when that's the one Droid reads) | permission prompts | `droid --resume <id>` |
+| GitHub Copilot CLI | `copilot` | `~/.copilot/hooks/agent-monitor.json` | questions | `copilot --resume <id>` |
+| Cursor (editor agent, `cursor-agent`) | `cursor` | `~/.cursor/hooks.json` | — (no permission hook) | `cursor-agent --resume <id>` |
+
+Any other CLI whose hooks run a command with a JSON payload on stdin can be added without code as a JSON manifest in `~/.agent-monitor/agents/` (`docs/agent-providers.md`). Not supported yet: OpenCode and Amp (plugins only, no command hooks), Aider (no hooks), Windsurf and Crush (no session or turn-end events), JetBrains Junie (its `Stop` hook carries no session or directory) and Augment Auggie (hook commands must be bare script paths).
 
 ---
 
@@ -541,8 +558,10 @@ You can also press `w` in the dashboard to see the log live.
 
 - `am hooks status` should report the hooks as installed; if not, run `am hooks install`.
 - After upgrading from 1.x, run `am hooks install` once so the hooks use `am-hook`.
-- **Agent plugins:** `s` → **Agent plugins…** lists every agent plugin (Claude Code, Gemini CLI, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
-- **Training mode:** an agent CLI am doesn't support yet can write its own plugin. On the Agent plugins page press `T` (or pick **+ Train a new harness plugin…**), type the command that starts it (e.g. `cursor-agent`), and am opens it in a new terminal with a prompt to paste. The agent studies its own hooks (am records every event it fires while the plugin is a **draft**), writes a manifest, and checks it with `am harness validate|add|captures|test`. Drafts show `✎ draft` on their rows; `e` retrains one with what am collected while it was used (`am harness issues <id>`), `p` publishes it and `x` removes it. Without the TUI: `am harness train --command <cmd>`.
+- **Harness plugins:** `s` → **Harness plugins…** lists every harness plugin (the built-ins below, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
+- **Codex CLI:** Codex runs a user hook only after you trust it in `/hooks`, and again after `am hooks install` rewrites it.
+- **Cursor:** Cursor also runs Claude Code's hooks by default; am ignores those for Cursor sessions and tracks them through Cursor's own `~/.cursor/hooks.json`. Cursor has no permission hook, so its sessions never show `waiting`, and the `cursor-agent` CLI may not fire every hook the editor does.
+- **Copilot CLI / Factory Droid:** both read hooks at startup, so restart running sessions after installing. Copilot's permission events aren't available in the hook format am uses, so only questions show as `waiting`.
 - **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.
 - Check `am logs --module hook-event` while the agent is working. No lines means the hooks aren't firing; for more detail, `am settings set logLevel debug`.
 - A session in a directory am doesn't track shows up under **Other sessions**. Add the repository with `A` or `am repo add <path>`.

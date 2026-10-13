@@ -1,4 +1,4 @@
-//! Agent plugins: everything specific to one coding-agent CLI.
+//! Harness plugins: everything specific to one coding-agent CLI.
 //!
 //! am tracks agents through their CLI's hooks. Each provider knows how to
 //! - install its hook entries into the CLI's own settings file,
@@ -15,15 +15,15 @@
 //! ([`manifest`]). Plugins can be disabled with the `disabledAgents`
 //! setting. See `docs/agent-providers.md`.
 
-pub mod capture;
 pub mod claude;
+pub mod codex;
+pub mod copilot;
+pub mod cursor;
+pub mod droid;
+pub mod embedded;
 pub mod gemini;
-pub mod issues;
-pub mod lifecycle;
+pub mod qwen;
 pub mod manifest;
-pub mod replay;
-pub mod training;
-pub mod validate;
 
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -67,20 +67,6 @@ pub trait Harness: Sync + Send {
         None
     }
 
-    /// The declarative manifest behind this harness, if it has one (manifest
-    /// plugins, and built-ins written as one such as Gemini).
-    fn manifest(&self) -> Option<&manifest::Manifest> {
-        None
-    }
-
-    /// `draft` while a plugin is being trained. Built-ins are published.
-    fn status(&self) -> manifest::PluginStatus {
-        match (self.origin(), self.manifest()) {
-            (Origin::Plugin(_), Some(m)) => m.status,
-            _ => manifest::PluginStatus::Published,
-        }
-    }
-
     /// Whether this CLI has been used on this machine (its config dir exists;
     /// a bare `$PATH` hit isn't enough, as the CLI writes the dir on first
     /// run). Decides what `am hooks install` and the setup wizard install by
@@ -95,7 +81,19 @@ pub trait Harness: Sync + Send {
     /// Native event names am registers a hook for.
     fn hook_events(&self) -> Vec<String>;
 
-    /// One matcher entry for `hooks.<event>` in the settings file.
+    /// The key holding `event → entries` in the settings file; empty when the
+    /// file is that map itself.
+    fn hooks_key(&self) -> &str {
+        "hooks"
+    }
+
+    /// Top-level keys the hook file needs besides `hooks` (e.g. Cursor's
+    /// `"version": 1`), added when missing.
+    fn hook_file_defaults(&self) -> serde_json::Map<String, Value> {
+        serde_json::Map::new()
+    }
+
+    /// One entry for `hooks.<event>` in the settings file.
     /// `invocation` is the program part (`"/path/am-hook" hook-event`).
     fn hook_entry(&self, event: &str, invocation: &str, native: bool) -> Value;
 
@@ -168,7 +166,12 @@ pub struct HarnessKind(&'static dyn Harness);
 
 impl HarnessKind {
     pub const CLAUDE: HarnessKind = HarnessKind(&claude::Claude);
-    pub const GEMINI: HarnessKind = HarnessKind(&gemini::Gemini);
+    pub const GEMINI: HarnessKind = HarnessKind(&gemini::GEMINI);
+    pub const CODEX: HarnessKind = HarnessKind(&codex::CODEX);
+    pub const QWEN: HarnessKind = HarnessKind(&qwen::QWEN);
+    pub const DROID: HarnessKind = HarnessKind(&droid::DROID);
+    pub const COPILOT: HarnessKind = HarnessKind(&copilot::COPILOT);
+    pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -180,15 +183,6 @@ impl HarnessKind {
 
     pub fn is_builtin(self) -> bool {
         self.0.origin() == Origin::BuiltIn
-    }
-
-    /// A handle on a provider that isn't registered (tests, previews). Leaks it.
-    pub fn leak(provider: Box<dyn Harness>) -> HarnessKind {
-        HarnessKind(Box::leak(provider))
-    }
-
-    pub fn is_draft(self) -> bool {
-        self.0.status() == manifest::PluginStatus::Draft
     }
 
     /// Look up a registered agent. Built-ins are checked first so the hook
@@ -232,7 +226,15 @@ impl std::fmt::Debug for HarnessKind {
 
 /// Compiled-in providers, in display order. To add one: a module here and
 /// one entry in this list.
-pub const BUILTIN: [HarnessKind; 2] = [HarnessKind::CLAUDE, HarnessKind::GEMINI];
+pub const BUILTIN: [HarnessKind; 7] = [
+    HarnessKind::CLAUDE,
+    HarnessKind::GEMINI,
+    HarnessKind::CODEX,
+    HarnessKind::QWEN,
+    HarnessKind::DROID,
+    HarnessKind::COPILOT,
+    HarnessKind::CURSOR,
+];
 
 struct Registry {
     agents: Vec<HarnessKind>,
@@ -246,7 +248,7 @@ fn load_registry() -> &'static Registry {
     let (plugins, errors) = manifest::load_dir(&plugins_dir(), &taken);
     let mut agents = BUILTIN.to_vec();
     for p in plugins {
-        crate::debug!("agents", "Loaded agent plugin {} from {}", p.manifest.id, p.source.display());
+        crate::debug!("agents", "Loaded harness plugin {} from {}", p.manifest.id, p.source.display());
         // Lives for the whole process, like the built-in unit structs.
         agents.push(HarnessKind(Box::leak(Box::new(p))));
     }

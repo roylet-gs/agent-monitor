@@ -19,6 +19,6 @@ expression: "render(&app, 100, 20)"
 │         │                                                                              │         │
 │         │● executing  ◇ planning  ◐ waiting  ◑ delegating  ✓ done  ○ idle              │         │
 │         │PR approved=CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting        │         │
-│         │✦ gemini session from another agent plugin, by id (no badge: Claude Code)     │         │
+│         │✦ gemini session from another harness plugin, by id (no badge: Claude Code)   │         │
 ╰─────────│today 4.1M tokens used today incl. cache (s → token usage: all / visible rows)│─ 1 of 3 ╯
  ⏎ open  │╰──────────────────────────────────────────────────────────────────────────────╯q quit

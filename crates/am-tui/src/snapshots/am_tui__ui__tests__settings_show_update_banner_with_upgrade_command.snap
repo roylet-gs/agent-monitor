@@ -5,13 +5,13 @@ expression: "render(&app, 100, 24)"
 ╭─Worktrees ─────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available ╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ ⬆ am v2.2.0 is available (you have v2.1.1)                                       │░ 121k │
-│ ◐ fix/│ Update: brew upgrade agent-monitor                                               │░ 185k │
+│ ◐ fix/│ Update: brew update && brew upgrade agent-monitor                                │░ 185k │
 │       │                                                                                  │       │
 │gridsig│ General                                                                          │───────│
 │ · main│▌  Open in                       vscode                                           │       │
 │       │   Editor command                —                                                │       │
 │       │   Resume last session on open   on                                               │       │
-│       │   Agent plugins…                claude, gemini · default claude                  │       │
+│       │   Harness plugins…              7 of 7 on · default claude                       │       │
 │       │   Key bindings…                 defaults                                         │       │
 │       │   Mouse                         on                                               │       │
 │       │   Run startup script in         pane                                             │       │

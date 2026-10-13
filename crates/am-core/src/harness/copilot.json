@@ -1,0 +1,27 @@
+{
+  "id": "copilot",
+  "name": "GitHub Copilot CLI",
+  "shortName": "Copilot",
+  "program": "copilot",
+  "configDir": "~/.copilot",
+  "hooks": {
+    "settingsPath": "~/.copilot/hooks/agent-monitor.json",
+    "layout": "flat",
+    "file": { "version": 1 },
+    "entry": { "type": "command" },
+    "timeoutKey": "timeoutSec",
+    "timeoutMs": 5000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "Stop": "Stop"
+  },
+  "resume": { "session": ["--resume", "{id}"], "continue": ["--continue"] },
+  "process": { "names": ["copilot"], "argvContains": ["/@github/copilot/"] },
+  "notes": "Copilot sends no permission prompts to hooks in this format, so only questions show as waiting"
+}

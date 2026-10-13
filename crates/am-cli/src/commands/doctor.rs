@@ -98,24 +98,9 @@ pub fn run(as_json: bool) {
     let plugin_errors = am_core::harness::plugin_errors();
     if !plugin_errors.is_empty() {
         checks.push(Check {
-            name: "Agent plugins".into(),
+            name: "Harness plugins".into(),
             status: "warn",
             message: format!("Skipped in {}: {}", am_core::harness::plugins_dir().display(), plugin_errors.join("; ")),
-        });
-    }
-
-    // Drafts are plugins still being trained: say so, with what they ran into.
-    let counts = am_core::db::open().ok().and_then(|c| am_core::db::plugin_issue_counts(&c).ok()).unwrap_or_default();
-    for &kind in am_core::harness::all().iter().filter(|k| k.is_draft()) {
-        let n = counts.get(kind.id()).copied().unwrap_or(0);
-        let captures = am_core::harness::capture::list(kind.id()).len();
-        checks.push(Check {
-            name: format!("{} (draft)", kind.provider().short_name()),
-            status: "warn",
-            message: format!(
-                "Draft plugin: {captures} capture(s), {n} issue(s). See `am harness issues {id}`; publish with `am harness publish {id}`",
-                id = kind.id()
-            ),
         });
     }
 

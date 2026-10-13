@@ -2,7 +2,7 @@
 //!
 //! Every billed token class counts (input, cache creation, cache read,
 //! output), subagent transcripts included. Which files to read and how to
-//! parse a line is up to each agent plugin ([`Harness::usage_files`] /
+//! parse a line is up to each harness plugin ([`Harness::usage_files`] /
 //! [`Harness::usage_record`]); this module only adds them up.
 //!
 //! Reading is incremental: a file is read once, then only the bytes appended
@@ -38,7 +38,7 @@ pub struct UsageRecord {
     pub tokens: u64,
 }
 
-/// Where usage comes from: an agent plugin, or a fixture in tests.
+/// Where usage comes from: an harness plugin, or a fixture in tests.
 pub trait UsageSource {
     /// Transcript files modified at or after `since`.
     fn files(&self, since: SystemTime) -> Vec<PathBuf>;

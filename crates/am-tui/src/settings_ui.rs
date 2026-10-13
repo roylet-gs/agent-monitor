@@ -26,7 +26,7 @@ pub enum Kind {
     Theme,
     /// Opens the theme builder.
     ThemeBuilder,
-    /// Opens the agent plugins page.
+    /// Opens the harness plugins page.
     Plugins,
     /// Opens the key bindings page.
     KeyBindings,
@@ -50,7 +50,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
-    Field { key: "agentPlugins", label: "Agent plugins…", help: "Turn agent CLIs on/off, install their hooks, pick the default agent", section: "General", kind: Kind::Plugins },
+    Field { key: "agentPlugins", label: "Harness plugins…", help: "Turn harnesses on/off, install their hooks, pick the default", section: "General", kind: Kind::Plugins },
     Field { key: "keyBindings", label: "Key bindings…", help: "Choose the dashboard's keys", section: "General", kind: Kind::KeyBindings },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
     Field { key: "startupScriptMode", label: "Run startup script in", help: "pane: output in the Jobs pane; window: a new terminal window", section: "General", kind: Kind::Choice(&["pane", "window"]) },
@@ -98,8 +98,6 @@ pub enum Outcome {
     Close,
     Changed(Box<Settings>),
     EditFile,
-    /// Start a training session (prepare + open a terminal, off the UI thread).
-    Train(am_core::harness::training::Mode),
 }
 
 pub struct SettingsEditor {
@@ -123,7 +121,7 @@ impl SettingsEditor {
     }
 
     /// A click on field `i`: selects it, or changes it (like ⏎) when it is
-    /// already selected. Ignored while a sub-page (agent plugins, key
+    /// already selected. Ignored while a sub-page (harness plugins, key
     /// bindings, sort editor, theme builder) covers the field list.
     pub fn click(&mut self, i: usize) -> Outcome {
         if self.plugins.is_some() || self.keys.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
@@ -161,9 +159,9 @@ impl SettingsEditor {
             Kind::Tokens { .. } => v.and_then(Value::as_u64).map(context::short_tokens).unwrap_or_else(|| "—".into()),
             Kind::Plugins => {
                 let s = self.settings();
-                let on: Vec<&str> = am_core::harness::enabled(&s).iter().map(|k| k.id()).collect();
-                let on = if on.is_empty() { "none".to_string() } else { on.join(", ") };
-                format!("{on} · default {}", s.default_agent().id())
+                // A count: there are too many built-ins to name; the page lists them.
+                let on = am_core::harness::enabled(&s).len();
+                format!("{on} of {} on · default {}", am_core::harness::all().len(), s.default_agent().id())
             }
             Kind::Sort => {
                 let crits: Vec<SortCriterion> = v.cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
@@ -382,34 +380,6 @@ impl SettingsEditor {
                 self.plugins = None;
                 return Outcome::None;
             }
-            PluginOutcome::TrainNew(command) => {
-                return Outcome::Train(am_core::harness::training::Mode::Create { command: command.clone() });
-            }
-            PluginOutcome::Edit(id) => {
-                if let Some(ed) = &mut self.plugins {
-                    ed.message = Some((true, format!("Opening a training session for {id}…")));
-                }
-                return Outcome::Train(am_core::harness::training::Mode::Edit { id: id.clone() });
-            }
-            PluginOutcome::Publish(id) | PluginOutcome::Remove(id) => {
-                use am_core::harness::{lifecycle, manifest::PluginStatus};
-                let message = match &out {
-                    PluginOutcome::Publish(_) => match lifecycle::set_status(id, PluginStatus::Published) {
-                        Ok(r) if r.warnings.is_empty() => (true, format!("{id} published")),
-                        Ok(r) => (true, format!("{id} published ({} warning(s): am harness validate {id})", r.warnings.len())),
-                        Err(e) => (false, e.lines().take(2).collect::<Vec<_>>().join(" ")),
-                    },
-                    _ => match lifecycle::remove(id, false) {
-                        Ok(()) => (true, format!("{id} removed · am harness rollback {id} restores it")),
-                        Err(e) => (false, e),
-                    },
-                };
-                let s = self.settings();
-                if let Some(ed) = &mut self.plugins {
-                    ed.refresh(plugins_ui::load_rows(&s), &s.default_agent, message);
-                }
-                return Outcome::None;
-            }
             PluginOutcome::SetEnabled(id, _) | PluginOutcome::InstallHooks(id) | PluginOutcome::SetDefault(id) => (id.clone(), Outcome::None),
         };
         let Some(kind) = HarnessKind::get(&id) else { return Outcome::None };
@@ -451,7 +421,7 @@ impl SettingsEditor {
                 outcome = self.set("defaultAgent", Value::from(id.as_str()));
                 (true, format!("Enter now starts {} where no session has run", p.name()))
             }
-            _ => unreachable!(),
+            PluginOutcome::Stay | PluginOutcome::Close => unreachable!(),
         };
         let s = self.settings();
         if let Some(ed) = &mut self.plugins {
@@ -799,10 +769,13 @@ mod tests {
 
         let mut ed = SettingsEditor::new(&Settings::parse(r#"{"defaultAgent":"gemini"}"#));
         goto(&mut ed, "agentPlugins");
-        assert_eq!(ed.display(ed.field()), "claude, gemini · default gemini");
+        assert_eq!(ed.display(ed.field()), "7 of 7 on · default gemini");
         ed.on_key(Key::Enter);
         let rows = &ed.plugins.as_ref().unwrap().rows;
-        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["claude", "gemini"]);
+        assert_eq!(
+            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["claude", "gemini", "codex", "qwen", "droid", "copilot", "cursor"]
+        );
         assert!(rows.iter().all(|r| r.enabled && !r.hooks));
 
         // Install Gemini's hooks, then switch it off: hooks go, and so does the default.
