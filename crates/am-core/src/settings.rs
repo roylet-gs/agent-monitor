@@ -84,6 +84,11 @@ pub struct Settings {
     /// Mouse capture in the TUI (click, double-click, wheel). Off restores
     /// the terminal's own click-drag text selection.
     pub mouse_enabled: bool,
+    /// Context-window bar at the far right of each worktree row.
+    pub show_context_window: bool,
+    /// Context window the bar is scaled to. A session that uses more than
+    /// this is shown against 1M instead (see `crate::context::window_for`).
+    pub context_window_tokens: u64,
     /// Check GitHub Releases for a newer `am` and show it in the dashboard.
     pub check_for_updates: bool,
     /// Where a repo's startup script runs after creating a worktree: `pane`
@@ -150,6 +155,8 @@ impl Default for Settings {
             theme: "ansi".into(),
             nerd_fonts: false,
             mouse_enabled: true,
+            show_context_window: true,
+            context_window_tokens: 200_000,
             check_for_updates: true,
             startup_script_mode: "pane".into(),
             raw: Default::default(),

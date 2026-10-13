@@ -4,11 +4,11 @@ expression: "render(&app, 100, 16)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ feature/refactor ◆2                                                  ENG-412 #127✓ ✔ ↑2 ±3  4m │
-│ ◐ fix/offline-cache                                                                           4m │
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ███░░ 121k │
+│ ◐ fix/offline-cache                                                                4m ████▋ 185k │
 │             ╭─New worktree ────────────────────────────────────────────────────────╮             │
 │gridsight ───│  Repo      ‹ agent-monitor ›                                         │─────────────│
-│ · main      │ ▌Branch    feature/x▏                                                │   ↑2 ±3  4m │
+│ · main      │ ▌Branch    feature/x▏                                                │m            │
 │             │            ✓ exists on origin — Enter will offer to pull it          │             │
 │             │  Name      (optional)                                                │             │
 │             │  Base      tracks origin/feature/x                                   │             │
