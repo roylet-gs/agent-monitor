@@ -48,7 +48,7 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 15 16 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 ;;
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Agent plugins
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs | crates/am-tui/src/jobs.rs) echo 09 10 ;;
