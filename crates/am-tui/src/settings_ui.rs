@@ -91,6 +91,8 @@ pub enum Outcome {
     Close,
     Changed(Box<Settings>),
     EditFile,
+    /// Start a training session (prepare + open a terminal, off the UI thread).
+    Train(am_core::harness::training::Mode),
 }
 
 pub struct SettingsEditor {
@@ -354,6 +356,34 @@ impl SettingsEditor {
                 self.plugins = None;
                 return Outcome::None;
             }
+            PluginOutcome::TrainNew(command) => {
+                return Outcome::Train(am_core::harness::training::Mode::Create { command: command.clone() });
+            }
+            PluginOutcome::Edit(id) => {
+                if let Some(ed) = &mut self.plugins {
+                    ed.message = Some((true, format!("Opening a training session for {id}…")));
+                }
+                return Outcome::Train(am_core::harness::training::Mode::Edit { id: id.clone() });
+            }
+            PluginOutcome::Publish(id) | PluginOutcome::Remove(id) => {
+                use am_core::harness::{lifecycle, manifest::PluginStatus};
+                let message = match &out {
+                    PluginOutcome::Publish(_) => match lifecycle::set_status(id, PluginStatus::Published) {
+                        Ok(r) if r.warnings.is_empty() => (true, format!("{id} published")),
+                        Ok(r) => (true, format!("{id} published ({} warning(s): am harness validate {id})", r.warnings.len())),
+                        Err(e) => (false, e.lines().take(2).collect::<Vec<_>>().join(" ")),
+                    },
+                    _ => match lifecycle::remove(id, false) {
+                        Ok(()) => (true, format!("{id} removed · am harness rollback {id} restores it")),
+                        Err(e) => (false, e),
+                    },
+                };
+                let s = self.settings();
+                if let Some(ed) = &mut self.plugins {
+                    ed.refresh(plugins_ui::load_rows(&s), &s.default_agent, message);
+                }
+                return Outcome::None;
+            }
             PluginOutcome::SetEnabled(id, _) | PluginOutcome::InstallHooks(id) | PluginOutcome::SetDefault(id) => (id.clone(), Outcome::None),
         };
         let Some(kind) = HarnessKind::get(&id) else { return Outcome::None };
@@ -395,7 +425,7 @@ impl SettingsEditor {
                 outcome = self.set("defaultAgent", Value::from(id.as_str()));
                 (true, format!("c now starts {} where no session has run", p.name()))
             }
-            PluginOutcome::Stay | PluginOutcome::Close => unreachable!(),
+            _ => unreachable!(),
         };
         let s = self.settings();
         if let Some(ed) = &mut self.plugins {

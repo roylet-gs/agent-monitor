@@ -65,7 +65,7 @@ waiting, `Stop` → done, `SessionStart`/`SessionEnd` → idle, `SubagentStart`/
 - **`process`**: `names` (process or script base names) and `argvContains` (substrings of the first
   argv entries) that identify the harness's processes.
 - **`notes`**: a caveat shown next to the hook status.
-- **`status`**: `draft` (being trained: every hook event is captured, rows show `◇draft`) or
+- **`status`**: `draft` (being trained: every hook event is captured, rows show `✎ draft`) or
   `published` (default). `am harness add` makes a plugin a draft; the user publishes it.
 - **`training`**:
   - `captureEvents`: extra native events hooked only while the plugin is a draft, so am records

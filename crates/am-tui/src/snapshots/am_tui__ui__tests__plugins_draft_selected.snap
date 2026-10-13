@@ -1,0 +1,24 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 20)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
+│▌◑ feat│ Agent plugins — space on/off · i install hooks · d default · esc back            │░ 121k │
+│ ◐ fix/│ Training — T train a new harness · e retrain · p publish · x remove              │░ 185k │
+│       │                                                                                  │       │
+│gridsig│  [x] Claude Code   built-in    hooks ✓      ★ default                            │───────│
+│ · main│▌ [x] Toy CLI       toycli.json hooks ✓                ✎ draft ⚠ 3                │       │
+│       │  + Train a new harness…                                                          │       │
+│       │                                                                                  │       │
+│       │ Add plugins as JSON manifests in ~/.agent-monitor/agents, or train one (T)       │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │ toycli · draft · 12 capture(s) · 3 issue(s) · am harness issues toycli           │       │
+╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
+ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

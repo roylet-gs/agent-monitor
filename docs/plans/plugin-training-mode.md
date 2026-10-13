@@ -36,7 +36,7 @@ What exists today (verified):
 6. The agent works through the prompt and ends with `am plugin add ./manifest.json`. The plugin lands as **draft**, and its hooks are installed, including the capture-only events.
 
 **Draft in use**
-- On worktree and session rows the badge becomes yellow `✦ mycli ◇draft` (`✦◇` below 100 columns).
+- On worktree and session rows the badge becomes yellow `✦ mycli ✎ draft` (`✦✎` below 100 columns).
 - The plugins page shows `draft` plus an issue count `⚠ 3`.
 - `am doctor` lists drafts with their issue counts.
 - Every hook event of a draft:
@@ -127,7 +127,7 @@ The shared logic lives in `am_core::agents::training` (new): the workspace, rend
   - The help line for a draft shows `captures N · issues N · am plugin issues <id>`.
   - New `PluginOutcome::{TrainNew, Edit(id), Publish(id), Remove(id)}`.
 - **Train modal** (`modals.rs`): fields Command and Name. Enter → `launcher::spawn_training(Prepare)` on a thread → `Msg::Popup("Prompt copied — paste into <cmd> and press Enter")`, or an error popup. If no terminal can be opened, the popup gives the workspace path and the command to run.
-- **Badges** (`ui.rs` row badges, `ctx`-style width rules): a draft harness gets `◇draft` after `✦ <id>`, in yellow from the theme. Wide is `✦ mycli ◇draft`, below 100 columns `✦◇`. The same applies to session child rows after PR 2. The help overlay explains `◇`.
+- **Badges** (`ui.rs` row badges, `ctx`-style width rules): a draft harness gets `✎ draft` after `✦ <id>`, in yellow from the theme. Wide is `✦ mycli ✎ draft`, below 100 columns `✦✎`. The same applies to session child rows after PR 2. The help overlay explains `✎`.
 - **Collector** (`data.rs`):
   - registry reload on manifest mtime change,
   - `process_unmatched`/`discovery_*` issue writes, at most once per (plugin, session) per process,
@@ -306,10 +306,10 @@ publish from Settings → Harnesses when they are happy.
 - **Insta**:
   - plugins page with a draft + issues + the `＋ Train` row;
   - train modal;
-  - a worktree row and a standalone row with `✦ mycli ◇draft` at 120 and 90 columns.
+  - a worktree row and a standalone row with `✦ mycli ✎ draft` at 120 and 90 columns.
 - **E2E** `18-plugin-training.spec.ts`:
   - The entrypoint drops a draft manifest `e2e/fixtures/agents/toycli.json` and replays a few `--agent toycli` events (one unmapped tool).
-  - The spec checks the `◇draft` badge on the standalone row and that the plugins page shows `draft ⚠ 1`.
+  - The spec checks the `✎ draft` badge on the standalone row and that the plugins page shows `draft ⚠ 1`.
   - `T` opens the modal; Enter shows the "prompt copied" popup. The container has no terminal or clipboard, so assert the error/fallback popup text with the workspace path, plus `TRAINING.md` existing via `docker exec`, or via a `--no-open` test hook.
   - `p` → confirm → the `draft` tag goes away (then restored).
   - Add `18` to the rows for `agents/`, `plugins_ui.rs`, `am-hook` and `plugin.rs` in `e2e/affected-specs.sh`.

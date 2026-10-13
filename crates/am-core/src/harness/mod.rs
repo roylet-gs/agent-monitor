@@ -171,6 +171,11 @@ impl HarnessKind {
         self.0.origin() == Origin::BuiltIn
     }
 
+    /// A handle on a provider that isn't registered (tests, previews). Leaks it.
+    pub fn leak(provider: Box<dyn Harness>) -> HarnessKind {
+        HarnessKind(Box::leak(provider))
+    }
+
     pub fn is_draft(self) -> bool {
         self.0.status() == manifest::PluginStatus::Draft
     }
