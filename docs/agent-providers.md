@@ -207,7 +207,7 @@ Invalid files are skipped and reported on the plugin page and in `am doctor`. Th
 
 An agent CLI that am doesn't support yet can write and test its own manifest. Plan and design notes: `docs/plans/plugin-training-mode.md`.
 
-1. **Start.** Settings → Agent plugins → `T` (or **+ Train a new harness…**), then type the command that starts the CLI. Without the TUI, use `am harness train --command <cmd>`. am:
+1. **Start.** Settings → Agent plugins → `T` (or **+ Train a new harness plugin…**), then type the command that starts the CLI. Without the TUI, use `am harness train --command <cmd>`. am:
    - creates `~/.agent-monitor/training/<name>/`, a small git repo, so the training session appears under "Other sessions";
    - writes the prompt (`crates/am-core/src/harness/training/create.md`) to `TRAINING.md` there;
    - copies a one-line "read TRAINING.md" to the clipboard;

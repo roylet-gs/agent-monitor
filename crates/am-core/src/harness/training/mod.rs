@@ -32,7 +32,7 @@ with the JSON payload on stdin";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mode {
-    /// Train a new harness started with `command` (as typed: program + args).
+    /// Train a new harness plugin for the harness started with `command` (as typed: program + args).
     Create { command: String },
     /// Improve plugin `id`.
     Edit { id: String },

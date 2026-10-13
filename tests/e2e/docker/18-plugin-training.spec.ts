@@ -28,9 +28,9 @@ test("Settings → Agent plugins: train, publish and retrain", async ({ page }) 
   await tui.open();
   await tui.openSetting("Turn agent CLIs on/off, install their hooks, pick the default agent");
   await tui.sendKey("Enter");
-  await tui.waitForText("Training — T train a new harness · e retrain · p publish · x remove");
+  await tui.waitForText("Training — T train a new harness plugin · e retrain · p publish · x remove");
   await tui.waitForMatch(/\[x\] Toy CLI\s+toycli\.json.*✎ draft ⚠ 1/);
-  await tui.waitForText("+ Train a new harness…");
+  await tui.waitForText("+ Train a new harness plugin…");
 
   // The draft's help line: what was captured and what went wrong.
   await tui.press("j", 2);
@@ -40,7 +40,7 @@ test("Settings → Agent plugins: train, publish and retrain", async ({ page }) 
   // Built-ins can't be retrained.
   await tui.sendKey("k");
   await tui.sendKey("e");
-  await tui.waitForText("is built in; T trains a new harness");
+  await tui.waitForText("is built in; T trains a new harness plugin");
   await tui.sendKey("j");
 
   // T: type the command; there's no terminal in the container, so the popup

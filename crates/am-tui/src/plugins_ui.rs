@@ -39,7 +39,7 @@ pub enum PluginOutcome {
     SetEnabled(String, bool),
     InstallHooks(String),
     SetDefault(String),
-    /// Train a new harness started with this command.
+    /// Train a new harness plugin for the harness started with this command.
     TrainNew(String),
     /// Retrain a manifest plugin.
     Edit(String),
@@ -65,7 +65,7 @@ pub struct PluginEditor {
     pub message: Option<(bool, String)>,
     /// Where manifest plugins go, for the hint line (`~`-relative).
     pub plugins_dir: String,
-    /// The "train a new harness" command being typed.
+    /// The "train a new harness plugin" command being typed.
     pub train: Option<String>,
     pub confirm: Option<Confirm>,
 }
@@ -112,12 +112,12 @@ impl PluginEditor {
         }
     }
 
-    /// The selected plugin; `None` on the "train a new harness" row.
+    /// The selected plugin; `None` on the "train a new harness plugin" row.
     pub fn selected(&self) -> Option<&PluginRow> {
         self.rows.get(self.cursor)
     }
 
-    /// The cursor is on the trailing "＋ Train a new harness…" row.
+    /// The cursor is on the trailing "＋ Train a new harness plugin…" row.
     pub fn on_train_row(&self) -> bool {
         self.cursor == self.rows.len()
     }
@@ -187,7 +187,7 @@ impl PluginEditor {
             Key::Char('i') => self.refuse(format!("{} is off; space turns it on", row.name)),
             Key::Char('d') if row.enabled => PluginOutcome::SetDefault(row.id.clone()),
             Key::Char('d') => self.refuse(format!("{} is off; it can't be the default", row.name)),
-            Key::Char('e' | 'p' | 'x') if row.builtin => self.refuse(format!("{} is built in; T trains a new harness", row.name)),
+            Key::Char('e' | 'p' | 'x') if row.builtin => self.refuse(format!("{} is built in; T trains a new harness plugin", row.name)),
             Key::Char('e') => PluginOutcome::Edit(row.id.clone()),
             Key::Char('p') if !row.draft => self.refuse(format!("{} is already published; e retrains it", row.name)),
             Key::Char('p') => {

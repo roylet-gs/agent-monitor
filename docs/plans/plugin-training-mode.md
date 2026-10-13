@@ -23,7 +23,7 @@ What exists today (verified):
 ## User flow
 
 **Create**
-1. Settings → Harnesses… → `T` (or the `＋ Train a new harness…` row at the bottom of the list).
+1. Settings → Harnesses… → `T` (or the `＋ Train a new harness plugin…` row at the bottom of the list).
 2. A modal asks for:
    - **Command**: how you start the harness, e.g. `cursor-agent` or `hermes`. Required, because am doesn't know unsupported harnesses.
    - **Name**: optional.
@@ -122,7 +122,7 @@ The shared logic lives in `am_core::agents::training` (new): the workspace, rend
 
 - **Plugins page** (`plugins_ui.rs`, `ui.rs draw_plugins`, effects `settings_ui.rs plugin_effect`):
   - Rows gain a status column (`draft` in yellow / blank) and `⚠ N` issues.
-  - The last row is `＋ Train a new harness…`.
+  - The last row is `＋ Train a new harness plugin…`.
   - The header lists the new keys: `T` train new, `e` edit/retrain, `p` publish (confirm), `x` remove (confirm).
   - The help line for a draft shows `captures N · issues N · am plugin issues <id>`.
   - New `PluginOutcome::{TrainNew, Edit(id), Publish(id), Remove(id)}`.

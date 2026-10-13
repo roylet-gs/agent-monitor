@@ -5,11 +5,11 @@ expression: "render(&app, 100, 20)"
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ Agent plugins — space on/off · i install hooks · d default · esc back            │░ 121k │
-│ ◐ fix/│ Training — T train a new harness · e retrain · p publish · x remove              │░ 185k │
+│ ◐ fix/│ Training — T train a new harness plugin · e retrain · p publish · x remove       │░ 185k │
 │       │                                                                                  │       │
 │gridsig│  [x] Claude Code   built-in    hooks ✓      ★ default                            │───────│
 │ · main│▌ [x] Toy CLI       toycli.json hooks ✓                ✎ draft ⚠ 3                │       │
-│       │  + Train a new harness…                                                          │       │
+│       │  + Train a new harness plugin…                                                   │       │
 │       │                                                                                  │       │
 │       │ Add plugins as JSON manifests in ~/.agent-monitor/agents, or train one (T)       │       │
 │       │                                                                                  │       │

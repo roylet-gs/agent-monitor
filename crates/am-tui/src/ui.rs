@@ -253,7 +253,7 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
     use crate::plugins_ui::Confirm;
     let mut lines = vec![
         Line::styled(" Agent plugins — space on/off · i install hooks · d default · esc back", theme.faint()),
-        Line::styled(" Training — T train a new harness · e retrain · p publish · x remove", theme.faint()),
+        Line::styled(" Training — T train a new harness plugin · e retrain · p publish · x remove", theme.faint()),
         Line::raw(""),
     ];
     for (i, r) in pl.rows.iter().enumerate() {
@@ -285,7 +285,7 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
     let sel = pl.on_train_row();
     let train = Line::from(vec![
         Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
-        Span::styled(" + Train a new harness…", theme.fg(theme.accent)),
+        Span::styled(" + Train a new harness plugin…", theme.fg(theme.accent)),
     ]);
     lines.push(if sel { train.style(theme.selected()) } else { train });
     if let Some(cmd) = &pl.train {
@@ -329,7 +329,7 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
             Line::styled(format!(" {} · hooks in {}{note}", r.id, r.settings_path), theme.faint())
         }
         (None, None, None) if pl.train.is_some() => Line::styled(" ⏎ start training · esc cancel", theme.faint()),
-        (None, None, None) => Line::styled(" ⏎ train a harness am doesn't support yet: it writes and tests its own plugin", theme.faint()),
+        (None, None, None) => Line::styled(" ⏎ train a new harness plugin: the harness writes and tests its own plugin", theme.faint()),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
 }
