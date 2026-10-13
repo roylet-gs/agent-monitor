@@ -109,11 +109,14 @@ pub struct App {
     pub deleting: std::collections::HashMap<String, bool>,
     /// Background create/delete jobs (right-hand jobs pane).
     pub jobs: crate::jobs::Jobs,
+    /// Dashboard keys (`keyBindings`), rebuilt whenever settings change.
+    pub keymap: crate::keymap::Keymap,
 }
 
 impl App {
     pub fn new(settings: Settings) -> App {
         App {
+            keymap: crate::keymap::Keymap::from_settings(&settings),
             settings,
             snapshot: Snapshot::default(),
             flat: Vec::new(),
@@ -313,9 +316,9 @@ impl App {
     /// Whether a key-bar action applies to the selected worktree (the key
     /// bar dims the ones that don't). Keys that aren't per-worktree are
     /// always available.
-    pub fn key_available(&self, key: &str) -> bool {
-        let row_key = matches!(key, "⏎" | "g" | "l" | "p" | "d");
-        if !row_key {
+    pub fn key_available(&self, cmd: crate::keymap::Command) -> bool {
+        use crate::keymap::Command as C;
+        if !cmd.is_row_action() {
             return true;
         }
         let Some(v) = self.selected_view() else { return false };
@@ -323,11 +326,11 @@ impl App {
             return false;
         }
         let w = &v.worktree;
-        match key {
-            "g" => v.pr.is_some(),
-            "l" => v.linear.is_some(),
-            "p" => v.linear.as_ref().and_then(|l| l.project.as_ref()).is_some_and(|p| p.url.is_some()),
-            "d" => w.is_standalone() || !(w.is_main && (w.branch == "main" || w.branch == "master")),
+        match cmd {
+            C::OpenPr => v.pr.is_some(),
+            C::OpenLinear => v.linear.is_some(),
+            C::OpenProject => v.linear.as_ref().and_then(|l| l.project.as_ref()).is_some_and(|p| p.url.is_some()),
+            C::Delete => w.is_standalone() || !(w.is_main && (w.branch == "main" || w.branch == "master")),
             _ => true,
         }
     }
@@ -469,33 +472,43 @@ impl App {
     }
 
     fn dashboard_key(&mut self, key: Key) -> Action {
-        let row_action = matches!(key, Key::Enter | Key::Char('g' | 'o' | 'l' | 'p' | 'd'));
-        if row_action && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
+        if key == Key::Tab && self.jobs.visible() {
+            self.jobs.focus();
+            return Action::None;
+        }
+        match self.keymap.command(key) {
+            Some(cmd) => self.run_command(cmd),
+            None => Action::None,
+        }
+    }
+
+    /// Run a dashboard command (from its key, a key-bar click or a double-click).
+    pub fn run_command(&mut self, cmd: crate::keymap::Command) -> Action {
+        use crate::keymap::Command as C;
+        if cmd.is_row_action() && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
             self.notice = Some("Deleting in the background…".into());
             return Action::None;
         }
-        match key {
-            Key::Char('q') | Key::CtrlC => return Action::Quit,
-            Key::Esc => return Action::Quit,
-            Key::Char('?') => self.show_help = true,
-            Key::Char('r') => {
+        match cmd {
+            C::Quit => return Action::Quit,
+            C::Help => self.show_help = true,
+            C::Refresh => {
                 self.notice = Some("Refreshing…".into());
                 return Action::Refresh;
             }
-            Key::Enter => return self.with_selected(Action::Open),
-            Key::Char('g') | Key::Char('o') => return self.url_action(|v, _| {
+            C::Open => return self.with_selected(Action::Open),
+            C::OpenPr => return self.url_action(|v, _| {
                 let pr = v.pr.as_ref()?;
                 // Same rule as the TS app: a merged PR jumps to its last active check.
                 Some(if pr.state == "MERGED" { pr.active_check_url.clone().unwrap_or(pr.url.clone()) } else { pr.url.clone() })
             }, "No PR for this branch"),
-            Key::Char('l') => return self.url_action(|v, s| v.linear.as_ref().map(|l| linear_url(&l.url, s)), "No Linear ticket"),
-            Key::Char('p') => return self.url_action(
+            C::OpenLinear => return self.url_action(|v, s| v.linear.as_ref().map(|l| linear_url(&l.url, s)), "No Linear ticket"),
+            C::OpenProject => return self.url_action(
                 |v, s| v.linear.as_ref()?.project.as_ref()?.url.as_ref().map(|u| linear_url(u, s)),
                 "No Linear project",
             ),
-            Key::Char('w') => self.show_log = !self.show_log,
-            Key::Tab if self.jobs.visible() => self.jobs.focus(),
-            Key::Char('n') => {
+            C::ToggleLog => self.show_log = !self.show_log,
+            C::NewWorktree => {
                 if self.snapshot.repos.is_empty() {
                     self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None });
                 } else {
@@ -508,7 +521,7 @@ impl App {
                     ));
                 }
             }
-            Key::Char('d') => {
+            C::Delete => {
                 if let Some(v) = self.selected_view().cloned() {
                     if v.worktree.is_standalone() {
                         return Action::RemoveStandalone(v.worktree.path);
@@ -520,18 +533,17 @@ impl App {
                     }
                 }
             }
-            Key::Char('f') => {
+            C::Feedback => {
                 self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
-            Key::Char('A') => self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None }),
-            Key::Char('s') => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
-            Key::Down | Key::Char('j') => self.move_by(1),
-            Key::Up | Key::Char('k') => self.move_by(-1),
-            Key::PageDown | Key::CtrlD => self.move_by(10),
-            Key::PageUp | Key::CtrlU => self.move_by(-10),
-            Key::Char('G') | Key::End => self.move_by(isize::MAX / 2),
-            Key::Home => self.move_by(isize::MIN / 2),
-            _ => {}
+            C::AddRepo => self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None }),
+            C::Settings => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
+            C::MoveDown => self.move_by(1),
+            C::MoveUp => self.move_by(-1),
+            C::PageDown => self.move_by(10),
+            C::PageUp => self.move_by(-10),
+            C::Bottom => self.move_by(isize::MAX / 2),
+            C::Top => self.move_by(isize::MIN / 2),
         }
         Action::None
     }
@@ -572,13 +584,11 @@ impl App {
             // The wheel moves whatever the keys would: the job list when the pane has focus.
             Mouse::Scroll(d) => self.on_key(if d > 0 { Key::Down } else { Key::Up }),
             Mouse::Click { x, y, double } => {
-                if let Some(k) = crate::ui::keybar_key_at(self, area, x, y) {
+                if let Some(hit) = crate::ui::keybar_key_at(self, area, x, y) {
                     // Exactly what pressing the key does (the jobs pane may have focus).
-                    return match k {
-                        "⏎" => self.on_key(Key::Enter),
-                        "⇥" => self.on_key(Key::Tab),
-                        k if k.chars().count() == 1 => self.on_key(Key::Char(k.chars().next().unwrap_or(' '))),
-                        _ => Action::None,
+                    return match hit {
+                        crate::ui::BarHit::Key(k) => self.on_key(k),
+                        crate::ui::BarHit::Command(c) => self.run_command(c),
                     };
                 }
                 if crate::ui::in_jobs_pane(self, area, x, y) {
@@ -589,21 +599,24 @@ impl App {
                 self.jobs.focused = false;
                 self.selected = i;
                 self.mark_selected_seen();
-                if double { self.dashboard_key(Key::Enter) } else { Action::None }
+                if double { self.run_command(crate::keymap::Command::Open) } else { Action::None }
             }
         }
     }
 
     /// Swap in new settings and re-derive rows (header style depends on sort).
     pub fn set_settings(&mut self, settings: Settings) {
+        self.keymap = crate::keymap::Keymap::from_settings(&settings);
         self.settings = settings;
         if let Some(e) = &mut self.settings_editor {
             let cursor = e.cursor;
-            // The agent-plugins page reports changes while it stays open.
+            // The agent-plugins and key-bindings pages report changes while they stay open.
             let plugins = e.plugins.take();
+            let keys = e.keys.take();
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
             e.cursor = cursor;
             e.plugins = plugins;
+            e.keys = keys;
         }
         let snap = self.snapshot.clone();
         self.apply(snap);

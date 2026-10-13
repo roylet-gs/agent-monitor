@@ -8,6 +8,7 @@ use am_core::themes;
 use serde_json::{Map, Value};
 
 use crate::app::Key;
+use crate::keys_ui::{KeyEditor, KeyOutcome};
 use crate::plugins_ui::{self, PluginEditor, PluginOutcome};
 use crate::theme_builder::{BuilderOutcome, ThemeBuilder};
 
@@ -27,6 +28,8 @@ pub enum Kind {
     ThemeBuilder,
     /// Opens the agent plugins page.
     Plugins,
+    /// Opens the key bindings page.
+    KeyBindings,
 }
 
 pub struct Field {
@@ -48,6 +51,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
     Field { key: "agentPlugins", label: "Agent plugins…", help: "Turn agent CLIs on/off, install their hooks, pick the default agent", section: "General", kind: Kind::Plugins },
+    Field { key: "keyBindings", label: "Key bindings…", help: "Choose the dashboard's keys", section: "General", kind: Kind::KeyBindings },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
     Field { key: "startupScriptMode", label: "Run startup script in", help: "pane: output in the Jobs pane; window: a new terminal window", section: "General", kind: Kind::Choice(&["pane", "window"]) },
     Field { key: "defaultBranchPrefix", label: "Branch prefix", help: "Prefix for new worktree branches", section: "General", kind: Kind::Text { secret: false } },
@@ -104,6 +108,7 @@ pub struct SettingsEditor {
     pub sort: Option<SortEditor>,
     pub builder: Option<ThemeBuilder>,
     pub plugins: Option<PluginEditor>,
+    pub keys: Option<KeyEditor>,
     pub values: Map<String, Value>,
     pub error: Option<String>,
 }
@@ -114,14 +119,14 @@ impl SettingsEditor {
             Ok(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, values, error: None }
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, values, error: None }
     }
 
     /// A click on field `i`: selects it, or changes it (like ⏎) when it is
-    /// already selected. Ignored while a sub-page (agent plugins, sort editor,
-    /// theme builder) covers the field list.
+    /// already selected. Ignored while a sub-page (agent plugins, key
+    /// bindings, sort editor, theme builder) covers the field list.
     pub fn click(&mut self, i: usize) -> Outcome {
-        if self.plugins.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
+        if self.plugins.is_some() || self.keys.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
             return Outcome::None;
         }
         if i == self.cursor {
@@ -149,6 +154,10 @@ impl SettingsEditor {
                 _ => "not set".into(),
             },
             Kind::ThemeBuilder => "⏎ open".into(),
+            Kind::KeyBindings => match self.settings().key_bindings.len() {
+                0 => "defaults".into(),
+                n => format!("{n} changed"),
+            },
             Kind::Tokens { .. } => v.and_then(Value::as_u64).map(context::short_tokens).unwrap_or_else(|| "—".into()),
             Kind::Plugins => {
                 let s = self.settings();
@@ -179,6 +188,16 @@ impl SettingsEditor {
         if let Some(plugins) = &mut self.plugins {
             let out = plugins.on_key(key);
             return self.plugin_effect(out);
+        }
+        if let Some(keys) = &mut self.keys {
+            return match keys.on_key(key) {
+                KeyOutcome::Stay => Outcome::None,
+                KeyOutcome::Close => {
+                    self.keys = None;
+                    Outcome::None
+                }
+                KeyOutcome::Save(bindings) => self.set("keyBindings", serde_json::to_value(bindings).unwrap_or_default()),
+            };
         }
         if let Some(builder) = &mut self.builder {
             match builder.on_key(key) {
@@ -273,6 +292,10 @@ impl SettingsEditor {
                 let errors = am_core::harness::plugin_errors().to_vec();
                 let dir = am_core::hooks_installer::tilde(&am_core::harness::plugins_dir());
                 self.plugins = Some(PluginEditor::new(plugins_ui::load_rows(&s), &s.default_agent, errors, dir));
+                Outcome::None
+            }
+            Kind::KeyBindings => {
+                self.keys = Some(KeyEditor::new(crate::keymap::Keymap::from_settings(&self.settings())));
                 Outcome::None
             }
             Kind::Number { .. } => {
@@ -723,6 +746,37 @@ mod tests {
         assert_eq!(b.name, "dracula-custom");
         assert_eq!(b.color(themes::Token::Text), (themes::ThemeColor::Rgb(0xff, 0, 0), true));
         std::fs::remove_dir_all(dir.join("themes")).unwrap();
+    }
+
+    #[test]
+    fn key_bindings_page_saves_only_changed_keys() {
+        let (_lock, dir) = data_dir();
+        std::fs::write(dir.join("settings.json"), r#"{"showIdeStatus":true}"#).unwrap();
+        let mut ed = SettingsEditor::new(&Settings::default());
+        goto(&mut ed, "keyBindings");
+        assert_eq!(ed.display(ed.field()), "defaults");
+        ed.on_key(Key::Enter);
+        let keys = ed.keys.as_mut().expect("page opens");
+        keys.cursor = crate::keymap::Command::ALL.iter().position(|c| *c == crate::keymap::Command::NewWorktree).unwrap();
+        ed.on_key(Key::Enter);
+        let Outcome::Changed(s) = ed.on_key(Key::Char('N')) else { panic!("expected save") };
+        assert_eq!(s.key_bindings.get("newWorktree").map(String::as_str), Some("N"));
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(saved["keyBindings"], serde_json::json!({ "newWorktree": "N" }));
+        assert_eq!(saved["showIdeStatus"], true, "unknown keys survive");
+
+        // The app keeps the page open across the change and applies it live.
+        let mut app = crate::app::App::new(Settings::default());
+        app.settings_editor = Some(ed);
+        app.set_settings(*s);
+        assert!(app.settings_editor.as_ref().is_some_and(|e| e.keys.is_some()));
+        assert_eq!(app.keymap.command(Key::Char('N')), Some(crate::keymap::Command::NewWorktree));
+        let ed = app.settings_editor.as_mut().unwrap();
+        ed.on_key(Key::Char('x'));
+        ed.on_key(Key::Esc);
+        assert!(ed.keys.is_none());
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(saved["keyBindings"], serde_json::json!({}));
     }
 
     #[test]
