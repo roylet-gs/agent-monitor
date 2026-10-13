@@ -12,4 +12,4 @@ expression: out
 │                                                                                                                      │
 │gridsight ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  t terminal  c agent  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

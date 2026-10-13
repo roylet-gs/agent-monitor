@@ -151,8 +151,6 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `Home` / `G` (`End`) | Jump to top / bottom |
 | `Ctrl-d` / `Ctrl-u` (`PgDn` / `PgUp`) | Page down / up |
 | `Enter` | Open the worktree in your editor (and resume its last agent session, see below) |
-| `t` | Open a terminal at the worktree (or focus the one already open there) |
-| `c` | Open a terminal resuming the worktree's latest session (`claude --resume <id>` or `gemini --resume <id>`); with no session yet, starts the `defaultAgent` |
 | `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
 | `l` | Open the Linear ticket |
 | `p` | Open the Linear project |
@@ -216,6 +214,8 @@ Right-aligned columns, each of which can be turned off in settings:
 - **Git**: `↑2` commits ahead, `↓1` behind, `±3` uncommitted changes
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
 - **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's Claude Code transcript, so it updates after every turn. It is measured against `contextWindowTokens` (1M by default). A session that has gone past that is measured against the setting doubled until it fits (200k → 400k → 800k …), whatever model it runs. The bar clears after a compaction until the next turn
+
+At the bottom right of the list, `today 182M` is the number of tokens your agents have used today (local day). It covers input, cache writes, cache reads and output, subagents included, because each of these is billed. It is read incrementally from the session transcripts, so a refresh costs a few milliseconds. With `dailyTokensScope` set to `visible` it counts only sessions under a row on screen (`today (visible) 4.1M`), so filters and hidden rows change it. Turn it off with `showDailyTokens`.
 
 When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
@@ -313,7 +313,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | --- | ------- | ----------- |
 | `ide` | `"cursor"` | What `Enter` opens worktrees in: `cursor`, `vscode`, `terminal` |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
-| `defaultAgent` | `"claude"` | Agent plugin `c` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
+| `defaultAgent` | `"claude"` | Agent plugin `Enter` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
 | `disabledAgents` | `[]` | Agent plugins switched off: no hooks, no session discovery (Settings → Agent plugins) |
 | `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
@@ -332,6 +332,8 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `showLastCommit` | `true` | Show the last-commit age |
 | `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
 | `contextWindowTokens` | `1000000` | Context window the bar is scaled to. A session past it is shown against this value doubled until it fits. In the settings editor `⏎` takes `128k`/`1m` and `←→` step through common sizes; `am settings set contextWindowTokens 200k` works too |
+| `showDailyTokens` | `true` | Show today's token usage at the bottom right of the list |
+| `dailyTokensScope` | `"all"` | What that total counts: `all` (every session today) or `visible` (only sessions under a row on screen) |
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
 | `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
@@ -509,7 +511,7 @@ This points your Claude Code hooks at the native `am-hook` binary by absolute pa
 - **Your data carries over unchanged.** The database, settings, startup scripts and cached PR/Linear data are read in place; nothing needs migrating or re-adding.
 - **Layout:** the detail panel is gone. PR, CI, ticket and git info now sit in the worktree row, and the `?` overlay lists every key.
 - **Preview builds:** if you installed the pre-release binaries with `cargo install` (`am-rs`, `am-tui`, `am-hook` in `~/.cargo/bin`), remove them so they don't shadow the release on your `PATH`: `cargo uninstall am-cli am-tui am-hook`, then run `am hooks install` again.
-- **Removed:** managed (headless) Claude sessions and the chat view (`am agent send|list|log|stop`), and `am daemon`. Use `c` in the dashboard or `am agent attach` to resume a session in a terminal instead. The Unix socket (`am.sock`) is no longer used.
+- **Removed:** managed (headless) Claude sessions and the chat view (`am agent send|list|log|stop`), and `am daemon`. Use `am agent attach` to resume a session in a terminal instead. The Unix socket (`am.sock`) is no longer used.
 
 ---
 
@@ -535,7 +537,7 @@ You can also press `w` in the dashboard to see the log live.
 
 - `am hooks status` should report the hooks as installed; if not, run `am hooks install`.
 - After upgrading from 1.x, run `am hooks install` once so the hooks use `am-hook`.
-- **Agent plugins:** `s` → **Agent plugins…** lists every agent plugin (Claude Code, Gemini CLI, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `c`. To add an agent CLI without code, see `docs/agent-providers.md`.
+- **Agent plugins:** `s` → **Agent plugins…** lists every agent plugin (Claude Code, Gemini CLI, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
 - **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.
 - Check `am logs --module hook-event` while the agent is working. No lines means the hooks aren't firing; for more detail, `am settings set logLevel debug`.
 - A session in a directory am doesn't track shows up under **Other sessions**. Add the repository with `A` or `am repo add <path>`.

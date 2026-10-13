@@ -256,6 +256,12 @@ fn settings_set_coerces_and_validates() {
         assert_eq!(o.code, 1, "{bad}");
         assert!(o.stderr.contains("Invalid token count"));
     }
+
+    env.ok(&["settings", "set", "dailyTokensScope", "visible"]);
+    assert_eq!(env.settings()["dailyTokensScope"], "visible");
+    let o = env.run(&["settings", "set", "dailyTokensScope", "some"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Use all or visible"));
 }
 
 #[test]

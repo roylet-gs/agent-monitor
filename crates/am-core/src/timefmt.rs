@@ -12,6 +12,11 @@ pub fn parse_sqlite(s: &str) -> Option<i64> {
     PrimitiveDateTime::parse(s.get(..19)?, fmt).ok().map(|t| t.assume_utc().unix_timestamp())
 }
 
+/// An ISO-8601 UTC timestamp (`2026-10-13T06:25:26.796Z`) → unix seconds.
+pub fn parse_iso(s: &str) -> Option<i64> {
+    parse_sqlite(&s.get(..19)?.replacen('T', " ", 1))
+}
+
 /// Compact age: `12s`, `4m`, `3h`, `2d`, `5w`.
 pub fn short_age(secs: i64) -> String {
     let s = secs.max(0);
@@ -45,6 +50,7 @@ mod tests {
         assert_eq!(parse_sqlite("1970-01-01 00:01:00"), Some(60));
         assert_eq!(parse_sqlite("2026-10-11 09:12:57.123"), parse_sqlite("2026-10-11 09:12:57"));
         assert_eq!(parse_sqlite("nope"), None);
+        assert_eq!(parse_iso("1970-01-01T00:01:00.123Z"), Some(60));
     }
 
     #[test]

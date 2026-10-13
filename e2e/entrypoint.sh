@@ -32,7 +32,7 @@ git fetch --quiet origin
 
 # A second worktree for the delete dialog (the main checkout can't be deleted).
 git worktree add --quiet /work/.claude/worktrees/feature-to-delete -b feature/to-delete
-# Two agents at once in one worktree (17-multi-session.spec.ts). Added after
+# Three agents at once in one worktree (18-multi-session.spec.ts). Added after
 # feature/to-delete, so it sorts first (newest) and to-delete → main stays adjacent.
 git worktree add --quiet /work/.claude/worktrees/feature-pair -b feature/pair
 echo ".claude/" > .git/info/exclude
@@ -76,11 +76,22 @@ mkdir -p "/tmp/claude-sessions/$SID/subagents"
 echo '{"description":"Survey auth module","agentType":"Explore"}' > "/tmp/claude-sessions/$SID/subagents/agent-a1b2c3d4.meta.json"
 hook() { am hook-event --worktree "$1" || true; }
 # Transcript with token usage for the context-window bar: 150k of the default
-# 1M window (15% used, so it renders green).
+# 1M window (15% used, so it renders green). The response spans two content
+# blocks, each line repeating its usage; today's token total counts it once
+# (150,120 tokens).
+NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
 mkdir -p "$HOME/.claude/projects/-work"
 cat > "$HOME/.claude/projects/-work/$SID.jsonl" <<JSONL
-{"type":"user","cwd":"/work","sessionId":"$SID","message":{"role":"user","content":"Refactor auth"}}
-{"type":"assistant","isSidechain":false,"cwd":"/work","sessionId":"$SID","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
+{"type":"user","cwd":"/work","sessionId":"$SID","timestamp":"$NOW_ISO","message":{"role":"user","content":"Refactor auth"}}
+{"type":"assistant","isSidechain":false,"cwd":"/work","sessionId":"$SID","timestamp":"$NOW_ISO","message":{"id":"msg_e2e_1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
+{"type":"assistant","isSidechain":false,"cwd":"/work","sessionId":"$SID","timestamp":"$NOW_ISO","message":{"id":"msg_e2e_1","model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
+JSONL
+# Usage outside every tracked row: counted by `dailyTokensScope: all` (total
+# 1.0M today) but not by `visible` (150k). Yesterday's line counts for neither.
+mkdir -p "$HOME/.claude/projects/-home-user-elsewhere"
+cat > "$HOME/.claude/projects/-home-user-elsewhere/sess-elsewhere.jsonl" <<JSONL
+{"type":"assistant","cwd":"/home/user/elsewhere","timestamp":"$(date -u -d '-2 days' +%Y-%m-%dT%H:%M:%S.000Z)","message":{"id":"msg_e2e_old","model":"m","usage":{"input_tokens":5000000,"output_tokens":0}}}
+{"type":"assistant","cwd":"/home/user/elsewhere","timestamp":"$NOW_ISO","message":{"id":"msg_e2e_2","model":"m","usage":{"input_tokens":49880,"cache_read_input_tokens":700000,"output_tokens":100000}}}
 JSONL
 
 echo "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"$SID\",\"transcript_path\":\"/tmp/claude-sessions/$SID.jsonl\"}" | hook /work
@@ -90,7 +101,7 @@ echo "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"$SID\",\"agent_id\":\
 echo "{\"hook_event_name\":\"Stop\",\"session_id\":\"$SID\",\"transcript_path\":\"/tmp/claude-sessions/$SID.jsonl\"}" | hook /work
 am status --worktree /work
 
-# --- Three agents in one worktree (17-multi-session.spec.ts) ----------------
+# --- Three agents in one worktree (18-multi-session.spec.ts) ----------------
 # Two Claude sessions and a Gemini one in feature/pair, each with its own
 # status. Claude #3a7c: executing, one running subagent, a 300k transcript.
 # Claude #9e41: turn ended with two subagents still running → delegating.

@@ -22,6 +22,9 @@ pub struct Snapshot {
     pub health: Health,
     /// Stacked branches: child worktree id → parent worktree id.
     pub stack: std::collections::HashMap<String, String>,
+    /// Tokens used today (`showDailyTokens`/`dailyTokensScope`); `None` when
+    /// the setting is off.
+    pub today_tokens: Option<u64>,
 }
 
 /// A visual row of the worktree list. Headers never take a selection index:
@@ -50,11 +53,6 @@ pub enum Action {
     Refresh,
     /// Enter: open in the configured IDE (resuming the last session if set).
     Open(Box<WorktreeView>),
-    /// `t`: terminal at the worktree.
-    OpenTerminal(Box<WorktreeView>),
-    /// `c`: terminal resuming the worktree's agent (`claude --resume <latest>`,
-    /// `gemini --resume <id>`).
-    OpenAgent(Box<WorktreeView>),
     /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
     OpenUrl(String),
     /// A setting was saved; theme/collector need to pick it up.
@@ -313,7 +311,7 @@ impl App {
     /// bar dims the ones that don't). Keys that aren't per-worktree are
     /// always available.
     pub fn key_available(&self, key: &str) -> bool {
-        let row_key = matches!(key, "⏎" | "t" | "c" | "g" | "l" | "p" | "d");
+        let row_key = matches!(key, "⏎" | "g" | "l" | "p" | "d");
         if !row_key {
             return true;
         }
@@ -467,7 +465,7 @@ impl App {
     }
 
     fn dashboard_key(&mut self, key: Key) -> Action {
-        let row_action = matches!(key, Key::Enter | Key::Char('t' | 'c' | 'g' | 'o' | 'l' | 'p' | 'd'));
+        let row_action = matches!(key, Key::Enter | Key::Char('g' | 'o' | 'l' | 'p' | 'd'));
         if row_action && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
             self.notice = Some("Deleting in the background…".into());
             return Action::None;
@@ -481,8 +479,6 @@ impl App {
                 return Action::Refresh;
             }
             Key::Enter => return self.with_selected(Action::Open),
-            Key::Char('t') => return self.with_selected(Action::OpenTerminal),
-            Key::Char('c') => return self.with_selected(Action::OpenAgent),
             Key::Char('g') | Key::Char('o') => return self.url_action(|v, _| {
                 let pr = v.pr.as_ref()?;
                 // Same rule as the TS app: a merged PR jumps to its last active check.

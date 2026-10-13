@@ -103,6 +103,14 @@ impl Harness for Claude {
         transcript::usage_for(root, session_id)
     }
 
+    fn usage_files(&self, since: SystemTime) -> Vec<PathBuf> {
+        usage_files_in(&home_join(".claude").join("projects"), since)
+    }
+
+    fn usage_record(&self, line: &str) -> Option<crate::usage::UsageRecord> {
+        usage_record(line)
+    }
+
     fn matches_process(&self, name: &str, argv: &[String]) -> bool {
         static SPEC: std::sync::LazyLock<ProcessSpec> = std::sync::LazyLock::new(|| ProcessSpec {
             names: vec!["claude".into()],
@@ -157,9 +165,95 @@ fn transcript_cwd(file: &Path) -> Option<String> {
     })
 }
 
+/// `<projects>/*/*.jsonl` and `<projects>/*/<session>/subagents/*.jsonl`
+/// modified at or after `since`.
+pub fn usage_files_in(projects_dir: &Path, since: SystemTime) -> Vec<PathBuf> {
+    let fresh = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).is_ok_and(|t| t >= since);
+    let jsonl = |dir: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "jsonl") && fresh(p))
+            .collect()
+    };
+    let mut out = Vec::new();
+    for project in std::fs::read_dir(projects_dir).into_iter().flatten().flatten() {
+        let project = project.path();
+        // A directory's mtime only moves when entries are added, not when a
+        // transcript grows, so every file is checked on its own.
+        for entry in std::fs::read_dir(&project).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                let subagents = path.join("subagents");
+                if subagents.is_dir() {
+                    out.extend(jsonl(&subagents));
+                }
+            } else if path.extension().is_some_and(|x| x == "jsonl") && fresh(&path) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+/// Token usage on an assistant line: input + cache creation + cache read +
+/// output. Sidechain (subagent) turns count; `<synthetic>` ones don't.
+pub fn usage_record(line: &str) -> Option<crate::usage::UsageRecord> {
+    if !line.contains("\"usage\"") || !line.contains("\"assistant\"") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(line).ok()?;
+    if v.get("type")?.as_str()? != "assistant" {
+        return None;
+    }
+    let msg = v.get("message")?;
+    if msg.get("model").and_then(Value::as_str) == Some("<synthetic>") {
+        return None;
+    }
+    let usage = msg.get("usage")?;
+    let n = |k: &str| usage.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let tokens = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens") + n("output_tokens");
+    let id = [msg.get("id"), v.get("requestId"), v.get("uuid")].into_iter().flatten().find_map(Value::as_str)?;
+    Some(crate::usage::UsageRecord {
+        id: id.to_owned(),
+        at: crate::timefmt::parse_iso(v.get("timestamp")?.as_str()?)?,
+        cwd: v.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()).map(str::to_owned),
+        tokens,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_records_count_every_token_class() {
+        let line = r#"{"type":"assistant","isSidechain":true,"cwd":"/w","timestamp":"1970-01-01T00:01:00.5Z","message":{"id":"msg_1","model":"m","usage":{"input_tokens":2,"cache_creation_input_tokens":30,"cache_read_input_tokens":400,"output_tokens":5000}}}"#;
+        let r = usage_record(line).unwrap();
+        assert_eq!((r.id.as_str(), r.at, r.cwd.as_deref(), r.tokens), ("msg_1", 60, Some("/w"), 5432));
+        let synthetic = line.replace(r#""model":"m""#, r#""model":"<synthetic>""#);
+        assert_eq!(usage_record(&synthetic), None);
+        let user = line.replace(r#""type":"assistant""#, r#""type":"user""#);
+        assert_eq!(usage_record(&user), None);
+        assert_eq!(usage_record(r#"{"type":"summary"}"#), None);
+    }
+
+    #[test]
+    fn usage_files_include_subagents_and_skip_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("-w");
+        std::fs::create_dir_all(project.join("s1/subagents")).unwrap();
+        for f in ["s1.jsonl", "s1/subagents/agent-a.jsonl", "notes.txt"] {
+            std::fs::write(project.join(f), "").unwrap();
+        }
+        let mut files = usage_files_in(dir.path(), SystemTime::UNIX_EPOCH);
+        files.sort();
+        assert_eq!(files, vec![project.join("s1/subagents/agent-a.jsonl"), project.join("s1.jsonl")]);
+        let later = SystemTime::now() + std::time::Duration::from_secs(60);
+        assert!(usage_files_in(dir.path(), later).is_empty());
+    }
 
     #[test]
     fn entry_shape_matches_ts() {

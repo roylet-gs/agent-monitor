@@ -30,7 +30,7 @@ test("worktrees without running subagents have no badge", async ({ page }) => {
   expect(row).toContain("feature/to-delete");
   expect(row).not.toContain("subagent");
   // Only main carries a badge among worktree rows (session rows, "├ "/"└ "
-  // under feature/pair, have their own: 17-multi-session.spec.ts).
+  // under feature/pair, have their own: 18-multi-session.spec.ts).
   const badged = (await tui.lines()).filter((l) => l.includes("subagent") && !/[├└] /.test(l));
   expect(badged).toHaveLength(1);
   expect(badged[0]).toContain(" main ");

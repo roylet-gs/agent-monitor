@@ -20,4 +20,5 @@ pub mod status;
 pub mod themes;
 pub mod timefmt;
 pub mod update_check;
+pub mod usage;
 pub mod worktrees;
