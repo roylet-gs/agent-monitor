@@ -24,8 +24,29 @@ test("dashboard renders the worktree pane and key bar with the seeded repo", asy
   expect(keys).toContain("g PR");
   expect(keys).toContain("? help");
   expect(keys).toContain("q quit");
+  // The `t` terminal and `c` agent actions are gone.
+  expect(keys).not.toContain("t terminal");
+  expect(keys).not.toContain("c agent");
 
   await tui.screenshot("dashboard");
+  await tui.screenshot("dashboard-keybar");
+});
+
+test("t and c are no longer bound: no popup or notice, dashboard stays", async ({ page }) => {
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("feature/to-delete");
+  const before = await tui.keyBar();
+
+  for (const key of ["t", "c"]) {
+    await tui.sendKey(key);
+    await tui.waitForText("─Worktrees");
+    const text = await tui.getScreenText();
+    expect(text).not.toContain("Copied");
+    expect(text).not.toMatch(/terminal|resum/i);
+    expect(await tui.keyBar()).toBe(before);
+    expect(await tui.selectedName()).toBe("feature/to-delete");
+  }
 });
 
 test("j/k move the ▌ selection; Home/G jump to top/bottom", async ({ page }) => {

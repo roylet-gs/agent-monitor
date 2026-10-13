@@ -143,8 +143,8 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 
 | Spec | What it tests |
 |------|---------------|
-| `01-dashboard.spec.ts` | `─Worktrees` pane with `N of M`, `work ───` repo header, key bar hints; j/k move the `▌` selection, `Home`/`G` jump to top/bottom; `w` toggles the log pane |
-| `02-help.spec.ts` | `?` help overlay (keys + status legend) opens and closes |
+| `01-dashboard.spec.ts` | `─Worktrees` pane with `N of M`, `work ───` repo header, key bar hints; j/k move the `▌` selection, `Home`/`G` jump to top/bottom; `w` toggles the log pane; `t`/`c` are unbound (no popup, key bar and selection unchanged) |
+| `02-help.spec.ts` | `?` help overlay (keys + status legend, no `t`/`c` lines) opens and closes |
 | `03-settings.spec.ts` | `s` settings editor; toggling "Resume last session on open" persists across a process restart (then restored) |
 | `04-pr-status.spec.ts` | PR column: open (`#42✓`), draft (`#43`) and no PR, via the batched `gh api graphql` path; the Linear PR attachment stands in when GitHub has no PR |
 | `05-linear.spec.ts` | ENG-123 ticket column and `— ticket —` cluster header; making Linear project the top sort key in the sort editor renders `═ Dashboard Revamp ═` (headers take no selection index), then restores |
