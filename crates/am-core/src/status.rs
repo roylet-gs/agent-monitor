@@ -1,4 +1,7 @@
-//! Agent-status rules: map a Claude Code hook event onto a worktree status.
+//! Agent-status rules: map a canonical hook event onto a worktree status.
+//!
+//! The canonical event vocabulary is Claude Code's; other agents' hooks are
+//! translated into it by their provider (`crate::agents`) before they get here.
 //!
 //! Ported from `src/commands/hook-event.ts` (`mapEventToStatus`) with one
 //! structural change: events are classified by *origin*. Claude Code tags
@@ -272,9 +275,9 @@ pub fn summarize_tool_input(tool: &str, input: Option<&Value>, cwd: Option<&str>
         "Bash" => pick("description").or(pick("command")),
         "Read" | "Edit" | "Write" | "NotebookEdit" => pick("file_path").or(pick("notebook_path")),
         "Grep" | "Glob" => pick("pattern"),
-        "WebFetch" => pick("url"),
+        "WebFetch" => pick("url").or(pick("prompt")),
         "WebSearch" => pick("query"),
-        "Agent" | "Task" => pick("description"),
+        "Agent" | "Task" => pick("description").or(pick("agent_name")),
         _ => None,
     }?;
     let line = raw.lines().next().unwrap_or("").trim();

@@ -26,7 +26,7 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
   const before = await resumeValue(tui);
   const after = before === "on" ? "off" : "on";
   await tui.sendKey("j"); // cursor → "Resume last session on open"
-  await tui.waitForText("Enter also resumes the worktree's most recent Claude session");
+  await tui.waitForText("Enter also resumes the worktree's most recent agent session");
   await tui.sendKey(" ");
   expect(await resumeValue(tui)).toBe(after);
   await tui.sendKey("Escape");

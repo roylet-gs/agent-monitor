@@ -10,7 +10,7 @@ use crate::hooks_installer as hi;
 use crate::output;
 
 struct Check {
-    name: &'static str,
+    name: String,
     status: &'static str, // ok | warn | fail
     message: String,
 }
@@ -39,7 +39,7 @@ pub fn run(as_json: bool) {
     let app_dir = paths::app_dir();
     let app_exists = app_dir.exists();
     checks.push(Check {
-        name: "App directory",
+        name: "App directory".into(),
         status: if app_exists { "ok" } else { "warn" },
         message: if app_exists {
             app_dir.display().to_string()
@@ -51,31 +51,53 @@ pub fn run(as_json: bool) {
     let db = am_core::db::open().and_then(|c| Ok((am_core::db::repositories(&c)?, am_core::db::worktrees(&c)?)));
     checks.push(match db {
         Ok((repos, wts)) => Check {
-            name: "Database",
+            name: "Database".into(),
             status: "ok",
             message: format!("{} — {} repos, {} worktrees", paths::db_path().display(), repos.len(), wts.len()),
         },
-        Err(e) => Check { name: "Database", status: "fail", message: format!("Failed to open: {e}") },
+        Err(e) => Check { name: "Database".into(), status: "fail", message: format!("Failed to open: {e}") },
     });
 
     let settings_path = paths::settings_path();
     let has_settings = settings_path.exists();
     checks.push(Check {
-        name: "Settings",
+        name: "Settings".into(),
         status: if has_settings { "ok" } else { "warn" },
         message: if has_settings { settings_path.display().to_string() } else { "Using defaults (no settings.json)".into() },
     });
 
-    let hooks = hi::is_global_hooks_installed();
-    checks.push(Check {
-        name: "Claude hooks",
-        status: if hooks { "ok" } else { "warn" },
-        message: if hooks { "Installed in ~/.claude/settings.json".into() } else { "Not installed. Run: am hooks install".into() },
-    });
+    let s = settings::load();
+    for &kind in am_core::agents::all() {
+        let p = kind.provider();
+        let hooks = hi::is_hooks_installed(kind);
+        let enabled = am_core::agents::is_enabled(kind, &s);
+        // Claude is always checked (1.x output); other agents once they are in use.
+        if kind != am_core::agents::AgentKind::CLAUDE && !hooks && !(enabled && p.is_present()) {
+            continue;
+        }
+        let path = hi::display_path(p);
+        let note = p.notes().map(|n| format!(" ({n})")).unwrap_or_default();
+        let (status, message) = match hi::read_settings(&p.settings_path()) {
+            Err(e) => ("warn", e.to_string()),
+            Ok(_) if !enabled && hooks => ("warn", format!("Plugin disabled but hooks remain in {path}. Run: am hooks uninstall --agent {}", kind.id())),
+            Ok(_) if !enabled => ("ok", "Plugin disabled".into()),
+            Ok(_) if !hooks => ("warn", format!("Not installed. Run: am hooks install --agent {}", kind.id())),
+            Ok(_) => ("ok", format!("Installed in {path}{note}")),
+        };
+        checks.push(Check { name: format!("{} hooks", p.short_name()), status, message });
+    }
+    let plugin_errors = am_core::agents::plugin_errors();
+    if !plugin_errors.is_empty() {
+        checks.push(Check {
+            name: "Agent plugins".into(),
+            status: "warn",
+            message: format!("Skipped in {}: {}", am_core::agents::plugins_dir().display(), plugin_errors.join("; ")),
+        });
+    }
 
     let native = hi::find_native_hook_binary();
     checks.push(Check {
-        name: "Native hook",
+        name: "Native hook".into(),
         status: if native.is_some() { "ok" } else { "warn" },
         message: match native {
             Some(p) => format!("{} (re-run `am hooks install` to point hooks at it)", p.display()),
@@ -83,17 +105,16 @@ pub fn run(as_json: bool) {
         },
     });
 
-    let s = settings::load();
     let gh = gh_available();
     checks.push(Check {
-        name: "gh CLI",
+        name: "gh CLI".into(),
         status: if gh || !s.gh_pr_status { "ok" } else { "warn" },
         message: if gh { "Available".into() } else { "Not found (PR status disabled)".into() },
     });
 
     let ttyd = super::find_sibling_or_path("ttyd").is_some();
     checks.push(Check {
-        name: "ttyd",
+        name: "ttyd".into(),
         status: if ttyd { "ok" } else { "warn" },
         message: if ttyd { "Available (TUI screenshots enabled)".into() } else { "Not found. Install with: brew install ttyd".into() },
     });
@@ -103,7 +124,7 @@ pub fn run(as_json: bool) {
     let broken: Vec<&String> = custom.iter().filter(|n| am_core::themes::load(n).is_err()).collect();
     let theme_ok = am_core::themes::exists(&s.theme);
     checks.push(Check {
-        name: "Theme",
+        name: "Theme".into(),
         status: if theme_ok && broken.is_empty() { "ok" } else { "warn" },
         message: if !theme_ok {
             format!("Unknown theme '{}' (the TUI uses ansi). Run: am theme list", s.theme)
@@ -117,7 +138,7 @@ pub fn run(as_json: bool) {
     if s.linear_enabled {
         let has_key = !s.linear_api_key.is_empty();
         checks.push(Check {
-            name: "Linear",
+            name: "Linear".into(),
             status: if has_key { "ok" } else { "warn" },
             message: if has_key { "Enabled with API key".into() } else { "Enabled but no API key set".into() },
         });

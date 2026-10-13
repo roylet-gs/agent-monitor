@@ -15,4 +15,4 @@ expression: "render(&app, 100, 14)"
 │                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 6 ╯
- ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

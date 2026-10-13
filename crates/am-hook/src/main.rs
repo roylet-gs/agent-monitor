@@ -19,11 +19,11 @@ fn main() {
         }
     }
     match am_hook::parse_hook_args(args) {
-        Ok(a) => am_hook::run_hook_event(&a.worktree, a.event.as_deref()),
+        Ok(a) => am_hook::run_hook_event(&a.worktree, a.event.as_deref(), a.agent.as_deref()),
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(2);
         }
     }
-    // Hooks must never block or fail Claude Code: always exit 0.
+    // Hooks must never block or fail the agent: always exit 0.
 }

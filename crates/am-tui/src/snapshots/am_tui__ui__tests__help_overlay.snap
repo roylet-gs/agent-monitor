@@ -6,9 +6,9 @@ expression: "render(&app, 100, 20)"
 │agent-mon│    j / k  ↑ / ↓  move                                                        │─────────│
 │▌◑ featur│        home / G  top / bottom                                                │█░░ 121k │
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │██▋ 185k │
-│         │           enter  open (IDE; resumes last Claude session)                     │         │
+│         │           enter  open (IDE; resumes last agent session)                      │         │
 │gridsight│               t  terminal at worktree                                        │─────────│
-│ · main  │               c  terminal running claude --resume                            │         │
+│ · main  │               c  terminal resuming the agent (claude / gemini)               │         │
 │         │       g / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane                                             │         │
 │         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
@@ -21,4 +21,4 @@ expression: "render(&app, 100, 20)"
 │         │                                                                              │         │
 │         │● executing  ◇ planning  ◐ waiting  ◑ delegating  ✓ done  ○ idle              │         │
 ╰─────────│PR ready=approved+CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting  │─ 1 of 3 ╯
- ⏎ open  c╰──────────────────────────────────────────────────────────────────────────────╯ quit
+ ⏎ open  c╰──────────────────────────────────────────────────────────────────────────────╯quit

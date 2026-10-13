@@ -46,8 +46,8 @@ test("project headers when Linear project is the top sort key", async ({ page })
   await tui.waitForGone("esc close");
 
   await tui.waitForText("═ Dashboard Revamp ═", 10_000);
-  // Headers never take a selection index: still "N of 3" worktree rows.
-  expect(await tui.getScreenText()).toMatch(/ \d of 3 /);
+  // Headers never take a selection index: still "N of 4" rows (2 worktrees + 2 standalone sessions).
+  expect(await tui.getScreenText()).toMatch(/ \d of 4 /);
   await tui.screenshot("linear-project");
 
   // Restore the default order (disable it, move it back down).

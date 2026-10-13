@@ -62,6 +62,7 @@
 //! keeps worktrees under `.claude/worktrees/` would light up whenever any of
 //! them had a terminal open.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -187,20 +188,20 @@ impl ProcessSnapshot {
     }
 
     /// Why `p` is not a user process worth showing, if it isn't.
-    fn exclusion(&self, p: &ProcInfo) -> Option<&'static str> {
+    fn exclusion(&self, p: &ProcInfo) -> Option<Cow<'static, str>> {
         if is_shell(p) {
-            return Some("shell");
+            return Some(Cow::Borrowed("shell"));
         }
-        if is_claude(p) {
-            return Some("claude");
+        if let Some(agent) = agent_cli(p) {
+            return Some(Cow::Owned(agent.to_owned()));
         }
         if is_editor(p) {
-            return Some("editor");
+            return Some(Cow::Borrowed("editor"));
         }
         if is_agent_monitor(p) {
-            return Some("agent-monitor");
+            return Some(Cow::Borrowed("agent-monitor"));
         }
-        // Tooling spawned directly (no shell in between) by Claude, an editor
+        // Tooling spawned directly (no shell in between) by an agent CLI, an editor
         // or am: MCP servers, language servers, extension helpers, am's own
         // `git status` polls. A dev server started from Claude's Bash tool or a
         // terminal always has a shell between it and its owner, so it is kept.
@@ -208,14 +209,14 @@ impl ProcessSnapshot {
             if is_shell(anc) {
                 return None;
             }
-            if is_claude(anc) {
-                return Some("spawned by claude");
+            if let Some(agent) = agent_cli(anc) {
+                return Some(Cow::Owned(format!("spawned by {agent}")));
             }
             if ide_of(anc).is_some() {
-                return Some("spawned by an editor");
+                return Some(Cow::Borrowed("spawned by an editor"));
             }
             if is_agent_monitor(anc) {
-                return Some("spawned by agent-monitor");
+                return Some(Cow::Borrowed("spawned by agent-monitor"));
             }
         }
         None
@@ -395,12 +396,9 @@ fn program_argv(argv: &[String]) -> &[String] {
     }
 }
 
-fn is_claude(p: &ProcInfo) -> bool {
-    let program = program_argv(&p.argv).first().map(String::as_str).unwrap_or("");
-    p.name == "claude"
-        || argv0_name(p) == "claude"
-        || basename(program) == "claude"
-        || program.contains("/@anthropic-ai/claude-code/")
+/// The registered agent CLI (`crate::agents`) `p` is, if any, by id.
+fn agent_cli(p: &ProcInfo) -> Option<&'static str> {
+    crate::agents::all().iter().find(|k| k.provider().matches_process(&p.name, &p.argv)).map(|k| k.id())
 }
 
 fn is_editor(p: &ProcInfo) -> bool {
@@ -790,6 +788,21 @@ mod tests {
         let map = ts_fixture().running_processes(&roots(&["/wt/a", "/wt/b"]), "");
         assert!(!pids(map.get(Path::new("/wt/a"))).contains(&1001));
         assert!(!map.contains_key(Path::new("/wt/b")));
+    }
+
+    #[test]
+    fn excludes_gemini_and_its_tooling() {
+        let snap = ProcessSnapshot::from_processes(
+            [
+                proc(2000, 1, "/usr/local/bin/node", "/wt/g", &["node", "/Users/dev/.nvm/bin/gemini"]),
+                proc(2001, 2000, "/usr/local/bin/node", "/wt/g", &["node", "--max-old-space-size=8192", "/n/lib/node_modules/@google/gemini-cli/bundle/gemini.js"]),
+                proc(2002, 2001, "/usr/local/bin/node", "/wt/g", &["node", "/wt/g/mcp-server.js"]),
+                proc(2003, 1, "/usr/local/bin/node", "/wt/g", &["node", "/wt/g/node_modules/.bin/vite"]),
+            ],
+            99_999,
+        );
+        let map = snap.running_processes(&roots(&["/wt/g"]), "");
+        assert_eq!(pids(map.get(Path::new("/wt/g"))), [2003]);
     }
 
     #[test]

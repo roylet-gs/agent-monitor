@@ -7,10 +7,11 @@
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
+use crate::agents::AgentKind;
 use crate::paths;
 use crate::status::Status;
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// A subagent counts as running only if it reported something recently;
 /// protects the count from a missed SubagentStop (crash, killed session).
@@ -71,6 +72,15 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
              CREATE INDEX IF NOT EXISTS subagents_worktree ON subagents(worktree_id, status);
              CREATE INDEX IF NOT EXISTS subagents_standalone ON subagents(standalone_path, status);",
         )?;
+    }
+    if v < 3 {
+        // Which agent CLI (`crate::agents::AgentKind` id) the session belongs
+        // to. NULL = Claude: every row 1.x or an older 2.x wrote.
+        for table in ["agent_status", "standalone_sessions"] {
+            if !has_column(&tx, table, "agent")? {
+                tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN agent TEXT"))?;
+            }
+        }
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
@@ -162,7 +172,7 @@ fn baseline(tx: &Transaction) -> rusqlite::Result<()> {
 }
 
 /// Which status row an event belongs to: a tracked worktree, or a
-/// "standalone" Claude session running somewhere am doesn't manage.
+/// "standalone" agent session running somewhere am doesn't manage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Owner {
     Worktree { id: String, repo_id: String, branch: String },
@@ -175,6 +185,7 @@ pub struct StatusRow {
     pub session_id: Option<String>,
     pub is_open: bool,
     pub active_subagents: i64,
+    pub agent: AgentKind,
 }
 
 pub fn find_worktree(conn: &Connection, path: &str) -> rusqlite::Result<Option<Owner>> {
@@ -189,11 +200,11 @@ pub fn find_worktree(conn: &Connection, path: &str) -> rusqlite::Result<Option<O
 pub fn get_status(conn: &Connection, owner: &Owner) -> rusqlite::Result<Option<StatusRow>> {
     let (sql, key) = match owner {
         Owner::Worktree { id, .. } => (
-            "SELECT status, session_id, is_open, active_subagents FROM agent_status WHERE worktree_id = ?",
+            "SELECT status, session_id, is_open, active_subagents, agent FROM agent_status WHERE worktree_id = ?",
             id.as_str(),
         ),
         Owner::Standalone { path } => (
-            "SELECT status, session_id, is_open, active_subagents FROM standalone_sessions WHERE path = ?",
+            "SELECT status, session_id, is_open, active_subagents, agent FROM standalone_sessions WHERE path = ?",
             path.as_str(),
         ),
     };
@@ -203,6 +214,7 @@ pub fn get_status(conn: &Connection, owner: &Owner) -> rusqlite::Result<Option<S
             session_id: r.get(1)?,
             is_open: r.get::<_, Option<i64>>(2)?.unwrap_or(0) != 0,
             active_subagents: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+            agent: AgentKind::from_db(r.get::<_, Option<String>>(4)?.as_deref()),
         })
     })
     .optional()
@@ -210,6 +222,8 @@ pub fn get_status(conn: &Connection, owner: &Owner) -> rusqlite::Result<Option<S
 
 pub struct StatusUpdate<'a> {
     pub status: Status,
+    /// The agent that sent the event; `None` keeps the stored one.
+    pub agent: Option<AgentKind>,
     pub session_id: Option<&'a str>,
     pub last_response: Option<&'a str>,
     pub transcript_summary: Option<&'a str>,
@@ -220,30 +234,33 @@ pub struct StatusUpdate<'a> {
 /// null fields keep the existing value.
 pub fn upsert_status(conn: &Connection, owner: &Owner, u: &StatusUpdate) -> rusqlite::Result<()> {
     let open = u.is_open as i64;
+    let agent = u.agent.map(AgentKind::id);
     match owner {
         Owner::Worktree { id, .. } => conn.execute(
-            "INSERT INTO agent_status (worktree_id, status, session_id, last_response, transcript_summary, is_open, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
+            "INSERT INTO agent_status (worktree_id, status, session_id, last_response, transcript_summary, is_open, agent, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
              ON CONFLICT(worktree_id) DO UPDATE SET
                status = excluded.status,
+               agent = COALESCE(excluded.agent, agent_status.agent),
                session_id = COALESCE(excluded.session_id, agent_status.session_id),
                last_response = COALESCE(excluded.last_response, agent_status.last_response),
                transcript_summary = COALESCE(excluded.transcript_summary, agent_status.transcript_summary),
                is_open = excluded.is_open,
                updated_at = datetime('now')",
-            params![id, u.status.as_str(), u.session_id, u.last_response, u.transcript_summary, open],
+            params![id, u.status.as_str(), u.session_id, u.last_response, u.transcript_summary, open, agent],
         )?,
         Owner::Standalone { path } => conn.execute(
-            "INSERT INTO standalone_sessions (id, path, status, session_id, last_response, transcript_summary, is_open, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+            "INSERT INTO standalone_sessions (id, path, status, session_id, last_response, transcript_summary, is_open, agent, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))
              ON CONFLICT(path) DO UPDATE SET
                status = excluded.status,
+               agent = COALESCE(excluded.agent, standalone_sessions.agent),
                session_id = COALESCE(excluded.session_id, standalone_sessions.session_id),
                last_response = COALESCE(excluded.last_response, standalone_sessions.last_response),
                transcript_summary = COALESCE(excluded.transcript_summary, standalone_sessions.transcript_summary),
                is_open = excluded.is_open,
                updated_at = datetime('now')",
-            params![uuid::Uuid::new_v4().to_string(), path, u.status.as_str(), u.session_id, u.last_response, u.transcript_summary, open],
+            params![uuid::Uuid::new_v4().to_string(), path, u.status.as_str(), u.session_id, u.last_response, u.transcript_summary, open, agent],
         )?,
     };
     Ok(())
@@ -464,7 +481,7 @@ pub fn worktrees(conn: &Connection) -> rusqlite::Result<Vec<crate::model::Worktr
 
 pub fn agent_states(conn: &Connection) -> rusqlite::Result<std::collections::HashMap<String, crate::model::AgentState>> {
     let mut stmt = conn.prepare(
-        "SELECT worktree_id, status, session_id, last_response, is_open, active_subagents, updated_at FROM agent_status",
+        "SELECT worktree_id, status, session_id, last_response, is_open, active_subagents, updated_at, agent FROM agent_status",
     )?;
     let rows = stmt.query_map([], |r| {
         let status = r.get::<_, Option<String>>(1)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle);
@@ -477,6 +494,7 @@ pub fn agent_states(conn: &Connection) -> rusqlite::Result<std::collections::Has
                 is_open: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
                 active_subagents: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
                 updated_at: r.get(6)?,
+                agent: AgentKind::from_db(r.get::<_, Option<String>>(7)?.as_deref()),
             },
         ))
     })?;
@@ -665,11 +683,11 @@ pub fn clear_linear_nicknames(conn: &Connection) -> rusqlite::Result<usize> {
     )
 }
 
-/// Claude sessions running outside any tracked worktree:
+/// Agent sessions running outside any tracked worktree:
 /// (row id, path, state), most recently active first.
 pub fn standalone_sessions(conn: &Connection) -> rusqlite::Result<Vec<(String, String, crate::model::AgentState)>> {
     let mut stmt = conn.prepare(
-        "SELECT id, path, status, session_id, last_response, is_open, active_subagents, updated_at
+        "SELECT id, path, status, session_id, last_response, is_open, active_subagents, updated_at, agent
          FROM standalone_sessions ORDER BY updated_at DESC",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -683,6 +701,7 @@ pub fn standalone_sessions(conn: &Connection) -> rusqlite::Result<Vec<(String, S
                 is_open: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
                 active_subagents: r.get::<_, Option<i64>>(6)?.unwrap_or(0),
                 updated_at: r.get(7)?,
+                agent: AgentKind::from_db(r.get::<_, Option<String>>(8)?.as_deref()),
             },
         ))
     })?;
@@ -742,7 +761,7 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        for c in ["transcript_summary", "is_open", "active_subagents"] {
+        for c in ["transcript_summary", "is_open", "active_subagents", "agent"] {
             assert!(tx_cols.iter().any(|n| n == c), "missing {c}");
         }
         // Re-opening is a no-op.
@@ -807,8 +826,8 @@ mod tests {
     fn status_upsert_keeps_existing_fields_when_null() {
         let (_d, conn) = fresh();
         let o = wt();
-        upsert_status(&conn, &o, &StatusUpdate { status: Status::Executing, session_id: Some("s1"), last_response: None, transcript_summary: None, is_open: true }).unwrap();
-        upsert_status(&conn, &o, &StatusUpdate { status: Status::Done, session_id: None, last_response: Some("ok"), transcript_summary: None, is_open: true }).unwrap();
+        upsert_status(&conn, &o, &StatusUpdate { status: Status::Executing, session_id: Some("s1"), last_response: None, transcript_summary: None, is_open: true, agent: None }).unwrap();
+        upsert_status(&conn, &o, &StatusUpdate { status: Status::Done, session_id: None, last_response: Some("ok"), transcript_summary: None, is_open: true, agent: None }).unwrap();
         let row = get_status(&conn, &o).unwrap().unwrap();
         assert_eq!(row.status, Some(Status::Done));
         assert_eq!(row.session_id.as_deref(), Some("s1"));
@@ -817,12 +836,33 @@ mod tests {
     }
 
     #[test]
+    fn status_rows_remember_the_agent() {
+        let (_d, conn) = fresh();
+        let up = |owner: &Owner, agent| {
+            let u = StatusUpdate { status: Status::Executing, session_id: None, last_response: None, transcript_summary: None, is_open: true, agent };
+            upsert_status(&conn, owner, &u).unwrap();
+        };
+        let id = |o: &Owner| match o {
+            Owner::Worktree { id, .. } => id.clone(),
+            Owner::Standalone { .. } => unreachable!(),
+        };
+        up(&wt(), None);
+        assert_eq!(agent_states(&conn).unwrap()[&id(&wt())].agent, AgentKind::CLAUDE);
+        up(&wt(), Some(AgentKind::GEMINI));
+        up(&wt(), None); // e.g. `am status --set`: keeps the agent
+        assert_eq!(agent_states(&conn).unwrap()[&id(&wt())].agent, AgentKind::GEMINI);
+        let standalone = Owner::Standalone { path: "/elsewhere".into() };
+        up(&standalone, Some(AgentKind::GEMINI));
+        assert_eq!(standalone_sessions(&conn).unwrap()[0].2.agent, AgentKind::GEMINI);
+    }
+
+    #[test]
     fn dashboard_reads() {
         let (_d, conn) = fresh();
         assert_eq!(repositories(&conn).unwrap().len(), 1);
         let wts = worktrees(&conn).unwrap();
         assert_eq!(wts[0].branch, "feat");
-        upsert_status(&conn, &wt(), &StatusUpdate { status: Status::Delegating, session_id: Some("s"), last_response: None, transcript_summary: None, is_open: true }).unwrap();
+        upsert_status(&conn, &wt(), &StatusUpdate { status: Status::Delegating, session_id: Some("s"), last_response: None, transcript_summary: None, is_open: true, agent: None }).unwrap();
         assert_eq!(agent_states(&conn).unwrap()["w"].status, Status::Delegating);
         subagent_started(&conn, &wt(), &SubagentKey { session_id: "s", agent_id: "a" }, Some("Explore")).unwrap();
         subagent_stopped(&conn, &wt(), &SubagentKey { session_id: "s", agent_id: "b" }, None, None, None).unwrap();
@@ -838,7 +878,7 @@ mod tests {
         let (_d, conn) = fresh();
         let o = Owner::Standalone { path: "/tmp/x".into() };
         set_active_subagents(&conn, &o, 1).unwrap();
-        upsert_status(&conn, &o, &StatusUpdate { status: Status::Waiting, session_id: Some("s"), last_response: None, transcript_summary: None, is_open: true }).unwrap();
+        upsert_status(&conn, &o, &StatusUpdate { status: Status::Waiting, session_id: Some("s"), last_response: None, transcript_summary: None, is_open: true, agent: None }).unwrap();
         let row = get_status(&conn, &o).unwrap().unwrap();
         assert_eq!(row.status, Some(Status::Waiting));
         assert_eq!(row.active_subagents, 1);

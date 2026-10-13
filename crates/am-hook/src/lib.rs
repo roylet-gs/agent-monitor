@@ -1,15 +1,21 @@
 //! Hook-event handling shared by the `am-hook` binary and `am hook-event`.
 //!
-//! Claude Code runs this on every hook event (at least twice per tool call),
-//! so it must start fast: no runtime, no TUI code, one SQLite connection.
-//! Usage mirrors the TS command so installed hooks can switch over unchanged:
+//! The agent CLI (Claude Code, Gemini CLI…) runs this on every hook event (at
+//! least twice per tool call), so it must start fast: no runtime, no TUI code,
+//! one SQLite connection. Usage mirrors the TS command so installed hooks can
+//! switch over unchanged:
 //!
-//!   am-hook hook-event --worktree <path> [--event <name>] [--managed]
+//!   am-hook hook-event [--agent <id>] --worktree <path> [--event <name>] [--managed]
+//!
+//! `--agent` (default `claude`) picks the provider that translates the native
+//! payload into the canonical event (`am_core::agents`). Never write to stdout
+//! or stderr: Gemini shows any hook output to the user.
 
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use am_core::agents::AgentKind;
 use am_core::db::{self, Owner, StatusUpdate, SubagentKey};
 use am_core::status::{self, HookEvent};
 use am_core::{debug, info, paths, settings, warn};
@@ -17,42 +23,47 @@ use serde_json::Value;
 
 const MODULE: &str = "hook-event";
 
-pub const USAGE: &str = "usage: am-hook hook-event --worktree <path> [--event <name>] [--managed]";
+pub const USAGE: &str = "usage: am-hook hook-event [--agent <id>] --worktree <path> [--event <name>] [--managed]";
 
 /// Parsed `hook-event` flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookArgs {
     pub worktree: String,
     pub event: Option<String>,
+    pub agent: Option<String>,
 }
 
 /// Parse the flags that follow the `hook-event` word: `-w/--worktree <path>`,
-/// `-e/--event <name>`, `--managed`, and the `--flag=value` forms. Unknown
+/// `-e/--event <name>`, `-a/--agent <id>`, `--managed`, and the `--flag=value` forms. Unknown
 /// flags are ignored so a newer hook command can't break an older binary.
 pub fn parse_hook_args(args: impl IntoIterator<Item = String>) -> Result<HookArgs, String> {
     let mut args = args.into_iter();
-    let (mut worktree, mut event) = (None, None);
+    let (mut worktree, mut event, mut agent) = (None, None, None);
     while let Some(a) = args.next() {
         match a.as_str() {
             "-w" | "--worktree" => worktree = args.next(),
             "-e" | "--event" => event = args.next(),
+            "-a" | "--agent" => agent = args.next(),
             "--managed" => {} // accepted for compatibility with Claude Code's rewritten entries
             other => {
                 if let Some(v) = other.strip_prefix("--worktree=") {
                     worktree = Some(v.to_owned());
                 } else if let Some(v) = other.strip_prefix("--event=") {
                     event = Some(v.to_owned());
+                } else if let Some(v) = other.strip_prefix("--agent=") {
+                    agent = Some(v.to_owned());
                 }
             }
         }
     }
-    Ok(HookArgs { worktree: worktree.ok_or("missing --worktree")?, event })
+    Ok(HookArgs { worktree: worktree.ok_or("missing --worktree")?, event, agent })
 }
 
 /// Handle one hook event: read the JSON payload from stdin, update SQLite and
 /// notify the TUI. Never panics on bad input and never reports failure —
-/// hooks must not block or fail Claude Code, so callers always exit 0.
-pub fn run_hook_event(worktree: &str, event: Option<&str>) {
+/// hooks must not block or fail the agent, so callers always exit 0.
+/// `agent` is the `--agent` id; unknown or missing means Claude.
+pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) {
     let s = settings::load();
     am_core::log::init(s.log_level(), s.max_log_size_mb);
     let started = Instant::now();
@@ -69,20 +80,25 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>) {
             Value::Null
         })
     };
-    let event = HookEvent::from_json(&payload, event);
-    maybe_capture(&event, &raw);
+    let kind = AgentKind::from_db(agent);
+    if agent.is_some_and(|a| AgentKind::get(a).is_none()) {
+        warn!(MODULE, "Unknown --agent {agent:?}; treating the event as Claude's");
+    }
+    let event = kind.provider().normalize(&payload, event);
+    maybe_capture(kind, &event, &raw);
 
-    if let Err(e) = handle(worktree, &event) {
+    if let Err(e) = handle(worktree, kind, &event) {
         warn!(MODULE, "event={} failed: {e}", event.event);
     }
     debug!(MODULE, "event={} handled in {:.2}ms", event.event, started.elapsed().as_secs_f64() * 1000.0);
 }
 
 
-fn handle(worktree_arg: &str, ev: &HookEvent) -> rusqlite::Result<()> {
+fn handle(worktree_arg: &str, kind: AgentKind, ev: &HookEvent) -> rusqlite::Result<()> {
     info!(
         MODULE,
-        "event={} tool={} agent={} stop_hook_active={} permission_mode={} for {}",
+        "[{}] event={} tool={} agent={} stop_hook_active={} permission_mode={} for {}",
+        kind.id(),
         ev.event,
         ev.tool_name.as_deref().unwrap_or("none"),
         ev.agent_id.as_deref().map(|a| format!("{a}({})", ev.agent_type.as_deref().unwrap_or(""))).unwrap_or_else(|| "main".into()),
@@ -133,6 +149,7 @@ fn handle(worktree_arg: &str, ev: &HookEvent) -> rusqlite::Result<()> {
 
     let unchanged = current.as_ref().is_some_and(|c| {
         c.status == Some(new_status)
+            && c.agent == kind
             && c.is_open == is_open
             && last_response.is_none()
             && ev.transcript_summary.is_none()
@@ -148,6 +165,7 @@ fn handle(worktree_arg: &str, ev: &HookEvent) -> rusqlite::Result<()> {
         &owner,
         &StatusUpdate {
             status: new_status,
+            agent: Some(kind),
             session_id,
             last_response,
             transcript_summary: ev.transcript_summary.as_deref(),
@@ -245,8 +263,9 @@ fn worktree_root(start: &Path) -> Option<PathBuf> {
 }
 
 /// `AM_HOOK_CAPTURE=1` saves raw payloads (one file per event name, newest
-/// wins) so field names can be verified against what Claude Code really sends.
-fn maybe_capture(ev: &HookEvent, raw: &str) {
+/// wins) so field names can be verified against what each agent really sends.
+/// Claude's files keep their old names; other agents' get an `<id>-` prefix.
+fn maybe_capture(kind: AgentKind, ev: &HookEvent, raw: &str) {
     if std::env::var_os("AM_HOOK_CAPTURE").is_none_or(|v| v.is_empty() || v == "0") {
         return;
     }
@@ -255,5 +274,6 @@ fn maybe_capture(ev: &HookEvent, raw: &str) {
         return;
     }
     let origin = if ev.from_subagent() { "subagent" } else { "main" };
-    let _ = std::fs::write(dir.join(format!("{}-{origin}.json", ev.event)), raw);
+    let prefix = if kind == AgentKind::CLAUDE { String::new() } else { format!("{}-", kind.id()) };
+    let _ = std::fs::write(dir.join(format!("{prefix}{}-{origin}.json", ev.event)), raw);
 }

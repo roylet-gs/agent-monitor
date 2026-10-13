@@ -38,19 +38,38 @@ impl Env {
     }
 
     /// Hook from a subdirectory, like $CLAUDE_PROJECT_DIR pointing inside a monorepo.
-    fn send(&self, event: &str, mut payload: Value) {
+    fn send(&self, event: &str, payload: Value) {
+        self.send_as(None, event, payload);
+    }
+
+    /// `agent` is the `--agent` flag (`None` = a Claude hook, which has none).
+    fn send_as(&self, agent: Option<&str>, event: &str, mut payload: Value) {
         payload["hook_event_name"] = event.into();
         payload["session_id"] = payload.get("session_id").cloned().unwrap_or("s1".into());
         let sub = self.worktree.path().join("pkg");
         std::fs::create_dir_all(&sub).unwrap();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_am-hook"))
-            .args(["hook-event", "--worktree", sub.to_str().unwrap(), "--event", event])
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_am-hook"));
+        cmd.arg("hook-event");
+        if let Some(a) = agent {
+            cmd.args(["--agent", a]);
+        }
+        let mut child = cmd
+            .args(["--worktree", sub.to_str().unwrap(), "--event", event])
             .env("AM_DATA_DIR", self.data.path())
             .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         child.stdin.take().unwrap().write_all(payload.to_string().as_bytes()).unwrap();
-        assert!(child.wait().unwrap().success());
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        // Gemini shows any hook output to the user, so the hook must be silent.
+        assert!(out.stdout.is_empty() && out.stderr.is_empty(), "hook printed: {out:?}");
+    }
+
+    fn agent(&self) -> Option<String> {
+        self.db().query_row("SELECT agent FROM agent_status WHERE worktree_id = 'w'", [], |r| r.get(0)).unwrap()
     }
 
     fn status(&self) -> (String, i64) {
@@ -123,6 +142,61 @@ fn background_subagents_keep_worktree_delegating_until_the_last_finishes() {
     assert_eq!((tools, last_tool.as_str(), input.as_str()), (1, "Bash", "grep WARN debug.log"));
     let internal: i64 = env.db().query_row("SELECT COUNT(*) FROM subagents WHERE agent_id = 'internal'", [], |r| r.get(0)).unwrap();
     assert_eq!(internal, 0);
+}
+
+#[test]
+fn a_gemini_session_is_tracked_through_its_native_events() {
+    let env = Env::new();
+    let gemini = |event: &str, payload: Value| env.send_as(Some("gemini"), event, payload);
+    gemini("SessionStart", json!({ "source": "startup", "transcript_path": "" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("gemini")));
+    gemini("BeforeAgent", json!({ "prompt": "fix the bug" }));
+    assert_eq!(env.status().0, "executing");
+    gemini("Notification", json!({ "notification_type": "ToolPermission", "message": "Allow replace?", "details": {} }));
+    assert_eq!(env.status().0, "waiting");
+    gemini("BeforeTool", json!({ "tool_name": "replace", "tool_input": { "file_path": "src/a.rs" } }));
+    gemini("BeforeTool", json!({ "tool_name": "invoke_agent", "tool_input": { "agent_name": "codebase_investigator" } }));
+    gemini("AfterTool", json!({ "tool_name": "invoke_agent" }));
+    assert_eq!(env.status(), ("executing".into(), 0));
+    gemini("AfterAgent", json!({ "prompt": "fix the bug", "prompt_response": "Fixed it.", "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    let (last, session): (String, String) = env
+        .db()
+        .query_row("SELECT last_response, session_id FROM agent_status WHERE worktree_id = 'w'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((last.as_str(), session.as_str()), ("Fixed it.", "s1"));
+
+    // A later Claude session in the same worktree takes the row over.
+    env.send("UserPromptSubmit", json!({ "session_id": "c1" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("claude")));
+}
+
+#[test]
+fn a_manifest_plugin_is_tracked_with_no_code() {
+    let env = Env::new();
+    std::fs::create_dir_all(env.data.path().join("agents")).unwrap();
+    std::fs::write(
+        env.data.path().join("agents/mycli.json"),
+        json!({
+            "id": "mycli", "name": "My CLI", "program": "mycli",
+            "hooks": {"settingsPath": "~/.mycli/hooks.json", "projectDirVar": "MYCLI_DIR"},
+            "events": {"Prompt": "UserPromptSubmit", "ToolStart": "PreToolUse", "Done": "Stop"},
+            "fields": {"session_id": "conversation", "last_assistant_message": "reply"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mycli = |event: &str, payload: Value| env.send_as(Some("mycli"), event, payload);
+    mycli("Prompt", json!({ "conversation": "m-1" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("mycli")));
+    mycli("ToolStart", json!({ "tool_name": "shell" }));
+    mycli("Done", json!({ "reply": "All set." }));
+    assert_eq!(env.status().0, "done");
+    let (last, session): (String, String) = env
+        .db()
+        .query_row("SELECT last_response, session_id FROM agent_status WHERE worktree_id = 'w'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((last.as_str(), session.as_str()), ("All set.", "m-1"));
 }
 
 #[test]
