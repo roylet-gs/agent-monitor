@@ -19,7 +19,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "am-cli"
-version = "2.1.9"
+version = "2.1.11"
 dependencies = [
  "am-core",
  "am-hook",
@@ -33,7 +33,7 @@ dependencies = [
 
 [[package]]
 name = "am-core"
-version = "2.1.9"
+version = "2.1.11"
 dependencies = [
  "libc",
  "rusqlite",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "am-hook"
-version = "2.1.9"
+version = "2.1.11"
 dependencies = [
  "am-core",
  "rusqlite",
@@ -58,7 +58,7 @@ dependencies = [
 
 [[package]]
 name = "am-tui"
-version = "2.1.9"
+version = "2.1.11"
 dependencies = [
  "am-core",
  "insta",

@@ -81,6 +81,31 @@ impl Env {
     }
 }
 
+impl Env {
+    /// (status, is_open) of one session.
+    fn session(&self, sid: &str) -> (String, bool) {
+        self.db()
+            .query_row("SELECT status, is_open FROM sessions WHERE session_id = ?1", [sid], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+    }
+
+    /// Headline session id on the worktree's `agent_status` row.
+    fn headline(&self) -> String {
+        self.db().query_row("SELECT session_id FROM agent_status WHERE worktree_id = 'w'", [], |r| r.get(0)).unwrap()
+    }
+
+    fn running_subagents_of(&self, sid: &str) -> i64 {
+        self.db()
+            .query_row("SELECT COUNT(*) FROM subagents WHERE session_id = ?1 AND status = 'running'", [sid], |r| r.get(0))
+            .unwrap()
+    }
+}
+
+fn with_session(sid: &str, mut v: Value) -> Value {
+    v["session_id"] = sid.into();
+    v
+}
+
 fn am_core_open(p: &Path) -> Connection {
     let c = Connection::open(p).unwrap();
     // Let the binary own migrations; tests just need the tables to exist.
@@ -351,4 +376,63 @@ fn an_unknown_plugin_is_captured_and_never_treated_as_claude() {
     // Ids that aren't valid can't name a capture dir.
     env.send_as(Some("../evil"), "Stop", json!({}));
     assert!(!env.data.path().join("hook-captures/../evil").exists());
+}
+
+#[test]
+fn two_main_sessions_in_one_worktree_keep_their_own_status() {
+    let env = Env::new();
+    let a = |e: &str, v: Value| env.send(e, with_session("A", v));
+    let b = |e: &str, v: Value| env.send(e, with_session("B", v));
+
+    a("SessionStart", json!({ "source": "startup" }));
+    a("UserPromptSubmit", json!({}));
+    a("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" } }));
+    b("SessionStart", json!({ "source": "startup" }));
+    b("UserPromptSubmit", json!({}));
+    b("Stop", json!({ "last_assistant_message": "B is finished" }));
+
+    // B finishing doesn't mark A's still-running turn as done.
+    assert_eq!(env.session("A"), ("executing".into(), true));
+    assert_eq!(env.session("B"), ("done".into(), true));
+    assert_eq!(env.status().0, "executing", "headline = the most urgent session");
+    assert_eq!(env.headline(), "A");
+
+    // A permission prompt in B outranks A executing.
+    b("UserPromptSubmit", json!({}));
+    b("Notification", json!({ "notification_type": "permission_prompt", "message": "Allow Bash?" }));
+    assert_eq!(env.session("B").0, "waiting");
+    a("PreToolUse", json!({ "tool_name": "Read", "tool_input": { "file_path": "/x" } }));
+    assert_eq!(env.status().0, "waiting", "A's tool call must not hide B waiting on the user");
+    assert_eq!(env.headline(), "B");
+
+    // B ends: A is the headline again, and the row stays open.
+    b("SessionEnd", json!({ "reason": "prompt_input_exit" }));
+    assert!(!env.session("B").1);
+    assert_eq!(env.headline(), "A");
+    let open: bool = env.db().query_row("SELECT is_open FROM agent_status WHERE worktree_id = 'w'", [], |r| r.get(0)).unwrap();
+    assert!(open);
+}
+
+#[test]
+fn a_new_session_keeps_another_live_sessions_subagents() {
+    let env = Env::new();
+    env.send("SessionStart", with_session("A", json!({ "source": "startup" })));
+    env.send("UserPromptSubmit", with_session("A", json!({})));
+    env.send("SubagentStart", with_session("A", sub("a1", json!({}))));
+    env.send("Stop", with_session("A", json!({})));
+    assert_eq!(env.session("A").0, "delegating");
+
+    // A second session starting in the same worktree used to close a1.
+    env.send("SessionStart", with_session("B", json!({ "source": "startup" })));
+    env.send("UserPromptSubmit", with_session("B", json!({})));
+    env.send("Stop", with_session("B", json!({})));
+    assert_eq!(env.running_subagents_of("A"), 1);
+    assert_eq!(env.session("A").0, "delegating", "B's subagent count (0) doesn't decide A's status");
+    assert_eq!(env.session("B").0, "done");
+    assert_eq!(env.status(), ("delegating".into(), 1));
+
+    // A session that has ended does lose its leftovers on the next start.
+    env.send("SessionEnd", with_session("A", json!({})));
+    env.send("SessionStart", with_session("C", json!({ "source": "startup" })));
+    assert_eq!(env.running_subagents_of("A"), 0);
 }

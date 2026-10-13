@@ -188,6 +188,12 @@ pub fn is_open_now(agent: Option<&AgentState>) -> bool {
     is_effectively_open(agent, &now_sqlite_minus_grace())
 }
 
+/// Whether one session (of several in a worktree) is live: the same rule as
+/// `is_open_now`, for a session row instead of the worktree's headline.
+pub fn session_is_live(is_open: bool, status: Status, updated_at: &str) -> bool {
+    is_open && !(status == Status::Idle && updated_at < now_sqlite_minus_grace().as_str())
+}
+
 fn is_effectively_open(agent: Option<&AgentState>, cutoff: &str) -> bool {
     let Some(a) = agent else { return false };
     if !a.is_open {
@@ -321,6 +327,7 @@ pub(crate) mod tests {
             open_ide: None,
             running_processes: Vec::new(),
             context: None,
+            sessions: Vec::new(),
         }
     }
 

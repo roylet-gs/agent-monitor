@@ -270,7 +270,7 @@ publish from Settings → Harnesses when they are happy.
 **Recommended delivery** (each green on its own, after PR 3 lands; T1 can start after PR 1 if wanted):
 - **T1 core + CLI**: manifest keys, trait additions, registry reload, captures v2, unknown-id fix, `plugin_issues` (v5), `training` module (render, workspace, replay, validation report), `am plugin …`, doctor.
 - **T2 TUI**: plugins page actions + modal + launcher, badges, collector issues/reload, help text.
-- **T3 prompts + docs + E2E**: templates, `docs/harnesses.md` "Training a harness" section, CLAUDE.md/README, spec 18.
+- **T3 prompts + docs + E2E**: templates, `docs/harnesses.md` "Training a harness" section, CLAUDE.md/README, spec 19.
 
 ## Critical files
 - `crates/am-core/src/agents/{mod,manifest}.rs` (→ `harness/`), new `agents/training/{mod.rs,create.md,edit.md}`, new `agents/manifest.schema.json`
@@ -307,7 +307,7 @@ publish from Settings → Harnesses when they are happy.
   - plugins page with a draft + issues + the `＋ Train` row;
   - train modal;
   - a worktree row and a standalone row with `✦ mycli ✎ draft` at 120 and 90 columns.
-- **E2E** `18-plugin-training.spec.ts`:
+- **E2E** `19-plugin-training.spec.ts`:
   - The entrypoint drops a draft manifest `e2e/fixtures/agents/toycli.json` and replays a few `--agent toycli` events (one unmapped tool).
   - The spec checks the `✎ draft` badge on the standalone row and that the plugins page shows `draft ⚠ 1`.
   - `T` opens the modal; Enter shows the "prompt copied" popup. The container has no terminal or clipboard, so assert the error/fallback popup text with the workspace path, plus `TRAINING.md` existing via `docker exec`, or via a `--no-open` test hook.

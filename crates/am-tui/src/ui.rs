@@ -4,7 +4,8 @@
 //! redraw only writes what changed — no full-screen clears, no flicker.
 
 use am_core::harness::HarnessKind;
-use am_core::model::{ChecksStatus, WorktreeView};
+use am_core::context::ContextUsage;
+use am_core::model::{ChecksStatus, SessionView, WorktreeView};
 use am_core::status::Status;
 use am_core::{context, timefmt};
 use ratatui::Frame;
@@ -883,7 +884,9 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         pr_words,
         git: if s.show_git_ahead_behind { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
         age: if s.show_last_commit { 3 } else { 0 },
-        ctx_bar: if s.show_context_window && app.flat.iter().any(|v| v.context.is_some()) {
+        ctx_bar: if s.show_context_window
+            && app.flat.iter().any(|v| v.context.is_some() || v.sessions.iter().any(|s| s.context.is_some()))
+        {
             if pr_words { 8 } else { 5 }
         } else {
             0
@@ -918,6 +921,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
                 worktree_line(app, theme, &app.flat[*i], &app.tree[*i], *i == app.selected, focused, &cols, inner.width, now)
             }
             Row::Pending(id) => pending_line(app, theme, *id, inner.width, now),
+            Row::Session(i, k) => session_line(app, theme, &app.flat[*i], &app.tree[*i], *k, &cols, inner.width, now),
         })
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
@@ -927,7 +931,11 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
 /// headers scroll with their rows.
 fn list_start(app: &App, height: usize) -> usize {
     let sel_row = app.rows.iter().position(|r| *r == Row::Worktree(app.selected)).unwrap_or(0);
-    let mut start = sel_row.saturating_sub(height.saturating_sub(1));
+    // Keep the selection's session rows in view too, but never scroll its
+    // own row off the top.
+    let sessions = app.rows[sel_row.min(app.rows.len())..].iter().skip(1).take_while(|r| matches!(r, Row::Session(..))).count();
+    let sel_end = sel_row + sessions.min(height.saturating_sub(1));
+    let mut start = sel_end.saturating_sub(height.saturating_sub(1));
     // Show the header above the selection when there's room.
     if start > 0 && sel_row - start < height.saturating_sub(1) {
         start = start.saturating_sub(1);
@@ -943,7 +951,7 @@ pub fn worktree_at(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
     }
     let start = list_start(app, inner.height as usize);
     match app.rows.get(start + (y - inner.y) as usize) {
-        Some(Row::Worktree(i)) => Some(*i),
+        Some(Row::Worktree(i) | Row::Session(i, _)) => Some(*i),
         _ => None,
     }
 }
@@ -961,7 +969,10 @@ fn worktree_line<'a>(
     now: i64,
 ) -> Line<'a> {
     let status = v.status();
-    let subagents = app.running_subagents_for(&v.worktree.id);
+    // With its sessions listed underneath, the row shows how many there are;
+    // harness, subagents and context move to the session rows.
+    let listed = v.sessions.len() > 1;
+    let subagents = if listed { 0 } else { app.running_subagents_for(&v.worktree.id) };
     let deleting = app.is_deleting(&v.worktree.id);
 
     // Right-hand columns, fixed width so they align down the list.
@@ -987,7 +998,8 @@ fn worktree_line<'a>(
     if cols.ctx_bar > 0 {
         right.push(Span::raw(" "));
         let start = right.len();
-        right.extend(ctx_spans(v, theme, cols.ctx_bar, cols.ctx_window, deleting));
+        let usage = if listed { None } else { v.context.as_ref() };
+        right.extend(ctx_spans(usage, theme, cols.ctx_bar, cols.ctx_window, deleting));
         ctx_range = start..right.len();
     }
     right.push(Span::raw(" "));
@@ -1016,6 +1028,10 @@ fn worktree_line<'a>(
     }
     // Which agent CLI, for anything but the default (Claude Code).
     let agent_badge = match v.agent.as_ref().map(|a| a.agent) {
+        _ if listed && !deleting => {
+            let n = v.sessions.len();
+            if width >= 100 { format!(" ⧉ {n} sessions") } else { format!(" ⧉{n}") }
+        }
         Some(kind) if !deleting && kind != HarnessKind::CLAUDE => {
             if width >= 100 { format!(" ✦ {}", kind.id()) } else { " ✦".to_string() }
         }
@@ -1078,7 +1094,7 @@ fn worktree_line<'a>(
         rest = r;
     }
     if let Some(r) = rest.strip_prefix(agent_badge.as_str()).filter(|_| !agent_badge.is_empty()) {
-        left.push(Span::styled(agent_badge.clone(), theme.fg(theme.blue)));
+        left.push(Span::styled(agent_badge.clone(), theme.fg(if listed { theme.magenta } else { theme.blue })));
         rest = r;
     }
     if let Some(r) = rest.strip_prefix(draft_badge).filter(|_| !draft_badge.is_empty()) {
@@ -1120,10 +1136,95 @@ fn worktree_line<'a>(
     line
 }
 
+/// One of several live sessions in a worktree, under its row:
+/// `├ ● claude  executing · 2m  ◆ 1 subagent` (plus a short `#3f2a` session
+/// id when two sessions share a harness), with its own context bar in the
+/// worktree's context column. The other columns are left blank.
+#[allow(clippy::too_many_arguments)]
+fn session_line<'a>(
+    app: &App,
+    theme: &Theme,
+    v: &WorktreeView,
+    tree: &str,
+    k: usize,
+    cols: &Columns,
+    width: u16,
+    now: i64,
+) -> Line<'a> {
+    let s: &SessionView = &v.sessions[k];
+    let deleting = app.is_deleting(&v.worktree.id);
+    let last = k + 1 == v.sessions.len();
+    let subagents = app.running_subagents_in(&v.worktree.id, &s.session_id);
+
+    // Same right-hand layout as `worktree_line`, blank but for the context bar.
+    let mut blank = 0;
+    for w in [cols.ticket, cols.pr, cols.git, cols.age] {
+        if w > 0 {
+            blank += 1 + w;
+        }
+    }
+    let mut right: Vec<Span> = vec![Span::raw(" ".repeat(blank))];
+    if cols.ctx_bar > 0 {
+        right.push(Span::raw(" "));
+        right.extend(ctx_spans(s.context.as_ref(), theme, cols.ctx_bar, cols.ctx_window, deleting));
+    }
+    right.push(Span::raw(" "));
+    let right_w: usize = right.iter().map(|s| s.content.width()).sum();
+
+    // The connector sits under the worktree's status glyph.
+    let indent = " ".repeat(1 + tree.width());
+    let connector = if last { "└ " } else { "├ " };
+    let status = Some(s.status);
+    let glyph_style = if deleting { theme.faint() } else { theme.fg(theme.status(status)) };
+    let harness = s.agent.id().to_string();
+    let harness_style = if deleting {
+        theme.faint()
+    } else if s.status == Status::Waiting {
+        theme.bold(theme.yellow)
+    } else if s.agent == HarnessKind::CLAUDE {
+        theme.fg(theme.text)
+    } else {
+        theme.fg(theme.blue)
+    };
+    let age = timefmt::parse_sqlite(&s.updated_at).map(|t| timefmt::short_age(now - t)).unwrap_or_default();
+    let detail = if age.is_empty() { format!("  {}", status_label(status)) } else { format!("  {} · {age}", status_label(status)) };
+    let badge = match subagents {
+        0 => String::new(),
+        n if width >= 100 => format!(" ◆ {n} subagent{}", if n == 1 { "" } else { "s" }),
+        n => format!(" ◆{n}"),
+    };
+
+    // Two sessions of one harness: a short session id tells them apart.
+    let twins = v.sessions.iter().filter(|o| o.agent == s.agent).count() > 1;
+    let tag = if twins { format!(" #{}", s.session_id.chars().take(4).collect::<String>()) } else { String::new() };
+
+    let fixed = indent.width() + connector.width() + 2 + right_w;
+    let avail = (width as usize).saturating_sub(fixed);
+    let harness = truncate(&harness, avail);
+    let tag = truncate(&tag, avail.saturating_sub(harness.width()));
+    let detail = truncate(&detail, avail.saturating_sub(harness.width() + tag.width() + badge.width()));
+    let used = harness.width() + tag.width() + detail.width() + badge.width();
+    let mut spans = vec![
+        Span::raw(indent),
+        Span::styled(connector, theme.fg(theme.border)),
+        Span::styled(status_glyph(status), glyph_style),
+        Span::raw(" "),
+        Span::styled(harness, harness_style),
+        Span::styled(tag, theme.faint()),
+        Span::styled(detail, theme.faint()),
+    ];
+    if used <= avail {
+        spans.push(Span::styled(badge, theme.fg(theme.magenta)));
+    }
+    spans.push(Span::raw(" ".repeat(avail.saturating_sub(used))));
+    spans.extend(right);
+    Line::from(spans)
+}
+
 /// Context-window bar plus tokens used (`████▌░░░ 380k`). The fill and the
 /// count go green → yellow → red as the session nears its window.
-fn ctx_spans<'a>(v: &WorktreeView, theme: &Theme, bar_w: usize, configured: u64, deleting: bool) -> Vec<Span<'a>> {
-    let Some(u) = &v.context else { return vec![Span::raw(" ".repeat(bar_w + 5))] };
+fn ctx_spans<'a>(usage: Option<&ContextUsage>, theme: &Theme, bar_w: usize, configured: u64, deleting: bool) -> Vec<Span<'a>> {
+    let Some(u) = usage else { return vec![Span::raw(" ".repeat(bar_w + 5))] };
     let window = context::window_for(u.tokens, configured);
     let style = if deleting {
         theme.faint()
@@ -1681,6 +1782,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         Span::styled(" tokens used today incl. cache (s → token usage: all / visible rows)", theme.faint()),
     ]));
     lines.push(Line::from(vec![
+        Span::styled("⧉ 2 sessions", theme.fg(theme.magenta)),
+        Span::styled(" agents in one worktree, each listed below it with its own status", theme.faint()),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("✎ draft", theme.fg(theme.yellow)),
         Span::styled(" plugin still being trained (Settings → Agent plugins publishes it)", theme.faint()),
     ]));
@@ -1774,6 +1879,7 @@ mod tests {
             open_ide: None,
             running_processes: vec![],
             context: None,
+            sessions: Vec::new(),
         }
     }
 
@@ -2353,7 +2459,7 @@ mod tests {
         let mut v = fixture().flat[0].clone();
         let at = |v: &mut WorktreeView, tokens| {
             v.context = Some(ContextUsage { tokens, model: None });
-            let spans = ctx_spans(v, &theme, 8, 200_000, false);
+            let spans = ctx_spans(v.context.as_ref(), &theme, 8, 200_000, false);
             let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
             (text, spans[0].style.fg, spans[2].style.fg)
         };
@@ -2364,7 +2470,7 @@ mod tests {
         assert_eq!(at(&mut v, 250_000), ("█████░░░ 250k".into(), Some(theme.green), Some(theme.green)));
         assert_eq!(at(&mut v, 700_000), ("███████░ 700k".into(), Some(theme.yellow), Some(theme.yellow)));
         v.context = None;
-        let blank: String = ctx_spans(&v, &theme, 8, 200_000, false).iter().map(|s| s.content.as_ref()).collect();
+        let blank: String = ctx_spans(v.context.as_ref(), &theme, 8, 200_000, false).iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(blank, " ".repeat(13), "rows without usage keep the column aligned");
     }
 
@@ -2473,6 +2579,77 @@ mod tests {
             "children follow the parent, depth-first, with tree lines"
         );
         insta::assert_snapshot!(render(&app, 100, 14));
+    }
+
+    fn session(harness: HarnessKind, id: &str, status: Status, updated: &str, tokens: Option<u64>) -> SessionView {
+        SessionView {
+            agent: harness,
+            session_id: id.into(),
+            status,
+            last_response: None,
+            started_at: "2025-10-11 09:00:00".into(),
+            updated_at: updated.into(),
+            context: tokens.map(|tokens| ContextUsage { tokens, model: None }),
+        }
+    }
+
+    #[test]
+    fn three_sessions_in_a_worktree_are_listed_under_it() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        // feature/refactor runs two Claude sessions and a Gemini one at once,
+        // each with its own subagents. (Rendering doesn't care which harness
+        // reported a subagent; Gemini CLI's hooks don't report them today.)
+        let w1 = &mut snap.groups[0].worktrees[0];
+        w1.agent.as_mut().unwrap().status = Status::Waiting;
+        w1.sessions = vec![
+            session(HarnessKind::CLAUDE, "s", Status::Delegating, "2025-10-11 09:58:00", Some(121_000)),
+            session(HarnessKind::CLAUDE, "7b1e-claude", Status::Executing, "2025-10-11 09:59:50", Some(310_000)),
+            session(HarnessKind::GEMINI, "g", Status::Waiting, "2025-10-11 09:59:30", Some(40_000)),
+        ];
+        let mut in_session = |sid: &str, id: &str, desc: &str| {
+            let (wt, mut s) = sub("w1", id, desc, true, Some(("Read", "src/db.rs")));
+            s.session_id = sid.into();
+            snap.subagents.push((wt, s));
+        };
+        in_session("7b1e-claude", "b1", "Write migration tests");
+        in_session("g", "c1", "Investigate codebase");
+        app.apply(snap);
+        assert_eq!(app.flat.len(), 3, "session rows take no selection index");
+        assert!(
+            matches!(app.rows[1..5], [Row::Worktree(0), Row::Session(0, 0), Row::Session(0, 1), Row::Session(0, 2)]),
+            "{:?}",
+            app.rows
+        );
+
+        let out = render(&app, 120, 11);
+        let line = |needle: &str| out.lines().find(|l| l.contains(needle)).unwrap_or_default().to_string();
+        let parent = line("feature/refactor");
+        assert!(parent.contains("⧉ 3 sessions") && !parent.contains("◆") && !parent.contains("121k"), "{parent}");
+        let first = line("claude #s ");
+        assert!(first.contains("delegating") && first.contains("◆ 2 subagents") && first.contains("121k"), "{first}");
+        let second = line("claude #7b1e");
+        assert!(second.contains("executing") && second.contains("◆ 1 subagent ") && second.contains("310k"), "{second}");
+        let gemini = line("└ ");
+        assert!(gemini.contains("gemini  waiting") && gemini.contains("◆ 1 subagent") && gemini.contains("40k"), "{gemini}");
+        assert!(!gemini.contains('#'), "a harness with one session needs no id: {gemini}");
+        insta::assert_snapshot!(out);
+        insta::assert_snapshot!("three_sessions_narrow", render(&app, 90, 11));
+
+        // A click on a session row selects its worktree.
+        let area = Rect::new(0, 0, 120, 11);
+        let y = out.lines().position(|l| l.contains("└ ")).unwrap() as u16;
+        assert_eq!(worktree_at(&app, area, 10, y), Some(0));
+    }
+
+    #[test]
+    fn a_single_session_is_not_listed_separately() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.groups[0].worktrees[0].sessions = vec![session(HarnessKind::CLAUDE, "s", Status::Delegating, "2025-10-11 09:58:00", None)];
+        app.apply(snap);
+        assert!(!app.rows.iter().any(|r| matches!(r, Row::Session(..))));
+        assert!(!render(&app, 120, 10).contains('⧉'));
     }
 
     #[test]
@@ -2681,6 +2858,7 @@ mod tests {
                 Row::Ticket(_) => "ticket",
                 Row::Worktree(_) => "wt",
                 Row::Pending(_) => "pending",
+                Row::Session(..) => "session",
             })
             .collect();
         assert_eq!(kinds, ["repo", "project", "wt", "spacer", "project", "wt", "spacer", "repo", "project", "wt"]);

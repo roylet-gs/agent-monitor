@@ -188,22 +188,9 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent, issues: &mut Ve
         }
     };
 
-    let current = db::get_status(&conn, &owner)?;
-    let current_status = current.as_ref().and_then(|c| c.status);
-
     // --- Subagent bookkeeping (independent of whether the status changes) ---
     // The TUI watches the DB (PRAGMA data_version), so no socket notify is needed.
     track_subagents(&conn, &owner, ev)?;
-    let running = db::running_subagents(&conn, &owner)?;
-    if current.as_ref().map(|c| c.active_subagents) != Some(running as i64) {
-        db::set_active_subagents(&conn, &owner, running)?;
-        debug!(MODULE, "Running subagents for {root_str}: {running}");
-    }
-
-    let Some(new_status) = status::map_event_to_status(ev, current_status, running) else {
-        debug!(MODULE, "No status change for {root_str} ({}, current={:?})", ev.event, current_status);
-        return Ok(());
-    };
 
     let last_response = if ev.from_subagent() {
         None
@@ -215,38 +202,112 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent, issues: &mut Ve
         None
     };
     let is_open = !ev.is("SessionEnd");
-    let session_id = if ev.from_subagent() { None } else { ev.session_id.as_deref() };
 
-    let unchanged = current.as_ref().is_some_and(|c| {
-        c.status == Some(new_status)
-            && c.agent == kind
-            && c.is_open == is_open
-            && last_response.is_none()
-            && ev.transcript_summary.is_none()
-            && (session_id.is_none() || session_id == c.session_id.as_deref())
-    });
-    if unchanged {
-        db::touch_status(&conn, &owner)?;
-        return Ok(());
+    // Each session keeps its own status, so two sessions in one worktree
+    // don't overwrite each other; the owner's row is their headline.
+    if let Some(sid) = ev.session_id.as_deref() {
+        let session = db::get_session(&conn, kind, sid)?;
+        let running = db::running_subagents_in(&conn, &owner, sid)?;
+        let current_status = session.as_ref().map(|s| s.status);
+        match status::map_event_to_status(ev, current_status, running) {
+            Some(new_status) => {
+                let unchanged = session.as_ref().is_some_and(|s| {
+                    s.status == new_status && s.is_open == is_open && last_response.is_none()
+                });
+                if unchanged {
+                    db::touch_session(&conn, kind, sid)?;
+                } else {
+                    db::upsert_session(&conn, &owner, kind, sid, new_status, last_response, is_open)?;
+                    info!(
+                        MODULE,
+                        "Session {}:{sid} in {root_str}: {} (was {:?}, subagents={running})",
+                        kind.id(),
+                        new_status.as_str(),
+                        current_status
+                    );
+                }
+            }
+            None => {
+                debug!(MODULE, "No status change for session {sid} in {root_str} ({}, current={:?})", ev.event, current_status);
+                if session.is_some() {
+                    db::touch_session(&conn, kind, sid)?;
+                }
+            }
+        }
+        refresh_headline(&conn, &owner, ev, &root_str)?;
+    } else {
+        // No session id (very old CLIs): status the owner directly, as before v4.
+        let current = db::get_status(&conn, &owner)?;
+        let current_status = current.as_ref().and_then(|c| c.status);
+        let running = db::running_subagents(&conn, &owner)?;
+        if let Some(new_status) = status::map_event_to_status(ev, current_status, running) {
+            db::upsert_status(
+                &conn,
+                &owner,
+                &StatusUpdate {
+                    status: new_status,
+                    agent: Some(kind),
+                    session_id: None,
+                    last_response,
+                    transcript_summary: ev.transcript_summary.as_deref(),
+                    is_open,
+                },
+            )?;
+            info!(MODULE, "Updated status for {root_str}: {} (was {:?}, no session id)", new_status.as_str(), current_status);
+        }
     }
-
-    db::upsert_status(
-        &conn,
-        &owner,
-        &StatusUpdate {
-            status: new_status,
-            agent: Some(kind),
-            session_id,
-            last_response,
-            transcript_summary: ev.transcript_summary.as_deref(),
-            is_open,
-        },
-    )?;
-    info!(MODULE, "Updated status for {root_str}: {} (was {:?}, subagents={running})", new_status.as_str(), current_status);
 
     if ev.is("Stop") || ev.is("SessionEnd") {
         db::checkpoint_passive(&conn);
     }
+    Ok(())
+}
+
+/// Mirror the most urgent open session into the owner's `agent_status` /
+/// `standalone_sessions` row (what 1.x, filters, sort and the CLI read), plus
+/// the owner-wide live subagent count. With no open session, the latest one.
+fn refresh_headline(conn: &rusqlite::Connection, owner: &Owner, ev: &HookEvent, root_str: &str) -> rusqlite::Result<()> {
+    let sessions = db::sessions_at(conn, owner)?;
+    let Some(head) = status::headline(&sessions, |s| (s.is_open, s.status)).cloned() else { return Ok(()) };
+    let running = db::running_subagents(conn, owner)?;
+    let current = db::get_status(conn, owner)?;
+    if current.as_ref().map(|c| c.active_subagents) != Some(running as i64) {
+        db::set_active_subagents(conn, owner, running)?;
+        debug!(MODULE, "Running subagents for {root_str}: {running}");
+    }
+    // The summary only belongs to the session that sent it.
+    let summary = ev.transcript_summary.as_deref().filter(|_| ev.session_id.as_deref() == Some(head.session_id.as_str()));
+    let unchanged = current.as_ref().is_some_and(|c| {
+        c.status == Some(head.status)
+            && c.agent == head.agent
+            && c.is_open == head.is_open
+            && c.session_id.as_deref() == Some(head.session_id.as_str())
+            && summary.is_none()
+    });
+    if unchanged {
+        return db::touch_status(conn, owner);
+    }
+    db::upsert_status(
+        conn,
+        owner,
+        &StatusUpdate {
+            status: head.status,
+            agent: Some(head.agent),
+            session_id: Some(&head.session_id),
+            last_response: head.last_response.as_deref(),
+            transcript_summary: summary,
+            is_open: head.is_open,
+        },
+    )?;
+    let open = sessions.iter().filter(|s| s.is_open).count();
+    info!(
+        MODULE,
+        "Updated status for {root_str}: {} from session {}:{} ({open} open, was {:?}, subagents={running})",
+        head.status.as_str(),
+        head.agent.id(),
+        head.session_id,
+        current.and_then(|c| c.status)
+    );
     Ok(())
 }
 
