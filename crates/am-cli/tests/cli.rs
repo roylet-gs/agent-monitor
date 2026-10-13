@@ -208,10 +208,11 @@ fn settings_list_and_get() {
     assert!(list.contains("setupCompleted"));
 
     let json = env.ok(&["settings", "list", "--json"]).json();
-    assert_eq!(json["ide"], "cursor");
+    assert_eq!(json["ide"], "vscode");
+    assert_eq!(json["ideCommand"], "");
     assert_eq!(json["ghPrStatus"], false);
 
-    assert_eq!(env.ok(&["settings", "get", "ide"]).stdout, "cursor\n");
+    assert_eq!(env.ok(&["settings", "get", "ide"]).stdout, "vscode\n");
     assert_eq!(env.ok(&["settings", "get", "pollingIntervalMs", "--json"]).json(), json!({"key": "pollingIntervalMs", "value": 30000}));
 
     let o = env.run(&["settings", "get", "nonexistent"]);
@@ -223,8 +224,13 @@ fn settings_list_and_get() {
 #[test]
 fn settings_set_coerces_and_validates() {
     let env = Env::new();
-    assert_eq!(env.ok(&["settings", "set", "ide", "vscode"]).stdout, "ide = vscode\n");
-    assert_eq!(env.settings()["ide"], "vscode");
+    assert_eq!(env.ok(&["settings", "set", "ide", "zed"]).stdout, "ide = zed\n");
+    assert_eq!(env.settings()["ide"], "zed");
+    let o = env.run(&["settings", "set", "ide", "notepad"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Use one of: vscode, cursor, zed, windsurf, terminal, custom"), "{}", o.stderr);
+    env.ok(&["settings", "set", "ideCommand", "open -a Nova {path}"]);
+    assert_eq!(env.settings()["ideCommand"], "open -a Nova {path}");
 
     for (input, expected) in [("true", true), ("0", false), ("1", true), ("false", false)] {
         env.ok(&["settings", "set", "compactView", input]);
@@ -291,7 +297,7 @@ fn settings_writes_preserve_unknown_keys_order_and_style() {
 
     assert_eq!(env.ok(&["settings", "reset"]).stdout, "Settings reset to defaults.\n");
     let v = env.settings();
-    assert_eq!(v["ide"], "cursor");
+    assert_eq!(v["ide"], "vscode");
     assert_eq!(v["ghPrStatus"], true);
     assert_eq!(v["setupCompleted"], true, "reset keeps non-settings keys");
 }
@@ -760,6 +766,24 @@ fn worktree_open_uses_the_configured_ide() {
     assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), wt.to_str().unwrap());
 }
 
+#[test]
+fn worktree_open_runs_a_custom_command() {
+    let env = Env::new();
+    let (repo, wt) = env.seed_repo();
+    let log = env.root().join("opened.txt");
+    env.fake_bin("my-editor", &format!("echo \"$@\" >> {}", log.display()));
+    env.ok(&["settings", "set", "ide", "custom"]);
+    env.ok(&["settings", "set", "ideCommand", "my-editor --new {path}"]);
+    let o = env.ok(&["open", "feature/login", "--repo", repo.to_str().unwrap()]);
+    assert_eq!(o.stdout, "Opened feature/login in custom\n");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("--new {}", wt.display()));
+
+    env.ok(&["settings", "set", "ideCommand", ""]);
+    let o = env.run(&["open", "feature/login", "--repo", repo.to_str().unwrap()]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Editor command"), "{}", o.stderr);
+}
+
 // --- pr / linear ---
 
 fn gql_pr(branch: &str) -> String {
@@ -867,8 +891,8 @@ fn script_edit_show_remove() {
     assert_eq!(env.ok(&["script", "remove", "--repo", repo_s]).stdout, "No startup script for myrepo\n");
 
     let log = env.root().join("edited.txt");
-    env.fake_bin("cursor", &format!("echo \"$@\" >> {}", log.display()));
-    assert_eq!(env.ok(&["script", "edit", "--repo", repo_s]).stdout, "Opened startup script for myrepo in cursor\n");
+    env.fake_bin("code", &format!("echo \"$@\" >> {}", log.display()));
+    assert_eq!(env.ok(&["script", "edit", "--repo", repo_s]).stdout, "Opened startup script for myrepo in vscode\n");
     let path = env.data().join("scripts/r1.sh");
     assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), path.to_str().unwrap());
     assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o755);

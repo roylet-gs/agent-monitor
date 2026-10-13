@@ -21,9 +21,18 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
 
   // 1. Editor
   await tui.waitForText("Where should Enter open a worktree?");
-  await tui.waitForText("● Cursor");
-  await tui.sendKey("j");
   await tui.waitForText("● VS Code");
+  await tui.sendKey("j");
+  await tui.waitForText("● Cursor");
+  // ↑ from the top wraps to the custom row, where letters are the command.
+  await tui.sendKey("k");
+  await tui.sendKey("ArrowUp");
+  await tui.waitForText("● Custom command:");
+  await tui.sendKey("Enter");
+  await tui.waitForText("Type the command that opens a folder");
+  await tui.type("subl -n");
+  await tui.waitForText("● Custom command: subl -n");
+  await tui.waitForText("in place of {path}");
   await tui.screenshot("setup-editor");
   await tui.sendKey("Enter");
 

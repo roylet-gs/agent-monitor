@@ -8,7 +8,8 @@ expression: "render(&app, 100, 24)"
 │ ◐ fix/│ Update: brew upgrade agent-monitor                                               │░ 185k │
 │       │                                                                                  │       │
 │gridsig│ General                                                                          │───────│
-│ · main│▌  Open in                       cursor                                           │       │
+│ · main│▌  Open in                       vscode                                           │       │
+│       │   Editor command                —                                                │       │
 │       │   Resume last session on open   on                                               │       │
 │       │   Agent plugins…                claude, gemini · default claude                  │       │
 │       │   Key bindings…                 defaults                                         │       │
@@ -22,7 +23,6 @@ expression: "render(&app, 100, 24)"
 │       │   Theme                         ansi                                             │       │
 │       │   Theme builder…                ⏎ open                                           │       │
 │       │                                                                                  │       │
-│       │                                                                                  │       │
-│       │ Which editor/IDE Enter opens worktrees in                                        │       │
+│       │ Which editor/IDE Enter opens worktrees in; custom runs Editor command            │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
  ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

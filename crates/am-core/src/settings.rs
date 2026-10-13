@@ -40,6 +40,8 @@ pub struct SortCriterion {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub ide: String,
+    /// Command line for `ide: "custom"` (see `launch::custom_command`).
+    pub ide_command: String,
     pub default_branch_prefix: String,
     pub default_base_branch: String,
     pub polling_interval_ms: u64,
@@ -121,7 +123,8 @@ impl Default for Settings {
         use SortKey::*;
         let c = |key, direction, enabled| SortCriterion { key, direction, enabled };
         Settings {
-            ide: "cursor".into(),
+            ide: "vscode".into(),
+            ide_command: String::new(),
             default_branch_prefix: "feature/".into(),
             default_base_branch: "main".into(),
             polling_interval_ms: 30_000,
@@ -334,9 +337,17 @@ mod tests {
 
     #[test]
     fn one_bad_value_does_not_reset_the_rest() {
-        let s = Settings::parse(r#"{"pollingIntervalMs":"fast","ide":"vscode"}"#);
+        let s = Settings::parse(r#"{"pollingIntervalMs":"fast","ide":"zed"}"#);
         assert_eq!(s.polling_interval_ms, 30_000);
-        assert_eq!(s.ide, "vscode");
+        assert_eq!(s.ide, "zed");
+    }
+
+    #[test]
+    fn opens_in_vscode_by_default() {
+        let d = Settings::parse("{}");
+        assert_eq!((d.ide.as_str(), d.ide_command.as_str()), ("vscode", ""));
+        let c = Settings::parse(r#"{"ide":"custom","ideCommand":"subl -n"}"#);
+        assert_eq!((c.ide.as_str(), c.ide_command.as_str()), ("custom", "subl -n"));
     }
 
     #[test]
