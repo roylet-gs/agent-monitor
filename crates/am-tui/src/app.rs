@@ -79,6 +79,9 @@ pub struct App {
     pub show_help: bool,
     pub loaded: bool,
     pub notice: Option<String>,
+    /// Newer release found by the update check: top right of the pane, and
+    /// a banner with the upgrade command at the top of Settings.
+    pub update_available: Option<am_core::update_check::Update>,
     /// Centered message box (e.g. "copied resume command"); any key closes it.
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
@@ -114,6 +117,7 @@ impl App {
             show_help: false,
             loaded: false,
             notice: None,
+            update_available: None,
             popup: None,
             show_log: false,
             settings_editor: None,
@@ -386,28 +390,8 @@ impl App {
             };
         }
         if let Some(editor) = &mut self.settings_editor {
-            use crate::settings_ui::Outcome;
-            return match editor.on_key(key) {
-                Outcome::None => Action::None,
-                Outcome::Close => {
-                    self.settings_editor = None;
-                    Action::None
-                }
-                Outcome::Changed(s) => {
-                    // Picking a sound plays it, so the choice can be heard.
-                    if let Some(key) = self.settings_editor.as_ref().map(|e| e.field().key) {
-                        let pick = match key {
-                            "audioWaitingSound" => Some(s.audio_waiting_sound.clone()),
-                            "audioDoneSound" => Some(s.audio_done_sound.clone()),
-                            _ => None,
-                        };
-                        self.sounds.extend(pick);
-                    }
-                    self.set_settings(*s);
-                    Action::SettingsChanged
-                }
-                Outcome::EditFile => Action::EditSettingsFile,
-            };
+            let outcome = editor.on_key(key);
+            return self.editor_outcome(outcome);
         }
         if self.show_help {
             if matches!(key, Key::Char('?') | Key::Esc | Key::Char('q')) {
@@ -425,6 +409,35 @@ impl App {
                 JobEffect::RunScript { job, repo_id, worktree_path } => Action::RunScript { job, repo_id, worktree_path },
             };
         }
+        self.dashboard_key(key)
+    }
+
+    fn editor_outcome(&mut self, outcome: crate::settings_ui::Outcome) -> Action {
+        use crate::settings_ui::Outcome;
+        match outcome {
+            Outcome::None => Action::None,
+            Outcome::Close => {
+                self.settings_editor = None;
+                Action::None
+            }
+            Outcome::Changed(s) => {
+                // Picking a sound plays it, so the choice can be heard.
+                if let Some(key) = self.settings_editor.as_ref().map(|e| e.field().key) {
+                    let pick = match key {
+                        "audioWaitingSound" => Some(s.audio_waiting_sound.clone()),
+                        "audioDoneSound" => Some(s.audio_done_sound.clone()),
+                        _ => None,
+                    };
+                    self.sounds.extend(pick);
+                }
+                self.set_settings(*s);
+                Action::SettingsChanged
+            }
+            Outcome::EditFile => Action::EditSettingsFile,
+        }
+    }
+
+    fn dashboard_key(&mut self, key: Key) -> Action {
         let row_action = matches!(key, Key::Enter | Key::Char('t' | 'c' | 'g' | 'o' | 'l' | 'p' | 'd'));
         if row_action && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
             self.notice = Some("Deleting in the background…".into());
@@ -492,6 +505,64 @@ impl App {
             _ => {}
         }
         Action::None
+    }
+
+    /// Mouse input, with the same overlay priority as `on_key`. Clicks are
+    /// hit-tested against the layout `ui` draws for a terminal of size `area`,
+    /// then mostly turned into the equivalent key.
+    pub fn on_mouse(&mut self, m: Mouse, area: ratatui::layout::Rect) -> Action {
+        if self.popup.is_some() {
+            if matches!(m, Mouse::Click { .. }) {
+                self.popup = None;
+            }
+            return Action::None;
+        }
+        if self.setup.is_some() || self.modal.is_some() {
+            return Action::None;
+        }
+        if self.settings_editor.is_some() {
+            let field = match m {
+                Mouse::Click { x, y, .. } => crate::ui::settings_field_at(self, area, x, y),
+                Mouse::Scroll(_) => None,
+            };
+            let Some(editor) = &mut self.settings_editor else { return Action::None };
+            let outcome = match (m, field) {
+                (Mouse::Scroll(d), _) => editor.on_key(if d > 0 { Key::Down } else { Key::Up }),
+                (Mouse::Click { .. }, Some(i)) => editor.click(i),
+                (Mouse::Click { .. }, None) => crate::settings_ui::Outcome::None,
+            };
+            return self.editor_outcome(outcome);
+        }
+        if self.show_help {
+            if matches!(m, Mouse::Click { .. }) {
+                self.show_help = false;
+            }
+            return Action::None;
+        }
+        match m {
+            // The wheel moves whatever the keys would: the job list when the pane has focus.
+            Mouse::Scroll(d) => self.on_key(if d > 0 { Key::Down } else { Key::Up }),
+            Mouse::Click { x, y, double } => {
+                if let Some(k) = crate::ui::keybar_key_at(self, area, x, y) {
+                    // Exactly what pressing the key does (the jobs pane may have focus).
+                    return match k {
+                        "⏎" => self.on_key(Key::Enter),
+                        "⇥" => self.on_key(Key::Tab),
+                        k if k.chars().count() == 1 => self.on_key(Key::Char(k.chars().next().unwrap_or(' '))),
+                        _ => Action::None,
+                    };
+                }
+                if crate::ui::in_jobs_pane(self, area, x, y) {
+                    self.jobs.focus();
+                    return Action::None;
+                }
+                let Some(i) = crate::ui::worktree_at(self, area, x, y) else { return Action::None };
+                self.jobs.focused = false;
+                self.selected = i;
+                self.mark_selected_seen();
+                if double { self.dashboard_key(Key::Enter) } else { Action::None }
+            }
+        }
     }
 
     /// Swap in new settings and re-derive rows (header style depends on sort).
@@ -591,6 +662,16 @@ fn linear_url(url: &str, s: &Settings) -> String {
 
 fn ticket_of(v: &WorktreeView) -> Option<&str> {
     v.linear.as_ref().map(|l| l.identifier.as_str())
+}
+
+/// Backend-independent mouse events (mapped from crossterm in main.rs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mouse {
+    /// Wheel: +1 down, -1 up.
+    Scroll(i8),
+    /// Left button down at a terminal cell; `double` for a quick second
+    /// click on the same row.
+    Click { x: u16, y: u16, double: bool },
 }
 
 /// Backend-independent key events (mapped from crossterm in main.rs).

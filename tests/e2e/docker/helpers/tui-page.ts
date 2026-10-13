@@ -95,14 +95,6 @@ export class TuiPage {
     await this.settle(before);
   }
 
-  /** Focus xterm's input textarea, clicking the terminal only if needed. */
-  private async focus(): Promise<void> {
-    const focused = await this.page.evaluate(
-      () => document.activeElement?.classList.contains("xterm-helper-textarea") ?? false
-    );
-    if (!focused) await this.page.click(".xterm-screen", { force: true });
-  }
-
   /**
    * Wait for the TUI to redraw after input: return as soon as the screen
    * differs from `before`, or after `max` ms for keys that change nothing
@@ -115,6 +107,22 @@ export class TuiPage {
       await this.page.waitForTimeout(20);
       if ((await this.getScreenText()) !== before) return;
     }
+  }
+
+  /**
+   * Give the terminal keyboard focus without clicking it: am-tui captures
+   * the mouse, so a focus click would reach the app (select a row, close
+   * the help overlay…).
+   */
+  async focus(): Promise<void> {
+    await this.page.evaluate(() => {
+      const term =
+        (window as any).term?.terminal ??
+        (window as any).terminal ??
+        (window as any).term;
+      if (term?.focus) term.focus();
+      else (document.querySelector(".xterm-helper-textarea") as HTMLElement | null)?.focus();
+    });
   }
 
   /** Save a screenshot to the tmp directory. */

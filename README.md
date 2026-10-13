@@ -23,6 +23,7 @@
 - [First Run](#first-run)
 - [The Dashboard](#the-dashboard)
   - [Keyboard Shortcuts](#keyboard-shortcuts)
+  - [Mouse](#mouse)
   - [Status Legend](#status-legend)
   - [Row Badges and Columns](#row-badges-and-columns)
   - [Stacked Branches](#stacked-branches)
@@ -165,6 +166,18 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `?` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
 
+### Mouse
+
+The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
+
+- **Scroll** to move the selection; **click** a row to select it; **double-click** to open it (same as `Enter`).
+- **Click a key-bar hint** (`n new`, `s settings`, `? help`…) to run that key.
+- **Click the Jobs pane** to focus it (scrolling then moves through the jobs); click a worktree row to go back to the list.
+- In **Settings**, scroll to move, click a field to select it, and click it again to change it.
+- Any click closes a popup or the help overlay.
+
+While am captures the mouse, your terminal's click-and-drag text selection needs a modifier (usually `Shift`, or `Option` in iTerm2/Terminal.app). Turn `mouseEnabled` off to get plain selection back. The change applies immediately.
+
 **Resume last session.** With `resumeLastSession` on (the default), `Enter` also picks up the worktree's most recent Claude session (started at the worktree root or any subdirectory) unless one is already open:
 
 - **Terminal** mode: the new terminal runs `claude --resume <id>` directly.
@@ -200,6 +213,7 @@ Right-aligned columns, each of which can be turned off in settings:
 - **PR**: `#42` coloured by state (green open, dim draft, yellow pending or changes requested, red failing, magenta merged, dim closed), followed by the checks glyph `✓` passing, `✗` failing or `◌` pending, and `⇡` when merged. Open PRs then show their review state: `ready` (approved, checks passing, no merge conflicts), `approved` (approved but checks failing or still running), `conflicts` (approved and green but conflicting with the base), `changes` (changes requested), `review` (awaiting a required review) or `draft`. Terminals under 100 columns get a glyph instead (`✔` `⚠` `!` `…` `~`), and `?` shows the legend. Nothing is shown when the repo doesn't require reviews or the PR only comes from a Linear attachment
 - **Git**: `↑2` commits ahead, `↓1` behind, `±3` uncommitted changes
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
+- **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's Claude Code transcript, so it updates after every turn. It is measured against `contextWindowTokens`, and a session that has gone past that is shown against 1M instead. The bar clears after a compaction until the next turn
 
 When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
@@ -284,6 +298,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | --- | ------- | ----------- |
 | `ide` | `"cursor"` | What `Enter` opens worktrees in: `cursor`, `vscode`, `terminal` |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest Claude session |
+| `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
 | `defaultBaseBranch` | `"main"` | Default base branch for new worktrees |
@@ -298,11 +313,14 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `showLinearTicket` | `true` | Show the ticket column |
 | `showGitAheadBehind` | `true` | Show the ahead/behind/dirty column |
 | `showLastCommit` | `true` | Show the last-commit age |
+| `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
+| `contextWindowTokens` | `200000` | Context window the bar is scaled to. A session past it is shown against 1,000,000. Set it to `1000000` if your sessions use the 1M window |
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
 | `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
 | `audioWaitingSound` | `"Glass"` | Sound for waiting |
 | `audioDoneSound` | `"Funk"` | Sound for done |
+| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew upgrade`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
 | `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |

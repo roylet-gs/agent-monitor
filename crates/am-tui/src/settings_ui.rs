@@ -36,6 +36,7 @@ const SOUNDS: &[&str] =
 pub const FIELDS: &[Field] = &[
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in", section: "General", kind: Kind::Choice(&["cursor", "vscode", "terminal"]) },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent Claude session", section: "General", kind: Kind::Bool },
+    Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
     Field { key: "startupScriptMode", label: "Run startup script in", help: "pane: output in the Jobs pane; window: a new terminal window", section: "General", kind: Kind::Choice(&["pane", "window"]) },
     Field { key: "defaultBranchPrefix", label: "Branch prefix", help: "Prefix for new worktree branches", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "defaultBaseBranch", label: "Base branch", help: "Default base branch for new worktrees", section: "General", kind: Kind::Text { secret: false } },
@@ -51,9 +52,12 @@ pub const FIELDS: &[Field] = &[
     Field { key: "showLinearTicket", label: "Show ticket column", help: "Linear identifier on each row", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showGitAheadBehind", label: "Show git column", help: "Ahead/behind/dirty counts", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showLastCommit", label: "Show commit age", help: "Age of the last commit", section: "Dashboard", kind: Kind::Bool },
+    Field { key: "showContextWindow", label: "Show context window", help: "Bar of the agent's context used, coloured as it nears the limit", section: "Dashboard", kind: Kind::Bool },
+    Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Scale for the bar; a session past it is shown against 1M", section: "Dashboard", kind: Kind::Number { step: 100000, min: 100000 } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only count processes whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
+    Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
     Field { key: "audioWaitingSound", label: "Waiting sound", help: "Played when an agent needs you", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "audioDoneSound", label: "Done sound", help: "Played when an agent finishes", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "ghPrStatus", label: "Fetch PRs", help: "GitHub PR and CI status via gh", section: "GitHub", kind: Kind::Bool },
@@ -94,6 +98,24 @@ impl SettingsEditor {
             _ => Map::new(),
         };
         SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, values, error: None }
+    }
+
+    /// A click on field `i`: selects it, or changes it (like ⏎) when it is
+    /// already selected. Ignored while the sort editor or theme builder is open.
+    pub fn click(&mut self, i: usize) -> Outcome {
+        if self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
+            return Outcome::None;
+        }
+        if i == self.cursor {
+            if self.editing.is_some() {
+                return Outcome::None;
+            }
+            return self.on_key(Key::Enter);
+        }
+        self.cursor = i;
+        self.editing = None;
+        self.error = None;
+        Outcome::None
     }
 
     pub fn field(&self) -> &'static Field {
@@ -375,6 +397,17 @@ mod tests {
 
     fn goto(ed: &mut SettingsEditor, key: &str) {
         ed.cursor = FIELDS.iter().position(|f| f.key == key).unwrap();
+    }
+
+    #[test]
+    fn click_selects_a_field_then_changes_it() {
+        let (_lock, _) = data_dir();
+        let mut ed = SettingsEditor::new(&Settings::default());
+        let i = FIELDS.iter().position(|f| f.key == "mouseEnabled").unwrap();
+        assert!(matches!(ed.click(i), Outcome::None));
+        assert_eq!(ed.cursor, i);
+        let Outcome::Changed(s) = ed.click(i) else { panic!("expected change") };
+        assert!(!s.mouse_enabled);
     }
 
     #[test]

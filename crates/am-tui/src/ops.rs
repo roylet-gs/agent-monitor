@@ -125,9 +125,6 @@ pub fn add_repo(path: String, tx: Sender<Msg>) {
     });
 }
 
-/// The app's own repo, for feature requests (same as the TS fallback).
-const OWN_REPO: &str = "roylet-gs/agent-monitor";
-
 /// `gh issue create` on the app's repo with an environment footer
 /// (port of `createFeatureRequest`).
 pub fn suggest(title: String, body: String, tx: Sender<Msg>) {
@@ -138,7 +135,7 @@ pub fn suggest(title: String, body: String, tx: Sender<Msg>) {
             std::env::consts::OS
         );
         let out = std::process::Command::new("gh")
-            .args(["issue", "create", "--repo", OWN_REPO, "--title", &title, "--body", &full])
+            .args(["issue", "create", "--repo", am_core::update_check::OWN_REPO, "--title", &title, "--body", &full])
             .stdin(std::process::Stdio::null())
             .output();
         let result = match out {

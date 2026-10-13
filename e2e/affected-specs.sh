@@ -48,11 +48,11 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 15 ;;
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs | crates/am-tui/src/jobs.rs) echo 09 10 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 ;;
-    crates/am-tui/src/data.rs) echo 01 06 07 08 ;;
+    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 ;;
     crates/am-tui/src/launcher.rs) echo - ;; # opens IDEs/terminals: unit tests only
 
     # --- am-core ----------------------------------------------------------
@@ -64,6 +64,8 @@ specs_for() {
     crates/am-core/src/status.rs) echo 07 08 ;;
     crates/am-core/src/worktrees.rs) echo 09 10 11 ;;
     crates/am-core/src/hooks_installer.rs) echo 11 ;;
+    crates/am-core/src/context.rs) echo 14 ;;      # context-window bar
+    crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice
     crates/am-core/src/themes.rs | crates/am-core/src/themes/*) echo 12 ;;
     crates/am-core/src/integrations/github.rs) echo 04 ;;
     crates/am-core/src/integrations/linear.rs) echo 04 05 ;;

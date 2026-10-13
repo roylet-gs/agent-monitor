@@ -81,6 +81,16 @@ pub struct Settings {
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,
+    /// Mouse capture in the TUI (click, double-click, wheel). Off restores
+    /// the terminal's own click-drag text selection.
+    pub mouse_enabled: bool,
+    /// Context-window bar at the far right of each worktree row.
+    pub show_context_window: bool,
+    /// Context window the bar is scaled to. A session that uses more than
+    /// this is shown against 1M instead (see `crate::context::window_for`).
+    pub context_window_tokens: u64,
+    /// Check GitHub Releases for a newer `am` and show it in the dashboard.
+    pub check_for_updates: bool,
     /// Where a repo's startup script runs after creating a worktree: `pane`
     /// (default; output streams into the TUI's jobs pane) or `window` (a new
     /// terminal window, falling back to the pane when none can be opened).
@@ -144,6 +154,10 @@ impl Default for Settings {
             resume_last_session: true,
             theme: "ansi".into(),
             nerd_fonts: false,
+            mouse_enabled: true,
+            show_context_window: true,
+            context_window_tokens: 200_000,
+            check_for_updates: true,
             startup_script_mode: "pane".into(),
             raw: Default::default(),
         }
@@ -253,6 +267,14 @@ mod tests {
     }
 
     #[test]
+    fn mouse_is_on_by_default_and_can_be_turned_off() {
+        assert!(Settings::parse("{}").mouse_enabled);
+        let off = Settings::parse(r#"{"mouseEnabled":false}"#);
+        assert!(!off.mouse_enabled);
+        assert_eq!(off.to_file_json()["mouseEnabled"], serde_json::Value::Bool(false));
+    }
+
+    #[test]
     fn startup_scripts_run_in_the_pane_unless_set_to_window() {
         assert!(!Settings::default().startup_script_in_window());
         assert!(!Settings::parse(r#"{"startupScriptMode":"bogus"}"#).startup_script_in_window());
@@ -291,6 +313,13 @@ mod tests {
         assert_eq!(view.keys().next().map(String::as_str), Some("ide"));
         assert_eq!(view.keys().next_back().map(String::as_str), Some("zeta"));
         assert_eq!(view["ide"], "vscode");
+    }
+
+    #[test]
+    fn check_for_updates_defaults_on_and_parses() {
+        assert!(Settings::parse("{}").check_for_updates);
+        assert!(!Settings::parse(r#"{"checkForUpdates":false}"#).check_for_updates);
+        assert_eq!(Settings::default().to_file_json()["checkForUpdates"], true);
     }
 
     #[test]

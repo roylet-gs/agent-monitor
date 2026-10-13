@@ -38,10 +38,14 @@ ENV CARGO_PROFILE_RELEASE_LTO=false \
 
 # Cache mounts keep the registry and target dir across rebuilds (BuildKit and
 # Buildah/Podman both support them). The binaries are copied out because the
-# cached target dir isn't part of the image layer.
+# cached target dir isn't part of the image layer. The target cache is shared
+# by every worktree's build and COPY doesn't keep source mtimes, so cargo can
+# take another branch's build of a workspace crate as fresh: touch the
+# workspace sources first (dependencies stay cached).
 RUN --mount=type=cache,id=am-cargo-registry,target=/usr/local/cargo/registry \
     --mount=type=cache,id=am-cargo-target,target=/src/target \
-    cargo build --release --locked -p am-tui -p am-cli -p am-hook \
+    find crates -type f -exec touch {} + \
+  && cargo build --release --locked -p am-tui -p am-cli -p am-hook \
   && mkdir -p /out \
   && cp target/release/am-tui target/release/am target/release/am-hook /out/
 

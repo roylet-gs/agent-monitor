@@ -4,12 +4,12 @@ expression: screen
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────││ ◐ Create feature/new-thing           │
-│ ◑ feature/refactor ◆2                              ENG-412 #127✓ ✔ ↑2 ±3  4m ││   ✓ Fetching origin/main…            │
-│ ◐ fix/offline-cache                                                       4m ││   ◐ Adding worktree…                 │
+│ ◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ███░░ 121k ││   ✓ Fetching origin/main…            │
+│ ◐ fix/offline-cache                                            4m ████▋ 185k ││   ◐ Adding worktree…                 │
 │ ◐ feature/new-thing creating… Adding worktree…                               ││                                      │
 │                                                                              ││                                      │
 │gridsight ────────────────────────────────────────────────────────────────────││                                      │
-│▌· main                                                             ↑2 ±3  4m ││                                      │
+│▌· main                                                  ↑2 ±3  4m            ││                                      │
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 │                                                                              ││                                      │
