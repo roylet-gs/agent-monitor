@@ -308,8 +308,6 @@ fn dispatch(
         Action::Quit => return Ok(true),
         Action::Refresh => collector.refresh(true),
         Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
-        Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
-        Action::OpenAgent(v) => launcher::open_agent(*v, &app.settings, launch_tx.clone()),
         Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
         Action::SettingsChanged => {
             *theme = theme::Theme::load(&app.settings.theme);

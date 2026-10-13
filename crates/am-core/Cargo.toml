@@ -11,9 +11,8 @@ serde_json.workspace = true
 time.workspace = true
 uuid.workspace = true
 ureq.workspace = true
-
-# procscan: libproc calls (proc_pidinfo, proc_pidpath, KERN_PROCARGS2). Linux reads /proc.
-[target.'cfg(target_os = "macos")'.dependencies]
+# usage: localtime_r/mktime for the local day. procscan (macOS): libproc calls
+# (proc_pidinfo, proc_pidpath, KERN_PROCARGS2); Linux reads /proc.
 libc.workspace = true
 
 [dev-dependencies]
