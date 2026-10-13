@@ -6,6 +6,7 @@
 
 mod app;
 mod data;
+mod jobs;
 mod launcher;
 mod modals;
 mod ops;
@@ -107,6 +108,7 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data::Collector) -> io::Result<()> {
     let mut theme = theme::Theme::load(&app.settings.theme);
     let (launch_tx, launch_rx) = std::sync::mpsc::channel();
+    launcher::spawn_update_check(launch_tx.clone());
     let mut popup_since: Option<Instant> = None;
     let mut log_lines: Vec<String> = Vec::new();
     let mut dirty = true;
@@ -124,7 +126,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
         while let Ok(msg) = launch_rx.try_recv() {
             match msg {
                 launcher::Msg::Popup(p) => {
-                    if matches!(app.modal, Some(modals::Modal::Busy { deleting: None, .. })) {
+                    if matches!(app.modal, Some(modals::Modal::Busy { .. })) {
                         app.modal = None;
                     }
                     app.popup = Some(p);
@@ -139,28 +141,34 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                         m.on_check_result(branch, r);
                     }
                 }
-                launcher::Msg::Created(repo, req, result) => {
+                launcher::Msg::JobStep(job, text) => {
+                    app.jobs.step(job, text);
+                    app.rebuild_rows();
+                }
+                launcher::Msg::JobLog(job, line) => app.jobs.log(job, line),
+                launcher::Msg::Created(job, result) => {
                     use am_core::worktrees::CreateError;
-                    app.modal = None;
                     match result {
                         Ok(w) => {
                             app.notice = Some(format!("Created {}", w.branch));
                             app.pending_select = Some(w.id.clone());
-                            let _ = &w.id;
-                            if am_core::worktrees::has_script(&repo.id) {
-                                app.modal = Some(modals::Modal::RunScript { repo_id: repo.id.clone(), worktree_path: w.path.clone() });
+                            app.jobs.set_worktree(job, w.id.clone());
+                            let repo_id = w.repo_id.clone();
+                            if am_core::worktrees::has_script(&repo_id) {
+                                app.jobs.ask(job, jobs::Question::RunScript { repo_id, worktree_path: w.path.clone() });
+                            } else {
+                                app.jobs.finish(job, Ok(()), Instant::now());
                             }
                             collector.refresh(false);
                         }
                         Err(CreateError::BranchExists { local, remote, .. }) if local || remote => {
-                            app.modal = Some(modals::Modal::BranchExists { repo: *repo, req: *req, local, remote });
+                            app.jobs.ask(job, jobs::Question::BranchExists { local, remote });
                         }
-                        Err(e) => {
-                            app.popup = Some(format!("✗ {e}"));
-                            popup_since = Some(Instant::now());
-                        }
+                        Err(e) => app.jobs.finish(job, Err(e.to_string()), Instant::now()),
                     }
+                    app.rebuild_rows();
                 }
+                launcher::Msg::ScriptDone(job, result) => app.jobs.finish(job, result, Instant::now()),
                 launcher::Msg::RepoAdded(path, result) if app.setup.is_some() => {
                     app.modal = None;
                     if result.is_ok() {
@@ -178,23 +186,22 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     Err(e) => app.modal = Some(modals::Modal::AddRepo { path, error: Some(e) }),
                 },
-                launcher::Msg::Deleted(id, label, result) => {
-                    // The box may have been dismissed (delete in background)
-                    // and replaced by something else; only close our own.
-                    if matches!(&app.modal, Some(modals::Modal::Busy { deleting: Some(d), .. }) if *d == id) {
-                        app.modal = None;
-                    }
+                launcher::Msg::UpdateAvailable(update) => app.update_available = Some(update),
+                launcher::Msg::Deleted(job, id, label, result) => {
                     app.finish_delete(&id, result.is_ok());
                     match result {
-                        Ok(warnings) if warnings.is_empty() => app.notice = Some(format!("Deleted {label}")),
                         Ok(warnings) => {
-                            app.popup = Some(format!("Deleted {label}, with warnings:\n\n{}", warnings.join("\n")));
-                            popup_since = Some(Instant::now());
+                            if warnings.is_empty() {
+                                app.notice = Some(format!("Deleted {label}"));
+                            } else {
+                                app.jobs.log(job, "Deleted, with warnings:".into());
+                            }
+                            for w in warnings {
+                                app.jobs.log(job, w);
+                            }
+                            app.jobs.finish(job, Ok(()), Instant::now());
                         }
-                        Err(e) => {
-                            app.popup = Some(format!("✗ {e}"));
-                            popup_since = Some(Instant::now());
-                        }
+                        Err(e) => app.jobs.finish(job, Err(e), Instant::now()),
                     }
                     collector.refresh(false);
                 }
@@ -214,6 +221,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             // Elapsed/age labels tick once a second; the diff renderer only
             // rewrites the cells that actually changed.
             last_second = now;
+            if app.jobs.tick(Instant::now()) {
+                app.rebuild_rows();
+            }
             if app.show_log {
                 log_lines = tail_log(200);
             }
@@ -299,8 +309,8 @@ fn dispatch(
             *theme = theme::Theme::load(&app.settings.theme);
             collector.update_settings(app.settings.clone());
         }
-        Action::Create(repo, req) => ops::create(app.settings.clone(), *repo, *req, launch_tx.clone()),
-        Action::Delete(v, delete_branch) => ops::delete(*v, delete_branch, launch_tx.clone()),
+        Action::Create(job, repo, req) => ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone()),
+        Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),
         Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
         Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
         Action::InstallHooks => {
@@ -318,8 +328,8 @@ fn dispatch(
             app.notice = Some("Stopped tracking session".into());
             collector.refresh(false);
         }
-        Action::RunScript { repo_id, worktree_path } => {
-            run_script(terminal, &repo_id, &worktree_path, mouse_before)?;
+        Action::RunScript { job, repo_id, worktree_path } => {
+            ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
         }
         Action::EditSettingsFile => {
             edit_settings_file(terminal, mouse_before)?;
@@ -393,26 +403,5 @@ fn edit_settings_file(terminal: &mut ratatui::DefaultTerminal, mouse: bool) -> i
     if let Err(e) = status {
         am_core::warn!("settings", "Failed to run editor {editor}: {e}");
     }
-    Ok(())
-}
-
-/// Run a repo's startup script in the real terminal (the TUI steps aside),
-/// then wait for Enter so the output can be read before returning.
-fn run_script(terminal: &mut ratatui::DefaultTerminal, repo_id: &str, cwd: &str, mouse: bool) -> io::Result<()> {
-    let script = am_core::worktrees::script_path(repo_id);
-    set_mouse(false);
-    ratatui::restore();
-    println!("\x1b[1m▶ Running startup script\x1b[0m {}\n  in {cwd}\n", script.display());
-    let status = std::process::Command::new("/bin/sh").arg(&script).current_dir(cwd).status();
-    match status {
-        Ok(s) if s.success() => println!("\n\x1b[32m✓ Script finished.\x1b[0m Press Enter to return to am…"),
-        Ok(s) => println!("\n\x1b[31m✗ Script exited with {s}.\x1b[0m Press Enter to return to am…"),
-        Err(e) => println!("\n\x1b[31m✗ Couldn't run script: {e}\x1b[0m Press Enter to return to am…"),
-    }
-    let mut line = String::new();
-    let _ = io::stdin().read_line(&mut line);
-    *terminal = ratatui::init();
-    set_mouse(mouse);
-    terminal.clear()?;
     Ok(())
 }

@@ -37,6 +37,18 @@ echo ".claude/" > .git/info/exclude
 # Register the repo (also syncs its worktrees into the DB).
 am repo add /work
 
+# A startup script, so creating a worktree asks to run it in the jobs pane.
+# No terminal emulator here, so it runs in-process with its output piped
+# into the pane.
+REPO_ID=$(am repo list --json | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)
+mkdir -p "$AM_DATA_DIR/scripts"
+cat > "$AM_DATA_DIR/scripts/$REPO_ID.sh" <<'SH'
+#!/bin/sh
+echo "e2e startup script running in $(basename "$PWD")"
+printf '\033[32mcoloured line\033[0m\n'
+echo "e2e startup script done"
+SH
+
 # Skip the setup wizard, show main, enable Linear against the mock.
 # linearAutoNickname is off so rows keep their branch names (the mock links
 # every branch to the same ticket, which would rename them all).
@@ -49,6 +61,10 @@ cat > "$AM_DATA_DIR/settings.json" <<'JSON'
   "linearAutoNickname": false
 }
 JSON
+
+# A fresh update-check cache naming a newer release, so the dashboard shows
+# "⬆ v9.9.9 available" without network (a cache < 6 h old is trusted).
+echo "{\"checkedAt\": $(date +%s), \"latest\": \"9.9.9\"}" > "$AM_DATA_DIR/update-check.json"
 
 # --- Agent activity on main, through the real hook path -------------------
 SID="3f2a91c8-7b4d-4e0a-9c1f-8d2e5a6b7c90"
