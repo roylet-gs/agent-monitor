@@ -159,7 +159,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 | `14-context-window.spec.ts` | Context bar at the far right of main's row (150k of the default 1M); rows without a session stay blank; setting the window to `100k` in Settings doubles the scale to 200k (6 of 8 cells), then restored to `1m` |
 | `15-mouse.spec.ts` | Mouse: a click selects a row, the wheel moves the selection, clicking `? help` in the key bar opens help and a click closes it, double-click on a row; clicking the Mouse setting turns it off, after which clicks are ignored (then restored) |
 | `16-gemini.spec.ts` | Gemini standalone session seeded through `am hook-event --agent gemini` (native events, ends on a `ToolPermission` notification → waiting) shows `✦ gemini`; the Claude standalone row stays unbadged; the Gemini row shows no context bar even with a Claude-shaped decoy transcript under its session id (context is read by the session's own harness); `?` explains the badge; Settings → Agent plugins lists both built-ins and toggles Gemini off/on |
-| `17-multi-session.spec.ts` | `feature/pair` with two agents: `⧉ 2 sessions` on the worktree row (no subagent/context badge there), then `├ ● claude executing … ◆ 1 subagent … 300k` and `└ ✓ gemini done` rows; `j` skips session rows; clicking a session row selects its worktree |
+| `17-multi-session.spec.ts` | `feature/pair` with two agents: `⧉ 2 sessions` on the worktree row (no subagent/context badge there), then `├ ● claude executing … ◆ 1 subagent … 300k` and `└ ✓ gemini done` rows; `j` skips session rows; clicking a session row selects its worktree; `?` explains `⧉ 2 sessions` |
 
 **Writing a spec:**
 ```typescript
