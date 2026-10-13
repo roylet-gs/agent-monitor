@@ -73,7 +73,7 @@ mkdir -p "/tmp/claude-sessions/$SID/subagents"
 echo '{"description":"Survey auth module","agentType":"Explore"}' > "/tmp/claude-sessions/$SID/subagents/agent-a1b2c3d4.meta.json"
 hook() { am hook-event --worktree "$1" || true; }
 # Transcript with token usage for the context-window bar: 150k of the default
-# 200k window (75% used, so it renders yellow).
+# 1M window (15% used, so it renders green).
 mkdir -p "$HOME/.claude/projects/-work"
 cat > "$HOME/.claude/projects/-work/$SID.jsonl" <<JSONL
 {"type":"user","cwd":"/work","sessionId":"$SID","message":{"role":"user","content":"Refactor auth"}}

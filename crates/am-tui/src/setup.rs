@@ -1,7 +1,7 @@
 //! First-run setup (shown when settings.json has no `setupCompleted`).
 //! Port of the TS SetupWizard, trimmed to what a first run needs: editor,
 //! agent hooks (Claude Code plus any other agent CLI found), repositories,
-//! integrations. Everything is also reachable
+//! integrations, context window. Everything is also reachable
 //! later via `s` (settings), `A` (add repo) and `am hooks install`.
 
 use am_core::agents::{self, AgentKind};
@@ -15,6 +15,7 @@ pub enum Step {
     Hooks,
     Repos,
     Integrations,
+    Context,
 }
 
 #[derive(Debug, Clone)]
@@ -32,9 +33,17 @@ pub struct Setup {
     pub gh: bool,
     pub linear_key: String,
     pub integration_field: usize,
+    /// Index into `CONTEXT_CHOICES`; the last one is a typed custom value.
+    pub ctx_choice: usize,
+    pub ctx_input: String,
+    pub ctx_error: Option<String>,
 }
 
 pub const IDES: [(&str, &str); 3] = [("cursor", "Cursor"), ("vscode", "VS Code"), ("terminal", "Terminal")];
+
+/// Context-window presets offered by the wizard; a third row takes a typed value.
+pub const CONTEXT_CHOICES: [(u64, &str); 2] = [(1_000_000, "1M (default)"), (200_000, "200k")];
+pub const CONTEXT_CUSTOM: usize = CONTEXT_CHOICES.len();
 
 pub enum SetupEffect {
     None,
@@ -50,6 +59,8 @@ impl Setup {
         let agents: Vec<(AgentKind, bool)> =
             agents::detected(settings).into_iter().map(|k| (k, am_core::hooks_installer::is_hooks_installed(k))).collect();
         let hooks_installed = agents.iter().all(|(_, on)| *on);
+        let context_window = settings.context_window_tokens;
+        let preset = CONTEXT_CHOICES.iter().position(|(n, _)| *n == context_window);
         Setup {
             step: Step::Editor,
             ide: IDES.iter().position(|(k, _)| *k == ide).unwrap_or(0),
@@ -62,6 +73,9 @@ impl Setup {
             gh: which("gh"),
             linear_key: String::new(),
             integration_field: 0,
+            ctx_choice: preset.unwrap_or(CONTEXT_CUSTOM),
+            ctx_input: if preset.is_some() { String::new() } else { am_core::context::short_tokens(context_window) },
+            ctx_error: None,
         }
     }
 
@@ -107,18 +121,47 @@ impl Setup {
                     self.linear_key.pop();
                 }
                 Key::Char(c) if self.integration_field == 1 => self.linear_key.push(c),
-                Key::Enter => {
-                    let key = self.linear_key.trim().to_string();
-                    return SetupEffect::Finish(vec![
-                        ("ide", Value::from(IDES[self.ide].0)),
-                        ("ghPrStatus", Value::Bool(self.gh)),
-                        ("linearEnabled", Value::Bool(!key.is_empty())),
-                        ("linearApiKey", Value::from(key)),
-                        ("setupCompleted", Value::Bool(true)),
-                    ]);
-                }
+                Key::Enter => self.step = Step::Context,
                 _ => {}
             },
+            Step::Context => {
+                self.ctx_error = None;
+                let custom = self.ctx_choice == CONTEXT_CUSTOM;
+                match key {
+                    Key::Esc => self.step = Step::Integrations,
+                    Key::Up => self.ctx_choice = (self.ctx_choice + CONTEXT_CUSTOM) % (CONTEXT_CUSTOM + 1),
+                    Key::Down | Key::Tab => self.ctx_choice = (self.ctx_choice + 1) % (CONTEXT_CUSTOM + 1),
+                    // On the custom row letters are input (`128k`, `1m`), so only arrows move.
+                    Key::Char('k') if !custom => self.ctx_choice = (self.ctx_choice + CONTEXT_CUSTOM) % (CONTEXT_CUSTOM + 1),
+                    Key::Char('j') if !custom => self.ctx_choice = (self.ctx_choice + 1) % (CONTEXT_CUSTOM + 1),
+                    Key::Backspace if custom => {
+                        self.ctx_input.pop();
+                    }
+                    Key::Char(c) if custom => self.ctx_input.push(c),
+                    Key::Enter => {
+                        let tokens = match CONTEXT_CHOICES.get(self.ctx_choice) {
+                            Some((n, _)) => *n,
+                            None => match am_core::context::parse_tokens(&self.ctx_input) {
+                                Some(n) if n >= am_core::context::MIN_WINDOW => n,
+                                _ => {
+                                    self.ctx_error = Some("Enter a token count ≥ 1k, e.g. 128k, 200k, 1m".into());
+                                    return SetupEffect::None;
+                                }
+                            },
+                        };
+                        let key = self.linear_key.trim().to_string();
+                        return SetupEffect::Finish(vec![
+                            ("ide", Value::from(IDES[self.ide].0)),
+                            ("ghPrStatus", Value::Bool(self.gh)),
+                            ("linearEnabled", Value::Bool(!key.is_empty())),
+                            ("linearApiKey", Value::from(key)),
+                            ("contextWindowTokens", Value::from(tokens)),
+                            ("setupCompleted", Value::Bool(true)),
+                        ]);
+                    }
+                    _ => {}
+                }
+            }
         }
         SetupEffect::None
     }
@@ -177,6 +220,9 @@ mod tests {
             gh: true,
             linear_key: String::new(),
             integration_field: 0,
+            ctx_choice: 0,
+            ctx_input: String::new(),
+            ctx_error: None,
         }
     }
 
@@ -205,10 +251,53 @@ mod tests {
         for c in "lin_key".chars() {
             s.on_key(Key::Char(c));
         }
+        assert!(matches!(s.on_key(Key::Enter), SetupEffect::None));
+        assert_eq!(s.step, Step::Context);
         let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
         assert!(v.contains(&("ide", Value::from("vscode"))));
         assert!(v.contains(&("linearEnabled", Value::Bool(true))));
+        assert!(v.contains(&("contextWindowTokens", Value::from(1_000_000u64))));
         assert!(v.contains(&("setupCompleted", Value::Bool(true))));
+    }
+
+    #[test]
+    fn context_step_takes_a_preset_or_a_typed_value() {
+        let mut s = setup();
+        s.step = Step::Context;
+        s.on_key(Key::Char('j'));
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        assert!(v.contains(&("contextWindowTokens", Value::from(200_000u64))));
+
+        let mut s = setup();
+        s.step = Step::Context;
+        s.on_key(Key::Up); // wraps to the custom row
+        assert_eq!(s.ctx_choice, CONTEXT_CUSTOM);
+        for c in "abc".chars() {
+            s.on_key(Key::Char(c));
+        }
+        assert!(matches!(s.on_key(Key::Enter), SetupEffect::None));
+        assert!(s.ctx_error.is_some());
+        for _ in 0..3 {
+            s.on_key(Key::Backspace);
+        }
+        for c in "500k".chars() {
+            s.on_key(Key::Char(c)); // `k` is input here, not "up"
+        }
+        assert_eq!(s.ctx_choice, CONTEXT_CUSTOM);
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        assert!(v.contains(&("contextWindowTokens", Value::from(500_000u64))));
+        s.step = Step::Context;
+        s.on_key(Key::Esc);
+        assert_eq!(s.step, Step::Integrations);
+    }
+
+    #[test]
+    fn new_preselects_the_current_window() {
+        let with = |n: u64| Setup::new(vec![], &am_core::settings::Settings { context_window_tokens: n, ..Default::default() });
+        assert_eq!(with(1_000_000).ctx_choice, 0);
+        assert_eq!(with(200_000).ctx_choice, 1);
+        let s = with(128_000);
+        assert_eq!((s.ctx_choice, s.ctx_input.as_str()), (CONTEXT_CUSTOM, "128k"));
     }
 
     #[test]

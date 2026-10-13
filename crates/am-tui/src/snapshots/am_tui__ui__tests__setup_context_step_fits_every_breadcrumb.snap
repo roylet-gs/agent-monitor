@@ -1,0 +1,24 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: out
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▋░░░░ 121k │
+│ ◐ fix/offline-cache                                                                4m ▉░░░░ 185k │
+│        ╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮        │
+│gridsigh│                                                                                │────────│
+│ · main │  ✓ Editor  ›  ✓ Agent hooks  ›  ✓ Repositories  ›  ✓ Integrations  ›  Context  │        │
+│        │                                                                                │        │
+│        │ How many tokens of context should the bar measure against?                     │        │
+│        │ A session past it doubles the scale until it fits.                             │        │
+│        │                                                                                │        │
+│        │   ○ 1M (default)                                                               │        │
+│        │   ○ 200k                                                                       │        │
+│        │   ● Custom: 128k▏                                                              │        │
+│        │                                                                                │        │
+│        ╰───────────────────────────────────────────────── ↑↓ choose  ⏎ finish  esc back ╯        │
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

@@ -245,6 +245,17 @@ fn settings_set_coerces_and_validates() {
     let o = env.run(&["settings", "set", "worktreeSort", "x"]);
     assert_eq!(o.code, 1);
     assert!(o.stderr.contains("can't be set from the CLI"));
+
+    assert_eq!(env.settings()["contextWindowTokens"], 1_000_000, "1M by default");
+    for (input, expected) in [("200k", 200_000), ("1.5m", 1_500_000), ("128000", 128_000)] {
+        env.ok(&["settings", "set", "contextWindowTokens", input]);
+        assert_eq!(env.settings()["contextWindowTokens"], expected, "contextWindowTokens={input}");
+    }
+    for bad in ["abc", "500", "0"] {
+        let o = env.run(&["settings", "set", "contextWindowTokens", bad]);
+        assert_eq!(o.code, 1, "{bad}");
+        assert!(o.stderr.contains("Invalid token count"));
+    }
 }
 
 #[test]

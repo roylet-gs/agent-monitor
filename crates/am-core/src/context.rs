@@ -4,9 +4,9 @@
 //! main-chain assistant message carries the API `usage`; the prompt size of the
 //! last one (input + cache read + cache creation) is the context in use.
 //!
-//! The window itself isn't recorded (1M sessions report a plain model id), so it
-//! comes from the `contextWindowTokens` setting, bumped to 1M once a session is
-//! past it.
+//! The window itself isn't recorded, and the app doesn't assume any model, so it
+//! comes from the `contextWindowTokens` setting, doubled until it holds a session
+//! that has gone past it.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -17,8 +17,8 @@ use serde_json::Value;
 use crate::agents::claude::encode_project_path;
 use crate::{debug, paths};
 
-/// The 1M-token window, used once a session outgrows the configured one.
-pub const LARGE_WINDOW: u64 = 1_000_000;
+/// Smallest `contextWindowTokens` the editors accept.
+pub const MIN_WINDOW: u64 = 1_000;
 /// Fraction of the window used at which the bar turns yellow, then red.
 pub const WARN_AT: f64 = 0.70;
 pub const CRITICAL_AT: f64 = 0.90;
@@ -42,12 +42,31 @@ pub enum Level {
     Critical,
 }
 
-/// The window `usage` is measured against: 1M for a `[1m]` model or a session
-/// already past `configured`, otherwise `configured`.
-pub fn window_for(usage: &ContextUsage, configured: u64) -> u64 {
-    let configured = configured.max(1);
-    let large = usage.model.as_deref().is_some_and(|m| m.contains("[1m]"));
-    if large || usage.tokens > configured { configured.max(LARGE_WINDOW) } else { configured }
+/// The window `tokens` are measured against: `configured`, doubled until it
+/// holds them (200k → 400k → 800k …), so a session past the setting still gets
+/// a meaningful bar whatever model it runs.
+pub fn window_for(tokens: u64, configured: u64) -> u64 {
+    let mut window = configured.max(1);
+    while tokens > window {
+        window = window.saturating_mul(2);
+    }
+    window
+}
+
+/// A token count as typed: `128000`, `200k`, `1m`, `1.5M` (`_`/`,` allowed as
+/// separators). `None` for anything else, zero included.
+pub fn parse_tokens(s: &str) -> Option<u64> {
+    let t: String = s.trim().chars().filter(|c| *c != '_' && *c != ',').collect::<String>().to_ascii_lowercase();
+    let (num, mult) = match t.strip_suffix('k') {
+        Some(n) => (n, 1_000.0),
+        None => match t.strip_suffix('m') {
+            Some(n) => (n, 1_000_000.0),
+            None => (t.as_str(), 1.0),
+        },
+    };
+    let n: f64 = num.trim().parse().ok()?;
+    let v = (n * mult).round();
+    (1.0..9.0e15).contains(&v).then_some(v as u64)
 }
 
 pub fn fraction(tokens: u64, window: u64) -> f64 {
@@ -243,12 +262,27 @@ mod tests {
     }
 
     #[test]
-    fn window_bumps_to_1m_past_the_setting() {
-        let u = |tokens, model: &str| ContextUsage { tokens, model: Some(model.into()) };
-        assert_eq!(window_for(&u(150_000, "claude-opus-5-5"), 200_000), 200_000);
-        assert_eq!(window_for(&u(250_000, "claude-opus-5-5"), 200_000), LARGE_WINDOW);
-        assert_eq!(window_for(&u(10, "claude-opus-5-5[1m]"), 200_000), LARGE_WINDOW);
-        assert_eq!(window_for(&u(10, "x"), 1_000_000), 1_000_000);
+    fn window_doubles_past_the_setting() {
+        assert_eq!(window_for(150_000, 200_000), 200_000);
+        assert_eq!(window_for(200_000, 200_000), 200_000);
+        assert_eq!(window_for(250_000, 200_000), 400_000);
+        assert_eq!(window_for(900_000, 200_000), 1_600_000);
+        assert_eq!(window_for(10, 1_000_000), 1_000_000);
+        assert_eq!(window_for(5, 0), 8);
+        assert_eq!(window_for(u64::MAX, 3), u64::MAX);
+    }
+
+    #[test]
+    fn parses_typed_token_counts() {
+        assert_eq!(parse_tokens("128000"), Some(128_000));
+        assert_eq!(parse_tokens("200k"), Some(200_000));
+        assert_eq!(parse_tokens(" 1M "), Some(1_000_000));
+        assert_eq!(parse_tokens("1.5m"), Some(1_500_000));
+        assert_eq!(parse_tokens("1_000_000"), Some(1_000_000));
+        assert_eq!(parse_tokens("200,000"), Some(200_000));
+        for bad in ["", "abc", "0", "-5", "k", "1g", "1e30"] {
+            assert_eq!(parse_tokens(bad), None, "{bad}");
+        }
     }
 
     #[test]

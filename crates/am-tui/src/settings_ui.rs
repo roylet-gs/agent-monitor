@@ -2,6 +2,7 @@
 //! keys (written by the TS app or a newer version) survive. `e` opens the
 //! whole file in $EDITOR for anything not listed here.
 
+use am_core::context;
 use am_core::settings::{Direction, SortCriterion, SortKey, Settings};
 use am_core::themes;
 use serde_json::{Map, Value};
@@ -15,6 +16,9 @@ pub enum Kind {
     Bool,
     Choice(&'static [&'static str]),
     Number { step: u64, min: u64 },
+    /// A token count: shown as `200k`/`1.0M`, typed as `128k`/`1m`, ←→ step
+    /// through `TOKEN_PRESETS`.
+    Tokens { min: u64 },
     Text { secret: bool },
     Sort,
     /// Built-in and custom themes, listed at runtime.
@@ -32,6 +36,9 @@ pub struct Field {
     pub section: &'static str,
     pub kind: Kind,
 }
+
+/// Common context-window sizes ←→ step through on a `Kind::Tokens` field.
+const TOKEN_PRESETS: &[u64] = &[32_000, 64_000, 128_000, 200_000, 256_000, 400_000, 500_000, 1_000_000, 2_000_000];
 
 const SOUNDS: &[&str] =
     &["Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"];
@@ -57,7 +64,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "showGitAheadBehind", label: "Show git column", help: "Ahead/behind/dirty counts", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showLastCommit", label: "Show commit age", help: "Age of the last commit", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showContextWindow", label: "Show context window", help: "Bar of the agent's context used, coloured as it nears the limit", section: "Dashboard", kind: Kind::Bool },
-    Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Scale for the bar; a session past it is shown against 1M", section: "Dashboard", kind: Kind::Number { step: 100000, min: 100000 } },
+    Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Bar scale; a session past it doubles the scale until it fits (⏎ to type, e.g. 128k)", section: "Dashboard", kind: Kind::Tokens { min: context::MIN_WINDOW } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only count processes whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
@@ -137,6 +144,7 @@ impl SettingsEditor {
                 _ => "not set".into(),
             },
             Kind::ThemeBuilder => "⏎ open".into(),
+            Kind::Tokens { .. } => v.and_then(Value::as_u64).map(context::short_tokens).unwrap_or_else(|| "—".into()),
             Kind::Plugins => {
                 let s = self.settings();
                 let on: Vec<&str> = am_core::agents::enabled(&s).iter().map(|k| k.id()).collect();
@@ -210,6 +218,13 @@ impl SettingsEditor {
                                 return Outcome::None;
                             }
                         },
+                        Kind::Tokens { min } => match context::parse_tokens(&text) {
+                            Some(n) if n >= min => Value::from(n),
+                            _ => {
+                                self.error = Some(format!("Enter a token count ≥ {} (e.g. 128k, 200k, 1m)", context::short_tokens(min)));
+                                return Outcome::None;
+                            }
+                        },
                         _ => Value::from(text),
                     };
                     return self.set(f.key, value);
@@ -259,6 +274,10 @@ impl SettingsEditor {
                 self.editing = Some(self.values.get(f.key).map(|v| v.to_string()).unwrap_or_default());
                 Outcome::None
             }
+            Kind::Tokens { .. } => {
+                self.editing = Some(self.values.get(f.key).and_then(Value::as_u64).map(context::short_tokens).unwrap_or_default());
+                Outcome::None
+            }
             Kind::Text { secret } => {
                 let cur = self.values.get(f.key).and_then(Value::as_str).unwrap_or("");
                 self.editing = Some(if secret { String::new() } else { cur.to_string() });
@@ -293,6 +312,18 @@ impl SettingsEditor {
                 let cur = self.values.get(f.key).and_then(Value::as_u64).unwrap_or(min);
                 let next = if dir > 0 { cur + step } else { cur.saturating_sub(step).max(min) };
                 self.set(f.key, Value::from(next))
+            }
+            Kind::Tokens { min } => {
+                let cur = self.values.get(f.key).and_then(Value::as_u64).unwrap_or(min);
+                let next = if dir > 0 {
+                    TOKEN_PRESETS.iter().copied().find(|&p| p > cur)
+                } else {
+                    TOKEN_PRESETS.iter().copied().rev().find(|&p| p < cur && p >= min)
+                };
+                match next {
+                    Some(n) => self.set(f.key, Value::from(n)),
+                    None => Outcome::None,
+                }
             }
             Kind::Bool => self.activate(),
             _ => Outcome::None,
@@ -540,6 +571,46 @@ mod tests {
         ed.on_key(Key::Char('5'));
         assert!(matches!(ed.on_key(Key::Enter), Outcome::None));
         assert!(ed.error.is_some());
+    }
+
+    #[test]
+    fn context_window_is_typed_in_k_or_m_and_steps_through_presets() {
+        let _lock = data_dir();
+        let mut ed = SettingsEditor::new(&Settings::default());
+        goto(&mut ed, "contextWindowTokens");
+        assert_eq!(ed.display(ed.field()), "1.0M");
+
+        ed.on_key(Key::Enter);
+        assert_eq!(ed.editing.as_deref(), Some("1.0M"));
+        for _ in 0..4 {
+            ed.on_key(Key::Backspace);
+        }
+        for c in "128k".chars() {
+            ed.on_key(Key::Char(c));
+        }
+        let Outcome::Changed(s) = ed.on_key(Key::Enter) else { panic!("expected change") };
+        assert_eq!(s.context_window_tokens, 128_000);
+        assert_eq!(ed.display(ed.field()), "128k");
+
+        let Outcome::Changed(s) = ed.on_key(Key::Right) else { panic!() };
+        assert_eq!(s.context_window_tokens, 200_000);
+        let Outcome::Changed(s) = ed.on_key(Key::Left) else { panic!() };
+        assert_eq!(s.context_window_tokens, 128_000);
+
+        // A custom value moves to the nearest preset in that direction.
+        ed.values.insert("contextWindowTokens".into(), Value::from(300_000));
+        let Outcome::Changed(s) = ed.on_key(Key::Left) else { panic!() };
+        assert_eq!(s.context_window_tokens, 256_000);
+
+        ed.on_key(Key::Enter);
+        for _ in 0..10 {
+            ed.on_key(Key::Backspace);
+        }
+        for c in "abc".chars() {
+            ed.on_key(Key::Char(c));
+        }
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::None));
+        assert!(ed.error.as_deref().is_some_and(|e| e.contains("128k")));
     }
 
     #[test]

@@ -5,7 +5,7 @@ expression: "render(&app, 100, 24)"
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ Agent plugins — space on/off · i install hooks · d default · esc back            │░ 121k │
-│ ◐ fix/│                                                                                  │▋ 185k │
+│ ◐ fix/│                                                                                  │░ 185k │
 │       │  [x] Claude Code   built-in    hooks ✓      ★ default                            │       │
 │gridsig│▌ [x] Gemini CLI    built-in    hooks ✗                                           │───────│
 │ · main│  [ ] My CLI        mycli.json  —                                                 │       │

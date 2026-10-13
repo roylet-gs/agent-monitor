@@ -46,6 +46,12 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
   await tui.waitForText("GitHub PR & CI status (via gh)");
   await tui.sendKey("Enter");
 
+  // 5. Context window: 1M is preselected; keep it.
+  await tui.waitForText("How many tokens of context should the bar measure against?");
+  await tui.waitForText("● 1M (default)");
+  await tui.screenshot("setup-context");
+  await tui.sendKey("Enter");
+
   await tui.waitForGone("Welcome to agent-monitor");
   // First sync + git scan of the new repo can be slow on a cold container.
   await tui.waitForText("feature/to-delete", 20_000);

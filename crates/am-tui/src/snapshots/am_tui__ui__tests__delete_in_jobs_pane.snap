@@ -4,8 +4,8 @@ expression: screen
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────││ ◐ Delete Confirm the results read and│
-│▌◐ Confirm the …  feature/ref… deleting… ENG-412 #127✓ ✔ ↑2 ±3  4m ███░░ 121k ││   the limit basis against a real     │
-│ ◐ fix/offline-cache                                            4m ████▋ 185k ││   customer feeder                    │
+│▌◐ Confirm the …  feature/ref… deleting… ENG-412 #127✓ ✔ ↑2 ±3  4m ▋░░░░ 121k ││   the limit basis against a real     │
+│ ◐ fix/offline-cache                                            4m ▉░░░░ 185k ││   customer feeder                    │
 │                                                                              ││   ◐ Removing worktree…               │
 │gridsight ────────────────────────────────────────────────────────────────────││                                      │
 │ · main                                                  ↑2 ±3  4m            ││                                      │
