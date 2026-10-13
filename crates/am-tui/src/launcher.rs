@@ -85,6 +85,15 @@ fn report(tx: &Sender<Msg>, r: Result<(), String>, ok: String) {
     });
 }
 
+/// `e` in settings with an editor `ide`: open settings.json there. The TUI
+/// picks up the saved file through its settings-file watch (`main.rs`).
+pub fn open_settings_file(path: std::path::PathBuf, ide: IdeChoice, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        report(&tx, launch::open_in_editor(&path, ide), format!("Opened {name} — saved changes apply automatically"));
+    });
+}
+
 pub fn open_url(url: String, tx: Sender<Msg>) {
     std::thread::spawn(move || {
         let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
