@@ -68,10 +68,10 @@ fn main() -> io::Result<()> {
     // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
     let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
     let show_log = args.iter().any(|a| a == "--log");
-    let ide = settings.ide.clone();
+    let (ide, ctx_window) = (settings.ide.clone(), settings.context_window_tokens);
     let mut app = App::new(settings);
     if first_run {
-        app.setup = Some(setup::Setup::new(Vec::new(), &ide));
+        app.setup = Some(setup::Setup::new(Vec::new(), &ide, ctx_window));
     }
     app.show_log = show_log;
 

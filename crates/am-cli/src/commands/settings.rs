@@ -90,7 +90,15 @@ pub fn set(key: &str, value: &str) {
     }
 
     let defaults = Settings::default().to_view();
-    let coerced = coerce(defaults.get(key), value).unwrap_or_else(|e| fail(&e));
+    let coerced = if key == "contextWindowTokens" {
+        // Token counts also take `200k` / `1m`, like the TUI editor.
+        match am_core::context::parse_tokens(value) {
+            Some(n) if n >= am_core::context::MIN_WINDOW => Value::from(n),
+            _ => fail(&format!("Invalid token count: {value}. Use a number ≥ 1000, e.g. 128000, 200k or 1m.")),
+        }
+    } else {
+        coerce(defaults.get(key), value).unwrap_or_else(|e| fail(&e))
+    };
 
     // Apply to the file's own JSON, then re-parse so the typed fields agree.
     let mut raw = current.raw.clone();

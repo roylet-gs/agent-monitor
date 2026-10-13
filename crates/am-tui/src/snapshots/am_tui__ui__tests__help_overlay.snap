@@ -4,8 +4,8 @@ expression: "render(&app, 100, 20)"
 ---
 ╭─Worktree╭ Keys ────────────────────────────────────────────────────────────────────────╮─────────╮
 │agent-mon│    j / k  ↑ / ↓  move                                                        │─────────│
-│▌◑ featur│        home / G  top / bottom                                                │█░░ 121k │
-│ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │██▋ 185k │
+│▌◑ featur│        home / G  top / bottom                                                │░░░ 121k │
+│ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │░░░ 185k │
 │         │           enter  open (IDE; resumes last Claude session)                     │         │
 │gridsight│               t  terminal at worktree                                        │─────────│
 │ · main  │               c  terminal running claude --resume                            │         │

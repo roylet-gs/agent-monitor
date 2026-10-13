@@ -538,8 +538,14 @@ fn spinner(now: i64) -> &'static str {
 
 #[allow(clippy::needless_late_init)] // each arm builds lines then picks its hint
 fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup) {
-    use crate::setup::{IDES, Step};
-    let steps = [(Step::Editor, "Editor"), (Step::Hooks, "Claude hooks"), (Step::Repos, "Repositories"), (Step::Integrations, "Integrations")];
+    use crate::setup::{CONTEXT_CHOICES, CONTEXT_CUSTOM, IDES, Step};
+    let steps = [
+        (Step::Editor, "Editor"),
+        (Step::Hooks, "Claude hooks"),
+        (Step::Repos, "Repositories"),
+        (Step::Integrations, "Integrations"),
+        (Step::Context, "Context"),
+    ];
     let mut crumbs = vec![Span::raw(" ")];
     let cur = steps.iter().position(|(st, _)| *st == s.step).unwrap_or(0);
     for (i, (_, name)) in steps.iter().enumerate() {
@@ -611,10 +617,36 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
                 Span::raw(" Linear API key: "),
                 Span::styled(if masked.is_empty() && f0 { "(optional)".to_string() } else { format!("{masked}{}", if f0 { "" } else { "▏" }) }, theme.faint()),
             ]));
-            hint = "tab field  space toggle  ⏎ finish  esc back";
+            hint = "tab field  space toggle  ⏎ next  esc back";
+        }
+        Step::Context => {
+            lines.push(Line::raw("How many tokens of context should the bar measure against?"));
+            lines.push(Line::styled("A session past it doubles the scale until it fits.", theme.faint()));
+            lines.push(Line::raw(""));
+            let radio = |sel: bool, label: String| {
+                Line::from(vec![
+                    Span::styled(if sel { "  ● " } else { "  ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
+                    Span::styled(label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
+                ])
+            };
+            for (i, (_, label)) in CONTEXT_CHOICES.iter().enumerate() {
+                lines.push(radio(i == s.ctx_choice, label.to_string()));
+            }
+            let custom = s.ctx_choice == CONTEXT_CUSTOM;
+            let mut row = radio(custom, "Custom: ".into());
+            row.spans.push(Span::styled(
+                if s.ctx_input.is_empty() && !custom { "e.g. 128k".to_string() } else { format!("{}{}", s.ctx_input, if custom { "▏" } else { "" }) },
+                theme.faint(),
+            ));
+            lines.push(row);
+            if let Some(e) = &s.ctx_error {
+                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
+            }
+            hint = "↑↓ choose  ⏎ finish  esc back";
         }
     }
-    let rect = modal_rect(area, 76, lines.len() as u16 + 4);
+    // 82 columns fits the five breadcrumbs on one line.
+    let rect = modal_rect(area, 82, lines.len() as u16 + 4);
     clear(f, theme, rect);
     let block = modal_block(theme, "Welcome to agent-monitor".into(), theme.border_focus, hint).padding(ratatui::widgets::Padding::new(1, 1, 1, 0));
     f.render_widget(Paragraph::new(lines).block(block), rect);
@@ -953,7 +985,7 @@ fn worktree_line<'a>(
 /// count go green → yellow → red as the session nears its window.
 fn ctx_spans<'a>(v: &WorktreeView, theme: &Theme, bar_w: usize, configured: u64, deleting: bool) -> Vec<Span<'a>> {
     let Some(u) = &v.context else { return vec![Span::raw(" ".repeat(bar_w + 5))] };
-    let window = context::window_for(u, configured);
+    let window = context::window_for(u.tokens, configured);
     let style = if deleting {
         theme.faint()
     } else {
@@ -1971,6 +2003,29 @@ mod tests {
     }
 
     #[test]
+    fn setup_context_step_fits_every_breadcrumb() {
+        let mut app = fixture();
+        app.setup = Some(crate::setup::Setup {
+            step: crate::setup::Step::Context,
+            ide: 0,
+            hooks_installed: true,
+            hook_binary: None,
+            repo_input: "~/".into(),
+            repos_added: vec![],
+            repo_error: None,
+            gh: true,
+            linear_key: String::new(),
+            integration_field: 0,
+            ctx_choice: crate::setup::CONTEXT_CUSTOM,
+            ctx_input: "128k".into(),
+            ctx_error: None,
+        });
+        let out = render(&app, 100, 20);
+        assert!(out.contains("✓ Integrations  ›  Context"), "breadcrumbs cut off:\n{out}");
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
     fn context_bar_turns_yellow_then_red_as_the_window_fills() {
         let theme = Theme::ansi();
         let mut v = fixture().flat[0].clone();
@@ -1983,8 +2038,9 @@ mod tests {
         assert_eq!(at(&mut v, 100_000), ("████░░░░ 100k".into(), Some(theme.green), Some(theme.green)));
         assert_eq!(at(&mut v, 150_000), ("██████░░ 150k".into(), Some(theme.yellow), Some(theme.yellow)));
         assert_eq!(at(&mut v, 190_000), ("███████▋ 190k".into(), Some(theme.red), Some(theme.red)));
-        // Past the configured window the bar rescales to 1M instead of pinning.
-        assert_eq!(at(&mut v, 250_000), ("██░░░░░░ 250k".into(), Some(theme.green), Some(theme.green)));
+        // Past the configured window the scale doubles until it fits (400k) instead of pinning.
+        assert_eq!(at(&mut v, 250_000), ("█████░░░ 250k".into(), Some(theme.green), Some(theme.green)));
+        assert_eq!(at(&mut v, 700_000), ("███████░ 700k".into(), Some(theme.yellow), Some(theme.yellow)));
         v.context = None;
         let blank: String = ctx_spans(&v, &theme, 8, 200_000, false).iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(blank, " ".repeat(13), "rows without usage keep the column aligned");
