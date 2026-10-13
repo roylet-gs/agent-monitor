@@ -4,11 +4,11 @@ expression: "render(&app, 110, 28)"
 ---
 ╭─Worktrees ─────────────────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ──────────────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ f╭─Theme builder ───────────────────────────────────────────────────────────────────────────────────╮ 4m │
-│ ◐ f│ Name catppuccin-mocha-custom   Base catppuccin-mocha                                             │ 4m │
+│▌◑ f╭─Theme builder ───────────────────────────────────────────────────────────────────────────────────╮21k │
+│ ◐ f│ Name catppuccin-mocha-custom   Base catppuccin-mocha                                             │85k │
 │    │                                                                                                  │    │
 │grid│  text          ██ #cdd6f4 base               ╭─Preview ─────────────────────────────────────────╮│────│
-│ · m│  faint         ██ #7f849c base               │ work ───                                         ││ 4m │
+│ · m│  faint         ██ #7f849c base               │ work ───                                         ││    │
 │    │▌ accent        ██ #89b4fa base               │ ═ Dashboard ═                                    ││    │
 │    │  border        ██ #585b70 base               │ ● feature/login   ENG-123 #42✓ ready             ││    │
 │    │  borderFocus   ██ #b4befe base               │▌◐ fix/crash       ENG-7  #41✗ changes            ││    │

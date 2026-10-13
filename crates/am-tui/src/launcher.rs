@@ -17,15 +17,20 @@ pub enum Msg {
     /// Short status-bar notice.
     Notice(String),
     BranchChecked(String, am_core::worktrees::BranchCheck),
-    Created(
-        Box<am_core::model::Repository>,
-        Box<am_core::worktrees::CreateRequest>,
-        Result<am_core::model::Worktree, am_core::worktrees::CreateError>,
-    ),
-    /// Worktree id, label, and warnings or an error.
-    Deleted(String, String, Result<Vec<String>, String>),
+    /// A job (jobs pane) started a new stage.
+    JobStep(u64, String),
+    /// A line of startup-script output for a job.
+    JobLog(u64, String),
+    /// Job id, and the created worktree or an error.
+    Created(u64, Result<am_core::model::Worktree, am_core::worktrees::CreateError>),
+    /// Job id, worktree id, label, and warnings or an error.
+    Deleted(u64, String, String, Result<Vec<String>, String>),
+    /// Startup script finished (or was handed to a new terminal window).
+    ScriptDone(u64, Result<(), String>),
     /// Typed path, and the repo name or an error.
     RepoAdded(String, Result<String, String>),
+    /// A newer release exists.
+    UpdateAvailable(am_core::update_check::Update),
 }
 
 /// Long enough for the popup to register before the editor steals focus.
@@ -110,4 +115,26 @@ pub fn open_url(url: String, tx: Sender<Msg>) {
             .and_then(|s| if s.success() { Ok(()) } else { Err(format!("{opener} failed")) });
         report(&tx, r, format!("Opened {url}"));
     });
+}
+
+/// Checks for a newer release now and then every [`update_check::CHECK_INTERVAL`].
+/// Re-reads `checkForUpdates` each time, so turning it off stops the requests.
+pub fn spawn_update_check(tx: Sender<Msg>) {
+    use am_core::update_check;
+    let spawned = std::thread::Builder::new().name("update-check".into()).spawn(move || {
+        let method = update_check::InstallMethod::current();
+        am_core::debug!("update", "install method: {method:?}");
+        loop {
+            if am_core::settings::load().check_for_updates
+                && let Some(latest) = update_check::check(env!("CARGO_PKG_VERSION"))
+                && tx.send(Msg::UpdateAvailable(update_check::Update::new(latest, method))).is_err()
+            {
+                return;
+            }
+            std::thread::sleep(update_check::CHECK_INTERVAL);
+        }
+    });
+    if let Err(e) = spawned {
+        am_core::debug!("update", "could not spawn update-check thread: {e}");
+    }
 }

@@ -97,6 +97,10 @@ impl AgentProvider for Claude {
         }
     }
 
+    fn context_usage(&self, root: &Path, session_id: &str) -> Option<crate::context::ContextUsage> {
+        crate::context::usage_for(root, session_id)
+    }
+
     fn matches_process(&self, name: &str, argv: &[String]) -> bool {
         static SPEC: std::sync::LazyLock<ProcessSpec> = std::sync::LazyLock::new(|| ProcessSpec {
             names: vec!["claude".into()],

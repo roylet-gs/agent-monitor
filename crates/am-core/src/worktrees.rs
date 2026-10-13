@@ -731,6 +731,18 @@ pub fn create_worktree(
     create_worktree_with(conn, settings, repo, req, &RemoteProbe::default())
 }
 
+/// [`create_worktree`] that reports each stage ("Fetching origin/main…")
+/// to `progress`, for the TUI's jobs pane.
+pub fn create_worktree_progress(
+    conn: &Connection,
+    settings: &Settings,
+    repo: &Repository,
+    req: &CreateRequest,
+    progress: &mut dyn FnMut(&str),
+) -> Result<Worktree, CreateError> {
+    create_worktree_inner(conn, settings, repo, req, &RemoteProbe::default(), progress)
+}
+
 /// The TUI's `doCreateWorktree` / `am worktree create`: limit check →
 /// existence check (fresh only) → optional local-branch delete → fetch →
 /// `git worktree add` at [`worktree_path_for`] → sync → nickname. Running the
@@ -742,6 +754,21 @@ pub fn create_worktree_with(
     req: &CreateRequest,
     probe: &RemoteProbe,
 ) -> Result<Worktree, CreateError> {
+    create_worktree_inner(conn, settings, repo, req, probe, &mut |_| {})
+}
+
+fn create_worktree_inner(
+    conn: &Connection,
+    settings: &Settings,
+    repo: &Repository,
+    req: &CreateRequest,
+    probe: &RemoteProbe,
+    progress: &mut dyn FnMut(&str),
+) -> Result<Worktree, CreateError> {
+    let mut stage = |text: String| {
+        debug!("git", "Create {}: {text}", req.branch.trim());
+        progress(&text);
+    };
     let branch = req.branch.trim();
     if branch.is_empty() {
         return Err(CreateError::Invalid("Branch name is required".into()));
@@ -758,6 +785,7 @@ pub fn create_worktree_with(
     };
 
     if req.mode == CreateMode::Fresh {
+        stage("Checking branch…".into());
         let check = check_branch_with(repo_path, branch, probe);
         if check.exists() || wt_path.exists() {
             return Err(branch_exists_err(check));
@@ -765,11 +793,11 @@ pub fn create_worktree_with(
     }
 
     let deletes_local = matches!(req.mode, CreateMode::Disconnected | CreateMode::DeleteAndRecreate);
-    if deletes_local
-        && local_branch_exists(repo_path, branch)
-        && let Err(e) = delete_branch(repo_path, branch, true)
-    {
-        debug!("git", "Local branch delete failed (may not exist locally): {e}");
+    if deletes_local && local_branch_exists(repo_path, branch) {
+        stage("Deleting local branch…".into());
+        if let Err(e) = delete_branch(repo_path, branch, true) {
+            debug!("git", "Local branch delete failed (may not exist locally): {e}");
+        }
     }
 
     // Decide the `git worktree add` arguments.
@@ -778,10 +806,12 @@ pub fn create_worktree_with(
     let reuse = |args: &mut Vec<String>| args.push(branch.to_string());
     match req.mode {
         CreateMode::ReuseLocal => {
+            stage(format!("Fetching origin/{branch}…"));
             fetch_and_reset_branch(repo_path, branch);
             reuse(&mut args);
         }
         CreateMode::TrackRemote => {
+            stage(format!("Fetching origin/{branch}…"));
             if local_branch_exists(repo_path, branch) {
                 fetch_and_reset_branch(repo_path, branch);
                 reuse(&mut args);
@@ -800,6 +830,7 @@ pub fn create_worktree_with(
                 Some(b) => b.to_string(),
                 None => main_branch(repo_path).map_err(CreateError::Git)?,
             };
+            stage(format!("Fetching origin/{base}…"));
             fetch_branch(repo_path, &base);
             let base_ref = if remote_branch_exists(repo_path, &base) { format!("origin/{base}") } else { base };
             args.extend(["-b".into(), branch.into()]);
@@ -813,6 +844,7 @@ pub fn create_worktree_with(
     }
 
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    stage("Adding worktree…".into());
     if let Err(e) = git(repo_path, &arg_refs) {
         if e.contains("already exists") || e.contains("already checked out") {
             warn!("git", "Worktree add for {branch} hit an existing branch/path: {e}");
@@ -822,11 +854,13 @@ pub fn create_worktree_with(
     }
     info!("git", "Created worktree at {path_str} for branch {branch} ({:?})", req.mode);
 
+    stage("Syncing…".into());
     sync_repo(conn, repo).map_err(CreateError::Git)?;
     let wt = db::worktree_by_branch(conn, &repo.id, branch)
         .map_err(db_err)?
         .ok_or_else(|| CreateError::Db(format!("Worktree {branch} missing from DB after sync")))?;
     if let Some(name) = req.custom_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        stage("Setting nickname…".into());
         db::update_worktree_custom_name(conn, &wt.id, Some(name), None).map_err(db_err)?;
         return db::worktree_by_branch(conn, &repo.id, branch)
             .map_err(db_err)?

@@ -2,13 +2,15 @@ import { test, expect } from "@playwright/test";
 import { RustTui, resetMock } from "./helpers/rust-tui";
 
 // The container's repo has a local bare `origin` with a branch that exists
-// only there: feature/on-origin (see e2e/entrypoint-rust.sh).
+// only there (feature/on-origin), and a startup script (see e2e/entrypoint.sh).
+// Creates run as jobs in the right-hand `─Jobs` pane; its questions are
+// answered after Tab focuses it.
 
 test.beforeEach(async () => {
   await resetMock();
 });
 
-test("live check flags a branch that exists on origin; Enter offers to pull it", async ({ page }) => {
+test("live check flags a branch that exists on origin; the jobs pane offers to pull it", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
 
@@ -24,11 +26,21 @@ test("live check flags a branch that exists on origin; Enter offers to pull it",
   await tui.screenshot("new-worktree-on-origin");
 
   await tui.sendKey("Enter");
-  await tui.waitForText('Branch "feature/on-origin" exists on origin', 15_000);
-  await tui.waitForText("Pull remote (track origin/feature/on-origin)");
-  await tui.screenshot("branch-exists");
-  await tui.sendKey("Escape");
-  await tui.waitForGone("Branch exists");
+  // No blocking box: the question shows in the jobs pane, with a
+  // placeholder row in the list, and the list keeps its keys.
+  await tui.waitForGone("New worktree", 5_000);
+  await tui.waitForText("─Jobs", 10_000);
+  await tui.waitForText('Branch "feature/on-origin" exists', 15_000);
+  await tui.waitForText("Pull remote (track");
+  await tui.waitForText("feature/on-origin waiting — ⇥ to answer");
+  expect(await tui.keyBar()).toContain("⇥ answer");
+  await tui.screenshot("branch-exists-jobs-pane");
+
+  await tui.sendKey("Tab");
+  await tui.waitForText("⇥ back  x dismiss");
+  await tui.sendKey("n"); // cancel the create
+  await tui.waitForGone("─Jobs", 5_000);
+  await tui.waitForGone("waiting — ⇥ to answer");
 });
 
 test("creating a fresh worktree adds and selects its row", async ({ page }) => {
@@ -47,12 +59,28 @@ test("creating a fresh worktree adds and selects its row", async ({ page }) => {
 
   await tui.sendKey("Enter");
   await tui.waitForGone("New worktree", 10_000);
-  await tui.waitForGone("Creating ", 30_000);
+  await tui.waitForText("─Jobs", 5_000);
+  await tui.waitForText(`Create feature/${name}`);
+  // Created: the pane asks about the repo's startup script.
+  await tui.waitForText("Run the repo's startup script?", 30_000);
   await tui.waitForText(`feature/${name}`, 15_000);
   // pending_select puts the new row under the cursor.
   await tui.waitForMatch(new RegExp(`│▌[│├└─ ]*\\S feature/${name}\\s`), 10_000);
   expect(await tui.selectedName()).toBe(`feature/${name}`);
-  await tui.screenshot("worktree-created");
+  await tui.screenshot("worktree-created-script-question");
+
+  // No terminal emulator in the container: the script runs here, its
+  // output (ANSI stripped) streamed into the pane.
+  await tui.sendKey("Tab");
+  await tui.sendKey("y");
+  await tui.waitForText("e2e startup script running in", 15_000);
+  await tui.waitForText("e2e startup script done", 15_000);
+  const screen = await tui.getScreenText();
+  expect(screen).toContain("coloured line");
+  expect(screen).not.toContain("[32m");
+  await tui.screenshot("startup-script-output");
+  // A finished job with output lingers, then the pane closes by itself.
+  await tui.waitForGone("─Jobs", 25_000);
 });
 
 test("empty branch name is refused", async ({ page }) => {

@@ -85,7 +85,8 @@ pub fn resolve_open_action(resume_last_session: bool, already_open: bool, ide: I
     OpenAction::CopyAndOpen(resume)
 }
 
-fn sh_quote(s: &str) -> String {
+/// Quote a word for `sh` (single quotes) unless it is plainly safe.
+pub fn sh_quote(s: &str) -> String {
     if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+:@".contains(c)) {
         return s.to_string();
     }

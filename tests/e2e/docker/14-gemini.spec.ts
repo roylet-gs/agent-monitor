@@ -33,10 +33,7 @@ test("a Gemini CLI session shows its status and a ✦ gemini badge", async ({ pa
 test("Settings → Agent plugins lists the plugins and toggles one", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
-  await tui.sendKey("s");
-  await tui.waitForText("esc close");
-  await tui.press("j", 2); // Open in → Resume last session → Agent plugins…
-  await tui.waitForText("Turn agent CLIs on/off, install their hooks, pick the default agent");
+  await tui.openSetting("Turn agent CLIs on/off, install their hooks, pick the default agent");
   await tui.waitForMatch(/Agent plugins…\s+claude, gemini · default claude/);
   await tui.sendKey("Enter");
   await tui.waitForText("Agent plugins — space on/off · i install hooks · d default · esc back");

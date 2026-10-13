@@ -156,6 +156,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `p` | Open the Linear project |
 | `n` | New worktree (adds a repository first if none is tracked) |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
+| `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
 | `A` | Add a repository |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
@@ -199,6 +200,7 @@ Right-aligned columns, each of which can be turned off in settings:
 - **PR**: `#42` coloured by state (green open, dim draft, yellow pending or changes requested, red failing, magenta merged, dim closed), followed by the checks glyph `✓` passing, `✗` failing or `◌` pending, and `⇡` when merged. Open PRs then show their review state: `ready` (approved, checks passing, no merge conflicts), `approved` (approved but checks failing or still running), `conflicts` (approved and green but conflicting with the base), `changes` (changes requested), `review` (awaiting a required review) or `draft`. Terminals under 100 columns get a glyph instead (`✔` `⚠` `!` `…` `~`), and `?` shows the legend. Nothing is shown when the repo doesn't require reviews or the PR only comes from a Linear attachment
 - **Git**: `↑2` commits ahead, `↓1` behind, `±3` uncommitted changes
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
+- **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's Claude Code transcript, so it updates after every turn. It is measured against `contextWindowTokens`, and a session that has gone past that is shown against 1M instead. The bar clears after a compaction until the next turn
 
 When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
@@ -224,7 +226,9 @@ Press `n` for the New Worktree form: repository (when you track several), branch
 - `✓ exists on origin — Enter will offer to pull it`: the base field is skipped, since the worktree will track `origin/<branch>`
 - `! exists locally only — Enter will offer to reuse it`
 
-If the branch exists, `Enter` offers the choices: pull the remote (track `origin/<branch>`, or reset the local branch to it), create disconnected (a new branch from the base with no tracking), reuse the existing local branch, or delete the local branch and re-create it from the base. Worktrees are created at `<repo>/.claude/worktrees/<branch>` (with `/` replaced by `-`), branching from `origin/<base>` when it exists.
+Creating and deleting run in the background: a **Jobs** pane opens on the right showing each step (fetch, `git worktree add`, sync…), the new worktree appears in the list straight away as a `creating…` placeholder, and the dashboard stays usable. Any follow-up question is asked in that pane; press `Tab` to focus it and answer (`Tab` again goes back to the list, `x` dismisses a finished or failed job). The pane closes by itself once nothing is running or waiting. If the repo has a startup script, the pane offers to run it; its output streams into the pane (set `startupScriptMode` to `window` to open it in a new terminal window instead).
+
+If the branch exists, the Jobs pane offers the choices: pull the remote (track `origin/<branch>`, or reset the local branch to it), create disconnected (a new branch from the base with no tracking), reuse the existing local branch, or delete the local branch and re-create it from the base. Worktrees are created at `<repo>/.claude/worktrees/<branch>` (with `/` replaced by `-`), branching from `origin/<base>` when it exists.
 
 Press `d` to delete. The dialog warns about uncommitted changes and unpushed commits, then asks whether to delete the local branch too. The `main`/`master` checkout can't be deleted. A main checkout on a non-default branch offers to delete just that branch, and a row whose directory has disappeared is cleaned up as a stale entry.
 
@@ -283,6 +287,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
 | `defaultAgent` | `"claude"` | Agent plugin `c` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
 | `disabledAgents` | `[]` | Agent plugins switched off: no hooks, no session discovery (Settings → Agent plugins) |
+| `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
 | `defaultBaseBranch` | `"main"` | Default base branch for new worktrees |
 | `pollingIntervalMs` | `30000` | Full git refresh interval (min 5000); a worktree whose agent acts is refreshed immediately |
@@ -296,11 +301,14 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `showLinearTicket` | `true` | Show the ticket column |
 | `showGitAheadBehind` | `true` | Show the ahead/behind/dirty column |
 | `showLastCommit` | `true` | Show the last-commit age |
+| `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
+| `contextWindowTokens` | `200000` | Context window the bar is scaled to. A session past it is shown against 1,000,000. Set it to `1000000` if your sessions use the 1M window |
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
 | `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
 | `audioWaitingSound` | `"Glass"` | Sound for waiting |
 | `audioDoneSound` | `"Funk"` | Sound for done |
+| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew upgrade`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
 | `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |

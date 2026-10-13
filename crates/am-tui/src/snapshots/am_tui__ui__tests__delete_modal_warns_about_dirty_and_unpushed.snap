@@ -4,11 +4,11 @@ expression: "render(&app, 100, 16)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ feature/refactor ◆2                                                  ENG-412 #127✓ ✔ ↑2 ±3  4m │
-│ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮          4m │
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ███░░ 121k │
+│ ◐ fix/offlin╭─Remove stale entry "feature/refactor" ───────────────────────────────╮m ████▋ 185k │
 │             │ ⚠ 3 uncommitted changes                                              │             │
 │gridsight ───│ ⚠ 2 commits not pushed                                               │─────────────│
-│ · main      │                                                                      │   ↑2 ±3  4m │
+│ · main      │                                                                      │m            │
 │             │ Remove stale entry and delete local branch feature/refactor?         │             │
 │             │                                                                      │             │
 │             │     ⏎ / y  Yes                                                       │             │

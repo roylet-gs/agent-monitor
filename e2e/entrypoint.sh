@@ -37,6 +37,18 @@ echo ".claude/" > .git/info/exclude
 # Register the repo (also syncs its worktrees into the DB).
 am repo add /work
 
+# A startup script, so creating a worktree asks to run it in the jobs pane.
+# No terminal emulator here, so it runs in-process with its output piped
+# into the pane.
+REPO_ID=$(am repo list --json | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' | head -1)
+mkdir -p "$AM_DATA_DIR/scripts"
+cat > "$AM_DATA_DIR/scripts/$REPO_ID.sh" <<'SH'
+#!/bin/sh
+echo "e2e startup script running in $(basename "$PWD")"
+printf '\033[32mcoloured line\033[0m\n'
+echo "e2e startup script done"
+SH
+
 # Skip the setup wizard, show main, enable Linear against the mock.
 # linearAutoNickname is off so rows keep their branch names (the mock links
 # every branch to the same ticket, which would rename them all).
@@ -50,12 +62,23 @@ cat > "$AM_DATA_DIR/settings.json" <<'JSON'
 }
 JSON
 
+# A fresh update-check cache naming a newer release, so the dashboard shows
+# "⬆ v9.9.9 available" without network (a cache < 6 h old is trusted).
+echo "{\"checkedAt\": $(date +%s), \"latest\": \"9.9.9\"}" > "$AM_DATA_DIR/update-check.json"
+
 # --- Agent activity on main, through the real hook path -------------------
 SID="3f2a91c8-7b4d-4e0a-9c1f-8d2e5a6b7c90"
 # Subagent description comes from Claude Code's <session>/subagents/agent-<id>.meta.json.
 mkdir -p "/tmp/claude-sessions/$SID/subagents"
 echo '{"description":"Survey auth module","agentType":"Explore"}' > "/tmp/claude-sessions/$SID/subagents/agent-a1b2c3d4.meta.json"
 hook() { am hook-event --worktree "$1" || true; }
+# Transcript with token usage for the context-window bar: 150k of the default
+# 200k window (75% used, so it renders yellow).
+mkdir -p "$HOME/.claude/projects/-work"
+cat > "$HOME/.claude/projects/-work/$SID.jsonl" <<JSONL
+{"type":"user","cwd":"/work","sessionId":"$SID","message":{"role":"user","content":"Refactor auth"}}
+{"type":"assistant","isSidechain":false,"cwd":"/work","sessionId":"$SID","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
+JSONL
 
 echo "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"$SID\",\"transcript_path\":\"/tmp/claude-sessions/$SID.jsonl\"}" | hook /work
 echo "{\"hook_event_name\":\"SubagentStart\",\"session_id\":\"$SID\",\"agent_id\":\"a1b2c3d4\",\"agent_type\":\"Explore\",\"transcript_path\":\"/tmp/claude-sessions/$SID.jsonl\"}" | hook /work

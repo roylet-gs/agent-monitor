@@ -92,6 +92,12 @@ pub trait AgentProvider: Sync + Send {
     /// else continue the latest session (`continue_latest`), else start fresh.
     fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>;
 
+    /// How full the session's context window is, if the agent records it.
+    /// Drives the context bar on a worktree row; `None` hides it.
+    fn context_usage(&self, _root: &Path, _session_id: &str) -> Option<crate::context::ContextUsage> {
+        None
+    }
+
     /// Whether a process (name + argv) is this CLI. Its processes, and tools
     /// it spawns directly, are not shown as a worktree's running processes.
     fn matches_process(&self, _name: &str, _argv: &[String]) -> bool {

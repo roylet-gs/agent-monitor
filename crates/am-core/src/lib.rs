@@ -3,6 +3,7 @@
 //! during the migration, so every schema change here must stay readable by it.
 
 pub mod agents;
+pub mod context;
 pub mod db;
 pub mod gitinfo;
 pub mod grouping;
@@ -18,4 +19,5 @@ pub mod stacks;
 pub mod status;
 pub mod themes;
 pub mod timefmt;
+pub mod update_check;
 pub mod worktrees;

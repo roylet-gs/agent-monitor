@@ -87,6 +87,17 @@ pub struct Settings {
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,
+    /// Context-window bar at the far right of each worktree row.
+    pub show_context_window: bool,
+    /// Context window the bar is scaled to. A session that uses more than
+    /// this is shown against 1M instead (see `crate::context::window_for`).
+    pub context_window_tokens: u64,
+    /// Check GitHub Releases for a newer `am` and show it in the dashboard.
+    pub check_for_updates: bool,
+    /// Where a repo's startup script runs after creating a worktree: `pane`
+    /// (default; output streams into the TUI's jobs pane) or `window` (a new
+    /// terminal window, falling back to the pane when none can be opened).
+    pub startup_script_mode: String,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -148,6 +159,10 @@ impl Default for Settings {
             disabled_agents: Vec::new(),
             theme: "ansi".into(),
             nerd_fonts: false,
+            show_context_window: true,
+            context_window_tokens: 200_000,
+            check_for_updates: true,
+            startup_script_mode: "pane".into(),
             raw: Default::default(),
         }
     }
@@ -156,6 +171,11 @@ impl Default for Settings {
 impl Settings {
     pub fn default_agent(&self) -> crate::agents::AgentKind {
         crate::agents::AgentKind::from_db(Some(&self.default_agent))
+    }
+
+    /// Run startup scripts in a new terminal window rather than the jobs pane.
+    pub fn startup_script_in_window(&self) -> bool {
+        self.startup_script_mode == "window"
     }
 
     pub fn log_level(&self) -> Level {
@@ -255,6 +275,13 @@ mod tests {
     }
 
     #[test]
+    fn startup_scripts_run_in_the_pane_unless_set_to_window() {
+        assert!(!Settings::default().startup_script_in_window());
+        assert!(!Settings::parse(r#"{"startupScriptMode":"bogus"}"#).startup_script_in_window());
+        assert!(Settings::parse(r#"{"startupScriptMode":"window"}"#).startup_script_in_window());
+    }
+
+    #[test]
     fn one_bad_value_does_not_reset_the_rest() {
         let s = Settings::parse(r#"{"pollingIntervalMs":"fast","ide":"vscode"}"#);
         assert_eq!(s.polling_interval_ms, 30_000);
@@ -286,6 +313,13 @@ mod tests {
         assert_eq!(view.keys().next().map(String::as_str), Some("ide"));
         assert_eq!(view.keys().next_back().map(String::as_str), Some("zeta"));
         assert_eq!(view["ide"], "vscode");
+    }
+
+    #[test]
+    fn check_for_updates_defaults_on_and_parses() {
+        assert!(Settings::parse("{}").check_for_updates);
+        assert!(!Settings::parse(r#"{"checkForUpdates":false}"#).check_for_updates);
+        assert_eq!(Settings::default().to_file_json()["checkForUpdates"], true);
     }
 
     #[test]

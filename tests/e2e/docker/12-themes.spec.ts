@@ -5,18 +5,14 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-// Settings rows (j presses from the top): … 2. Default agent, 5. Polling, 6. Theme, 7. Theme builder…
-async function openSettingsAt(tui: RustTui, row: number) {
-  await tui.sendKey("s");
-  await tui.waitForText("esc close");
-  await tui.press("j", row);
-}
+// Help lines of the Theme and Theme builder settings rows.
+const THEME = "ansi follows your terminal palette";
+const BUILDER = "Make your own theme";
 
 test("built-in themes cycle from the Theme row", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
-  await openSettingsAt(tui, 6);
-  await tui.waitForText("ansi follows your terminal palette");
+  await tui.openSetting(THEME);
   await tui.waitForMatch(/Theme\s+ansi/);
 
   await tui.press("ArrowRight", 4);
@@ -34,7 +30,7 @@ test("built-in themes cycle from the Theme row", async ({ page }) => {
   await tui.screenshot("theme-dos");
 
   // Restore.
-  await openSettingsAt(tui, 6);
+  await tui.openSetting(THEME);
   await tui.press("ArrowRight", 5);
   await tui.waitForMatch(/Theme\s+ansi/);
   await tui.sendKey("Escape");
@@ -43,8 +39,7 @@ test("built-in themes cycle from the Theme row", async ({ page }) => {
 test("theme builder: pick from the palette, type a hex, save and select", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
-  await openSettingsAt(tui, 7);
-  await tui.waitForText("Make your own theme");
+  await tui.openSetting(BUILDER);
   await tui.sendKey("Enter");
   await tui.waitForText("Theme builder ");
   await tui.waitForText("Name ansi-custom");
@@ -82,7 +77,7 @@ test("theme builder: pick from the palette, type a hex, save and select", async 
   // Persisted: a new process starts on it, and reopening the builder edits it.
   await page.reload();
   await tui.open();
-  await openSettingsAt(tui, 7);
+  await tui.openSetting(BUILDER);
   expect(await tui.getScreenText()).toMatch(/Theme\s+e2e-theme/);
   await tui.sendKey("Enter");
   await tui.waitForText("Name e2e-theme");

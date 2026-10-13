@@ -36,3 +36,8 @@ pub fn capture_dir() -> PathBuf {
 pub fn themes_dir() -> PathBuf {
     app_dir().join("themes")
 }
+
+/// Last update check (`update_check`), shared by every running TUI.
+pub fn update_check_path() -> PathBuf {
+    app_dir().join("update-check.json")
+}

@@ -4,11 +4,11 @@ expression: "render(&app, 110, 28)"
 ---
 ╭─Worktrees ─────────────────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ──────────────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ f╭─Theme builder ───────────────────────────────────────────────────────────────────────────────────╮ 4m │
-│ ◐ f│ Name ansi-custom   Base ansi                                                                     │ 4m │
+│▌◑ f╭─Theme builder ───────────────────────────────────────────────────────────────────────────────────╮21k │
+│ ◐ f│ Name ansi-custom   Base ansi                                                                     │85k │
 │    │                                                                                                  │    │
 │grid│▌ text          ·· default base                text — pick a colour                               │────│
-│ · m│  faint         ██ darkgray base                ██  ██  ██  ██  ██  ██  ██  ██                    │ 4m │
+│ · m│  faint         ██ darkgray base                ██  ██  ██  ██  ██  ██  ██  ██                    │    │
 │    │  accent        ██ cyan base                    ██  ██  ██  ██  ██  ██  ██  ██                    │    │
 │    │  border        ██ darkgray base                                                                  │    │
 │    │  borderFocus   ██ green base                   ██  ██  ██  ██  ██  ██  ██  ██                    │    │
