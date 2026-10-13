@@ -393,7 +393,7 @@ impl SettingsEditor {
             },
             PluginOutcome::SetDefault(_) => {
                 outcome = self.set("defaultAgent", Value::from(id.as_str()));
-                (true, format!("c now starts {} where no session has run", p.name()))
+                (true, format!("Enter now starts {} where no session has run", p.name()))
             }
             PluginOutcome::Stay | PluginOutcome::Close => unreachable!(),
         };

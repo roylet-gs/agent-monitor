@@ -75,7 +75,7 @@ pub struct Settings {
     pub agent_permission_mode: String,
     pub agent_claude_args: String,
     pub resume_last_session: bool,
-    /// Agent CLI (`agents::AgentKind` id) that `c` starts in a worktree with
+    /// Agent CLI (`agents::AgentKind` id) that Enter starts in a worktree with
     /// no session history yet.
     pub default_agent: String,
     /// Agent plugin ids switched off (`agents::is_enabled`): no hooks, no
