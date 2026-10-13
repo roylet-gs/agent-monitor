@@ -143,6 +143,13 @@ impl HookEvent {
 /// Map an event to the worktree's new status. `None` means "leave it alone".
 /// `running_subagents` is the number of live (non-internal) subagents for the
 /// worktree *after* this event's bookkeeping has been applied.
+/// Tool names the status rules and summaries know (Claude Code's). A
+/// harness plugin maps its own tool names onto these in `tools`.
+pub const CANONICAL_TOOLS: [&str; 18] = [
+    "Bash", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "LS", "WebFetch", "WebSearch",
+    "AskUserQuestion", "EnterPlanMode", "ExitPlanMode", "Agent", "Task", "TodoWrite", "Skill",
+];
+
 pub fn map_event_to_status(
     event: &HookEvent,
     current: Option<Status>,

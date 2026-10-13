@@ -11,7 +11,7 @@ use crate::harness::HarnessKind;
 use crate::paths;
 use crate::status::Status;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// A subagent counts as running only if it reported something recently;
 /// protects the count from a missed SubagentStop (crash, killed session).
@@ -81,6 +81,22 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
                 tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN agent TEXT"))?;
             }
         }
+    }
+    if v < 4 {
+        // What went wrong with a manifest plugin while it was used, aggregated
+        // so the edit prompt of training mode can read it (`harness::issues`).
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS plugin_issues (
+               plugin TEXT NOT NULL,
+               kind TEXT NOT NULL,
+               key TEXT NOT NULL,
+               sample TEXT,
+               count INTEGER NOT NULL DEFAULT 1,
+               first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+               last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+               PRIMARY KEY (plugin, kind, key)
+             );",
+        )?;
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
@@ -719,6 +735,68 @@ pub fn prune_standalone_sessions(conn: &Connection) -> rusqlite::Result<usize> {
 }
 
 /// Cheap change detector for the TUI: bumps whenever any connection commits.
+/// One aggregated problem with a manifest plugin (see `harness::issues`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginIssue {
+    pub plugin: String,
+    pub kind: String,
+    pub key: String,
+    pub sample: Option<String>,
+    pub count: i64,
+    pub first_seen: String,
+    pub last_seen: String,
+}
+
+/// Count one occurrence; returns true when this (plugin, kind, key) is new,
+/// so callers log only the first one.
+pub fn record_plugin_issue(conn: &Connection, plugin: &str, kind: &str, key: &str, sample: Option<&str>) -> rusqlite::Result<bool> {
+    let updated = conn.execute(
+        "UPDATE plugin_issues SET count = count + 1, last_seen = datetime('now'), sample = COALESCE(?4, sample)
+         WHERE plugin = ?1 AND kind = ?2 AND key = ?3",
+        params![plugin, kind, key, sample],
+    )?;
+    if updated > 0 {
+        return Ok(false);
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO plugin_issues (plugin, kind, key, sample) VALUES (?1, ?2, ?3, ?4)",
+        params![plugin, kind, key, sample],
+    )?;
+    Ok(true)
+}
+
+/// A plugin's issues, most frequent first.
+pub fn plugin_issues(conn: &Connection, plugin: &str) -> rusqlite::Result<Vec<PluginIssue>> {
+    let mut stmt = conn.prepare(
+        "SELECT plugin, kind, key, sample, count, first_seen, last_seen FROM plugin_issues
+         WHERE plugin = ?1 ORDER BY count DESC, last_seen DESC",
+    )?;
+    let rows = stmt.query_map(params![plugin], |r| {
+        Ok(PluginIssue {
+            plugin: r.get(0)?,
+            kind: r.get(1)?,
+            key: r.get(2)?,
+            sample: r.get(3)?,
+            count: r.get(4)?,
+            first_seen: r.get(5)?,
+            last_seen: r.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// Distinct issues per plugin, for list views.
+pub fn plugin_issue_counts(conn: &Connection) -> rusqlite::Result<std::collections::HashMap<String, usize>> {
+    let mut stmt = conn.prepare("SELECT plugin, COUNT(*) FROM plugin_issues GROUP BY plugin")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize)))?;
+    rows.collect()
+}
+
+pub fn clear_plugin_issues(conn: &Connection, plugin: &str) -> rusqlite::Result<usize> {
+    conn.execute("DELETE FROM plugin_issues WHERE plugin = ?1", params![plugin])
+}
+
 pub fn data_version(conn: &Connection) -> rusqlite::Result<i64> {
     conn.pragma_query_value(None, "data_version", |r| r.get(0))
 }
@@ -737,6 +815,21 @@ mod tests {
 
     fn wt() -> Owner {
         Owner::Worktree { id: "w".into(), repo_id: "r".into(), branch: "feat".into() }
+    }
+
+    #[test]
+    fn plugin_issues_aggregate_and_report_the_first_occurrence() {
+        let (_d, conn) = fresh();
+        assert!(record_plugin_issue(&conn, "mycli", "unmapped_tool", "shell", Some("{}")).unwrap());
+        assert!(!record_plugin_issue(&conn, "mycli", "unmapped_tool", "shell", None).unwrap());
+        assert!(record_plugin_issue(&conn, "mycli", "missing_field", "session_id", None).unwrap());
+        record_plugin_issue(&conn, "other", "unmapped_event", "X", None).unwrap();
+        let issues = plugin_issues(&conn, "mycli").unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!((issues[0].key.as_str(), issues[0].count, issues[0].sample.as_deref()), ("shell", 2, Some("{}")));
+        assert_eq!(plugin_issue_counts(&conn).unwrap().get("mycli"), Some(&2));
+        assert_eq!(clear_plugin_issues(&conn, "mycli").unwrap(), 2);
+        assert!(plugin_issues(&conn, "mycli").unwrap().is_empty());
     }
 
     #[test]

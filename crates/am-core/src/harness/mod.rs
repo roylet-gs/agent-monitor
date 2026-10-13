@@ -15,12 +15,18 @@
 //! ([`manifest`]). Plugins can be disabled with the `disabledAgents`
 //! setting. See `docs/agent-providers.md`.
 
+pub mod capture;
 pub mod claude;
 pub mod gemini;
+pub mod issues;
+pub mod lifecycle;
 pub mod manifest;
+pub mod replay;
+pub mod training;
+pub mod validate;
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::RwLock;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -59,6 +65,20 @@ pub trait Harness: Sync + Send {
     /// A caveat shown next to the hook status (`am doctor`, the plugin page).
     fn notes(&self) -> Option<&str> {
         None
+    }
+
+    /// The declarative manifest behind this harness, if it has one (manifest
+    /// plugins, and built-ins written as one such as Gemini).
+    fn manifest(&self) -> Option<&manifest::Manifest> {
+        None
+    }
+
+    /// `draft` while a plugin is being trained. Built-ins are published.
+    fn status(&self) -> manifest::PluginStatus {
+        match (self.origin(), self.manifest()) {
+            (Origin::Plugin(_), Some(m)) => m.status,
+            _ => manifest::PluginStatus::Published,
+        }
     }
 
     /// Whether this CLI has been used on this machine (its config dir exists;
@@ -151,6 +171,10 @@ impl HarnessKind {
         self.0.origin() == Origin::BuiltIn
     }
 
+    pub fn is_draft(self) -> bool {
+        self.0.status() == manifest::PluginStatus::Draft
+    }
+
     /// Look up a registered agent. Built-ins are checked first so the hook
     /// path never reads the plugin directory for them.
     pub fn get(id: &str) -> Option<HarnessKind> {
@@ -199,19 +223,49 @@ struct Registry {
     errors: Vec<String>,
 }
 
+static REGISTRY: RwLock<Option<&'static Registry>> = RwLock::new(None);
+
+fn load_registry() -> &'static Registry {
+    let taken: Vec<&str> = BUILTIN.iter().map(|k| k.id()).collect();
+    let (plugins, errors) = manifest::load_dir(&plugins_dir(), &taken);
+    let mut agents = BUILTIN.to_vec();
+    for p in plugins {
+        crate::debug!("agents", "Loaded agent plugin {} from {}", p.manifest.id, p.source.display());
+        // Lives for the whole process, like the built-in unit structs.
+        agents.push(HarnessKind(Box::leak(Box::new(p))));
+    }
+    // Leaked so handles stay `&'static`; a reload (a manifest changed on
+    // disk) leaks the old one, which is small and rare.
+    Box::leak(Box::new(Registry { agents, errors }))
+}
+
 fn registry() -> &'static Registry {
-    static REGISTRY: OnceLock<Registry> = OnceLock::new();
-    REGISTRY.get_or_init(|| {
-        let taken: Vec<&str> = BUILTIN.iter().map(|k| k.id()).collect();
-        let (plugins, errors) = manifest::load_dir(&plugins_dir(), &taken);
-        let mut agents = BUILTIN.to_vec();
-        for p in plugins {
-            crate::debug!("agents", "Loaded agent plugin {} from {}", p.manifest.id, p.source.display());
-            // Lives for the whole process, like the built-in unit structs.
-            agents.push(HarnessKind(Box::leak(Box::new(p))));
+    if let Some(r) = *REGISTRY.read().unwrap_or_else(|e| e.into_inner()) {
+        return r;
+    }
+    let mut slot = REGISTRY.write().unwrap_or_else(|e| e.into_inner());
+    slot.get_or_insert_with(load_registry)
+}
+
+/// Re-read `<app dir>/agents/` (a plugin was added, edited or removed while
+/// this process runs). Handles from before keep working; they compare by id.
+pub fn reload() {
+    let fresh = load_registry();
+    *REGISTRY.write().unwrap_or_else(|e| e.into_inner()) = Some(fresh);
+    crate::debug!("agents", "Reloaded plugins: {} registered", fresh.agents.len());
+}
+
+/// Newest modification time in the plugin dir (adding, changing or removing
+/// a file bumps the dir or the file), to decide when to [`reload`].
+pub fn plugins_stamp() -> Option<std::time::SystemTime> {
+    let dir = plugins_dir();
+    let mut newest = std::fs::metadata(&dir).and_then(|m| m.modified()).ok()?;
+    for e in std::fs::read_dir(&dir).ok()?.flatten() {
+        if let Ok(t) = e.metadata().and_then(|m| m.modified()) {
+            newest = newest.max(t);
         }
-        Registry { agents, errors }
-    })
+    }
+    Some(newest)
 }
 
 /// `<app dir>/agents`: one `<id>.json` manifest per plugin.
