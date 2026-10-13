@@ -92,11 +92,20 @@ mkdir -p /home/user/my-project
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"sess-standalone-1"}' | hook /home/user/my-project
 
 # --- Gemini CLI session: native Gemini events through `--agent gemini` -------
+# The last event uses the `--harness` alias so both spellings stay covered.
 mkdir -p /home/user/gemini-project
-gemini_hook() { am hook-event --agent gemini --worktree /home/user/gemini-project --event "$1" || true; }
+gemini_hook() { am hook-event "${2:---agent}" gemini --worktree /home/user/gemini-project --event "$1" || true; }
 echo '{"hook_event_name":"SessionStart","session_id":"gem-1","source":"startup","transcript_path":""}' | gemini_hook SessionStart
 echo '{"hook_event_name":"BeforeAgent","session_id":"gem-1","prompt":"add tests"}' | gemini_hook BeforeAgent
-echo '{"hook_event_name":"Notification","session_id":"gem-1","notification_type":"ToolPermission","message":"Allow run_shell_command?"}' | gemini_hook Notification
+echo '{"hook_event_name":"Notification","session_id":"gem-1","notification_type":"ToolPermission","message":"Allow run_shell_command?"}' | gemini_hook Notification --harness
+# Decoy: a Claude-shaped transcript under the Gemini session's id. Context
+# usage must come from the session's own harness (Gemini has no reader), so
+# the Gemini row must never show this 150k (16-gemini.spec.ts).
+mkdir -p "$HOME/.claude/projects/-home-user-gemini-project"
+cat > "$HOME/.claude/projects/-home-user-gemini-project/gem-1.jsonl" <<'JSONL'
+{"type":"user","cwd":"/home/user/gemini-project","sessionId":"gem-1","message":{"role":"user","content":"add tests"}}
+{"type":"assistant","isSidechain":false,"cwd":"/home/user/gemini-project","sessionId":"gem-1","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
+JSONL
 
 # 7682: a fresh, empty data dir on every connection → first-run setup wizard.
 cat > /usr/local/bin/am-tui-fresh <<'SH'
