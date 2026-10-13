@@ -320,6 +320,7 @@ pub(crate) mod tests {
             has_terminal: false,
             open_ide: None,
             running_processes: Vec::new(),
+            context: None,
         }
     }
 

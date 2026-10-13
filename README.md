@@ -200,6 +200,7 @@ Right-aligned columns, each of which can be turned off in settings:
 - **PR**: `#42` coloured by state (green open, dim draft, yellow pending or changes requested, red failing, magenta merged, dim closed), followed by the checks glyph `✓` passing, `✗` failing or `◌` pending, and `⇡` when merged. Open PRs then show their review state: `ready` (approved, checks passing, no merge conflicts), `approved` (approved but checks failing or still running), `conflicts` (approved and green but conflicting with the base), `changes` (changes requested), `review` (awaiting a required review) or `draft`. Terminals under 100 columns get a glyph instead (`✔` `⚠` `!` `…` `~`), and `?` shows the legend. Nothing is shown when the repo doesn't require reviews or the PR only comes from a Linear attachment
 - **Git**: `↑2` commits ahead, `↓1` behind, `±3` uncommitted changes
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
+- **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's Claude Code transcript, so it updates after every turn. It is measured against `contextWindowTokens`, and a session that has gone past that is shown against 1M instead. The bar clears after a compaction until the next turn
 
 When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
@@ -298,6 +299,8 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `showLinearTicket` | `true` | Show the ticket column |
 | `showGitAheadBehind` | `true` | Show the ahead/behind/dirty column |
 | `showLastCommit` | `true` | Show the last-commit age |
+| `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
+| `contextWindowTokens` | `200000` | Context window the bar is scaled to. A session past it is shown against 1,000,000. Set it to `1000000` if your sessions use the 1M window |
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
 | `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |

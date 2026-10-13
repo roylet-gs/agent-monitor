@@ -51,6 +51,8 @@ pub const FIELDS: &[Field] = &[
     Field { key: "showLinearTicket", label: "Show ticket column", help: "Linear identifier on each row", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showGitAheadBehind", label: "Show git column", help: "Ahead/behind/dirty counts", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showLastCommit", label: "Show commit age", help: "Age of the last commit", section: "Dashboard", kind: Kind::Bool },
+    Field { key: "showContextWindow", label: "Show context window", help: "Bar of the agent's context used, coloured as it nears the limit", section: "Dashboard", kind: Kind::Bool },
+    Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Scale for the bar; a session past it is shown against 1M", section: "Dashboard", kind: Kind::Number { step: 100000, min: 100000 } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only count processes whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
