@@ -743,9 +743,12 @@ fn worktree_line<'a>(
         right.push(Span::raw(" "));
         right.push(Span::styled(format!("{age:>3}"), theme.faint()));
     }
+    let mut ctx_range = 0..0;
     if cols.ctx_bar > 0 {
         right.push(Span::raw(" "));
+        let start = right.len();
         right.extend(ctx_spans(v, theme, cols.ctx_bar, cols.ctx_window, deleting));
+        ctx_range = start..right.len();
     }
     right.push(Span::raw(" "));
     let right_w: usize = right.iter().map(|s| s.content.width()).sum();
@@ -827,13 +830,27 @@ fn worktree_line<'a>(
     left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
     left.push(Span::raw(" ".repeat(fill)));
 
+    let ctx_range = ctx_range.start + left.len()..ctx_range.end + left.len();
     let mut spans = left;
     spans.extend(right);
     let line = Line::from(spans);
     if selected && focused {
         if theme.name == "ansi" {
             // Reverse video swaps fg/bg, so drop span colours to stay legible.
-            let plain: Vec<Span> = line.spans.into_iter().map(|s| Span::raw(s.content)).collect();
+            // The context bar keeps its colours outside the reverse: reversed,
+            // its `█` cells would take the background colour and vanish.
+            let plain: Vec<Span> = line
+                .spans
+                .into_iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    if ctx_range.contains(&i) {
+                        Span::styled(s.content, s.style.remove_modifier(Modifier::REVERSED))
+                    } else {
+                        Span::raw(s.content)
+                    }
+                })
+                .collect();
             return Line::from(plain).style(theme.selected().add_modifier(Modifier::BOLD));
         }
         return line.style(theme.selected());
@@ -1491,6 +1508,23 @@ mod tests {
         v.context = None;
         let blank: String = ctx_spans(&v, &theme, 8, 200_000, false).iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(blank, " ".repeat(13), "rows without usage keep the column aligned");
+    }
+
+    #[test]
+    fn context_bar_stays_visible_on_the_reversed_selection() {
+        let app = fixture();
+        let theme = Theme::ansi();
+        let line = worktree_line(&app, &theme, &app.flat[0], "", true, true, &cols_for(&app), 120, NOW);
+        assert!(line.style.add_modifier.contains(Modifier::REVERSED));
+        let bar = line.spans.iter().find(|s| s.content.contains('█')).expect("bar span");
+        assert_eq!(bar.style.fg, Some(theme.green));
+        assert!(bar.style.sub_modifier.contains(Modifier::REVERSED), "bar opts out of the reverse");
+        let name = line.spans.iter().find(|s| s.content.contains("feature/refactor")).unwrap();
+        assert_eq!(name.style.fg, None, "the rest of the row still drops its colours");
+    }
+
+    fn cols_for(app: &App) -> Columns {
+        Columns { ticket: 7, pr: 12, pr_words: true, git: 5, age: 3, ctx_bar: 8, ctx_window: app.settings.context_window_tokens }
     }
 
     #[test]
