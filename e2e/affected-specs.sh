@@ -66,7 +66,8 @@ specs_for() {
     crates/am-core/src/status.rs) echo 07 08 16 ;;
     # Agent plugins: hook normalisation seeds every agent row; the installer
     # runs in the wizard; the plugin page and Gemini row are spec 16.
-    crates/am-core/src/agents/*) echo 07 08 11 16 17 ;;
+    crates/am-core/src/harness/claude/transcript.rs) echo 14 ;;  # Claude's context reader
+    crates/am-core/src/harness/*|crates/am-core/src/agents/*) echo 07 08 11 16 17 ;; # agents/ = pre-rename paths
     crates/am-core/src/worktrees.rs) echo 09 10 11 ;;
     crates/am-core/src/hooks_installer.rs) echo 11 16 ;;
     crates/am-core/src/context.rs) echo 14 ;;      # context-window bar

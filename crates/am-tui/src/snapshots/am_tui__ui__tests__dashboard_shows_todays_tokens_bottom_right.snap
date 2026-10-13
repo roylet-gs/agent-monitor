@@ -17,4 +17,4 @@ expression: "render(&app, 120, 16)"
 │                                                                                                                      │
 │                                                                                                                      │
 ╰───────────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ─ today 182M ╯
- ⏎ open  t terminal  c agent  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

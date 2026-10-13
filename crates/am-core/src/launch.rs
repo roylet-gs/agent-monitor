@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
-use crate::agents::{self, AgentKind};
+use crate::harness::{self, HarnessKind};
 use crate::{info, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,13 +20,13 @@ pub struct Session {
     /// Directory the session was started in (the worktree root or a subdir).
     pub cwd: String,
     pub modified: SystemTime,
-    pub agent: AgentKind,
+    pub agent: HarnessKind,
 }
 
 /// Every session of every enabled agent started at `root` or any
 /// subdirectory, newest first.
 pub fn discover_sessions(root: &Path) -> Vec<Session> {
-    let enabled = agents::enabled(&crate::settings::load());
+    let enabled = harness::enabled(&crate::settings::load());
     let mut sessions: Vec<Session> = enabled.iter().flat_map(|k| k.provider().discover_sessions(root)).collect();
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));
     sessions
@@ -52,7 +52,7 @@ impl IdeChoice {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resume {
     /// Which agent CLI to start.
-    pub agent: AgentKind,
+    pub agent: HarnessKind,
     pub session_id: Option<String>,
     /// No exact id known, but the worktree has had a session: `claude -c` /
     /// `gemini --resume latest`.
@@ -235,7 +235,7 @@ pub fn focus_terminal_app() -> Result<(), String> {
 /// session from: its newest saved session, else "continue latest". With no
 /// hook history, the newest session of any agent; with none at all, a fresh
 /// `default_agent` session.
-pub fn resume_for(root: &Path, known: Option<AgentKind>, default_agent: AgentKind) -> Resume {
+pub fn resume_for(root: &Path, known: Option<HarnessKind>, default_agent: HarnessKind) -> Resume {
     let newest = match known {
         Some(agent) => agent.provider().discover_sessions(root).into_iter().next(),
         None => discover_sessions(root).into_iter().next(),
@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(agent_command(&resume(None, false)), "claude");
         let r = Resume { cwd: Some("/w/my pkg".into()), ..resume(Some("x"), false) };
         assert_eq!(agent_command(&r), "cd '/w/my pkg' && claude --resume x");
-        let g = |id: Option<&str>, cont| Resume { agent: AgentKind::GEMINI, ..resume(id, cont) };
+        let g = |id: Option<&str>, cont| Resume { agent: HarnessKind::GEMINI, ..resume(id, cont) };
         assert_eq!(agent_command(&g(Some("u-1"), true)), "gemini --resume u-1");
         assert_eq!(agent_command(&g(None, true)), "gemini --resume latest");
         assert_eq!(agent_command(&g(None, false)), "gemini");

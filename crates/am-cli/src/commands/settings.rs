@@ -88,8 +88,8 @@ pub fn set(key: &str, value: &str) {
             am_core::themes::all_names().join(", ")
         ));
     }
-    if key == "defaultAgent" && am_core::agents::AgentKind::get(value).is_none() {
-        fail(&format!("Unknown agent: {value}\nAvailable: {}", am_core::agents::ids().join(", ")));
+    if key == "defaultAgent" && am_core::harness::HarnessKind::get(value).is_none() {
+        fail(&format!("Unknown agent: {value}\nAvailable: {}", am_core::harness::ids().join(", ")));
     }
 
     if key == "dailyTokensScope" && !["all", "visible"].contains(&value) {

@@ -396,9 +396,9 @@ fn program_argv(argv: &[String]) -> &[String] {
     }
 }
 
-/// The registered agent CLI (`crate::agents`) `p` is, if any, by id.
+/// The registered agent CLI (`crate::harness`) `p` is, if any, by id.
 fn agent_cli(p: &ProcInfo) -> Option<&'static str> {
-    crate::agents::all().iter().find(|k| k.provider().matches_process(&p.name, &p.argv)).map(|k| k.id())
+    crate::harness::all().iter().find(|k| k.provider().matches_process(&p.name, &p.argv)).map(|k| k.id())
 }
 
 fn is_editor(p: &ProcInfo) -> bool {

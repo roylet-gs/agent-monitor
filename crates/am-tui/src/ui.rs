@@ -3,7 +3,7 @@
 //! ratatui diffs each frame against the previous one cell by cell, so a
 //! redraw only writes what changed — no full-screen clears, no flicker.
 
-use am_core::agents::AgentKind;
+use am_core::harness::HarnessKind;
 use am_core::model::{ChecksStatus, WorktreeView};
 use am_core::status::Status;
 use am_core::{context, timefmt};
@@ -748,7 +748,7 @@ fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
     let w = 72.min(area.width.saturating_sub(4));
     let mut lines: Vec<Line> = Vec::new();
     for raw in msg.lines() {
-        let is_command = raw.starts_with("cd ") || am_core::agents::all().iter().any(|k| raw.starts_with(k.provider().program()));
+        let is_command = raw.starts_with("cd ") || am_core::harness::all().iter().any(|k| raw.starts_with(k.provider().program()));
         let style = if is_command { theme.bold(theme.accent) } else { theme.fg(theme.text) };
         lines.push(Line::styled(raw.to_string(), style));
     }
@@ -979,7 +979,7 @@ fn worktree_line<'a>(
     }
     // Which agent CLI, for anything but the default (Claude Code).
     let agent_badge = match v.agent.as_ref().map(|a| a.agent) {
-        Some(kind) if !deleting && kind != AgentKind::CLAUDE => {
+        Some(kind) if !deleting && kind != HarnessKind::CLAUDE => {
             if width >= 100 { format!(" ✦ {}", kind.id()) } else { " ✦".to_string() }
         }
         _ => String::new(),
@@ -1891,7 +1891,7 @@ mod tests {
     fn gemini_rows_carry_an_agent_badge() {
         let mut app = fixture();
         let mut snap = app.snapshot.clone();
-        snap.groups[0].worktrees[1].agent.as_mut().unwrap().agent = AgentKind::GEMINI;
+        snap.groups[0].worktrees[1].agent.as_mut().unwrap().agent = HarnessKind::GEMINI;
         app.apply(snap);
         let row = |w: u16| render(&app, w, 12).lines().find(|l| l.contains("fix/offline-cache")).unwrap().to_string();
         assert!(row(120).contains("fix/offline-cache ✦ gemini"), "{}", row(120));
@@ -2213,7 +2213,7 @@ mod tests {
             step: crate::setup::Step::Context,
             ide: 0,
             hooks_installed: true,
-            agents: vec![(am_core::agents::AgentKind::CLAUDE, true)],
+            agents: vec![(am_core::harness::HarnessKind::CLAUDE, true)],
             hook_binary: None,
             repo_input: "~/".into(),
             repos_added: vec![],

@@ -1,12 +1,12 @@
 //! Hook config in each agent CLI's settings file (`~/.claude/settings.json`,
 //! `~/.gemini/settings.json`). The entry shapes come from the providers in
-//! `crate::agents`; the rules are shared and ported from the TS
+//! `crate::harness`; the rules are shared and ported from the TS
 //! `src/lib/hooks-installer.ts`: replace our entries, keep everyone else's, so
 //! the TS and Rust installers can run against each other's output.
 
 use std::path::{Path, PathBuf};
 
-use crate::agents::{AgentKind, AgentProvider};
+use crate::harness::{Harness, HarnessKind};
 use crate::{debug, info, paths, warn};
 use serde_json::{Map, Value};
 
@@ -113,7 +113,7 @@ fn native_program(command: &str) -> Option<PathBuf> {
 
 /// The missing binaries `agent`'s installed hooks point at (deleted worktree,
 /// upgraded-away install). Every hook then fails with "No such file or directory".
-pub fn dangling_hook_binaries(agent: AgentKind) -> Vec<PathBuf> {
+pub fn dangling_hook_binaries(agent: HarnessKind) -> Vec<PathBuf> {
     dangling_in(&read_settings(&agent.provider().settings_path()).unwrap_or_default())
 }
 
@@ -136,9 +136,9 @@ fn dangling_in(settings: &Map<String, Value>) -> Vec<PathBuf> {
 
 /// Reinstall the hooks of every agent whose am hooks point at a missing
 /// binary, so they find the current one. Returns the agents repaired.
-pub fn repair_dangling_hooks() -> Vec<AgentKind> {
+pub fn repair_dangling_hooks() -> Vec<HarnessKind> {
     let mut repaired = Vec::new();
-    for &kind in crate::agents::all() {
+    for &kind in crate::harness::all() {
         let missing = dangling_hook_binaries(kind);
         if missing.is_empty() {
             continue;
@@ -164,7 +164,7 @@ fn invocation(native_bin: Option<&Path>) -> String {
     }
 }
 
-pub fn build_hook_entry(agent: AgentKind, event: &str, native_bin: Option<&Path>) -> Value {
+pub fn build_hook_entry(agent: HarnessKind, event: &str, native_bin: Option<&Path>) -> Value {
     agent.provider().hook_entry(event, &invocation(native_bin), native_bin.is_some())
 }
 
@@ -220,7 +220,7 @@ fn hooks_of(settings: &Map<String, Value>) -> Map<String, Value> {
 
 /// Install `agent`'s hooks. Returns the binary they now point at (`None` =
 /// the `am hook-event` CLI fallback).
-pub fn install_hooks(agent: AgentKind) -> std::io::Result<Option<PathBuf>> {
+pub fn install_hooks(agent: HarnessKind) -> std::io::Result<Option<PathBuf>> {
     let provider = agent.provider();
     let path = provider.settings_path();
     let mut settings = read_settings(&path)?;
@@ -246,7 +246,7 @@ pub fn install_hooks(agent: AgentKind) -> std::io::Result<Option<PathBuf>> {
     Ok(native)
 }
 
-pub fn uninstall_hooks(agent: AgentKind) -> std::io::Result<()> {
+pub fn uninstall_hooks(agent: HarnessKind) -> std::io::Result<()> {
     let provider = agent.provider();
     let path = provider.settings_path();
     if !path.exists() {
@@ -273,14 +273,14 @@ pub fn uninstall_hooks(agent: AgentKind) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn is_hooks_installed(agent: AgentKind) -> bool {
+pub fn is_hooks_installed(agent: HarnessKind) -> bool {
     let provider = agent.provider();
     let hooks = hooks_of(&read_settings(&provider.settings_path()).unwrap_or_default());
     provider.hook_events().iter().any(|e| hooks.get(e.as_str()).and_then(Value::as_array).is_some_and(|ms| ms.iter().any(matcher_is_ours)))
 }
 
 /// Display form of a provider's settings path (`~/.gemini/settings.json`).
-pub fn display_path(p: &dyn AgentProvider) -> String {
+pub fn display_path(p: &dyn Harness) -> String {
     tilde(&p.settings_path())
 }
 

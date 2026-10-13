@@ -2,8 +2,8 @@
 //!
 //! Every billed token class counts (input, cache creation, cache read,
 //! output), subagent transcripts included. Which files to read and how to
-//! parse a line is up to each agent plugin ([`AgentProvider::usage_files`] /
-//! [`AgentProvider::usage_record`]); this module only adds them up.
+//! parse a line is up to each agent plugin ([`Harness::usage_files`] /
+//! [`Harness::usage_record`]); this module only adds them up.
 //!
 //! Reading is incremental: a file is read once, then only the bytes appended
 //! since, so a refresh costs milliseconds even with tens of MB of transcripts.
@@ -12,8 +12,8 @@
 //! day is the local calendar day; nothing is persisted, totals are rebuilt
 //! from the transcripts when the process starts.
 //!
-//! [`AgentProvider::usage_files`]: crate::agents::AgentProvider::usage_files
-//! [`AgentProvider::usage_record`]: crate::agents::AgentProvider::usage_record
+//! [`Harness::usage_files`]: crate::harness::Harness::usage_files
+//! [`Harness::usage_record`]: crate::harness::Harness::usage_record
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -22,7 +22,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::agents::{AgentKind, is_within};
+use crate::harness::{HarnessKind, is_within};
 use crate::{debug, info};
 
 /// One API response's usage, as parsed from a transcript line.
@@ -46,7 +46,7 @@ pub trait UsageSource {
     fn record(&self, line: &str) -> Option<UsageRecord>;
 }
 
-impl UsageSource for AgentKind {
+impl UsageSource for HarnessKind {
     fn files(&self, since: SystemTime) -> Vec<PathBuf> {
         self.provider().usage_files(since)
     }

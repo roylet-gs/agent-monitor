@@ -26,7 +26,7 @@ use std::time::SystemTime;
 use serde_json::Value;
 
 use super::manifest::{Manifest, expand_home};
-use super::{AgentKind, AgentProvider, home_join, is_within};
+use super::{Harness, HarnessKind, home_join, is_within};
 use crate::launch::Session;
 use crate::status::HookEvent;
 
@@ -35,7 +35,7 @@ static MANIFEST: LazyLock<Manifest> =
 
 pub struct Gemini;
 
-impl AgentProvider for Gemini {
+impl Harness for Gemini {
     fn id(&self) -> &str {
         &MANIFEST.id
     }
@@ -125,7 +125,7 @@ pub fn discover_sessions_in(gemini_dir: &Path, root: &Path) -> Vec<Session> {
             }
             let Some(id) = main_session_id(&path) else { continue };
             let modified = f.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
-            sessions.push(Session { id, cwd: project.clone(), modified, agent: AgentKind::GEMINI });
+            sessions.push(Session { id, cwd: project.clone(), modified, agent: HarnessKind::GEMINI });
         }
     }
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));
@@ -244,7 +244,7 @@ mod tests {
         let ids: Vec<&str> = s.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["bbbb2222-full", "aaaa1111-full"]);
         assert_eq!(s[0].cwd, "/w/repo/pkg");
-        assert!(s.iter().all(|s| s.agent == AgentKind::GEMINI));
+        assert!(s.iter().all(|s| s.agent == HarnessKind::GEMINI));
         assert!(discover_sessions_in(&g.join("missing"), Path::new("/w/repo")).is_empty());
     }
 }

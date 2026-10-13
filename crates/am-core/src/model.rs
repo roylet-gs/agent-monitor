@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::agents::AgentKind;
+use crate::harness::HarnessKind;
 use crate::status::Status;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +50,7 @@ pub struct AgentState {
     pub active_subagents: i64,
     pub updated_at: String,
     /// The agent CLI the session belongs to.
-    pub agent: AgentKind,
+    pub agent: HarnessKind,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

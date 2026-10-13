@@ -1,6 +1,6 @@
 //! Runs the open actions off the UI thread and reports back as messages.
 //! Port of `handleOpen` in `src/app.tsx`, generalised to
-//! any agent CLI (`am_core::agents`).
+//! any agent CLI (`am_core::harness`).
 
 use std::path::Path;
 use std::sync::mpsc::Sender;
@@ -37,7 +37,7 @@ pub enum Msg {
 const POPUP_BEFORE_OPEN: Duration = Duration::from_millis(600);
 
 /// The agent the hooks last saw a session from, if any.
-fn known_agent(v: &WorktreeView) -> Option<am_core::agents::AgentKind> {
+fn known_agent(v: &WorktreeView) -> Option<am_core::harness::HarnessKind> {
     v.agent.as_ref().filter(|a| a.session_id.is_some()).map(|a| a.agent)
 }
 

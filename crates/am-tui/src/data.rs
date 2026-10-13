@@ -14,10 +14,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use am_core::integrations::{Integrations, RepoBranches};
-use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Subagent, Worktree, WorktreeView};
+use am_core::model::{AgentState, CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
-use am_core::context::{self, ContextUsage};
+use am_core::context::ContextUsage;
 use am_core::usage::DailyUsage;
 use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
@@ -245,7 +245,7 @@ impl Worker {
             }
         }
         if usage_due {
-            self.usage.refresh(&am_core::agents::enabled(&self.settings));
+            self.usage.refresh(&am_core::harness::enabled(&self.settings));
             self.last_usage = Some(Instant::now());
         }
         let worktrees = db::worktrees(&self.conn)?;
@@ -282,11 +282,7 @@ impl Worker {
             debug!("tui", "git refresh for {} worktree(s) in {:?}", fresh.len(), started.elapsed());
             self.git.extend(fresh);
             for w in &stale {
-                // Each agent plugin reads its own transcripts (Claude's only, so far).
-                let usage = agents.get(&w.id).and_then(|a| {
-                    let sid = a.session_id.as_deref()?;
-                    a.agent.provider().context_usage(Path::new(&w.path), sid)
-                });
+                let usage = agents.get(&w.id).and_then(|a| session_context(a, Path::new(&w.path)));
                 self.ctx.insert(w.id.clone(), usage);
             }
         }
@@ -427,8 +423,7 @@ impl Worker {
                 let key = format!("standalone:{id}");
                 // Re-read the transcript only when the session moved.
                 if self.agent_seen.get(&key) != Some(&agent.updated_at) {
-                    let sid = agent.session_id.as_deref();
-                    let usage = sid.and_then(|sid| context::usage_for(Path::new(&path), sid));
+                    let usage = session_context(&agent, Path::new(&path));
                     self.ctx.insert(key.clone(), usage);
                     self.agent_seen.insert(key.clone(), agent.updated_at.clone());
                 }
@@ -668,10 +663,16 @@ fn apply_parked(mut views: Vec<WorktreeView>, subagents: &[(Option<String>, Suba
     views
 }
 
+/// Context usage of the session `agent` describes, read by the session's own
+/// harness plugin (Claude's only, so far). Worktree and standalone rows both go
+/// through here, so a Gemini session is never looked up as a Claude transcript.
+fn session_context(agent: &AgentState, root: &Path) -> Option<ContextUsage> {
+    agent.agent.provider().context_usage(root, agent.session_id.as_deref()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use am_core::model::AgentState;
 
     fn view(id: &str, session: &str, status: Status) -> WorktreeView {
         WorktreeView {
@@ -743,6 +744,18 @@ mod tests {
         let views = apply_parked(views, &subs, &parked);
         assert_eq!(views[0].status(), Some(Status::Delegating), "done + parked subagent → delegating");
         assert_eq!(views[1].status(), Some(Status::Done));
+    }
+
+    #[test]
+    fn context_is_read_by_the_sessions_own_harness() {
+        let mut v = view("w1", "s1", Status::Done);
+        let a = v.agent.as_mut().unwrap();
+        a.agent = am_core::harness::HarnessKind::GEMINI;
+        // Gemini has no context reader: no Claude transcript lookup, no bar.
+        assert_eq!(session_context(a, Path::new("/r/w1")), None);
+        a.session_id = None;
+        a.agent = Default::default();
+        assert_eq!(session_context(a, Path::new("/r/w1")), None, "no session, nothing to read");
     }
 
     #[test]

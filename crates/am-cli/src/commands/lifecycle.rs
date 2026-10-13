@@ -48,7 +48,7 @@ pub fn create(a: &CreateArgs) {
         Err(e) => fail(&e.to_string()),
     };
 
-    for kind in am_core::agents::detected(&am_core::settings::load()) {
+    for kind in am_core::harness::detected(&am_core::settings::load()) {
         if !hooks_installer::is_hooks_installed(kind) && hooks_installer::install_hooks(kind).is_ok() {
             println!("{} hooks installed automatically.", kind.provider().short_name());
         }

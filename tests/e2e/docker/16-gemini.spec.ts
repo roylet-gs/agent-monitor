@@ -21,6 +21,15 @@ test("a Gemini CLI session shows its status and a ✦ gemini badge", async ({ pa
   // Claude sessions stay unbadged.
   const claudeRow = (await tui.lines()).find((l) => l.includes("/home/user/my-project")) ?? "";
   expect(claudeRow).not.toContain("✦");
+  // Context usage comes from the session's own harness plugin. Gemini has no
+  // transcript reader, so its row has no context bar or token count, even
+  // with a Claude-shaped transcript planted under its session id
+  // (e2e/entrypoint.sh). main's bar shows the column is on.
+  await tui.waitForMatch(/ main\b.*150k │/);
+  // (Drop the selection bar: the row is selected and `▌` is also a bar glyph.)
+  const geminiRow = ((await tui.lines()).find((l) => l.includes("/home/user/gemini-project")) ?? "").replace("│▌", "│ ");
+  expect(geminiRow).not.toMatch(/[░█▏▎▍▌▋▊▉]/);
+  expect(geminiRow).not.toMatch(/\d+(\.\d+)?[kM] │/);
   await tui.screenshot("gemini-session");
 
   // The help overlay explains the badge.

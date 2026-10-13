@@ -8,9 +8,11 @@ use std::time::SystemTime;
 
 use serde_json::{Value, json};
 
-use super::{AgentKind, AgentProvider, ProcessSpec, home_join, is_within};
+use super::{Harness, HarnessKind, ProcessSpec, home_join, is_within};
 use crate::launch::Session;
 use crate::status::HookEvent;
+
+pub mod transcript;
 
 pub const HOOK_EVENTS: [&str; 11] = [
     "PreToolUse",
@@ -35,7 +37,7 @@ pub const NATIVE_COMPAT_SUFFIX: &str = " # am hook-event (native)";
 
 pub struct Claude;
 
-impl AgentProvider for Claude {
+impl Harness for Claude {
     fn id(&self) -> &str {
         "claude"
     }
@@ -98,7 +100,7 @@ impl AgentProvider for Claude {
     }
 
     fn context_usage(&self, root: &Path, session_id: &str) -> Option<crate::context::ContextUsage> {
-        crate::context::usage_for(root, session_id)
+        transcript::usage_for(root, session_id)
     }
 
     fn usage_files(&self, since: SystemTime) -> Vec<PathBuf> {
@@ -147,7 +149,7 @@ pub fn discover_sessions_in(projects_dir: &Path, root: &Path) -> Vec<Session> {
             }
             let modified = f.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
             let id = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            sessions.push(Session { id, cwd, modified, agent: AgentKind::CLAUDE });
+            sessions.push(Session { id, cwd, modified, agent: HarnessKind::CLAUDE });
         }
     }
     sessions.sort_by_key(|s| std::cmp::Reverse(s.modified));

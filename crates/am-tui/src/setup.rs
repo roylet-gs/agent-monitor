@@ -4,7 +4,7 @@
 //! integrations, context window. Everything is also reachable
 //! later via `s` (settings), `A` (add repo) and `am hooks install`.
 
-use am_core::agents::{self, AgentKind};
+use am_core::harness::{self, HarnessKind};
 use serde_json::Value;
 
 use crate::app::Key;
@@ -25,7 +25,7 @@ pub struct Setup {
     /// True once every agent in `agents` has hooks.
     pub hooks_installed: bool,
     /// Agent CLIs the hooks step installs for, and whether each has hooks.
-    pub agents: Vec<(AgentKind, bool)>,
+    pub agents: Vec<(HarnessKind, bool)>,
     pub hook_binary: Option<String>,
     pub repo_input: String,
     pub repos_added: Vec<String>,
@@ -56,8 +56,8 @@ pub enum SetupEffect {
 impl Setup {
     pub fn new(existing_repos: Vec<String>, settings: &am_core::settings::Settings) -> Setup {
         let ide = settings.ide.as_str();
-        let agents: Vec<(AgentKind, bool)> =
-            agents::detected(settings).into_iter().map(|k| (k, am_core::hooks_installer::is_hooks_installed(k))).collect();
+        let agents: Vec<(HarnessKind, bool)> =
+            harness::detected(settings).into_iter().map(|k| (k, am_core::hooks_installer::is_hooks_installed(k))).collect();
         let hooks_installed = agents.iter().all(|(_, on)| *on);
         let context_window = settings.context_window_tokens;
         let preset = CONTEXT_CHOICES.iter().position(|(n, _)| *n == context_window);
@@ -212,7 +212,7 @@ mod tests {
             step: Step::Editor,
             ide: 0,
             hooks_installed: false,
-            agents: vec![(AgentKind::CLAUDE, false), (AgentKind::GEMINI, true)],
+            agents: vec![(HarnessKind::CLAUDE, false), (HarnessKind::GEMINI, true)],
             hook_binary: None,
             repo_input: "~/".into(),
             repos_added: vec![],
