@@ -23,8 +23,12 @@ test("? opens the key help overlay and closes it again", async ({ page }) => {
   }
   // PR review-state legend.
   expect(text).toContain("PR ready=approved+CI");
+  // The `t` terminal and `c` agent actions are gone.
+  expect(text).not.toContain("terminal at worktree");
+  expect(text).not.toContain("terminal resuming the agent");
   await tui.screenshot("help");
   await tui.screenshot("help-pr-legend");
+  await tui.screenshot("help-overlay");
 
   await tui.sendKey("?");
   await tui.waitForGone(" Keys ");

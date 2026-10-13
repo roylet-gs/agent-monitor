@@ -7,10 +7,8 @@ expression: "render(&app, 100, 20)"
 │▌◑ featur│        home / G  top / bottom                                                │░░░ 121k │
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │░░░ 185k │
 │         │           enter  open (IDE; resumes last agent session)                      │         │
-│gridsight│               t  terminal at worktree                                        │─────────│
-│ · main  │               c  terminal resuming the agent (claude / gemini)               │         │
-│         │       g / l / p  open PR / Linear ticket / Linear project                    │         │
-│         │               w  toggle log pane                                             │         │
+│gridsight│       g / l / p  open PR / Linear ticket / Linear project                    │─────────│
+│ · main  │               w  toggle log pane                                             │         │
 │         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
 │         │               A  add repository                                              │         │
 │         │               f  suggest a feature (files a GitHub issue)                    │         │
@@ -20,5 +18,7 @@ expression: "render(&app, 100, 20)"
 │         │          q  esc  quit                                                        │         │
 │         │                                                                              │         │
 │         │● executing  ◇ planning  ◐ waiting  ◑ delegating  ✓ done  ○ idle              │         │
-╰─────────│PR ready=approved+CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting  │─ 1 of 3 ╯
- ⏎ open  c╰──────────────────────────────────────────────────────────────────────────────╯quit
+│         │PR ready=approved+CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting  │         │
+│         │✦ gemini session from another agent plugin, by id (no badge: Claude Code)     │         │
+╰─────────╰──────────────────────────────────────────────────────────────────────────────╯─ 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

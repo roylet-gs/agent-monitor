@@ -1440,8 +1440,6 @@ fn git_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>>
 /// what doesn't fit is still in the `?` overlay.
 const KEYS: &[(&str, &str, u8)] = &[
     ("⏎", "open", 0),
-    ("t", "terminal", 2),
-    ("c", "agent", 1),
     ("|", "", 0),
     ("g", "PR", 0),
     ("l", "linear", 0),
@@ -1589,8 +1587,6 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("home / G", "top / bottom"),
         ("ctrl-d / ctrl-u", "page down / up"),
         ("enter", "open (IDE; resumes last agent session)"),
-        ("t", "terminal at worktree"),
-        ("c", "terminal resuming the agent (claude / gemini)"),
         ("g / l / p", "open PR / Linear ticket / Linear project"),
         ("w", "toggle log pane"),
         ("n / d / tab", "new / delete worktree / focus jobs pane"),
@@ -2178,6 +2174,15 @@ mod tests {
     }
 
     #[test]
+    fn terminal_and_agent_keys_are_gone() {
+        let mut app = fixture();
+        assert_eq!(app.on_key(Key::Char('t')), crate::app::Action::None);
+        assert_eq!(app.on_key(Key::Char('c')), crate::app::Action::None);
+        let screen = render(&app, 120, 16);
+        assert!(!screen.contains("t terminal") && !screen.contains("c agent"), "{screen}");
+    }
+
+    #[test]
     fn new_worktree_modal_renders() {
         let mut app = fixture();
         app.snapshot.repos = vec![
@@ -2492,7 +2497,7 @@ mod tests {
         assert!(app.key_available("n") && app.key_available("?"), "global keys are always on");
         // A row being deleted takes no row actions at all.
         app.deleting.insert("w3".into(), false);
-        assert!(!app.key_available("⏎") && !app.key_available("t"));
+        assert!(!app.key_available("⏎") && !app.key_available("g"));
 
         // Rendered: available keys are bold accent, unavailable ones dimmed.
         let theme = Theme::ansi();
