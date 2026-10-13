@@ -48,7 +48,8 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 19 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 19 20 ;;
+    crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/plugins_ui.rs) echo 16 19 ;;   # Settings → Agent plugins + training mode
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs | crates/am-tui/src/jobs.rs) echo 09 10 ;;

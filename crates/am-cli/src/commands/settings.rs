@@ -82,6 +82,14 @@ pub fn set(key: &str, value: &str) {
         );
     }
 
+    if key == "keyBindings" {
+        fail(
+            "keyBindings is a map and can't be set from the CLI.\n\
+             Edit it in the TUI (s → Key bindings…) or in settings.json,\n\
+             e.g. \"keyBindings\": { \"newWorktree\": \"N\" }.",
+        );
+    }
+
     if key == "theme" && !am_core::themes::exists(value) {
         fail(&format!(
             "Unknown theme: {value}\nAvailable: {}",

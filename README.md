@@ -165,12 +165,14 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `?` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
 
+These are the defaults. To change them, open **Settings → Key bindings…**: pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `?` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "feedback": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`; `none` unbinds the action.
+
 ### Mouse
 
 The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
 
 - **Scroll** to move the selection; **click** a row to select it; **double-click** to open it (same as `Enter`).
-- **Click a key-bar hint** (`n new`, `s settings`, `? help`…) to run that key.
+- **Click a key-bar hint** (`n new`, `s settings`, `? help`…) to run that action.
 - **Click the Jobs pane** to focus it (scrolling then moves through the jobs); click a worktree row to go back to the list.
 - In **Settings**, scroll to move, click a field to select it, and click it again to change it.
 - Any click closes a popup or the help overlay.
@@ -304,7 +306,7 @@ Press `s` to open the settings editor:
 
 Changes are saved immediately. The **Sort order** field opens a sub-editor: `j`/`k` move, `Space` turns a criterion on or off, `d` flips its direction, `J`/`K` move it down/up, `Enter` saves, `Esc` cancels. Criteria apply in order, and the first one that tells two rows apart decides their order.
 
-Settings are stored in `~/.agent-monitor/settings.json` and can also be read or changed with `am settings` (except `worktreeSort`, which is a list).
+Settings are stored in `~/.agent-monitor/settings.json` and can also be read or changed with `am settings` (except `worktreeSort`, which is a list, and `keyBindings`, which is a map).
 
 <details>
 <summary><strong>All settings</strong></summary>
@@ -315,6 +317,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
 | `defaultAgent` | `"claude"` | Agent plugin `Enter` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
 | `disabledAgents` | `[]` | Agent plugins switched off: no hooks, no session discovery (Settings → Agent plugins) |
+| `keyBindings` | `{}` | Dashboard keys you changed: action id (`open`, `openPr`, `openLinear`, `openProject`, `newWorktree`, `deleteWorktree`, `addRepo`, `toggleLog`, `settings`, `feedback`, `refresh`, `help`, `quit`, `moveDown`, `moveUp`, `pageDown`, `pageUp`, `top`, `bottom`) → key. Edit it in Settings → Key bindings…; see [Keyboard Shortcuts](#keyboard-shortcuts) |
 | `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |

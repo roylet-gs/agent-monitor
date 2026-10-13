@@ -15,7 +15,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Row};
+use crate::app::{App, Key, Row};
+use crate::keymap::Command;
 use crate::theme::{Theme, status_glyph, status_label};
 
 
@@ -44,7 +45,7 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
         draw_jobs(f, app, theme, jobs, now);
     }
     if app.show_help {
-        draw_help(f, theme, area);
+        draw_help(f, theme, area, &app.keymap);
     }
     if let Some(editor) = &app.settings_editor {
         match &editor.builder {
@@ -176,6 +177,10 @@ fn draw_settings(
 
     if let Some(pl) = &ed.plugins {
         draw_plugins(f, theme, list, help, pl);
+        return;
+    }
+    if let Some(keys) = &ed.keys {
+        draw_key_bindings(f, theme, list, help, keys);
         return;
     }
 
@@ -331,6 +336,43 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
         }
         (None, None, None) if pl.train.is_some() => Line::styled(" ⏎ start training · esc cancel", theme.faint()),
         (None, None, None) => Line::styled(" ⏎ train a new harness plugin: the harness writes and tests its own plugin", theme.faint()),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// Settings → Key bindings.
+fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::keys_ui::KeyEditor) {
+    use crate::keymap::{self, Command};
+    let mut lines = vec![
+        Line::styled(" Key bindings — ⏎ change · x reset · R reset all · esc back", theme.faint()),
+        Line::raw(""),
+    ];
+    for (i, cmd) in Command::ALL.into_iter().enumerate() {
+        let sel = i == ed.cursor;
+        let key = ed.keymap.key(cmd);
+        let mut spans = vec![
+            Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(format!("  {:<24}", cmd.label()), theme.fg(theme.text)),
+        ];
+        if sel && ed.capturing {
+            spans.push(Span::styled("press a key…", theme.bold(theme.accent)));
+        } else {
+            let shown = ed.keymap.shown(cmd);
+            spans.push(Span::styled(format!("{shown:<8}"), if key.is_some() { theme.bold(theme.accent) } else { theme.faint() }));
+            if key != cmd.default_key() {
+                let default = cmd.default_key().map(keymap::display).unwrap_or_else(|| "none".into());
+                spans.push(Span::styled(format!("(default {default})"), theme.faint()));
+            }
+        }
+        let line = Line::from(spans);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(" Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit", theme.faint()));
+    f.render_widget(Paragraph::new(lines), list);
+    let help_line = match &ed.message {
+        Some((ok, m)) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
+        None => Line::styled(format!(" {}", ed.selected().help()), theme.faint()),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
 }
@@ -1584,30 +1626,39 @@ fn git_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>>
 
 
 
-/// Every dashboard key, grouped. Lower `priority` survives narrower widths;
-/// what doesn't fit is still in the `?` overlay.
-const KEYS: &[(&str, &str, u8)] = &[
-    ("⏎", "open", 0),
-    ("|", "", 0),
-    ("g", "PR", 0),
-    ("l", "linear", 0),
-    ("p", "project", 2),
-    ("|", "", 0),
-    ("n", "new", 1),
-    ("d", "delete", 1),
-    ("A", "add repo", 3),
-    ("|", "", 0),
-    ("w", "log", 3),
-    ("s", "settings", 1),
-    ("f", "feedback", 3),
-    ("r", "refresh", 1),
-    ("?", "help", 0),
-    ("q", "quit", 0),
+/// Every key-bar command, grouped (`None` = a `│` separator). Lower
+/// `priority` survives narrower widths; what doesn't fit is still in `?`.
+const KEYS: &[(Option<Command>, u8)] = &[
+    (Some(Command::Open), 0),
+    (None, 0),
+    (Some(Command::OpenPr), 0),
+    (Some(Command::OpenLinear), 0),
+    (Some(Command::OpenProject), 2),
+    (None, 0),
+    (Some(Command::NewWorktree), 1),
+    (Some(Command::Delete), 1),
+    (Some(Command::AddRepo), 3),
+    (None, 0),
+    (Some(Command::ToggleLog), 3),
+    (Some(Command::Settings), 1),
+    (Some(Command::Feedback), 3),
+    (Some(Command::Refresh), 1),
+    (Some(Command::Help), 0),
+    (Some(Command::Quit), 0),
 ];
+
+/// What a click on a key-bar hint does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarHit {
+    /// Press this key (jobs-pane hints, `⇥`).
+    Key(Key),
+    /// Run this dashboard command.
+    Command(Command),
+}
 
 /// A key-bar entry: a key hint or a `│` separator.
 enum KeyItem {
-    Key { key: &'static str, label: &'static str, available: bool },
+    Key { key: String, label: &'static str, hit: Option<BarHit>, available: bool },
     Sep,
 }
 
@@ -1621,33 +1672,55 @@ impl KeyItem {
 }
 
 /// The hints that fit in `width` (lower-priority ones drop first), after a
-/// one-cell left margin. Shared by drawing and click hit-testing.
+/// one-cell left margin. Shared by drawing and click hit-testing. Keys come
+/// from the keymap; an unbound command is left out.
 fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
-    // While jobs are showing, Tab moves between the list and the pane.
-    let mut keys: Vec<(&'static str, &'static str, u8)> = Vec::new();
+    // (key, label, click, priority); an empty key is a separator.
+    let mut keys: Vec<(String, &'static str, Option<BarHit>, u8)> = Vec::new();
+    let raw = |k: &str, label, hit: Option<Key>, prio| (k.to_string(), label, hit.map(BarHit::Key), prio);
     if app.jobs.focused {
-        keys.extend([("⇥", "back to list", 0), ("j/k", "select job", 1), ("x", "dismiss", 1), ("|", "", 0), ("q", "quit", 0)]);
+        // While jobs are showing, Tab moves between the list and the pane.
+        keys.extend([
+            raw("⇥", "back to list", Some(Key::Tab), 0),
+            raw("j/k", "select job", None, 1),
+            raw("x", "dismiss", Some(Key::Char('x')), 1),
+            raw("", "", None, 0),
+            raw("q", "quit", Some(Key::Char('q')), 0),
+        ]);
     } else {
         if app.jobs.visible() {
-            keys.extend([("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, 0), ("|", "", 0)]);
+            keys.extend([raw("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, Some(Key::Tab), 0), raw("", "", None, 0)]);
         }
-        keys.extend(KEYS.iter().copied());
+        for &(cmd, prio) in KEYS {
+            match cmd {
+                None => keys.push(raw("", "", None, prio)),
+                Some(c) => {
+                    if let (Some(k), Some(label)) = (app.keymap.key(c), c.bar_label()) {
+                        keys.push((crate::keymap::display(k), label, Some(BarHit::Command(c)), prio));
+                    }
+                }
+            }
+        }
     }
     let pick = |max_prio: u8| -> Vec<KeyItem> {
         let mut items = Vec::new();
         let mut last_sep = true;
-        for &(k, label, prio) in &keys {
-            if prio > max_prio {
+        for (k, label, hit, prio) in &keys {
+            if *prio > max_prio {
                 continue;
             }
-            if k == "|" {
+            if k.is_empty() {
                 if !last_sep {
                     items.push(KeyItem::Sep);
                     last_sep = true;
                 }
                 continue;
             }
-            items.push(KeyItem::Key { key: k, label, available: app.key_available(k) });
+            let available = match hit {
+                Some(BarHit::Command(c)) => app.key_available(*c),
+                _ => true,
+            };
+            items.push(KeyItem::Key { key: k.clone(), label, hit: *hit, available });
             last_sep = false;
         }
         items
@@ -1683,9 +1756,9 @@ fn keybar_areas(app: &App, area: Rect) -> [Rect; 2] {
     Layout::horizontal([Constraint::Min(0), Constraint::Length(status_w as u16)]).areas(area)
 }
 
-/// The key-bar hint under a click (`"⏎"`, `"n"`, `"⇥"`…); dimmed hints
-/// count too, the key itself refuses them like a key press would.
-pub fn keybar_key_at(app: &App, area: Rect, x: u16, y: u16) -> Option<&'static str> {
+/// The key-bar hint under a click; dimmed hints count too, the command
+/// itself refuses them like a key press would.
+pub fn keybar_key_at(app: &App, area: Rect, x: u16, y: u16) -> Option<BarHit> {
     let keys = dashboard_areas(app, area).keys;
     let [keys, _] = keybar_areas(app, keys);
     if !contains(keys, x, y) {
@@ -1694,10 +1767,10 @@ pub fn keybar_key_at(app: &App, area: Rect, x: u16, y: u16) -> Option<&'static s
     let mut col = keys.x as usize + 1;
     for item in keybar_items(app, keys.width as usize) {
         let w = item.width();
-        if let KeyItem::Key { key, .. } = item
+        if let KeyItem::Key { hit, .. } = item
             && (col..col + w).contains(&(x as usize))
         {
-            return Some(key);
+            return hit;
         }
         col += w;
     }
@@ -1715,11 +1788,11 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         match item {
             KeyItem::Sep => spans.push(Span::styled("│ ", theme.fg(theme.border))),
             // Actions the selected worktree can't take stay in place, dimmed.
-            KeyItem::Key { key, label, available: true } => {
+            KeyItem::Key { key, label, available: true, .. } => {
                 spans.push(Span::styled(key, theme.bold(theme.accent)));
                 spans.push(Span::styled(format!(" {label}  "), theme.faint()));
             }
-            KeyItem::Key { key, label, available: false } => {
+            KeyItem::Key { key, label, available: false, .. } => {
                 let off = theme.faint().add_modifier(Modifier::DIM);
                 spans.push(Span::styled(key, off));
                 spans.push(Span::styled(format!(" {label}  "), off));
@@ -1729,22 +1802,36 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)), keys_area);
 }
 
-fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
-    let keys: &[(&str, &str)] = &[
-        ("j / k  ↑ / ↓", "move"),
-        ("home / G", "top / bottom"),
-        ("ctrl-d / ctrl-u", "page down / up"),
-        ("enter", "open (IDE; resumes last agent session)"),
-        ("g / l / p", "open PR / Linear ticket / Linear project"),
-        ("w", "toggle log pane"),
-        ("n / d / tab", "new / delete worktree / focus jobs pane"),
-        ("A", "add repository"),
-        ("f", "suggest a feature (files a GitHub issue)"),
-        ("s", "settings"),
-        ("r", "refresh now (bypasses backoff)"),
-        ("?", "toggle help"),
-        ("q  esc", "quit"),
+fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::Keymap) {
+    use Command as C;
+    // Each command's key (unbound: its fixed key, else `—`), then the
+    // group's always-on keys.
+    let groups: &[(&[Command], &str, &str)] = &[
+        (&[C::MoveDown, C::MoveUp], "  ↑ / ↓", "move"),
+        (&[C::Top, C::Bottom], "", "top / bottom"),
+        (&[C::PageDown, C::PageUp], "", "page down / up"),
+        (&[C::Open], "", "open (IDE; resumes last agent session)"),
+        (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
+        (&[C::ToggleLog], "", "toggle log pane"),
+        (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
+        (&[C::AddRepo], "", "add repository"),
+        (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
+        (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
+        (&[C::Refresh], "", "refresh now (bypasses backoff)"),
+        (&[C::Help], "", "toggle help"),
+        (&[C::Quit], "  esc", "quit"),
     ];
+    let keys: Vec<(String, &str)> = groups
+        .iter()
+        .map(|(cmds, fixed, desc)| {
+            let shown = |c: &Command| match (keymap.key(*c), c.fixed_keys().first(), fixed.is_empty()) {
+                (Some(k), _, _) => crate::keymap::display(k),
+                (None, Some(k), true) => crate::keymap::display(*k),
+                _ => "—".into(),
+            };
+            (format!("{}{fixed}", cmds.iter().map(shown).collect::<Vec<_>>().join(" / ")), *desc)
+        })
+        .collect();
     let legend: Vec<Span> = [Status::Executing, Status::Planning, Status::Waiting, Status::Delegating, Status::Done, Status::Idle]
         .into_iter()
         .flat_map(|s| {
@@ -2188,6 +2275,66 @@ mod tests {
         insta::assert_snapshot!(render(&app, 100, 20));
     }
 
+    fn rebound(bindings: &str) -> App {
+        let mut app = fixture();
+        let mut settings = am_core::settings::Settings::parse(&format!(r#"{{"keyBindings":{bindings}}}"#));
+        settings.worktree_sort = vec![];
+        app.set_settings(settings);
+        app
+    }
+
+    #[test]
+    fn rebound_keys_drive_the_dashboard() {
+        let mut app = rebound(r#"{"newWorktree":"N","moveDown":"J","open":"O"}"#);
+        assert_eq!(app.on_key(Key::Char('n')), crate::app::Action::None);
+        assert!(app.modal.is_none(), "n is free now");
+        app.on_key(Key::Char('N'));
+        assert!(app.modal.is_some());
+        app.modal = None;
+        app.on_key(Key::Char('J'));
+        assert_eq!(app.selected, 1);
+        app.on_key(Key::Down);
+        assert_eq!(app.selected, 2, "arrows always move");
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::None, "Enter is unbound");
+        assert!(matches!(app.on_key(Key::Char('O')), crate::app::Action::Open(_)));
+        assert_eq!(app.on_key(Key::CtrlC), crate::app::Action::Quit);
+        // A double-click still opens, whatever Enter does.
+        let row = find(&app, 120, 16, "fix/offline-cache");
+        assert!(matches!(click(&mut app, 120, 16, row, true), crate::app::Action::Open(_)));
+    }
+
+    #[test]
+    fn key_bar_and_help_show_rebound_keys() {
+        let mut app = rebound(r#"{"newWorktree":"N","feedback":"none"}"#);
+        let screen = render(&app, 120, 16);
+        let bar = screen.lines().last().unwrap();
+        assert!(bar.contains("N new") && !bar.contains("feedback"), "{bar}");
+        // Clicking the hint runs the command.
+        let hint = find(&app, 120, 16, "N new");
+        click(&mut app, 120, 16, hint, false);
+        assert!(app.modal.is_some());
+        app.modal = None;
+        app.on_key(Key::Char('?'));
+        let help = render(&app, 100, 24);
+        assert!(help.contains("N / d / tab"), "{help}");
+        assert!(help.contains("—  suggest a feature"), "{help}");
+    }
+
+    #[test]
+    fn key_bindings_page() {
+        let mut app = rebound(r#"{"newWorktree":"N"}"#);
+        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
+        let mut keys = crate::keys_ui::KeyEditor::new(app.keymap.clone());
+        keys.cursor = 4;
+        ed.keys = Some(keys);
+        app.settings_editor = Some(ed);
+        insta::assert_snapshot!("key_bindings_page", render(&app, 100, 34));
+        let keys = app.settings_editor.as_mut().unwrap().keys.as_mut().unwrap();
+        keys.cursor = 10;
+        keys.on_key(Key::Enter);
+        insta::assert_snapshot!("key_bindings_capturing", render(&app, 100, 34));
+    }
+
     fn with_builder(current: &str) -> App {
         use am_core::themes;
         let mut app = fixture();
@@ -2320,7 +2467,7 @@ mod tests {
     fn key_bar_hints_are_clickable() {
         let mut app = fixture();
         let help = find(&app, 120, 16, "? help");
-        assert_eq!(keybar_key_at(&app, Rect::new(0, 0, 120, 16), help.0 + 3, help.1), Some("?"));
+        assert_eq!(keybar_key_at(&app, Rect::new(0, 0, 120, 16), help.0 + 3, help.1), Some(BarHit::Command(Command::Help)));
         click(&mut app, 120, 16, help, false);
         assert!(app.show_help);
         // Any click closes help.
@@ -2779,19 +2926,19 @@ mod tests {
         snap.groups[1].worktrees[0].worktree.is_main = true;
         app.apply(snap);
         // w1: PR + Linear ticket (no project).
-        assert!(app.key_available("g") && app.key_available("l") && app.key_available("d"));
-        assert!(!app.key_available("p"), "ticket without a project");
+        assert!(app.key_available(Command::OpenPr) && app.key_available(Command::OpenLinear) && app.key_available(Command::Delete));
+        assert!(!app.key_available(Command::OpenProject), "ticket without a project");
         // w2: no PR, no ticket.
         app.on_key(Key::Char('j'));
-        assert!(!app.key_available("g") && !app.key_available("l"));
-        assert!(app.key_available("⏎") && app.key_available("d"));
+        assert!(!app.key_available(Command::OpenPr) && !app.key_available(Command::OpenLinear));
+        assert!(app.key_available(Command::Open) && app.key_available(Command::Delete));
         // w3: the main checkout on main can't be deleted.
         app.on_key(Key::Char('j'));
-        assert!(!app.key_available("d"));
-        assert!(app.key_available("n") && app.key_available("?"), "global keys are always on");
+        assert!(!app.key_available(Command::Delete));
+        assert!(app.key_available(Command::NewWorktree) && app.key_available(Command::Help), "global keys are always on");
         // A row being deleted takes no row actions at all.
         app.deleting.insert("w3".into(), false);
-        assert!(!app.key_available("⏎") && !app.key_available("g"));
+        assert!(!app.key_available(Command::Open) && !app.key_available(Command::OpenPr));
 
         // Rendered: available keys are bold accent, unavailable ones dimmed.
         let theme = Theme::ansi();

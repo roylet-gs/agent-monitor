@@ -11,6 +11,7 @@ expression: "render(&app, 100, 24)"
 │ · main│▌  Open in                       cursor                                           │       │
 │       │   Resume last session on open   on                                               │       │
 │       │   Agent plugins…                claude, gemini · default claude                  │       │
+│       │   Key bindings…                 defaults                                         │       │
 │       │   Mouse                         on                                               │       │
 │       │   Run startup script in         pane                                             │       │
 │       │   Branch prefix                 feature/                                         │       │
@@ -21,7 +22,6 @@ expression: "render(&app, 100, 24)"
 │       │   Theme                         ansi                                             │       │
 │       │   Theme builder…                ⏎ open                                           │       │
 │       │                                                                                  │       │
-│       │ Dashboard                                                                        │       │
 │       │                                                                                  │       │
 │       │ Which editor/IDE Enter opens worktrees in                                        │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯

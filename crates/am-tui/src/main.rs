@@ -7,6 +7,8 @@
 mod app;
 mod data;
 mod jobs;
+mod keymap;
+mod keys_ui;
 mod launcher;
 mod modals;
 mod ops;
