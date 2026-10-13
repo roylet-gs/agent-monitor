@@ -17,7 +17,7 @@ use am_core::integrations::{Integrations, RepoBranches};
 use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
-use am_core::context::{self, ContextUsage};
+use am_core::context::ContextUsage;
 use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
 
@@ -389,8 +389,10 @@ impl Worker {
                 let key = format!("standalone:{id}");
                 // Re-read the transcript only when the session moved.
                 if self.agent_seen.get(&key) != Some(&agent.updated_at) {
+                    // The session's own plugin reads its transcript: a Gemini
+                    // standalone session must not be looked up as a Claude one.
                     let sid = agent.session_id.as_deref();
-                    let usage = sid.and_then(|sid| context::usage_for(Path::new(&path), sid));
+                    let usage = sid.and_then(|sid| agent.agent.provider().context_usage(Path::new(&path), sid));
                     self.ctx.insert(key.clone(), usage);
                     self.agent_seen.insert(key.clone(), agent.updated_at.clone());
                 }
