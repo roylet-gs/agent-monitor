@@ -4,7 +4,7 @@ expression: out
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌◐ feature/refactor ⧉ 3 sessions                                          ENG-412 #127✓ ready ↑2 ±3  4m               │
+│▌◐ feature/refactor ⧉ 3 sessions                                       ENG-412 #127✓ approved ↑2 ±3  4m               │
 │ ├ ◑ claude #s  delegating · 2m ◆ 2 subagents                                                           █░░░░░░░ 121k │
 │ ├ ● claude #7b1e  executing · 10s ◆ 1 subagent                                                         ██▌░░░░░ 310k │
 │ └ ◐ gemini  waiting · 30s ◆ 1 subagent                                                                 ▍░░░░░░░  40k │

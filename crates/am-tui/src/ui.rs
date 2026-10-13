@@ -461,7 +461,7 @@ fn theme_preview(theme: &Theme) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![Span::styled(" work ", theme.bold(theme.text)), Span::styled("───", theme.fg(theme.border))]),
         Line::from(vec![Span::styled(" ═ ", theme.fg(theme.magenta)), Span::styled("Dashboard", theme.bold(theme.magenta)), Span::styled(" ═", theme.fg(theme.magenta))]),
-        row(Status::Executing, "feature/login", vec![Span::styled("ENG-123 ", theme.fg(theme.blue)), Span::styled("#42✓ ready", theme.fg(theme.green))]),
+        row(Status::Executing, "feature/login", vec![Span::styled("ENG-123 ", theme.fg(theme.blue)), Span::styled("#42✓ approved", theme.fg(theme.green))]),
         selected.style(theme.selected()),
         row(Status::Delegating, "main", vec![Span::styled("◆ 1 subagent", theme.fg(theme.accent))]),
         row(Status::Planning, "spike/api", vec![Span::styled("#43 draft", theme.faint())]),
@@ -866,7 +866,7 @@ fn tokens_label(app: &App, width: u16) -> Option<String> {
 struct Columns {
     ticket: usize,
     pr: usize,
-    /// Review state as a word (`ready`, `approved`…) rather than a glyph.
+    /// Review state as a word (`approved`, `changes`…) rather than a glyph.
     pr_words: bool,
     git: usize,
     age: usize,
@@ -1439,9 +1439,9 @@ fn pr_text(v: &WorktreeView, words: bool) -> String {
 /// "approved and good to go" stands apart from "approved but failing".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Review {
-    /// Approved, checks passing (or none), no merge conflicts.
+    /// Approved, checks passing (or none), no merge conflicts: bold green `approved`.
     Ready,
-    /// Approved, but checks are failing or still running.
+    /// Approved, but checks are failing or still running: yellow `approved`.
     Approved,
     /// Approved and green, but conflicts with its base.
     Conflicts,
@@ -1454,7 +1454,7 @@ enum Review {
 impl Review {
     fn word(self) -> &'static str {
         match self {
-            Review::Ready => "ready",
+            Review::Ready => "approved",
             Review::Approved => "approved",
             Review::Conflicts => "conflicts",
             Review::ChangesRequested => "changes",
@@ -1528,7 +1528,7 @@ fn pr_color(pr: &am_core::model::PrInfo) -> ColorPick {
 
 /// PR cell: number in the state colour, checks glyph always in its own
 /// colour (green ✓ / red ✗ / yellow ◌) so CI is readable on drafts too,
-/// then the review state (`ready` / `approved` / `changes`…).
+/// then the review state (`approved` / `changes` / `review`…).
 fn pr_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize, words: bool) -> Vec<Span<'a>> {
     let Some(pr) = &v.pr else { return vec![Span::raw(" ".repeat(width))] };
     let text = pr_text(v, words);
@@ -1817,10 +1817,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         .collect();
     lines.push(Line::raw(""));
     lines.push(Line::from(legend));
-    // PR review states: ready = approved + CI green, approved = CI ✗/◌.
+    // PR review states: `approved` is green with CI ✓, yellow with CI ✗/◌.
     let mut pr_legend = vec![Span::styled("PR ", theme.faint())];
     for (r, note) in [
-        (Review::Ready, "=approved+CI ✓"),
+        (Review::Ready, "=CI ✓"),
         (Review::Approved, "=CI ✗/◌"),
         (Review::Conflicts, ""),
         (Review::ChangesRequested, ""),
@@ -2594,7 +2594,7 @@ mod tests {
     }
 
     #[test]
-    fn pr_review_state_tells_ready_from_approved_but_failing() {
+    fn pr_review_state_approved_colour_follows_ci() {
         let theme = Theme::ansi();
         let mut v = fixture().flat[0].clone();
         let label = |v: &WorktreeView, words: bool| {
@@ -2608,10 +2608,10 @@ mod tests {
             pr.mergeable = mergeable.map(str::to_string);
         };
         set(&mut v, "APPROVED", ChecksStatus::Passing, Some("MERGEABLE"));
-        assert_eq!(label(&v, true), Some(("ready".into(), Some(theme.green))));
-        assert_eq!(pr_text(&v, true), "#127✓ ready");
+        assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.green))));
+        assert_eq!(pr_text(&v, true), "#127✓ approved");
         set(&mut v, "APPROVED", ChecksStatus::None, None);
-        assert_eq!(label(&v, true).unwrap().0, "ready", "no CI configured still counts as ready");
+        assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.green))), "no CI configured is still green");
         set(&mut v, "APPROVED", ChecksStatus::Failing, Some("MERGEABLE"));
         assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.yellow))));
         assert_eq!(pr_text(&v, true), "#127✗ approved");

@@ -10,7 +10,7 @@ expression: "render(&app, 110, 28)"
 │grid│  text          ██ #cdd6f4 base               ╭─Preview ─────────────────────────────────────────╮│────│
 │ · m│  faint         ██ #7f849c base               │ work ───                                         ││    │
 │    │▌ accent        ██ #89b4fa base               │ ═ Dashboard ═                                    ││    │
-│    │  border        ██ #585b70 base               │ ● feature/login   ENG-123 #42✓ ready             ││    │
+│    │  border        ██ #585b70 base               │ ● feature/login   ENG-123 #42✓ approved          ││    │
 │    │  borderFocus   ██ #b4befe base               │▌◐ fix/crash       ENG-7  #41✗ changes            ││    │
 │    │  selection     ██ #313244 base               │ ◑ main            ◆ 1 subagent                   ││    │
 │    │  background    ·· default base               │ ◇ spike/api       #43 draft                      ││    │

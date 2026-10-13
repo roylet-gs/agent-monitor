@@ -78,9 +78,9 @@ test("Linear PR attachment stands in when GitHub has no PR", async ({ page }) =>
 });
 
 // Review state after `#N` + checks glyph. The browser is 1280px wide, so the
-// PR column has room for words (`ready`, `approved`, `changes`…) not glyphs.
+// PR column has room for words (`approved`, `changes`, `review`…) not glyphs.
 
-test("approved PR with passing checks reads ready", async ({ page }) => {
+test("approved PR with passing checks reads approved", async ({ page }) => {
   await setupMock({
     gh: {
       number: 42,
@@ -96,9 +96,9 @@ test("approved PR with passing checks reads ready", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
   await tui.selectRow("main");
-  await tui.waitForMatch(/│▌.*#42✓ ready/m, 15_000);
-  expect(await tui.selectedRow()).toContain("#42✓ ready");
-  await tui.screenshot("pr-ready");
+  await tui.waitForMatch(/│▌.*#42✓ approved/m, 15_000);
+  expect(await tui.selectedRow()).toContain("#42✓ approved");
+  await tui.screenshot("pr-approved");
 });
 
 test("approved PR with a failing check reads approved", async ({ page }) => {
