@@ -1,0 +1,27 @@
+{
+  "id": "droid",
+  "name": "Factory Droid",
+  "shortName": "Droid",
+  "program": "droid",
+  "configDir": "~/.factory",
+  "hooks": {
+    "settingsPath": "~/.factory/hooks.json",
+    "hooksKey": "",
+    "projectDirVar": "FACTORY_PROJECT_DIR",
+    "timeoutMs": 5000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "Notification": "Notification",
+    "Stop": "Stop"
+  },
+  "tools": { "Execute": "Bash", "Create": "Write", "ApplyPatch": "Edit", "FetchUrl": "WebFetch" },
+  "resume": { "session": ["--resume", "{id}"] },
+  "process": { "names": ["droid"] },
+  "notes": "Droid reads hooks at startup: restart running sessions after installing"
+}

@@ -70,8 +70,6 @@ pub enum Action {
     AddRepo(String),
     InstallHooks,
     Suggest { title: String, body: String },
-    /// Settings → Harnesses: start a training session.
-    Train(am_core::harness::training::Mode),
 }
 
 pub struct App {
@@ -467,7 +465,6 @@ impl App {
                 Action::SettingsChanged
             }
             Outcome::EditFile => Action::EditSettingsFile,
-            Outcome::Train(mode) => Action::Train(mode),
         }
     }
 

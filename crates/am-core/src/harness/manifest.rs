@@ -1,4 +1,4 @@
-//! Declarative agent plugins: a JSON manifest in `<app dir>/agents/<id>.json`
+//! Declarative harness plugins: a JSON manifest in `<app dir>/agents/<id>.json`
 //! describes an agent CLI whose hooks follow the common Claude-style shape,
 //! so adding one needs no code and no rebuild. Gemini's built-in provider is
 //! this same manifest format (`gemini.json`) plus custom session discovery.
@@ -29,9 +29,21 @@
 //!   `cwd`, `tool_name`, `tool_input`, `last_assistant_message`, `message`,
 //!   `notification_type`, `stop_hook_active`, `permission_mode`, `agent_id`,
 //!   `agent_type`, …) to the agent's own; unlisted keys are read as-is.
+//! - `fields` values starting with `/` are JSON pointers into the payload
+//!   (`"cwd": "/workspace_roots/0"`).
+//! - `hooks` shapes the entries am writes. Defaults give Claude's nested
+//!   `{"matcher", "hooks": [{"type": "command", "command", "timeout"}]}` under
+//!   a top-level `hooks` key. `layout: "flat"` writes one hook object per
+//!   entry (Cursor, Copilot); `commandKey` / `timeoutKey` rename those keys,
+//!   `timeoutUnit` is `ms` (default) or `s`, `entry` adds keys to every hook
+//!   object, `file` adds top-level keys when missing (`{"version": 1}`), and
+//!   `hooksKey: ""` puts events at the top level of the file. Without
+//!   `projectDirVar` the command passes `--worktree ""` and am-hook uses the
+//!   payload's `cwd`.
 //! - `sessions.command` (optional) prints a JSON array of
 //!   `{"id", "cwd", "modified"}` (modified = unix seconds) for `{root}`;
-//!   without it, resuming falls back to `resume.continue`.
+//!   without it, resuming falls back to `resume.continue`. Built-ins without
+//!   their own discovery offer the sessions am's hooks recorded instead.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -89,73 +101,78 @@ pub struct Manifest {
     /// A caveat shown next to the hook status, e.g. a trust requirement.
     #[serde(default)]
     pub notes: Option<String>,
-    /// `draft` while a plugin is being trained; absent = published.
-    #[serde(default)]
-    pub status: PluginStatus,
-    /// Training-mode metadata (see `docs/plans/plugin-training-mode.md`).
-    #[serde(default)]
-    pub training: Option<TrainingSpec>,
-    /// An editor hint (`am harness schema --json`); ignored.
-    #[serde(default, rename = "$schema")]
-    pub schema: Option<String>,
-    /// The manifest as written, for `am harness show`.
-    #[serde(skip)]
-    pub raw: Value,
-}
-
-/// Whether a plugin is still being trained. Drafts capture every hook event
-/// they fire and are badged in the TUI.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PluginStatus {
-    Draft,
-    #[default]
-    Published,
-}
-
-impl PluginStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PluginStatus::Draft => "draft",
-            PluginStatus::Published => "published",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TrainingSpec {
-    /// Extra native events hooked only while the plugin is a draft, so am
-    /// records them. Never mapped to a status.
-    #[serde(default)]
-    pub capture_events: Vec<String>,
-    /// Start the harness with an initial prompt; `{prompt}` is replaced.
-    #[serde(default)]
-    pub prompt_args: Vec<String>,
-    /// What the plugin was verified against, e.g. `mycli 1.7.2`.
-    #[serde(default)]
-    pub verified_with: Option<String>,
-    /// The training agent's own findings, carried into the edit prompt.
-    #[serde(default)]
-    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HookSpec {
     pub settings_path: String,
-    /// Env var the CLI sets to the session's project dir (`$VAR` in the command).
-    pub project_dir_var: String,
+    /// Env var the CLI sets to the session's project dir (`$VAR` in the
+    /// command). Without one, `--worktree ""` makes am-hook use the payload's
+    /// `cwd`.
+    #[serde(default)]
+    pub project_dir_var: Option<String>,
     #[serde(default)]
     pub matcher: Option<String>,
     #[serde(default = "default_timeout")]
     pub timeout_ms: u64,
+    /// The unit the CLI reads the timeout in.
+    #[serde(default)]
+    pub timeout_unit: TimeoutUnit,
+    /// Key of the timeout in a hook object (`timeout`, Copilot's `timeoutSec`).
+    #[serde(default = "default_timeout_key")]
+    pub timeout_key: String,
+    /// Key of the command in a hook object (`command`, Copilot's `bash`).
+    #[serde(default = "default_command_key")]
+    pub command_key: String,
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub layout: HookLayout,
+    /// Extra keys for each hook object, e.g. `{"type": "command"}`.
+    #[serde(default)]
+    pub entry: Map<String, Value>,
+    /// Top-level keys the hook file needs, added when missing (`{"version": 1}`).
+    #[serde(default)]
+    pub file: Map<String, Value>,
+    /// The key holding `event → entries`; `""` when the file is that map.
+    #[serde(default = "default_hooks_key")]
+    pub hooks_key: String,
+}
+
+fn default_hooks_key() -> String {
+    "hooks".into()
+}
+
+/// How one entry of `hooks.<event>` is shaped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HookLayout {
+    /// Claude's `{"matcher": …, "hooks": [{"type": "command", "command": …}]}`.
+    #[default]
+    Nested,
+    /// One hook object per entry: `{"command": …, "timeout": …}` (Cursor, Copilot).
+    Flat,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TimeoutUnit {
+    #[default]
+    Ms,
+    S,
 }
 
 fn default_timeout() -> u64 {
     5_000
+}
+
+fn default_timeout_key() -> String {
+    "timeout".into()
+}
+
+fn default_command_key() -> String {
+    "command".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -194,13 +211,8 @@ pub fn expand_home(p: &str) -> PathBuf {
     }
 }
 
-pub fn valid_id(id: &str) -> bool {
+fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-}
-
-/// Event names end up in a shell command (`--event <name>`).
-pub fn valid_event_name(name: &str) -> bool {
-    !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.' || b == b':')
 }
 
 fn valid_var(v: &str) -> bool {
@@ -208,15 +220,19 @@ fn valid_var(v: &str) -> bool {
 }
 
 impl Manifest {
+    /// A compiled-in manifest; a broken one is a bug caught by the tests.
+    pub fn builtin(text: &str) -> Manifest {
+        Manifest::parse(text).unwrap_or_else(|e| panic!("built-in harness manifest is invalid: {e}"))
+    }
+
     /// Parse and validate. Errors read as one line for the plugin list.
     pub fn parse(text: &str) -> Result<Manifest, String> {
-        let mut m: Manifest = serde_json::from_str(text).map_err(|e| e.to_string())?;
-        m.raw = serde_json::from_str(text).unwrap_or_default();
+        let m: Manifest = serde_json::from_str(text).map_err(|e| e.to_string())?;
         if !valid_id(&m.id) {
             return Err(format!("id \"{}\" must be 1-32 chars of a-z, 0-9, -", m.id));
         }
-        if !valid_var(&m.hooks.project_dir_var) {
-            return Err(format!("hooks.projectDirVar \"{}\" must be an env var name", m.hooks.project_dir_var));
+        if let Some(var) = m.hooks.project_dir_var.as_deref().filter(|v| !valid_var(v)) {
+            return Err(format!("hooks.projectDirVar \"{var}\" must be an env var name"));
         }
         if m.program.is_empty() || m.program.contains(char::is_whitespace) {
             return Err("program must be a single executable name".into());
@@ -229,13 +245,8 @@ impl Manifest {
             if !CANONICAL_EVENTS.contains(&canon) {
                 return Err(format!("events.{native}: unknown canonical event \"{canon}\""));
             }
-            if !valid_event_name(native) {
+            if native.is_empty() || !native.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
                 return Err(format!("event name \"{native}\" must be alphanumeric"));
-            }
-        }
-        for native in m.capture_events() {
-            if !valid_event_name(native) {
-                return Err(format!("training.captureEvents: event name \"{native}\" must be alphanumeric"));
             }
         }
         Ok(m)
@@ -245,16 +256,21 @@ impl Manifest {
         self.fields.get(canonical).map(String::as_str).unwrap_or(canonical)
     }
 
+    /// The payload value for a canonical key: a top-level key, or a JSON
+    /// pointer when the mapping starts with `/` (`/workspace_roots/0`).
+    fn lookup<'v>(&self, v: &'v Value, canonical: &str) -> Option<&'v Value> {
+        let f = self.field(canonical);
+        if f.starts_with('/') { v.pointer(f) } else { v.get(f) }
+    }
+
     fn canonical_event<'a>(&'a self, native: &'a str) -> &'a str {
         self.events.get(native).and_then(Value::as_str).unwrap_or(native)
     }
 
     /// Native payload → canonical event, driven entirely by the mappings.
     pub fn normalize(&self, v: &Value, event_override: Option<&str>) -> HookEvent {
-        let s = |canon: &str| {
-            v.get(self.field(canon)).and_then(Value::as_str).filter(|x| !x.is_empty()).map(str::to_owned)
-        };
-        let b = |canon: &str| v.get(self.field(canon)).and_then(Value::as_bool).unwrap_or(false);
+        let s = |canon: &str| self.lookup(v, canon).and_then(Value::as_str).filter(|x| !x.is_empty()).map(str::to_owned);
+        let b = |canon: &str| self.lookup(v, canon).and_then(Value::as_bool).unwrap_or(false);
         let native = event_override.map(str::to_owned).or_else(|| s("hook_event_name")).unwrap_or_else(|| "unknown".into());
         HookEvent {
             event: self.canonical_event(&native).to_owned(),
@@ -263,7 +279,7 @@ impl Manifest {
             cwd: s("cwd"),
             permission_mode: s("permission_mode"),
             tool_name: s("tool_name").map(|t| self.tools.get(&t).cloned().unwrap_or(t)),
-            tool_input: v.get(self.field("tool_input")).cloned(),
+            tool_input: self.lookup(v, "tool_input").cloned(),
             stop_hook_active: b("stop_hook_active"),
             last_assistant_message: s("last_assistant_message").filter(|m| !m.trim().is_empty()),
             transcript_summary: s("transcript_summary"),
@@ -271,62 +287,38 @@ impl Manifest {
             notification_type: s("notification_type").map(|t| self.notification_types.get(&t).cloned().unwrap_or(t)),
             permission_prompt: b("permission_prompt"),
             agent_id: s("agent_id"),
-            agent_type: v.get(self.field("agent_type")).and_then(Value::as_str).map(str::to_owned),
+            agent_type: self.lookup(v, "agent_type").and_then(Value::as_str).map(str::to_owned),
             agent_transcript_path: s("agent_transcript_path"),
         }
     }
 
-    /// Native events to hook: the mapped ones, plus a draft's capture-only
-    /// events (deduplicated, mapped ones first).
     pub fn hook_events(&self) -> Vec<String> {
-        let mut out: Vec<String> = self.events.keys().cloned().collect();
-        if self.status == PluginStatus::Draft {
-            for e in self.capture_events() {
-                if !out.iter().any(|o| o == e) {
-                    out.push(e.clone());
-                }
-            }
-        }
-        out
-    }
-
-    /// Native events listed in `training.captureEvents`.
-    pub fn capture_events(&self) -> &[String] {
-        self.training.as_ref().map(|t| t.capture_events.as_slice()).unwrap_or(&[])
-    }
-
-    /// Whether `native` is one of the mapped events.
-    pub fn maps_event(&self, native: &str) -> bool {
-        self.events.contains_key(native)
-    }
-
-    /// Whether `native` (a tool name as the harness sends it) has a mapping.
-    pub fn maps_tool(&self, native: &str) -> bool {
-        self.tools.contains_key(native)
-    }
-
-    /// The native event name in a payload: `--event`, else `hook_event_name`.
-    pub fn native_event(&self, v: &Value, event_override: Option<&str>) -> Option<String> {
-        event_override
-            .map(str::to_owned)
-            .or_else(|| v.get(self.field("hook_event_name")).and_then(Value::as_str).map(str::to_owned))
-            .filter(|e| !e.is_empty())
+        self.events.keys().cloned().collect()
     }
 
     pub fn hook_entry(&self, event: &str, invocation: &str) -> Value {
-        let mut hook = json!({
-            "type": "command",
-            "command": format!(
-                "{invocation} --agent {} --worktree \"${}\" --event {event}",
-                self.id, self.hooks.project_dir_var
-            ),
-            "timeout": self.hooks.timeout_ms,
-        });
-        if let Some(name) = &self.hooks.name {
-            hook["name"] = name.clone().into();
+        let h = &self.hooks;
+        let worktree = h.project_dir_var.as_deref().map(|v| format!("\"${v}\"")).unwrap_or_else(|| "\"\"".into());
+        let command = format!("{invocation} --agent {} --worktree {worktree} --event {event}", self.id);
+        let timeout = match h.timeout_unit {
+            TimeoutUnit::Ms => h.timeout_ms,
+            TimeoutUnit::S => h.timeout_ms.div_ceil(1000),
+        };
+        let mut hook = Map::new();
+        if h.layout == HookLayout::Nested {
+            hook.insert("type".into(), "command".into());
         }
-        let mut entry = json!({ "hooks": [hook] });
-        if let Some(m) = &self.hooks.matcher {
+        hook.insert(h.command_key.clone(), command.into());
+        hook.insert(h.timeout_key.clone(), timeout.into());
+        if let Some(name) = &h.name {
+            hook.insert("name".into(), name.clone().into());
+        }
+        hook.extend(h.entry.clone());
+        let mut entry = match h.layout {
+            HookLayout::Nested => json!({ "hooks": [hook] }),
+            HookLayout::Flat => Value::Object(hook),
+        };
+        if let Some(m) = &h.matcher {
             entry["matcher"] = m.clone().into();
         }
         entry
@@ -346,18 +338,11 @@ impl Manifest {
         let root_s = root.to_string_lossy();
         let argv: Vec<String> = spec.command.iter().map(|a| a.replace("{root}", &root_s)).collect();
         let Some((prog, args)) = argv.split_first() else { return Vec::new() };
-        let failed = |why: String| {
-            crate::debug!("agents", "{}: sessions command {why}", self.id);
-            let issue = super::issues::Issue::new(super::issues::DISCOVERY_FAILED, argv.join(" "), Some(why));
-            super::issues::record_now(&self.id, &[issue]);
-            Vec::new()
-        };
         let Some(out) = run_bounded(prog, args, Duration::from_secs(3)) else {
-            return failed("failed, exited non-zero or took over 3 s".into());
+            crate::debug!("agents", "{}: sessions command failed or timed out", self.id);
+            return Vec::new();
         };
-        let Ok(Value::Array(items)) = serde_json::from_slice::<Value>(&out) else {
-            return failed(format!("didn't print a JSON array: {}", crate::status::truncate(&String::from_utf8_lossy(&out), 200)));
-        };
+        let Ok(Value::Array(items)) = serde_json::from_slice::<Value>(&out) else { return Vec::new() };
         let mut sessions: Vec<Session> = items
             .iter()
             .filter_map(|it| {
@@ -424,9 +409,6 @@ impl Harness for ManifestProvider {
     fn notes(&self) -> Option<&str> {
         self.manifest.notes.as_deref()
     }
-    fn manifest(&self) -> Option<&Manifest> {
-        Some(&self.manifest)
-    }
     fn is_present(&self) -> bool {
         self.manifest.config_dir.as_deref().is_some_and(|d| expand_home(d).is_dir())
     }
@@ -438,6 +420,12 @@ impl Harness for ManifestProvider {
     }
     fn hook_entry(&self, event: &str, invocation: &str, _native: bool) -> Value {
         self.manifest.hook_entry(event, invocation)
+    }
+    fn hook_file_defaults(&self) -> Map<String, Value> {
+        self.manifest.hooks.file.clone()
+    }
+    fn hooks_key(&self) -> &str {
+        &self.manifest.hooks.hooks_key
     }
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent {
         self.manifest.normalize(payload, event_override)
@@ -477,7 +465,7 @@ pub fn load_dir(dir: &Path, taken: &[&str]) -> (Vec<ManifestProvider>, Vec<Strin
         }
     }
     for e in &errors {
-        crate::warn!("agents", "Skipping agent plugin {e}");
+        crate::warn!("agents", "Skipping harness plugin {e}");
     }
     (out, errors)
 }
@@ -511,6 +499,19 @@ mod tests {
         assert_eq!(step(Some(Executing), json!({"hook_event_name":"Approval","notification_type":"approval"})), Some(Waiting));
         assert_eq!(step(Some(Executing), json!({"hook_event_name":"ToolStart","tool_name":"ask"})), Some(Waiting));
         assert_eq!(step(Some(Executing), json!({"hook_event_name":"TurnDone"})), Some(Done));
+    }
+
+    #[test]
+    fn fields_can_be_json_pointers() {
+        let m = Manifest::parse(
+            r#"{"id":"ptr","name":"Ptr","program":"ptr","hooks":{"settingsPath":"~/.ptr/hooks.json"},
+                "events":{"stop":"Stop"},
+                "fields":{"session_id":"/conversation_id","cwd":"/workspace_roots/0","hook_event_name":"hook_event_name"}}"#,
+        )
+        .unwrap();
+        let e = m.normalize(&json!({"hook_event_name":"stop","conversation_id":"c-9","workspace_roots":["/w/repo","/w/other"]}), None);
+        assert_eq!((e.event.as_str(), e.session_id.as_deref(), e.cwd.as_deref()), ("Stop", Some("c-9"), Some("/w/repo")));
+        assert_eq!(m.normalize(&json!({"hook_event_name":"stop","workspace_roots":[]}), None).cwd, None);
     }
 
     #[test]

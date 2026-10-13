@@ -1,0 +1,34 @@
+{
+  "id": "qwen",
+  "name": "Qwen Code",
+  "shortName": "Qwen",
+  "program": "qwen",
+  "configDir": "~/.qwen",
+  "hooks": {
+    "settingsPath": "~/.qwen/settings.json",
+    "projectDirVar": "QWEN_PROJECT_DIR",
+    "timeoutMs": 5000,
+    "timeoutUnit": "s",
+    "name": "agent-monitor"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "PermissionRequest": "PermissionRequest",
+    "Notification": "Notification",
+    "SubagentStart": "SubagentStart",
+    "SubagentStop": "SubagentStop",
+    "Stop": "Stop",
+    "StopFailure": "StopFailure"
+  },
+  "tools": {
+    "run_shell_command": "Bash", "read_file": "Read", "write_file": "Write", "edit": "Edit",
+    "glob": "Glob", "grep_search": "Grep", "web_fetch": "WebFetch", "todo_write": "TodoWrite",
+    "exit_plan_mode": "ExitPlanMode"
+  },
+  "resume": { "session": ["--resume", "{id}"], "continue": ["--continue"] },
+  "process": { "names": ["qwen"], "argvContains": ["/@qwen-code/qwen-code/"] }
+}

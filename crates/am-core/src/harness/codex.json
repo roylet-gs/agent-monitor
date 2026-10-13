@@ -1,0 +1,28 @@
+{
+  "id": "codex",
+  "name": "Codex CLI",
+  "shortName": "Codex",
+  "program": "codex",
+  "configDir": "~/.codex",
+  "hooks": {
+    "settingsPath": "~/.codex/hooks.json",
+    "timeoutMs": 3000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "PermissionRequest": "PermissionRequest",
+    "SubagentStart": "SubagentStart",
+    "SubagentStop": "SubagentStop",
+    "Stop": "Stop",
+    "Interrupt": "Stop"
+  },
+  "tools": { "apply_patch": "Edit", "update_plan": "TodoWrite" },
+  "resume": { "session": ["resume", "{id}"], "continue": ["resume", "--last"] },
+  "process": { "names": ["codex"], "argvContains": ["/@openai/codex/"] },
+  "notes": "Codex runs user hooks only once you trust them in /hooks, and again after each reinstall"
+}

@@ -1,6 +1,8 @@
 //! Hook config in each agent CLI's settings file (`~/.claude/settings.json`,
-//! `~/.gemini/settings.json`). The entry shapes come from the providers in
-//! `crate::harness`; the rules are shared and ported from the TS
+//! `~/.gemini/settings.json`, `~/.cursor/hooks.json`…). Every file keeps its
+//! hooks under a top-level `hooks` object keyed by event; the entry shapes
+//! (Claude's nested `{matcher, hooks: [{command}]}` or a flat `{command}`)
+//! come from the providers in `crate::harness`; the rules are shared and ported from the TS
 //! `src/lib/hooks-installer.ts`: replace our entries, keep everyone else's, so
 //! the TS and Rust installers can run against each other's output.
 
@@ -114,17 +116,16 @@ fn native_program(command: &str) -> Option<PathBuf> {
 /// The missing binaries `agent`'s installed hooks point at (deleted worktree,
 /// upgraded-away install). Every hook then fails with "No such file or directory".
 pub fn dangling_hook_binaries(agent: HarnessKind) -> Vec<PathBuf> {
-    dangling_in(&read_settings(&agent.provider().settings_path()).unwrap_or_default())
+    let p = agent.provider();
+    dangling_in(&read_settings(&p.settings_path()).unwrap_or_default(), p.hooks_key())
 }
 
-fn dangling_in(settings: &Map<String, Value>) -> Vec<PathBuf> {
-    let mut missing: Vec<PathBuf> = hooks_of(settings)
+fn dangling_in(settings: &Map<String, Value>, key: &str) -> Vec<PathBuf> {
+    let mut missing: Vec<PathBuf> = hooks_of(settings, key)
         .values()
         .filter_map(Value::as_array)
         .flatten()
-        .filter_map(|m| m.get("hooks").and_then(Value::as_array))
-        .flatten()
-        .filter_map(|h| h.get("command").and_then(Value::as_str))
+        .flat_map(entry_commands)
         .filter(|c| is_am_hook_command(c))
         .filter_map(native_program)
         .filter(|p| !is_executable(p))
@@ -165,11 +166,7 @@ fn invocation(native_bin: Option<&Path>) -> String {
 }
 
 pub fn build_hook_entry(agent: HarnessKind, event: &str, native_bin: Option<&Path>) -> Value {
-    entry_for(agent.provider(), event, native_bin)
-}
-
-fn entry_for(provider: &dyn Harness, event: &str, native_bin: Option<&Path>) -> Value {
-    provider.hook_entry(event, &invocation(native_bin), native_bin.is_some())
+    agent.provider().hook_entry(event, &invocation(native_bin), native_bin.is_some())
 }
 
 /// The settings file as a JSON object. A missing file is empty; a file that
@@ -205,45 +202,74 @@ pub fn write_settings(path: &Path, settings: &Map<String, Value>) -> std::io::Re
     std::fs::write(path, text)
 }
 
+/// Keys a hook command can sit under (`bash` is Copilot CLI's).
+const COMMAND_KEYS: [&str; 2] = ["command", "bash"];
+
+/// The commands in one entry of `hooks.<event>`: nested (`{matcher, hooks:
+/// [{command}]}`, Claude's layout) or flat (`{command}`, Cursor's).
+fn entry_commands(entry: &Value) -> Vec<&str> {
+    let nested = entry.get("hooks").and_then(Value::as_array).into_iter().flatten();
+    std::iter::once(entry)
+        .chain(nested)
+        .flat_map(|h| COMMAND_KEYS.iter().filter_map(move |k| h.get(*k).and_then(Value::as_str)))
+        .collect()
+}
+
 fn matcher_is_ours(m: &Value) -> bool {
-    m.get("hooks")
-        .and_then(Value::as_array)
-        .is_some_and(|hs| hs.iter().any(|h| h.get("command").and_then(Value::as_str).is_some_and(is_am_hook_command)))
+    entry_commands(m).into_iter().any(is_am_hook_command)
 }
 
 fn without_am_hooks(matchers: &[Value]) -> Vec<Value> {
     matchers.iter().filter(|m| !matcher_is_ours(m)).cloned().collect()
 }
 
-fn hooks_of(settings: &Map<String, Value>) -> Map<String, Value> {
-    match settings.get("hooks") {
+/// The event → entries map: under `key`, or the whole file when `key` is
+/// empty (Factory Droid's `hooks.json` is keyed by event at the top level).
+fn hooks_of(settings: &Map<String, Value>, key: &str) -> Map<String, Value> {
+    if key.is_empty() {
+        return settings.clone();
+    }
+    match settings.get(key) {
         Some(Value::Object(h)) => h.clone(),
         _ => Map::new(),
+    }
+}
+
+fn put_hooks(settings: &mut Map<String, Value>, key: &str, hooks: Map<String, Value>) {
+    if key.is_empty() {
+        *settings = hooks;
+    } else if hooks.is_empty() {
+        settings.shift_remove(key);
+    } else {
+        settings.insert(key.into(), Value::Object(hooks));
     }
 }
 
 /// Install `agent`'s hooks. Returns the binary they now point at (`None` =
 /// the `am hook-event` CLI fallback).
 pub fn install_hooks(agent: HarnessKind) -> std::io::Result<Option<PathBuf>> {
-    install_for(agent.provider())
+    install_provider(agent.provider())
 }
 
-/// [`install_hooks`] for any provider, registered or not (a manifest being
-/// added or published by `harness::lifecycle`).
-pub fn install_for(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> {
+fn install_provider(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> {
     let path = provider.settings_path();
     let mut settings = read_settings(&path)?;
-    let mut hooks = hooks_of(&settings);
+    let mut hooks = hooks_of(&settings, provider.hooks_key());
     let native = find_native_hook_binary();
     // Replace (rather than skip) existing am entries so re-running install
     // switches between the TS command and the native binary.
     for event in provider.hook_events() {
         let existing = hooks.get(event.as_str()).and_then(Value::as_array).cloned().unwrap_or_default();
         let mut next = without_am_hooks(&existing);
-        next.push(entry_for(provider, &event, native.as_deref()));
+        next.push(provider.hook_entry(&event, &invocation(native.as_deref()), native.is_some()));
         hooks.insert(event, Value::Array(next));
     }
-    settings.insert("hooks".into(), Value::Object(hooks));
+    put_hooks(&mut settings, provider.hooks_key(), hooks);
+    // Keys the file format needs (Cursor/Copilot: `"version": 1`); never
+    // overwrites a value the user or the CLI already wrote.
+    for (k, v) in provider.hook_file_defaults() {
+        settings.entry(k).or_insert(v);
+    }
     write_settings(&path, &settings)?;
     info!(
         "hooks",
@@ -256,17 +282,16 @@ pub fn install_for(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> {
 }
 
 pub fn uninstall_hooks(agent: HarnessKind) -> std::io::Result<()> {
-    uninstall_for(agent.provider())
+    uninstall_provider(agent.provider())
 }
 
-/// [`uninstall_hooks`] for any provider, registered or not.
-pub fn uninstall_for(provider: &dyn Harness) -> std::io::Result<()> {
+fn uninstall_provider(provider: &dyn Harness) -> std::io::Result<()> {
     let path = provider.settings_path();
     if !path.exists() {
         return Ok(());
     }
     let mut settings = read_settings(&path)?;
-    let mut hooks = hooks_of(&settings);
+    let mut hooks = hooks_of(&settings, provider.hooks_key());
     for event in provider.hook_events() {
         let Some(existing) = hooks.get(event.as_str()).and_then(Value::as_array).cloned() else { continue };
         let kept = without_am_hooks(&existing);
@@ -276,22 +301,18 @@ pub fn uninstall_for(provider: &dyn Harness) -> std::io::Result<()> {
             hooks.insert(event.to_string(), Value::Array(kept));
         }
     }
-    if hooks.is_empty() {
-        settings.shift_remove("hooks");
-    } else {
-        settings.insert("hooks".into(), Value::Object(hooks));
-    }
+    put_hooks(&mut settings, provider.hooks_key(), hooks);
     write_settings(&path, &settings)?;
     info!("hooks", "Uninstalled {} hooks from {}", provider.name(), path.display());
     Ok(())
 }
 
 pub fn is_hooks_installed(agent: HarnessKind) -> bool {
-    is_installed_for(agent.provider())
+    is_installed_provider(agent.provider())
 }
 
-pub fn is_installed_for(provider: &dyn Harness) -> bool {
-    let hooks = hooks_of(&read_settings(&provider.settings_path()).unwrap_or_default());
+fn is_installed_provider(provider: &dyn Harness) -> bool {
+    let hooks = hooks_of(&read_settings(&provider.settings_path()).unwrap_or_default(), provider.hooks_key());
     provider.hook_events().iter().any(|e| hooks.get(e.as_str()).and_then(Value::as_array).is_some_and(|ms| ms.iter().any(matcher_is_ours)))
 }
 
@@ -359,8 +380,69 @@ mod tests {
             "Notification": [cmd(&live.display().to_string(), "Notification"), {"hooks": [{"type": "command", "command": "cat | am hook-event"}]}],
         }}))
         .unwrap();
-        assert_eq!(dangling_in(&settings), [PathBuf::from("/gone/am-hook")]);
-        assert!(dangling_in(&Map::new()).is_empty());
+        assert_eq!(dangling_in(&settings, "hooks"), [PathBuf::from("/gone/am-hook")]);
+        assert!(dangling_in(&Map::new(), "hooks").is_empty());
+    }
+
+    /// A Cursor-style flat hook file, installed next to someone else's hook.
+    #[test]
+    fn flat_layout_installs_idempotently_and_keeps_foreign_hooks() {
+        use crate::harness::manifest::{Manifest, ManifestProvider};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hooks.json");
+        let manifest = Manifest::parse(&format!(
+            r#"{{"id":"flatcli","name":"Flat CLI","program":"flatcli",
+                "hooks":{{"settingsPath":"{}","projectDirVar":"FLAT_DIR","layout":"flat","timeoutUnit":"s",
+                          "file":{{"version":1}}}},
+                "events":{{"stop":"Stop","preToolUse":"PreToolUse"}}}}"#,
+            file.display()
+        ))
+        .unwrap();
+        let p = ManifestProvider { manifest, source: dir.path().join("flatcli.json") };
+        std::fs::write(&file, r#"{"version":1,"hooks":{"stop":[{"command":"./notify.sh"}]}}"#).unwrap();
+
+        install_provider(&p).unwrap();
+        let once = std::fs::read_to_string(&file).unwrap();
+        install_provider(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), once, "reinstalling changes nothing");
+        let v: Value = serde_json::from_str(&once).unwrap();
+        assert_eq!(v["version"], 1);
+        let stop = v["hooks"]["stop"].as_array().unwrap();
+        assert_eq!(stop.len(), 2);
+        assert_eq!(stop[0]["command"], "./notify.sh");
+        assert_eq!(stop[1]["timeout"], 5);
+        assert!(stop[1].get("hooks").is_none() && stop[1].get("type").is_none());
+        assert!(stop[1]["command"].as_str().unwrap().ends_with("--agent flatcli --worktree \"$FLAT_DIR\" --event stop"));
+        assert!(is_installed_provider(&p));
+
+        uninstall_provider(&p).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(v, serde_json::json!({"version":1,"hooks":{"stop":[{"command":"./notify.sh"}]}}));
+        assert!(!is_installed_provider(&p));
+    }
+
+    #[test]
+    fn a_fresh_flat_file_gets_its_version_key() {
+        use crate::harness::manifest::{Manifest, ManifestProvider};
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("sub/am.json");
+        let manifest = Manifest::parse(&format!(
+            r#"{{"id":"cop","name":"Cop","program":"cop",
+                "hooks":{{"settingsPath":"{}","layout":"flat","commandKey":"bash","timeoutKey":"timeoutSec",
+                          "timeoutUnit":"s","entry":{{"type":"command"}},"file":{{"version":1}}}},
+                "events":{{"Stop":"Stop"}}}}"#,
+            file.display()
+        ))
+        .unwrap();
+        let p = ManifestProvider { manifest, source: dir.path().join("cop.json") };
+        install_provider(&p).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(v["version"], 1);
+        let e = &v["hooks"]["Stop"][0];
+        assert_eq!((e["type"].as_str(), e["timeoutSec"].as_u64()), (Some("command"), Some(5)));
+        // No project-dir variable: am-hook falls back to the payload's cwd.
+        assert!(e["bash"].as_str().unwrap().ends_with("--agent cop --worktree \"\" --event Stop"), "{e}");
+        assert!(is_installed_provider(&p));
     }
 
     #[test]
