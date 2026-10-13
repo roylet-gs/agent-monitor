@@ -77,8 +77,17 @@ pub fn run(as_json: bool) {
         }
         let path = hi::display_path(p);
         let note = p.notes().map(|n| format!(" ({n})")).unwrap_or_default();
+        let dangling = if hooks { hi::dangling_hook_binaries(kind) } else { Vec::new() };
         let (status, message) = match hi::read_settings(&p.settings_path()) {
             Err(e) => ("warn", e.to_string()),
+            Ok(_) if !dangling.is_empty() => (
+                "warn",
+                format!(
+                    "Hooks in {path} run a missing {}. Run: am hooks install --agent {}",
+                    dangling.iter().map(|b| b.display().to_string()).collect::<Vec<_>>().join(", "),
+                    kind.id()
+                ),
+            ),
             Ok(_) if !enabled && hooks => ("warn", format!("Plugin disabled but hooks remain in {path}. Run: am hooks uninstall --agent {}", kind.id())),
             Ok(_) if !enabled => ("ok", "Plugin disabled".into()),
             Ok(_) if !hooks => ("warn", format!("Not installed. Run: am hooks install --agent {}", kind.id())),

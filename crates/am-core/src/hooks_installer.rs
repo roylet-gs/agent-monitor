@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::agents::{AgentKind, AgentProvider};
-use crate::{info, paths};
+use crate::{debug, info, paths, warn};
 use serde_json::{Map, Value};
 
 /// Whether a hook command is one of ours. Superset of the TS marker
@@ -47,25 +47,112 @@ fn is_executable(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
+/// A cargo build output (`…/target/debug/am-hook`, `…/target/<triple>/release/…`):
+/// usually inside a worktree that gets deleted, so hooks shouldn't stay pinned to it.
+fn is_cargo_build_output(bin: &Path) -> bool {
+    let dirs: Vec<_> = bin.parent().into_iter().flat_map(Path::components).map(|c| c.as_os_str()).collect();
+    match dirs.split_last() {
+        Some((last, above)) => (*last == "debug" || *last == "release") && above.iter().any(|d| *d == "target"),
+        None => false,
+    }
+}
+
 /// The native `am-hook` binary to point hooks at: `$AM_HOOK_BIN`, then the
 /// one next to this executable (a `cargo install`/release puts them side by
 /// side), then `$PATH`, then `~/.cargo/bin`. `$AM_NO_NATIVE_HOOK` opts out.
+///
+/// Hook commands outlive the binary that wrote them, so two cases prefer a
+/// stable path: a sibling that `$PATH` reaches through a symlink (Homebrew's
+/// `bin/am-hook` → the versioned `Cellar/…` path `current_exe` resolves to,
+/// which `brew upgrade` removes) is written as the `$PATH` entry, and a
+/// sibling in a cargo `target/` dir (a dev build) is used only when no other
+/// `am-hook` is installed.
 pub fn find_native_hook_binary() -> Option<PathBuf> {
     if std::env::var_os("AM_NO_NATIVE_HOOK").is_some_and(|v| !v.is_empty()) {
         return None;
     }
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(p) = std::env::var_os("AM_HOOK_BIN").filter(|p| !p.is_empty()) {
-        candidates.push(PathBuf::from(p));
+    if let Some(p) = std::env::var_os("AM_HOOK_BIN").filter(|p| !p.is_empty()).map(PathBuf::from)
+        && is_executable(&p)
+    {
+        return Some(p);
     }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
-        candidates.push(dir.join("am-hook"));
-    }
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join("am-hook")))
+        .filter(|p| is_executable(p));
+    let mut installed: Vec<PathBuf> = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&path).filter(|d| !d.as_os_str().is_empty()).map(|d| d.join("am-hook")));
+        installed.extend(std::env::split_paths(&path).filter(|d| !d.as_os_str().is_empty()).map(|d| d.join("am-hook")));
     }
-    candidates.push(paths::home_dir().join(".cargo").join("bin").join("am-hook"));
-    candidates.into_iter().find(|c| is_executable(c))
+    installed.push(paths::home_dir().join(".cargo").join("bin").join("am-hook"));
+    installed.retain(|p| is_executable(p));
+
+    if let Some(sib) = sibling {
+        let real = std::fs::canonicalize(&sib).ok();
+        if let Some(alias) = installed.iter().find(|p| p != &&sib && real.is_some() && std::fs::canonicalize(p).ok() == real) {
+            return Some(alias.clone());
+        }
+        if !is_cargo_build_output(&sib) {
+            return Some(sib);
+        }
+        if let Some(stable) = installed.iter().find(|p| !is_cargo_build_output(p)) {
+            debug!("hooks", "Skipping dev build {} for installed {}", sib.display(), stable.display());
+            return Some(stable.clone());
+        }
+        return Some(sib);
+    }
+    installed.into_iter().next()
+}
+
+/// The native binary an am hook command runs (`"/path/am-hook" hook-event …`),
+/// `None` for the `cat | am hook-event` CLI form.
+fn native_program(command: &str) -> Option<PathBuf> {
+    let quoted = command.strip_prefix('"')?;
+    Some(PathBuf::from(&quoted[..quoted.find('"')?]))
+}
+
+/// The missing binaries `agent`'s installed hooks point at (deleted worktree,
+/// upgraded-away install). Every hook then fails with "No such file or directory".
+pub fn dangling_hook_binaries(agent: AgentKind) -> Vec<PathBuf> {
+    dangling_in(&read_settings(&agent.provider().settings_path()).unwrap_or_default())
+}
+
+fn dangling_in(settings: &Map<String, Value>) -> Vec<PathBuf> {
+    let mut missing: Vec<PathBuf> = hooks_of(settings)
+        .values()
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|m| m.get("hooks").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|h| h.get("command").and_then(Value::as_str))
+        .filter(|c| is_am_hook_command(c))
+        .filter_map(native_program)
+        .filter(|p| !is_executable(p))
+        .collect();
+    missing.sort();
+    missing.dedup();
+    missing
+}
+
+/// Reinstall the hooks of every agent whose am hooks point at a missing
+/// binary, so they find the current one. Returns the agents repaired.
+pub fn repair_dangling_hooks() -> Vec<AgentKind> {
+    let mut repaired = Vec::new();
+    for &kind in crate::agents::all() {
+        let missing = dangling_hook_binaries(kind);
+        if missing.is_empty() {
+            continue;
+        }
+        let gone = missing.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
+        match install_hooks(kind) {
+            Ok(_) => {
+                info!("hooks", "Repaired {} hooks that pointed at missing {gone}", kind.provider().name());
+                repaired.push(kind);
+            }
+            Err(e) => warn!("hooks", "{} hooks point at missing {gone}; reinstall failed: {e}", kind.provider().name()),
+        }
+    }
+    repaired
 }
 
 /// The program part of a hook command: the native binary when there is one,
@@ -225,6 +312,39 @@ mod tests {
         assert!(!is_am_hook_command("am hook-events"));
         assert!(!is_am_hook_command("my-hook-event"));
         assert!(!is_am_hook_command("program hook-event"));
+    }
+
+    #[test]
+    fn cargo_build_outputs_are_recognised() {
+        assert!(is_cargo_build_output(Path::new("/r/.claude/worktrees/x/target/debug/am-hook")));
+        assert!(is_cargo_build_output(Path::new("/r/target/aarch64-apple-darwin/release/am-hook")));
+        assert!(!is_cargo_build_output(Path::new("/Users/x/.cargo/bin/am-hook")));
+        assert!(!is_cargo_build_output(Path::new("/opt/homebrew/Cellar/agent-monitor/2.1.6/bin/am-hook")));
+        assert!(!is_cargo_build_output(Path::new("/srv/debug/am-hook")));
+    }
+
+    #[test]
+    fn native_program_reads_the_quoted_path() {
+        assert_eq!(native_program("\"/a b/am-hook\" hook-event --event Stop"), Some(PathBuf::from("/a b/am-hook")));
+        assert_eq!(native_program("cat | am hook-event --event Stop"), None);
+    }
+
+    #[test]
+    fn dangling_finds_only_our_missing_binaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = dir.path().join("am-hook");
+        std::fs::write(&live, "#!/bin/sh\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&live, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cmd = |bin: &str, ev: &str| serde_json::json!({"hooks": [{"type": "command", "command": format!("\"{bin}\" hook-event --event {ev}")}]});
+        let settings: Map<String, Value> = serde_json::from_value(serde_json::json!({"hooks": {
+            "Stop": [cmd("/gone/am-hook", "Stop"), {"hooks": [{"type": "command", "command": "\"/gone/other-tool\" run"}]}],
+            "SessionEnd": [cmd("/gone/am-hook", "SessionEnd")],
+            "Notification": [cmd(&live.display().to_string(), "Notification"), {"hooks": [{"type": "command", "command": "cat | am hook-event"}]}],
+        }}))
+        .unwrap();
+        assert_eq!(dangling_in(&settings), [PathBuf::from("/gone/am-hook")]);
+        assert!(dangling_in(&Map::new()).is_empty());
     }
 
     #[test]
