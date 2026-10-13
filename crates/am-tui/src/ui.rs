@@ -1708,6 +1708,7 @@ mod tests {
             open_ide: None,
             running_processes: vec![],
             context: None,
+            sessions: Vec::new(),
         }
     }
 

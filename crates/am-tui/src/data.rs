@@ -14,7 +14,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use am_core::integrations::{Integrations, RepoBranches};
-use am_core::model::{AgentState, CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, Subagent, Worktree, WorktreeView};
+use am_core::harness::HarnessKind;
+use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::context::ContextUsage;
@@ -119,6 +120,8 @@ struct ProcData {
     running: Vec<RunningProcess>,
     /// Claude Code shell commands still running here (see `parked_subagents`).
     claude_shells: usize,
+    /// Agent CLI processes here by harness id (see `live_sessions`).
+    agents: HashMap<&'static str, usize>,
 }
 
 #[derive(Default, Clone)]
@@ -183,6 +186,7 @@ impl Worker {
             let mut force = false;
             if self.last_full.is_none() {
                 let _ = db::prune_standalone_sessions(&self.conn);
+                let _ = db::prune_sessions(&self.conn);
             }
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
@@ -236,6 +240,7 @@ impl Worker {
             self.last_procs = Some(Instant::now());
         }
         let agents = db::agent_states(&self.conn)?;
+        let mut sessions = db::open_worktree_sessions(&self.conn)?;
 
         // Which worktrees need fresh git data this cycle?
         let stale: Vec<&Worktree> = if full_due {
@@ -264,8 +269,13 @@ impl Worker {
             debug!("tui", "git refresh for {} worktree(s) in {:?}", fresh.len(), started.elapsed());
             self.git.extend(fresh);
             for w in &stale {
-                let usage = agents.get(&w.id).and_then(|a| session_context(a, Path::new(&w.path)));
+                let root = Path::new(&w.path);
+                let usage = agents.get(&w.id).and_then(|a| session_context(a.agent, a.session_id.as_deref(), root));
                 self.ctx.insert(w.id.clone(), usage);
+                for s in sessions.get(&w.id).into_iter().flatten() {
+                    let usage = session_context(s.agent, Some(&s.session_id), root);
+                    self.ctx.insert(session_key(&w.id, &s.session_id), usage);
+                }
             }
         }
         if full_due {
@@ -279,6 +289,18 @@ impl Worker {
                 let p = self.procs.get(&w.id).cloned().unwrap_or_default();
                 let (pr, linear) =
                     self.fields.get(&(w.repo_id.clone(), w.branch.clone())).cloned().unwrap_or_default();
+                let sessions = live_sessions(sessions.remove(&w.id).unwrap_or_default(), &p.agents)
+                    .into_iter()
+                    .map(|s| SessionView {
+                        context: self.ctx.get(&session_key(&w.id, &s.session_id)).cloned().flatten(),
+                        agent: s.agent,
+                        session_id: s.session_id,
+                        status: s.status,
+                        last_response: s.last_response,
+                        started_at: s.started_at,
+                        updated_at: s.updated_at,
+                    })
+                    .collect();
                 WorktreeView {
                     agent: agents.get(&w.id).cloned(),
                     git: g.status,
@@ -289,6 +311,7 @@ impl Worker {
                     open_ide: p.open_ide,
                     running_processes: p.running,
                     context: self.ctx.get(&w.id).cloned().flatten(),
+                    sessions,
                     worktree: w,
                 }
             })
@@ -385,7 +408,7 @@ impl Worker {
                 let key = format!("standalone:{id}");
                 // Re-read the transcript only when the session moved.
                 if self.agent_seen.get(&key) != Some(&agent.updated_at) {
-                    let usage = session_context(&agent, Path::new(&path));
+                    let usage = session_context(agent.agent, agent.session_id.as_deref(), Path::new(&path));
                     self.ctx.insert(key.clone(), usage);
                     self.agent_seen.insert(key.clone(), agent.updated_at.clone());
                 }
@@ -411,6 +434,7 @@ impl Worker {
                     open_ide: None,
                     running_processes: Vec::new(),
                     context,
+                    sessions: Vec::new(),
                 }
             })
             .collect();
@@ -423,6 +447,7 @@ impl Worker {
     fn collect_procs(&self, worktrees: &[Worktree]) -> HashMap<String, ProcData> {
         let snap = procscan::capture();
         let roots: Vec<PathBuf> = worktrees.iter().map(|w| PathBuf::from(&w.path)).collect();
+        let mut agents = snap.agent_sessions(&roots);
         let mut running = if self.settings.show_running_processes {
             snap.running_processes(&roots, &self.settings.running_process_filter)
         } else {
@@ -437,6 +462,7 @@ impl Worker {
                     open_ide: snap.open_ide(&root),
                     running: running.remove(&root).unwrap_or_default(),
                     claude_shells: snap.claude_shell_commands(&root),
+                    agents: agents.remove(&root).unwrap_or_default(),
                 };
                 (w.id.clone(), data)
             })
@@ -582,15 +608,20 @@ fn stack_branches(worktrees: &[Worktree], repo_id: &str) -> Vec<stacks::Branch> 
 /// on a background command and will be woken when it finishes. Only the
 /// worktree's current session counts. A finished background subagent calls
 /// `SubagentHandback`; one that just replied (no handback) has nothing left
-/// running, so it isn't caught by the shell check.
+/// running, so it isn't caught by the shell check. Only the worktree's live
+/// sessions (its headline and any listed session) count.
 fn parked_subagents(
     subagents: &[(Option<String>, Subagent)],
     views: &[WorktreeView],
     claude_shells: impl Fn(&str) -> usize,
 ) -> HashSet<String> {
-    let session: HashMap<&str, &str> = views
+    let live: HashSet<(&str, &str)> = views
         .iter()
-        .filter_map(|v| Some((v.worktree.id.as_str(), v.agent.as_ref()?.session_id.as_deref()?)))
+        .flat_map(|v| {
+            let wt = v.worktree.id.as_str();
+            let head = v.agent.as_ref().and_then(|a| a.session_id.as_deref());
+            head.into_iter().chain(v.sessions.iter().map(|s| s.session_id.as_str())).map(move |sid| (wt, sid))
+        })
         .collect();
     subagents
         .iter()
@@ -598,23 +629,33 @@ fn parked_subagents(
             let Some(wt) = wt.as_deref() else { return false };
             !s.running
                 && s.last_tool.as_deref() != Some(HANDBACK_TOOL)
-                && session.get(wt) == Some(&s.session_id.as_str())
+                && live.contains(&(wt, s.session_id.as_str()))
                 && claude_shells(wt) > 0
         })
         .map(|(_, s)| s.agent_id.clone())
         .collect()
 }
 
-/// A worktree whose main turn is `done` but has a parked subagent is still
-/// `delegating`. (Display only; the DB keeps the hook-driven status.)
+/// A worktree (or one of its sessions) whose main turn is `done` but has a
+/// parked subagent is still `delegating`. (Display only; the DB keeps the
+/// hook-driven status.)
 fn apply_parked(mut views: Vec<WorktreeView>, subagents: &[(Option<String>, Subagent)], parked: &HashSet<String>) -> Vec<WorktreeView> {
     if parked.is_empty() {
         return views;
     }
-    let busy: HashSet<&str> =
-        subagents.iter().filter(|(_, s)| parked.contains(&s.agent_id)).filter_map(|(wt, _)| wt.as_deref()).collect();
+    let busy: HashSet<(&str, &str)> = subagents
+        .iter()
+        .filter(|(_, s)| parked.contains(&s.agent_id))
+        .filter_map(|(wt, s)| Some((wt.as_deref()?, s.session_id.as_str())))
+        .collect();
     for v in &mut views {
-        if busy.contains(v.worktree.id.as_str())
+        let wt = v.worktree.id.as_str();
+        for s in &mut v.sessions {
+            if s.status == Status::Done && busy.contains(&(wt, s.session_id.as_str())) {
+                s.status = Status::Delegating;
+            }
+        }
+        if busy.iter().any(|(w, _)| *w == wt)
             && let Some(a) = v.agent.as_mut()
             && a.status == Status::Done
         {
@@ -625,16 +666,45 @@ fn apply_parked(mut views: Vec<WorktreeView>, subagents: &[(Option<String>, Suba
     views
 }
 
-/// Context usage of the session `agent` describes, read by the session's own
-/// harness plugin (Claude's only, so far). Worktree and standalone rows both go
+/// Context usage of one session, read by the session's own harness plugin
+/// (Claude's only, so far). Worktree, session and standalone rows all go
 /// through here, so a Gemini session is never looked up as a Claude transcript.
-fn session_context(agent: &AgentState, root: &Path) -> Option<ContextUsage> {
-    agent.agent.provider().context_usage(root, agent.session_id.as_deref()?)
+fn session_context(harness: HarnessKind, session_id: Option<&str>, root: &Path) -> Option<ContextUsage> {
+    harness.provider().context_usage(root, session_id?)
+}
+
+/// `ctx` key of one session's context usage.
+fn session_key(worktree_id: &str, session_id: &str) -> String {
+    format!("{worktree_id}\u{1f}{session_id}")
+}
+
+/// The open sessions of a worktree that are really running, oldest first.
+/// A session killed without `SessionEnd` stays open in the DB, so when the
+/// process scan sees fewer CLIs of a harness than it has open sessions, only
+/// the most recently active ones are kept. No process at all (an IDE
+/// extension, an unreadable cwd) proves nothing: those are all kept.
+fn live_sessions(mut rows: Vec<db::SessionRow>, processes: &HashMap<&'static str, usize>) -> Vec<db::SessionRow> {
+    rows.retain(|s| grouping::session_is_live(s.is_open, s.status, &s.updated_at));
+    let mut keep = vec![true; rows.len()];
+    for (harness, &n) in processes {
+        let mut of: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].agent.id() == *harness).collect();
+        if n == 0 || of.len() <= n {
+            continue;
+        }
+        of.sort_by(|&a, &b| rows[b].updated_at.cmp(&rows[a].updated_at));
+        for &i in &of[n..] {
+            keep[i] = false;
+        }
+    }
+    let mut k = keep.into_iter();
+    rows.retain(|_| k.next().unwrap_or(true));
+    rows
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use am_core::model::AgentState;
 
     fn view(id: &str, session: &str, status: Status) -> WorktreeView {
         WorktreeView {
@@ -665,6 +735,7 @@ mod tests {
             open_ide: None,
             running_processes: Vec::new(),
             context: None,
+            sessions: Vec::new(),
         }
     }
 
@@ -710,14 +781,45 @@ mod tests {
 
     #[test]
     fn context_is_read_by_the_sessions_own_harness() {
-        let mut v = view("w1", "s1", Status::Done);
-        let a = v.agent.as_mut().unwrap();
-        a.agent = am_core::harness::HarnessKind::GEMINI;
         // Gemini has no context reader: no Claude transcript lookup, no bar.
-        assert_eq!(session_context(a, Path::new("/r/w1")), None);
-        a.session_id = None;
-        a.agent = Default::default();
-        assert_eq!(session_context(a, Path::new("/r/w1")), None, "no session, nothing to read");
+        assert_eq!(session_context(HarnessKind::GEMINI, Some("s1"), Path::new("/r/w1")), None);
+        assert_eq!(session_context(HarnessKind::CLAUDE, None, Path::new("/r/w1")), None, "no session, nothing to read");
+    }
+
+    fn row(harness: HarnessKind, id: &str, status: Status, updated: &str) -> db::SessionRow {
+        db::SessionRow {
+            agent: harness,
+            session_id: id.into(),
+            status,
+            last_response: None,
+            is_open: true,
+            started_at: "2099-01-01 00:00:00".into(),
+            updated_at: updated.into(),
+        }
+    }
+
+    #[test]
+    fn sessions_beyond_the_running_processes_are_dropped_newest_kept() {
+        let c = HarnessKind::CLAUDE;
+        // Far-future timestamps so the idle-grace rule never applies.
+        let rows = vec![
+            row(c, "old", Status::Done, "2099-01-01 00:01:00"),
+            row(c, "mid", Status::Executing, "2099-01-01 00:03:00"),
+            row(HarnessKind::GEMINI, "gem", Status::Done, "2099-01-01 00:00:30"),
+            row(c, "new", Status::Waiting, "2099-01-01 00:05:00"),
+        ];
+        let ids = |v: Vec<db::SessionRow>| v.into_iter().map(|s| s.session_id).collect::<Vec<_>>();
+        // Two claude processes: the stale "old" one goes; order is kept.
+        let procs = HashMap::from([("claude", 2)]);
+        assert_eq!(ids(live_sessions(rows.clone(), &procs)), ["mid", "gem", "new"]);
+        // No process seen proves nothing.
+        assert_eq!(ids(live_sessions(rows.clone(), &HashMap::new())), ["old", "mid", "gem", "new"]);
+        // Closed sessions and long-idle ones aren't live.
+        let mut closed = rows.clone();
+        closed[1].is_open = false;
+        closed[0].status = Status::Idle;
+        closed[0].updated_at = "2000-01-01 00:00:00".into();
+        assert_eq!(ids(live_sessions(closed, &HashMap::new())), ["gem", "new"]);
     }
 
     #[test]
