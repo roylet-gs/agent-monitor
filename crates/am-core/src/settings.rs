@@ -81,6 +81,9 @@ pub struct Settings {
     pub theme: String,
     /// Use Nerd Font glyphs instead of plain Unicode.
     pub nerd_fonts: bool,
+    /// Mouse capture in the TUI (click, double-click, wheel). Off restores
+    /// the terminal's own click-drag text selection.
+    pub mouse_enabled: bool,
     /// Context-window bar at the far right of each worktree row.
     pub show_context_window: bool,
     /// Context window the bar is scaled to. A session that uses more than
@@ -151,6 +154,7 @@ impl Default for Settings {
             resume_last_session: true,
             theme: "ansi".into(),
             nerd_fonts: false,
+            mouse_enabled: true,
             show_context_window: true,
             context_window_tokens: 200_000,
             check_for_updates: true,
@@ -260,6 +264,14 @@ mod tests {
         assert!(s.hide_main_branch);
         assert_eq!(s.worktree_sort.len(), 10);
         assert!(s.raw.contains_key("showIdeStatus"));
+    }
+
+    #[test]
+    fn mouse_is_on_by_default_and_can_be_turned_off() {
+        assert!(Settings::parse("{}").mouse_enabled);
+        let off = Settings::parse(r#"{"mouseEnabled":false}"#);
+        assert!(!off.mouse_enabled);
+        assert_eq!(off.to_file_json()["mouseEnabled"], serde_json::Value::Bool(false));
     }
 
     #[test]

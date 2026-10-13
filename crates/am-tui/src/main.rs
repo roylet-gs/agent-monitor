@@ -20,11 +20,13 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use am_core::{info, settings};
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use ratatui::crossterm::execute;
 
-use app::{Action, App, Key};
+use app::{Action, App, Key, Mouse};
 
 fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
     let ctrl = mods.contains(KeyModifiers::CONTROL);
@@ -76,11 +78,32 @@ fn main() -> io::Result<()> {
     // ratatui::init enables raw mode + alt screen and installs a panic hook
     // that restores the terminal before printing the panic.
     let mut terminal = ratatui::init();
+    // ratatui's hook doesn't know about mouse capture; turn it off first so
+    // a panic doesn't leave the shell receiving mouse escape sequences.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(io::stdout(), DisableMouseCapture);
+        hook(info);
+    }));
+    set_mouse(app.settings.mouse_enabled);
     let result = run(&mut terminal, &mut app, &collector);
+    set_mouse(false);
     ratatui::restore();
     collector.shutdown();
     result
 }
+
+/// Turn terminal mouse reporting on or off.
+fn set_mouse(on: bool) {
+    let r = if on { execute!(io::stdout(), EnableMouseCapture) } else { execute!(io::stdout(), DisableMouseCapture) };
+    match r {
+        Ok(()) => am_core::debug!("tui", "mouse capture {}", if on { "on" } else { "off" }),
+        Err(e) => am_core::warn!("tui", "Couldn't turn mouse capture {}: {e}", if on { "on" } else { "off" }),
+    }
+}
+
+/// Two left clicks on the same row within this window are a double-click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data::Collector) -> io::Result<()> {
     let mut theme = theme::Theme::load(&app.settings.theme);
@@ -91,6 +114,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     let mut dirty = true;
     let mut last_second = am_core::timefmt::now_unix();
     let mut notice_since: Option<Instant> = None;
+    let mut last_click: Option<(u16, Instant)> = None;
     loop {
         while let Some(snapshot) = collector.try_recv() {
             app.apply(snapshot);
@@ -219,64 +243,107 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
         }
 
         if event::poll(Duration::from_millis(100))? {
-            match event::read()? {
-                Event::Key(k) if k.kind != KeyEventKind::Release => {
-                    if let Some(key) = map_key(k.code, k.modifiers) {
-                        match app.on_key(key) {
-                            Action::Quit => return Ok(()),
-                            Action::Refresh => collector.refresh(true),
-                            Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
-                            Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
-                            Action::OpenClaude(v) => launcher::open_claude(*v, launch_tx.clone()),
-                            Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
-                            Action::SettingsChanged => {
-                                theme = theme::Theme::load(&app.settings.theme);
-                                collector.update_settings(app.settings.clone());
-                            }
-                            Action::Create(job, repo, req) => ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone()),
-                            Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),
-                            Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
-                            Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
-                            Action::InstallHooks => {
-                                let r = am_core::hooks_installer::install_global_hooks()
-                                    .map(|bin| bin.map(|b| b.display().to_string()))
-                                    .map_err(|e| e.to_string());
-                                if let Some(s) = &mut app.setup {
-                                    s.on_hooks_installed(r);
-                                }
-                            }
-                            Action::RemoveStandalone(path) => {
-                                if let Ok(conn) = am_core::db::open() {
-                                    let _ = am_core::db::remove_standalone_session(&conn, &path);
-                                }
-                                app.notice = Some("Stopped tracking session".into());
-                                collector.refresh(false);
-                            }
-                            Action::RunScript { job, repo_id, worktree_path } => {
-                                ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
-                            }
-                            Action::EditSettingsFile => {
-                                edit_settings_file(terminal)?;
-                                app.set_settings(settings::load());
-                                theme = theme::Theme::load(&app.settings.theme);
-                                collector.update_settings(app.settings.clone());
-                            }
-                            Action::None => {}
+            let action = match event::read()? {
+                Event::Key(k) if k.kind != KeyEventKind::Release => map_key(k.code, k.modifiers).map(|key| app.on_key(key)),
+                Event::Mouse(m) if app.settings.mouse_enabled => {
+                    let mouse = match m.kind {
+                        MouseEventKind::ScrollDown => Some(Mouse::Scroll(1)),
+                        MouseEventKind::ScrollUp => Some(Mouse::Scroll(-1)),
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            let double = last_click.is_some_and(|(row, t)| row == m.row && t.elapsed() < DOUBLE_CLICK);
+                            // A third click starts over rather than making a second double.
+                            last_click = if double { None } else { Some((m.row, Instant::now())) };
+                            Some(Mouse::Click { x: m.column, y: m.row, double })
                         }
-                        for sound in app.sounds.drain(..) {
-                            play_sound(&sound);
+                        // Moves, drags, releases and other buttons don't redraw.
+                        _ => None,
+                    };
+                    match mouse {
+                        Some(mouse) => {
+                            let size = terminal.size()?;
+                            Some(app.on_mouse(mouse, ratatui::layout::Rect::new(0, 0, size.width, size.height)))
                         }
-                        if app.show_log && log_lines.is_empty() {
-                            log_lines = tail_log(200);
-                        }
-                        dirty = true;
+                        None => None,
                     }
                 }
-                Event::Resize(..) => dirty = true,
-                _ => {}
+                Event::Resize(..) => {
+                    dirty = true;
+                    None
+                }
+                _ => None,
+            };
+            if let Some(action) = action {
+                if dispatch(action, terminal, app, collector, &mut theme, &launch_tx)? {
+                    return Ok(());
+                }
+                for sound in app.sounds.drain(..) {
+                    play_sound(&sound);
+                }
+                if app.show_log && log_lines.is_empty() {
+                    log_lines = tail_log(200);
+                }
+                dirty = true;
             }
         }
     }
+}
+
+/// Run an `Action` from a key or mouse press. Returns `true` to quit.
+fn dispatch(
+    action: Action,
+    terminal: &mut ratatui::DefaultTerminal,
+    app: &mut App,
+    collector: &data::Collector,
+    theme: &mut theme::Theme,
+    launch_tx: &std::sync::mpsc::Sender<launcher::Msg>,
+) -> io::Result<bool> {
+    let mouse_before = app.settings.mouse_enabled;
+    match action {
+        Action::Quit => return Ok(true),
+        Action::Refresh => collector.refresh(true),
+        Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
+        Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
+        Action::OpenClaude(v) => launcher::open_claude(*v, launch_tx.clone()),
+        Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
+        Action::SettingsChanged => {
+            *theme = theme::Theme::load(&app.settings.theme);
+            collector.update_settings(app.settings.clone());
+        }
+        Action::Create(job, repo, req) => ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone()),
+        Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),
+        Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
+        Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
+        Action::InstallHooks => {
+            let r = am_core::hooks_installer::install_global_hooks()
+                .map(|bin| bin.map(|b| b.display().to_string()))
+                .map_err(|e| e.to_string());
+            if let Some(s) = &mut app.setup {
+                s.on_hooks_installed(r);
+            }
+        }
+        Action::RemoveStandalone(path) => {
+            if let Ok(conn) = am_core::db::open() {
+                let _ = am_core::db::remove_standalone_session(&conn, &path);
+            }
+            app.notice = Some("Stopped tracking session".into());
+            collector.refresh(false);
+        }
+        Action::RunScript { job, repo_id, worktree_path } => {
+            ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
+        }
+        Action::EditSettingsFile => {
+            edit_settings_file(terminal, mouse_before)?;
+            app.set_settings(settings::load());
+            *theme = theme::Theme::load(&app.settings.theme);
+            collector.update_settings(app.settings.clone());
+        }
+        Action::None => {}
+    }
+    if app.settings.mouse_enabled != mouse_before {
+        info!("tui", "Mouse {}", if app.settings.mouse_enabled { "enabled" } else { "disabled" });
+        set_mouse(app.settings.mouse_enabled);
+    }
+    Ok(false)
 }
 
 /// macOS system sound by name; fire-and-forget (port of src/lib/audio.ts).
@@ -323,13 +390,15 @@ fn tail_log(n: usize) -> Vec<String> {
 }
 
 /// Hand the terminal to $EDITOR (default `vi`) for settings.json, then take it back.
-fn edit_settings_file(terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
+fn edit_settings_file(terminal: &mut ratatui::DefaultTerminal, mouse: bool) -> io::Result<()> {
     let path = am_core::paths::settings_path();
     let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
+    set_mouse(false);
     ratatui::restore();
     // $EDITOR may carry arguments (e.g. `code --wait`), so run it via the shell.
     let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
     *terminal = ratatui::init();
+    set_mouse(mouse);
     terminal.clear()?;
     if let Err(e) = status {
         am_core::warn!("settings", "Failed to run editor {editor}: {e}");

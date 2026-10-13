@@ -31,21 +31,15 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     if theme.background.is_some() {
         f.render_widget(Block::new().style(theme.base()), area);
     }
-    let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
-    let [body, log, keys] =
-        Layout::vertical([Constraint::Min(5), Constraint::Length(log_h), Constraint::Length(1)]).areas(area);
-    draw_keybar(f, app, theme, keys);
+    let areas = dashboard_areas(app, area);
+    draw_keybar(f, app, theme, areas.keys);
     if app.show_log {
-        draw_log(f, theme, log, log_lines);
+        draw_log(f, theme, areas.log, log_lines);
     }
 
-    if app.jobs.visible() {
-        let pane_w = (body.width / 3).clamp(34, 60).min(body.width.saturating_sub(40));
-        let [list, jobs] = Layout::horizontal([Constraint::Min(40), Constraint::Length(pane_w)]).areas(body);
-        draw_worktrees(f, app, theme, list, now);
+    draw_worktrees(f, app, theme, areas.list, now);
+    if let Some(jobs) = areas.jobs {
         draw_jobs(f, app, theme, jobs, now);
-    } else {
-        draw_worktrees(f, app, theme, body, now);
     }
     if app.show_help {
         draw_help(f, theme, area);
@@ -67,6 +61,88 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     }
 }
 
+/// Where the dashboard's parts go. `jobs` is `None` while the jobs pane is hidden.
+struct DashAreas {
+    list: Rect,
+    jobs: Option<Rect>,
+    log: Rect,
+    keys: Rect,
+}
+
+fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
+    let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
+    let [body, log, keys] =
+        Layout::vertical([Constraint::Min(5), Constraint::Length(log_h), Constraint::Length(1)]).areas(area);
+    if app.jobs.visible() {
+        let pane_w = (body.width / 3).clamp(34, 60).min(body.width.saturating_sub(40));
+        let [list, jobs] = Layout::horizontal([Constraint::Min(40), Constraint::Length(pane_w)]).areas(body);
+        DashAreas { list, jobs: Some(jobs), log, keys }
+    } else {
+        DashAreas { list: body, jobs: None, log, keys }
+    }
+}
+
+/// Whether a click landed in the jobs pane.
+pub fn in_jobs_pane(app: &App, area: Rect, x: u16, y: u16) -> bool {
+    dashboard_areas(app, area).jobs.is_some_and(|r| contains(r, x, y))
+}
+
+/// Settings box, then inside it the update banner, field list and help line.
+fn settings_areas(area: Rect, update: Option<&am_core::update_check::Update>) -> (Rect, [Rect; 3]) {
+    let w = 84.min(area.width.saturating_sub(2));
+    // Headline, the (possibly wrapped) upgrade hint, then a blank line.
+    let banner_h = update.map_or(0, |u| {
+        let hint_w = " Update: ".width() + u.hint.width();
+        2 + hint_w.div_ceil((w as usize).saturating_sub(2).max(1)) as u16
+    });
+    let h = area.height.saturating_sub(2).min(crate::settings_ui::FIELDS.len() as u16 + 16 + banner_h);
+    let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
+    let parts = Layout::vertical([Constraint::Length(banner_h), Constraint::Min(3), Constraint::Length(2)])
+        .areas(Block::bordered().inner(rect));
+    (rect, parts)
+}
+
+/// The settings list as lines: `Some(field index)` for a field, `None` for a
+/// section header or blank line.
+fn settings_lines() -> Vec<Option<usize>> {
+    let mut lines = Vec::new();
+    let mut section = "";
+    for (i, field) in crate::settings_ui::FIELDS.iter().enumerate() {
+        if field.section != section {
+            section = field.section;
+            if !lines.is_empty() {
+                lines.push(None);
+            }
+            lines.push(None);
+        }
+        lines.push(Some(i));
+    }
+    lines
+}
+
+/// First visible settings line: keeps the cursor (plus one line) in view.
+fn settings_start(lines: &[Option<usize>], cursor: usize, height: usize) -> usize {
+    let sel_line = lines.iter().position(|l| *l == Some(cursor)).unwrap_or(0);
+    (sel_line + 2).saturating_sub(height)
+}
+
+/// The settings field under a click, if any (field list only, not the
+/// sort editor or theme builder).
+pub fn settings_field_at(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
+    let ed = app.settings_editor.as_ref()?;
+    let (_, [_, list, _]) = settings_areas(area, shown_update(app));
+    if !contains(list, x, y) {
+        return None;
+    }
+    let lines = settings_lines();
+    let start = settings_start(&lines, ed.cursor, list.height as usize);
+    lines.get(start + (y - list.y) as usize).copied().flatten()
+}
+
+fn contains(r: Rect, x: u16, y: u16) -> bool {
+    x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
+}
+
 fn draw_settings(
     f: &mut Frame,
     theme: &Theme,
@@ -75,14 +151,7 @@ fn draw_settings(
     update: Option<&am_core::update_check::Update>,
 ) {
     use crate::settings_ui::{FIELDS, Kind, sort_label};
-    let w = 84.min(area.width.saturating_sub(2));
-    // Headline, the (possibly wrapped) upgrade hint, then a blank line.
-    let banner_h = update.map_or(0, |u| {
-        let hint_w = " Update: ".width() + u.hint.width();
-        2 + hint_w.div_ceil((w as usize).saturating_sub(2).max(1)) as u16
-    });
-    let h = area.height.saturating_sub(2).min(FIELDS.len() as u16 + 16 + banner_h);
-    let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
+    let (rect, [banner, list, help]) = settings_areas(area, update);
     clear(f, theme, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -91,10 +160,7 @@ fn draw_settings(
         .title_bottom(
             Line::styled(" ⏎/space change  ←→ adjust  e edit file  esc close ", theme.faint()).alignment(Alignment::Right),
         );
-    let inner = block.inner(rect);
     f.render_widget(block, rect);
-    let [banner, list, help] =
-        Layout::vertical([Constraint::Length(banner_h), Constraint::Min(3), Constraint::Length(2)]).areas(inner);
     if let Some(u) = update {
         let lines = vec![
             Line::from(vec![
@@ -130,22 +196,20 @@ fn draw_settings(
         return;
     }
 
+    let layout = settings_lines();
     let mut lines: Vec<Line> = Vec::new();
-    let mut sel_line = 0;
-    let mut section = "";
     let label_w = 30usize;
-    for (i, field) in FIELDS.iter().enumerate() {
-        if field.section != section {
-            section = field.section;
-            if !lines.is_empty() {
-                lines.push(Line::raw(""));
+    for (n, entry) in layout.iter().enumerate() {
+        let Some(i) = *entry else {
+            // A header is followed by its section's first field; blank otherwise.
+            match layout.get(n + 1).copied().flatten() {
+                Some(next) => lines.push(Line::styled(format!(" {}", FIELDS[next].section), theme.bold(theme.accent))),
+                None => lines.push(Line::raw("")),
             }
-            lines.push(Line::styled(format!(" {section}"), theme.bold(theme.accent)));
-        }
+            continue;
+        };
+        let field = &FIELDS[i];
         let sel = i == ed.cursor;
-        if sel {
-            sel_line = lines.len();
-        }
         let value = match (&ed.editing, sel) {
             (Some(buf), true) => {
                 let shown = if matches!(field.kind, Kind::Text { secret: true }) { "•".repeat(buf.chars().count()) } else { buf.clone() };
@@ -167,7 +231,7 @@ fn draw_settings(
         lines.push(if sel { line.style(theme.selected()) } else { line });
     }
     let height = list.height as usize;
-    let start = (sel_line + 2).saturating_sub(height);
+    let start = settings_start(&layout, ed.cursor, height);
     f.render_widget(Paragraph::new(lines.into_iter().skip(start).take(height).collect::<Vec<_>>()), list);
 
     let field = ed.field();
@@ -678,14 +742,8 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         ctx_window: s.context_window_tokens,
     };
 
-    // Keep the selected row in view; headers scroll with their rows.
     let height = inner.height as usize;
-    let sel_row = app.rows.iter().position(|r| *r == Row::Worktree(app.selected)).unwrap_or(0);
-    let mut start = sel_row.saturating_sub(height.saturating_sub(1));
-    // Show the header above the selection when there's room.
-    if start > 0 && sel_row - start < height.saturating_sub(1) {
-        start = start.saturating_sub(1);
-    }
+    let start = list_start(app, height);
     let lines: Vec<Line> = app
         .rows
         .iter()
@@ -714,6 +772,31 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
         })
         .collect();
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// First visible row of the worktree list. Keeps the selected row in view;
+/// headers scroll with their rows.
+fn list_start(app: &App, height: usize) -> usize {
+    let sel_row = app.rows.iter().position(|r| *r == Row::Worktree(app.selected)).unwrap_or(0);
+    let mut start = sel_row.saturating_sub(height.saturating_sub(1));
+    // Show the header above the selection when there's room.
+    if start > 0 && sel_row - start < height.saturating_sub(1) {
+        start = start.saturating_sub(1);
+    }
+    start
+}
+
+/// The worktree (`flat` index) under a click; headers and blank space are `None`.
+pub fn worktree_at(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
+    let inner = Block::bordered().inner(dashboard_areas(app, area).list);
+    if app.flat.is_empty() || !contains(inner, x, y) {
+        return None;
+    }
+    let start = list_start(app, inner.height as usize);
+    match app.rows.get(start + (y - inner.y) as usize) {
+        Some(Row::Worktree(i)) => Some(*i),
+        _ => None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1252,30 +1335,26 @@ const KEYS: &[(&str, &str, u8)] = &[
     ("q", "quit", 0),
 ];
 
-fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    // Right side: a transient notice, else the offline warning.
-    let h = &app.snapshot.health;
-    let offline = match (h.github_failing, h.linear_failing) {
-        (true, true) => Some("GitHub + Linear"),
-        (true, false) => Some("GitHub"),
-        (false, true) => Some("Linear"),
-        _ => None,
-    };
-    let status: Option<Span> = match (&app.notice, offline) {
-        (Some(n), _) => Some(Span::styled(format!("{n} "), theme.fg(theme.accent))),
-        (None, Some(src)) => Some(Span::styled(format!("⚠ {src} offline — cached "), theme.fg(theme.yellow))),
-        _ => None,
-    };
-    let status_w = status.as_ref().map_or(0, |s| s.content.width());
-    let [keys_area, status_area] =
-        Layout::horizontal([Constraint::Min(0), Constraint::Length(status_w as u16)]).areas(area);
-    if let Some(s) = status {
-        f.render_widget(Paragraph::new(Line::from(s)), status_area);
+/// A key-bar entry: a key hint or a `│` separator.
+enum KeyItem {
+    Key { key: &'static str, label: &'static str, available: bool },
+    Sep,
+}
+
+impl KeyItem {
+    fn width(&self) -> usize {
+        match self {
+            KeyItem::Key { key, label, .. } => key.width() + label.width() + 3,
+            KeyItem::Sep => 2,
+        }
     }
-    let area = keys_area;
-    let width = area.width as usize;
+}
+
+/// The hints that fit in `width` (lower-priority ones drop first), after a
+/// one-cell left margin. Shared by drawing and click hit-testing.
+fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
     // While jobs are showing, Tab moves between the list and the pane.
-    let mut keys: Vec<(&str, &str, u8)> = Vec::new();
+    let mut keys: Vec<(&'static str, &'static str, u8)> = Vec::new();
     if app.jobs.focused {
         keys.extend([("⇥", "back to list", 0), ("j/k", "select job", 1), ("x", "dismiss", 1), ("|", "", 0), ("q", "quit", 0)]);
     } else {
@@ -1284,42 +1363,100 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         }
         keys.extend(KEYS.iter().copied());
     }
-    let render = |max_prio: u8| -> Vec<Span<'static>> {
-        let mut spans = vec![Span::raw(" ")];
+    let pick = |max_prio: u8| -> Vec<KeyItem> {
+        let mut items = Vec::new();
         let mut last_sep = true;
-        for (k, label, prio) in &keys {
-            if *prio > max_prio {
+        for &(k, label, prio) in &keys {
+            if prio > max_prio {
                 continue;
             }
-            if *k == "|" {
+            if k == "|" {
                 if !last_sep {
-                    spans.push(Span::styled("│ ", theme.fg(theme.border)));
+                    items.push(KeyItem::Sep);
                     last_sep = true;
                 }
                 continue;
             }
-            // Actions the selected worktree can't take stay in place, dimmed.
-            if app.key_available(k) {
-                spans.push(Span::styled(k.to_string(), theme.bold(theme.accent)));
-                spans.push(Span::styled(format!(" {label}  "), theme.faint()));
-            } else {
-                let off = theme.faint().add_modifier(Modifier::DIM);
-                spans.push(Span::styled(k.to_string(), off));
-                spans.push(Span::styled(format!(" {label}  "), off));
-            }
+            items.push(KeyItem::Key { key: k, label, available: app.key_available(k) });
             last_sep = false;
         }
-        spans
+        items
     };
-    let mut spans = render(0);
     for prio in (0..=3).rev() {
-        let candidate = render(prio);
-        if candidate.iter().map(|s| s.content.width()).sum::<usize>() <= width {
-            spans = candidate;
-            break;
+        let candidate = pick(prio);
+        // +1 for the left margin.
+        if candidate.iter().map(KeyItem::width).sum::<usize>() < width {
+            return candidate;
         }
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    pick(0)
+}
+
+/// Right side of the key bar: a transient notice, else the offline warning.
+fn keybar_status(app: &App) -> Option<(String, bool)> {
+    let h = &app.snapshot.health;
+    let offline = match (h.github_failing, h.linear_failing) {
+        (true, true) => Some("GitHub + Linear"),
+        (true, false) => Some("GitHub"),
+        (false, true) => Some("Linear"),
+        _ => None,
+    };
+    match (&app.notice, offline) {
+        (Some(n), _) => Some((format!("{n} "), false)),
+        (None, Some(src)) => Some((format!("⚠ {src} offline — cached "), true)),
+        _ => None,
+    }
+}
+
+fn keybar_areas(app: &App, area: Rect) -> [Rect; 2] {
+    let status_w = keybar_status(app).map_or(0, |(s, _)| s.width());
+    Layout::horizontal([Constraint::Min(0), Constraint::Length(status_w as u16)]).areas(area)
+}
+
+/// The key-bar hint under a click (`"⏎"`, `"n"`, `"⇥"`…); dimmed hints
+/// count too, the key itself refuses them like a key press would.
+pub fn keybar_key_at(app: &App, area: Rect, x: u16, y: u16) -> Option<&'static str> {
+    let keys = dashboard_areas(app, area).keys;
+    let [keys, _] = keybar_areas(app, keys);
+    if !contains(keys, x, y) {
+        return None;
+    }
+    let mut col = keys.x as usize + 1;
+    for item in keybar_items(app, keys.width as usize) {
+        let w = item.width();
+        if let KeyItem::Key { key, .. } = item
+            && (col..col + w).contains(&(x as usize))
+        {
+            return Some(key);
+        }
+        col += w;
+    }
+    None
+}
+
+fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let [keys_area, status_area] = keybar_areas(app, area);
+    if let Some((text, warn)) = keybar_status(app) {
+        let color = if warn { theme.yellow } else { theme.accent };
+        f.render_widget(Paragraph::new(Line::from(Span::styled(text, theme.fg(color)))), status_area);
+    }
+    let mut spans = vec![Span::raw(" ")];
+    for item in keybar_items(app, keys_area.width as usize) {
+        match item {
+            KeyItem::Sep => spans.push(Span::styled("│ ", theme.fg(theme.border))),
+            // Actions the selected worktree can't take stay in place, dimmed.
+            KeyItem::Key { key, label, available: true } => {
+                spans.push(Span::styled(key, theme.bold(theme.accent)));
+                spans.push(Span::styled(format!(" {label}  "), theme.faint()));
+            }
+            KeyItem::Key { key, label, available: false } => {
+                let off = theme.faint().add_modifier(Modifier::DIM);
+                spans.push(Span::styled(key, off));
+                spans.push(Span::styled(format!(" {label}  "), off));
+            }
+        }
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), keys_area);
 }
 
 fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
@@ -1662,6 +1799,141 @@ mod tests {
         assert_eq!(app.sounds, vec!["Glass".to_string(), "Funk".to_string()]);
         app.on_key(Key::Char('j'));
         assert!(!app.unseen.contains("w2"), "selecting marks it seen");
+    }
+
+    /// Cell (x, y) of the first occurrence of `needle` on screen.
+    fn find(app: &App, w: u16, h: u16, needle: &str) -> (u16, u16) {
+        let screen = render(app, w, h);
+        screen
+            .lines()
+            .enumerate()
+            .find_map(|(y, line)| line.find(needle).map(|b| (line[..b].chars().count() as u16, y as u16)))
+            .unwrap_or_else(|| panic!("{needle:?} not on screen:\n{screen}"))
+    }
+
+    fn click(app: &mut App, w: u16, h: u16, (x, y): (u16, u16), double: bool) -> crate::app::Action {
+        app.on_mouse(crate::app::Mouse::Click { x, y, double }, Rect::new(0, 0, w, h))
+    }
+
+    #[test]
+    fn clicking_a_row_selects_it_and_a_double_click_opens_it() {
+        let mut app = fixture();
+        let at = find(&app, 120, 16, "main");
+        assert_eq!(click(&mut app, 120, 16, at, false), crate::app::Action::None);
+        assert_eq!(app.selected_view().unwrap().worktree.branch, "main");
+        // Headers and blank space select nothing.
+        let header = find(&app, 120, 16, "agent-monitor");
+        click(&mut app, 120, 16, header, false);
+        click(&mut app, 120, 16, (5, 10), false);
+        assert_eq!(app.selected, 2);
+        let at = find(&app, 120, 16, "fix/offline-cache");
+        assert!(matches!(click(&mut app, 120, 16, at, true), crate::app::Action::Open(v) if v.worktree.branch == "fix/offline-cache"));
+    }
+
+    #[test]
+    fn double_click_on_a_deleting_row_does_not_open_it() {
+        let mut app = fixture();
+        app.deleting.insert("w2".into(), false);
+        let at = find(&app, 120, 16, "fix/offline-cache");
+        assert_eq!(click(&mut app, 120, 16, at, true), crate::app::Action::None);
+        assert_eq!(app.notice.as_deref(), Some("Deleting in the background…"));
+    }
+
+    #[test]
+    fn clicks_follow_the_scrolled_list() {
+        let mut app = fixture();
+        app.on_key(Key::End);
+        // 7 rows: a 3-line list, so the top of the list has scrolled away.
+        let screen = render(&app, 120, 7);
+        assert!(!screen.contains("feature/refactor"), "{screen}");
+        let at = find(&app, 120, 7, "main");
+        click(&mut app, 120, 7, at, false);
+        assert_eq!(app.selected, 2);
+        let header = find(&app, 120, 7, "gridsight");
+        click(&mut app, 120, 7, header, false);
+        assert_eq!(app.selected, 2);
+    }
+
+    #[test]
+    fn wheel_moves_the_selection_and_clamps() {
+        let mut app = fixture();
+        let area = Rect::new(0, 0, 120, 16);
+        app.on_mouse(crate::app::Mouse::Scroll(1), area);
+        app.on_mouse(crate::app::Mouse::Scroll(1), area);
+        app.on_mouse(crate::app::Mouse::Scroll(1), area);
+        assert_eq!(app.selected, 2);
+        app.on_mouse(crate::app::Mouse::Scroll(-1), area);
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn key_bar_hints_are_clickable() {
+        let mut app = fixture();
+        let help = find(&app, 120, 16, "? help");
+        assert_eq!(keybar_key_at(&app, Rect::new(0, 0, 120, 16), help.0 + 3, help.1), Some("?"));
+        click(&mut app, 120, 16, help, false);
+        assert!(app.show_help);
+        // Any click closes help.
+        click(&mut app, 120, 16, (0, 0), false);
+        assert!(!app.show_help);
+        let sep = find(&app, 120, 16, "│ g PR");
+        assert_eq!(keybar_key_at(&app, Rect::new(0, 0, 120, 16), sep.0, sep.1), None);
+        let open = find(&app, 120, 16, "⏎ open");
+        assert!(matches!(click(&mut app, 120, 16, open, false), crate::app::Action::Open(_)));
+        let settings = find(&app, 120, 16, "s settings");
+        click(&mut app, 120, 16, settings, false);
+        assert!(app.settings_editor.is_some());
+    }
+
+    #[test]
+    fn clicks_close_popups_and_modals_ignore_the_mouse() {
+        let mut app = fixture();
+        app.popup = Some("hello".into());
+        app.on_mouse(crate::app::Mouse::Scroll(1), Rect::new(0, 0, 120, 16));
+        assert!(app.popup.is_some());
+        click(&mut app, 120, 16, (0, 0), false);
+        assert!(app.popup.is_none());
+        app.on_key(Key::Char('n'));
+        assert!(app.modal.is_some());
+        let at = find(&app, 120, 30, "main");
+        assert_eq!(click(&mut app, 120, 30, at, true), crate::app::Action::None);
+        assert!(app.modal.is_some());
+    }
+
+    #[test]
+    fn jobs_pane_takes_focus_on_click_and_gives_it_back_on_a_row_click() {
+        let mut app = fixture();
+        app.jobs.start_delete("w2".into(), "fix/offline-cache");
+        assert!(app.jobs.visible());
+        let jobs = find(&app, 120, 16, "Jobs");
+        click(&mut app, 120, 16, (jobs.0 + 2, jobs.1 + 2), false);
+        assert!(app.jobs.focused);
+        // The key bar switched to the pane's keys; ⇥ goes back to the list.
+        let tab = find(&app, 120, 16, "⇥ back to list");
+        click(&mut app, 120, 16, tab, false);
+        assert!(!app.jobs.focused);
+        click(&mut app, 120, 16, (jobs.0 + 2, jobs.1 + 2), false);
+        assert!(app.jobs.focused);
+        let at = find(&app, 120, 16, "main");
+        click(&mut app, 120, 16, at, false);
+        assert!(!app.jobs.focused);
+        assert_eq!(app.selected_view().unwrap().worktree.branch, "main");
+    }
+
+    #[test]
+    fn clicking_a_settings_field_selects_it() {
+        let mut app = fixture();
+        app.on_key(Key::Char('s'));
+        let at = find(&app, 120, 50, "Mouse");
+        click(&mut app, 120, 50, at, false);
+        let ed = app.settings_editor.as_ref().unwrap();
+        assert_eq!(ed.field().key, "mouseEnabled");
+        // A section header isn't a field.
+        let header = find(&app, 120, 50, " Appearance");
+        click(&mut app, 120, 50, header, false);
+        assert_eq!(app.settings_editor.as_ref().unwrap().field().key, "mouseEnabled");
+        app.on_mouse(crate::app::Mouse::Scroll(1), Rect::new(0, 0, 120, 50));
+        assert_eq!(app.settings_editor.as_ref().unwrap().field().key, "startupScriptMode");
     }
 
     #[test]

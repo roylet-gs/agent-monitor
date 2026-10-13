@@ -10,6 +10,7 @@ expression: "render(&app, 100, 24)"
 │gridsig│ General                                                                          │───────│
 │ · main│▌  Open in                       cursor                                           │       │
 │       │   Resume last session on open   on                                               │       │
+│       │   Mouse                         on                                               │       │
 │       │   Run startup script in         pane                                             │       │
 │       │   Branch prefix                 feature/                                         │       │
 │       │   Base branch                   main                                             │       │
@@ -21,7 +22,6 @@ expression: "render(&app, 100, 24)"
 │       │                                                                                  │       │
 │       │ Dashboard                                                                        │       │
 │       │   Sort order                    none                                             │       │
-│       │   Hide main branch              on                                               │       │
 │       │                                                                                  │       │
 │       │ Which editor/IDE Enter opens worktrees in                                        │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯

@@ -113,6 +113,48 @@ export class RustTui extends TuiPage {
     return branch;
   }
 
+  /** Pixel centre of terminal cell (col, row), from the screen size ÷ cols/rows. */
+  async cellCenter(col: number, row: number): Promise<{ x: number; y: number }> {
+    const box = await this.pg.locator(".xterm-screen").boundingBox();
+    if (!box) throw new Error("No .xterm-screen");
+    const { cols, rows } = await this.pg.evaluate(() => {
+      const term = (window as any).term?.terminal ?? (window as any).terminal ?? (window as any).term;
+      return { cols: term.cols as number, rows: term.rows as number };
+    });
+    return { x: box.x + ((col + 0.5) * box.width) / cols, y: box.y + ((row + 0.5) * box.height) / rows };
+  }
+
+  /** Cell (col, row) of the first occurrence of `text` on screen. */
+  async findCell(text: string): Promise<{ col: number; row: number }> {
+    const lines = await this.lines();
+    for (let row = 0; row < lines.length; row++) {
+      const i = lines[row].indexOf(text);
+      if (i >= 0) return { col: [...lines[row].slice(0, i)].length, row };
+    }
+    throw new Error(`"${text}" not on screen.\n${lines.join("\n")}`);
+  }
+
+  /** Left-click (or double-click) the first occurrence of `text`. */
+  async clickText(text: string, opts: { double?: boolean } = {}): Promise<void> {
+    const { col, row } = await this.findCell(text);
+    const { x, y } = await this.cellCenter(col, row);
+    if (opts.double) await this.pg.mouse.dblclick(x, y);
+    else await this.pg.mouse.click(x, y);
+    await this.pg.waitForTimeout(300);
+  }
+
+  /** Scroll the wheel over the middle of the terminal (`ticks` > 0 = down). */
+  async wheel(ticks: number): Promise<void> {
+    const box = await this.pg.locator(".xterm-screen").boundingBox();
+    if (!box) throw new Error("No .xterm-screen");
+    await this.pg.mouse.move(box.x + box.width / 2, box.y + box.height / 3);
+    for (let i = 0; i < Math.abs(ticks); i++) {
+      await this.pg.mouse.wheel(0, ticks > 0 ? 100 : -100);
+      await this.pg.waitForTimeout(150);
+    }
+    await this.pg.waitForTimeout(200);
+  }
+
   /**
    * After a create: wait for the jobs pane to ask about the seeded startup
    * script and decline (Tab focuses the pane, `n` skips). The placeholder
