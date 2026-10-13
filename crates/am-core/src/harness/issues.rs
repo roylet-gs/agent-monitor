@@ -27,11 +27,9 @@ pub const BAD_PAYLOAD: &str = "bad_payload";
 pub const UNKNOWN_PLUGIN: &str = "unknown_plugin";
 /// The sessions command failed, timed out or printed something unparseable.
 pub const DISCOVERY_FAILED: &str = "discovery_failed";
-/// Opening the harness to resume a session failed.
-pub const RESUME_FAILED: &str = "resume_failed";
 
-pub const ALL_KINDS: [&str; 8] =
-    [UNMAPPED_EVENT, UNMAPPED_TOOL, MISSING_FIELD, NO_WORKTREE, BAD_PAYLOAD, UNKNOWN_PLUGIN, DISCOVERY_FAILED, RESUME_FAILED];
+pub const ALL_KINDS: [&str; 7] =
+    [UNMAPPED_EVENT, UNMAPPED_TOOL, MISSING_FIELD, NO_WORKTREE, BAD_PAYLOAD, UNKNOWN_PLUGIN, DISCOVERY_FAILED];
 
 /// The log module of a plugin's issues and draft events.
 pub fn log_module(id: &str) -> String {

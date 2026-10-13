@@ -323,3 +323,22 @@ publish from Settings → Harnesses when they are happy.
 5. **Clipboard + paste** vs passing the prompt as an argument: for create, am can't know the harness's prompt flag, so the plan uses the one-line bootstrap. Is a paste step acceptable, or should the modal take an optional "initial prompt flag" (e.g. `-i`)?
 6. **Drafts and the rest of am**: may a draft be the `defaultAgent` (used by `c`), or only after publishing?
 7. **Sharing**: out of scope here, but should publish later offer "open a PR/issue to upstream this manifest as a built-in" (reusing `f` / `gh issue create`)?
+
+## Implementation notes (built on PR 1, `feature/agent-plugins-change` / #141)
+Where the build differs from the plan above:
+- **CLI noun:** `am harness …`, with `am plugin …` as an alias (open question 1, proposed default).
+- **Defaults taken for the open questions:**
+  - the training agent may run its own harness headless;
+  - editing a published plugin turns it back into a draft;
+  - published plugins record issues too (only drafts capture);
+  - create mode uses the one-line paste;
+  - drafts may be the default agent;
+  - upstreaming is left for later.
+- **Badge:** `✎ draft`, not `◇draft`, because `◇` is already the *planning* status glyph.
+- **Schema:** `plugin_issues` is **v4** on this branch, since nothing else has taken v4 yet. Whichever of this and PR 2's `sessions` table lands second renumbers its step.
+- **Train UI:** the command input and the publish/remove confirmations live inside the plugins page (`plugins_ui.rs`), not in `modals.rs`.
+- **Issue kinds built:** `unmapped_event`, `unmapped_tool`, `missing_field`, `no_worktree`, `bad_payload`, `unknown_plugin`, `discovery_failed`.
+- **Issue kinds not built yet:**
+  - `discovery_empty` and `process_unmatched` need PR 2's per-session rows.
+  - `resume_failed`: am can't observe a resume failing in a detached terminal.
+- **Still needs PR 3:** capture events for non-Claude-shaped hook formats, optional `projectDirVar` (the hook already falls back to the payload `cwd` when `--worktree` is empty), and JSON-pointer fields.

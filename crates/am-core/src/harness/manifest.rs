@@ -346,11 +346,18 @@ impl Manifest {
         let root_s = root.to_string_lossy();
         let argv: Vec<String> = spec.command.iter().map(|a| a.replace("{root}", &root_s)).collect();
         let Some((prog, args)) = argv.split_first() else { return Vec::new() };
-        let Some(out) = run_bounded(prog, args, Duration::from_secs(3)) else {
-            crate::debug!("agents", "{}: sessions command failed or timed out", self.id);
-            return Vec::new();
+        let failed = |why: String| {
+            crate::debug!("agents", "{}: sessions command {why}", self.id);
+            let issue = super::issues::Issue::new(super::issues::DISCOVERY_FAILED, argv.join(" "), Some(why));
+            super::issues::record_now(&self.id, &[issue]);
+            Vec::new()
         };
-        let Ok(Value::Array(items)) = serde_json::from_slice::<Value>(&out) else { return Vec::new() };
+        let Some(out) = run_bounded(prog, args, Duration::from_secs(3)) else {
+            return failed("failed, exited non-zero or took over 3 s".into());
+        };
+        let Ok(Value::Array(items)) = serde_json::from_slice::<Value>(&out) else {
+            return failed(format!("didn't print a JSON array: {}", crate::status::truncate(&String::from_utf8_lossy(&out), 200)));
+        };
         let mut sessions: Vec<Session> = items
             .iter()
             .filter_map(|it| {
