@@ -158,6 +158,9 @@ struct Worker {
     last_sent: Option<Snapshot>,
     /// Parked subagent ids last cycle, to log only when the set changes.
     parked: HashSet<String>,
+    /// Newest change in the plugin dir; a new value reloads the registry (a
+    /// training session added, replaced or published a plugin).
+    plugins_stamp: Option<std::time::SystemTime>,
 }
 
 impl Worker {
@@ -176,6 +179,7 @@ impl Worker {
             last_usage: None,
             last_procs: None,
             parked: HashSet::new(),
+            plugins_stamp: am_core::harness::plugins_stamp(),
             last_sync: None,
             stack_git: HashMap::new(),
             agent_seen: HashMap::new(),
@@ -254,6 +258,12 @@ impl Worker {
         }
         let worktrees = db::worktrees(&self.conn)?;
         if procs_due || full_due {
+            let stamp = am_core::harness::plugins_stamp();
+            if stamp != self.plugins_stamp {
+                self.plugins_stamp = stamp;
+                am_core::harness::reload();
+                info!("tui", "Agent plugins changed on disk; reloaded ({} registered)", am_core::harness::all().len());
+            }
             self.procs = self.collect_procs(&worktrees);
             self.last_procs = Some(Instant::now());
         }

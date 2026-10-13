@@ -149,6 +149,24 @@ cat > "$HOME/.claude/projects/-home-user-gemini-project/gem-1.jsonl" <<'JSONL'
 {"type":"assistant","isSidechain":false,"cwd":"/home/user/gemini-project","sessionId":"gem-1","message":{"model":"claude-opus-5-5","usage":{"input_tokens":2,"cache_read_input_tokens":148000,"cache_creation_input_tokens":1998,"output_tokens":120}}}
 JSONL
 
+# --- Training mode: a draft manifest plugin "toycli" (19-plugin-training) -----
+# Its events go through `am hook-event --agent toycli`: a draft captures every
+# one, and the unmapped tool becomes an issue (⚠ 1 on the plugins page).
+mkdir -p "$AM_DATA_DIR/agents" /home/user/toy-project
+cat > "$AM_DATA_DIR/agents/toycli.json" <<'JSON'
+{
+  "id": "toycli", "name": "Toy CLI", "program": "toycli", "status": "draft",
+  "hooks": { "settingsPath": "~/.toycli/hooks.json", "projectDirVar": "TOY_DIR" },
+  "events": { "Prompt": "UserPromptSubmit", "ToolStart": "PreToolUse", "Done": "Stop" },
+  "tools": { "shell": "Bash" },
+  "process": { "names": ["toycli"] },
+  "training": { "captureEvents": ["Thinking"] }
+}
+JSON
+toy_hook() { am hook-event --agent toycli --worktree /home/user/toy-project --event "$1" || true; }
+echo '{"hook_event_name":"Prompt","session_id":"toy-1","cwd":"/home/user/toy-project"}' | toy_hook Prompt
+echo '{"hook_event_name":"ToolStart","session_id":"toy-1","cwd":"/home/user/toy-project","tool_name":"grep_files"}' | toy_hook ToolStart
+
 # 7682: a fresh, empty data dir on every connection → first-run setup wizard.
 cat > /usr/local/bin/am-tui-fresh <<'SH'
 #!/bin/bash

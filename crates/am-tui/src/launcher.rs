@@ -102,6 +102,23 @@ pub fn open_url(url: String, tx: Sender<Msg>) {
 
 /// Checks for a newer release now and then every [`update_check::CHECK_INTERVAL`].
 /// Re-reads `checkForUpdates` each time, so turning it off stops the requests.
+/// Settings → Harnesses: set up a training workspace and open the harness in
+/// a terminal with the prompt ready (`am_core::harness::training`).
+pub fn train(mode: am_core::harness::training::Mode, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        use am_core::harness::training;
+        let result = training::prepare(&mode).and_then(|p| training::start(&p));
+        let msg = match result {
+            Ok(m) => m,
+            Err(e) => {
+                am_core::warn!("launch", "Training session for {mode:?} failed: {e}");
+                format!("✗ {e}")
+            }
+        };
+        let _ = tx.send(Msg::Popup(msg));
+    });
+}
+
 pub fn spawn_update_check(tx: Sender<Msg>) {
     use am_core::update_check;
     let spawned = std::thread::Builder::new().name("update-check".into()).spawn(move || {

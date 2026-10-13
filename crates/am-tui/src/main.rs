@@ -317,6 +317,7 @@ fn dispatch(
         Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),
         Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
         Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
+        Action::Train(mode) => launcher::train(mode, launch_tx.clone()),
         Action::InstallHooks => {
             // Every agent the wizard listed; the first failure is reported.
             let kinds: Vec<_> = app.setup.as_ref().map(|s| s.agents.iter().map(|(k, _)| *k).collect()).unwrap_or_default();

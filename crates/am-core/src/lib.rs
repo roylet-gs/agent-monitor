@@ -22,3 +22,5 @@ pub mod timefmt;
 pub mod update_check;
 pub mod usage;
 pub mod worktrees;
+#[cfg(test)]
+mod test_env;

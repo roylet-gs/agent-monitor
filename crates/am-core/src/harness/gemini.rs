@@ -56,6 +56,10 @@ impl Harness for Gemini {
         MANIFEST.notes.as_deref()
     }
 
+    fn manifest(&self) -> Option<&Manifest> {
+        Some(&MANIFEST)
+    }
+
     fn is_present(&self) -> bool {
         gemini_dir().is_dir()
     }

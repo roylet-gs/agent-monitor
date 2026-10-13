@@ -207,6 +207,24 @@ The fields are:
 
 Invalid files are skipped and reported on the plugin page and in `am doctor`. Then turn the plugin on (it is on by default) and install its hooks from **Settings → Agent plugins**, or with `am hooks install --agent mycli`.
 
+### By training mode (let the agent write it)
+
+An agent CLI that am doesn't support yet can write and test its own manifest. Plan and design notes: `docs/plans/plugin-training-mode.md`.
+
+1. **Start.** Settings → Agent plugins → `T` (or **+ Train a new harness plugin…**), then type the command that starts the CLI. Without the TUI, use `am harness train --command <cmd>`. am:
+   - creates `~/.agent-monitor/training/<name>/`, a small git repo, so the training session appears under "Other sessions";
+   - writes the prompt (`crates/am-core/src/harness/training/create.md`) to `TRAINING.md` there;
+   - copies a one-line "read TRAINING.md" to the clipboard;
+   - opens the CLI there in a new terminal.
+2. **Listen.** The agent writes `manifest.json` with `"status": "draft"`. It lists every event its CLI documents: the ones it can map in `events`, the rest in `training.captureEvents`. It then runs `am harness add`. While a plugin is a draft, `am-hook` saves every event it receives to `hook-captures/<id>/`, under its native name, with the hook's argv, cwd and environment variable names, plus the values of variables that name a directory (this is how the agent finds `projectDirVar`). Events that aren't mapped are recorded but never change a status. Most CLIs only read hooks at startup, so the agent fires events from a new session: a short headless run of itself, or steps it gives the user.
+3. **Iterate.**
+   - `am harness captures <id>` summarises what fired.
+   - `am harness test <id> --manifest ./manifest.json` replays the captures through a candidate manifest and prints each event's canonical name and status transition. It writes nothing.
+   - `am harness validate` lists every problem with a JSON path and a hint. It refuses a hook file that another plugin already writes to.
+   - `am harness add --replace` installs a new version and keeps the old one for `am harness rollback`.
+4. **Use the draft.** Rows show a yellow `✎ draft` badge. Every manifest plugin, draft or published, records what goes wrong in `plugin_issues`: unmapped events or tools, a missing `session_id`/`cwd`, no directory for the session at all, a payload that isn't JSON, hooks for an id that has no loadable manifest, and a sessions command that fails. The first occurrence of each is also logged as a WARN under `plugin:<id>`, and draft events are logged at INFO. See them with `am harness issues <id>` and `am logs --module plugin:<id>`.
+5. **Retrain or publish.** `e` on the plugin's row puts it back into draft and opens a session with `edit.md`, which points the agent at the manifest, the captures and the issues. `p` publishes the plugin after a confirmation: it needs a clean validation, removes the capture-only hooks, and drops the badge. The agent is told never to publish.
+
 ### As a built-in (when a manifest isn't enough)
 
 1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. Start from a manifest, as `gemini.rs` does, if most of the agent is declarative.

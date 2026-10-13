@@ -41,3 +41,13 @@ pub fn themes_dir() -> PathBuf {
 pub fn update_check_path() -> PathBuf {
     app_dir().join("update-check.json")
 }
+
+/// Hook payloads captured for one plugin (training mode): `hook-captures/<id>/`.
+pub fn plugin_capture_dir(id: &str) -> PathBuf {
+    capture_dir().join(id)
+}
+
+/// Training workspaces, one git-initialised dir per session (`training/<slug>/`).
+pub fn training_dir() -> PathBuf {
+    app_dir().join("training")
+}

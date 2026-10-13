@@ -15,7 +15,8 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use am_core::harness::HarnessKind;
+use am_core::harness::issues::Issue;
+use am_core::harness::{HarnessKind, capture, manifest};
 use am_core::db::{self, Owner, StatusUpdate, SubagentKey};
 use am_core::status::{self, HookEvent};
 use am_core::{debug, info, paths, settings, warn};
@@ -63,7 +64,9 @@ pub fn parse_hook_args(args: impl IntoIterator<Item = String>) -> Result<HookArg
 /// Handle one hook event: read the JSON payload from stdin, update SQLite and
 /// notify the TUI. Never panics on bad input and never reports failure —
 /// hooks must not block or fail the agent, so callers always exit 0.
-/// `agent` is the `--agent` id; unknown or missing means Claude.
+/// `agent` is the `--agent` id; missing means Claude. An id with no loadable
+/// plugin (a draft whose manifest broke) only captures the payload: its events
+/// mean nothing to Claude's rules, so they must not move any status.
 pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) {
     let s = settings::load();
     am_core::log::init(s.log_level(), s.max_log_size_mb);
@@ -81,21 +84,73 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) 
             Value::Null
         })
     };
-    let kind = HarnessKind::from_db(agent);
-    if agent.is_some_and(|a| HarnessKind::get(a).is_none()) {
-        warn!(MODULE, "Unknown --agent {agent:?}; treating the event as Claude's");
-    }
-    let event = kind.provider().normalize(&payload, event);
-    maybe_capture(kind, &event, &raw);
+    let kind = match agent {
+        None => HarnessKind::CLAUDE,
+        Some(id) => match HarnessKind::get(id) {
+            Some(k) => k,
+            None => return unknown_plugin(id, event, &payload, &raw),
+        },
+    };
+    let ev = kind.provider().normalize(&payload, event);
+    maybe_capture(kind, &ev, &raw);
 
-    if let Err(e) = handle(worktree, kind, &event) {
-        warn!(MODULE, "event={} failed: {e}", event.event);
+    // Manifest plugins: capture drafts, collect issues, and leave the status
+    // alone for events the manifest doesn't map (capture-only ones).
+    let mut issues = Vec::new();
+    let mut mapped = true;
+    if !kind.is_builtin()
+        && let Some(m) = kind.provider().manifest()
+    {
+        let native = m.native_event(&payload, event);
+        let module = am_core::harness::issues::log_module(kind.id());
+        if kind.is_draft() || capture_requested() {
+            let _ = capture::write(kind.id(), native.as_deref().unwrap_or("unknown"), &raw);
+        }
+        if kind.is_draft() {
+            info!(
+                &module,
+                "{} → {} tool={} session={} cwd={}",
+                native.as_deref().unwrap_or("?"),
+                ev.event,
+                ev.tool_name.as_deref().unwrap_or("-"),
+                ev.session_id.as_deref().unwrap_or("-"),
+                ev.cwd.as_deref().unwrap_or("-")
+            );
+        }
+        issues = am_core::harness::issues::hook_issues(m, native.as_deref(), &payload, &ev);
+        mapped = native.as_deref().is_some_and(|n| m.maps_event(n));
     }
-    debug!(MODULE, "event={} handled in {:.2}ms", event.event, started.elapsed().as_secs_f64() * 1000.0);
+    if !mapped {
+        am_core::harness::issues::record_now(kind.id(), &issues);
+        debug!(MODULE, "[{}] unmapped event {:?}; captured only", kind.id(), event);
+        return;
+    }
+
+    if let Err(e) = handle(worktree, kind, &ev, &mut issues) {
+        warn!(MODULE, "event={} failed: {e}", ev.event);
+    }
+    debug!(MODULE, "event={} handled in {:.2}ms", ev.event, started.elapsed().as_secs_f64() * 1000.0);
 }
 
+/// Hooks for an id with no loadable plugin: keep the payload for the training
+/// agent and record why, but never touch a status.
+fn unknown_plugin(id: &str, event: Option<&str>, payload: &Value, raw: &str) {
+    if !manifest::valid_id(id) {
+        warn!(MODULE, "Ignoring an event for invalid --agent {id:?}");
+        return;
+    }
+    let native = event.map(str::to_owned).or_else(|| payload.get("hook_event_name").and_then(Value::as_str).map(str::to_owned));
+    let _ = capture::write(id, native.as_deref().unwrap_or("unknown"), raw);
+    let why = am_core::harness::plugin_errors().iter().find(|e| e.starts_with(&format!("{id}.json:"))).cloned();
+    let issue = Issue::new(am_core::harness::issues::UNKNOWN_PLUGIN, id, why.or_else(|| Some("no manifest with this id".into())));
+    am_core::harness::issues::record_now(id, &[issue]);
+}
 
-fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Result<()> {
+fn capture_requested() -> bool {
+    std::env::var_os("AM_HOOK_CAPTURE").is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent, issues: &mut Vec<Issue>) -> rusqlite::Result<()> {
     info!(
         MODULE,
         "[{}] event={} tool={} agent={} stop_hook_active={} permission_mode={} for {}",
@@ -109,7 +164,21 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
     );
 
     let conn = db::open()?;
-    let root = worktree_root(Path::new(worktree_arg)).unwrap_or_else(|| PathBuf::from(worktree_arg));
+    // A harness without a project-dir variable leaves `--worktree ""`: use the payload's cwd.
+    let dir = if worktree_arg.trim().is_empty() { ev.cwd.as_deref().unwrap_or("") } else { worktree_arg };
+    let found = worktree_root(Path::new(dir));
+    // Outside git is fine (a standalone session); no directory at all is not.
+    if dir.is_empty() && !kind.is_builtin() {
+        issues.push(Issue::new(am_core::harness::issues::NO_WORKTREE, "(no directory)", Some("--worktree was empty and the payload has no cwd".into())));
+    }
+    if !kind.is_builtin() {
+        am_core::harness::issues::record(&conn, kind.id(), issues);
+    }
+    if dir.is_empty() {
+        debug!(MODULE, "[{}] no directory for event={}; skipped", kind.id(), ev.event);
+        return Ok(());
+    }
+    let root = found.unwrap_or_else(|| PathBuf::from(dir));
     let root_str = root.to_string_lossy().into_owned();
     let owner = match db::find_worktree(&conn, &root_str)? {
         Some(o) => o,
@@ -328,7 +397,8 @@ fn worktree_root(start: &Path) -> Option<PathBuf> {
 /// wins) so field names can be verified against what each agent really sends.
 /// Claude's files keep their old names; other agents' get an `<id>-` prefix.
 fn maybe_capture(kind: HarnessKind, ev: &HookEvent, raw: &str) {
-    if std::env::var_os("AM_HOOK_CAPTURE").is_none_or(|v| v.is_empty() || v == "0") {
+    // Manifest plugins capture per plugin instead (`harness::capture`).
+    if !capture_requested() || !kind.is_builtin() {
         return;
     }
     let dir = paths::capture_dir();

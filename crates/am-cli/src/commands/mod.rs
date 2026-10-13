@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod doctor;
+pub mod harness;
 pub mod hooks;
 pub mod lifecycle;
 pub mod linear;
