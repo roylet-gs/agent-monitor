@@ -2,6 +2,8 @@
 
 am started as a dashboard for Claude Code. This document describes how it was made agent-agnostic, why it is built this way, and how to add another agent CLI. Gemini CLI is the first agent added this way.
 
+> **Harness, not model.** The pluggable unit is the *harness*: the CLI or IDE that runs the model, fires the hooks, writes the transcripts, owns the resume command and shows up in the process table. The model is an attribute of a session; Codex, Copilot, Cursor, OpenCode and others run many models, and Claude Code can sit behind a gateway. The code calls a plugin a `Harness` (`am_core::harness`, handle `HarnessKind`); persisted names keep the older word (`--agent` with alias `--harness`, the `agent` DB column, `defaultAgent`/`disabledAgents`, `~/.agent-monitor/agents/*.json`) so existing hooks, settings and 1.x keep working.
+
 ## What was Claude-specific
 
 The core of am never depended on Claude itself. The status rules, the SQLite schema, worktrees, integrations and the TUI only need to know what an agent is doing. The Claude-specific parts were all at the edges:
@@ -20,7 +22,7 @@ The core of am never depended on Claude itself. The status rules, the SQLite sch
 
 ### Goal
 
-New agent types must plug in without refactoring am. Nothing outside `crates/am-core/src/agents/` names a specific agent: the DB, the status rules, the TUI, the CLI, settings, doctor and the process scan all go through an **open registry** of providers.
+New agent types must plug in without refactoring am. The DB, the status rules, the TUI, the CLI, settings, doctor and the process scan all go through an **open registry** of providers, and the aim is that nothing outside `crates/am-core/src/harness/` names a specific harness. Known exceptions still to move behind the plugin: the canonical tool names in `status.rs` (`AskUserQuestion`, `ExitPlanMode`…), `procscan::claude_shell_commands`, the `SubagentHandback` parked-subagent rule in `am-tui/src/data.rs`, and the places that special-case Claude as the default harness.
 
 ### Options considered
 
@@ -28,9 +30,9 @@ New agent types must plug in without refactoring am. Nothing outside `crates/am-
 2. **A closed set of compiled providers** (an enum with a `match` per agent). This is fast, but every new agent means edits across the codebase. This was the first cut, and it was rejected for that reason.
 3. **An open registry of providers behind a trait, with two kinds of plugin** (chosen):
    - **Manifest plugins**: a JSON file in `~/.agent-monitor/agents/<id>.json`. It declares the hook file and events, native→canonical event, tool and field mappings, resume arguments, process patterns and an optional session-listing command. No code and no rebuild. Normalising is pure data lookups, so the hook path stays fast.
-   - **Built-in plugins**: a Rust module implementing `AgentProvider`, plus one entry in `agents::BUILTIN`. Use this when an agent needs logic a manifest can't express, such as Claude's transcript-`cwd` session discovery or Gemini's project-slug registry.
+   - **Built-in plugins**: a Rust module implementing `Harness`, plus one entry in `harness::BUILTIN`. Use this when an agent needs logic a manifest can't express, such as Claude's transcript-`cwd` session discovery or Gemini's project-slug registry.
 
-Gemini is built as **both**. Its mapping, hooks, resume arguments and process patterns are the manifest `crates/am-core/src/agents/gemini.json`, in exactly the format users write. Only session discovery is Rust. This proves the manifest format can describe a real agent.
+Gemini is built as **both**. Its mapping, hooks, resume arguments and process patterns are the manifest `crates/am-core/src/harness/gemini.json`, in exactly the format users write. Only session discovery is Rust. This proves the manifest format can describe a real agent.
 
 ### Managing plugins
 
@@ -50,10 +52,10 @@ gemini ─ BeforeTool ─▶ am-hook --agent gemini ─▶ Gemini::normalize ─
 claude ─ PreToolUse ─▶ am-hook                ─▶ Claude::normalize ─▶ HookEvent{PreToolUse, Bash} ─┴▶ map_event_to_status ─▶ SQLite
 ```
 
-### The trait and registry (`crates/am-core/src/agents/mod.rs`)
+### The trait and registry (`crates/am-core/src/harness/mod.rs`)
 
 ```rust
-pub trait AgentProvider: Sync + Send {
+pub trait Harness: Sync + Send {
     fn id(&self) -> &str;                   // "gemini": --agent flag, DB `agent` column, settings
     fn name(&self) -> &str;                 // "Gemini CLI"
     fn short_name(&self) -> &str;           // "Gemini"
@@ -67,18 +69,19 @@ pub trait AgentProvider: Sync + Send {
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent;
     fn discover_sessions(&self, root: &Path) -> Vec<Session>;
     fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>;
+    fn context_usage(&self, root: &Path, session_id: &str) -> Option<ContextUsage>; // default None
     fn matches_process(&self, name: &str, argv: &[String]) -> bool;
 }
 ```
 
-`AgentKind` is a copyable handle to a registered provider, compared by id. `agents::all()` returns the built-ins followed by manifest plugins, which are loaded once per process. `AgentKind::get(id)` checks the built-ins first, so a Claude or Gemini hook never reads the plugin directory.
+`HarnessKind` is a copyable handle to a registered provider, compared by id. `harness::all()` returns the built-ins followed by manifest plugins, which are loaded once per process. `HarnessKind::get(id)` checks the built-ins first, so a Claude or Gemini hook never reads the plugin directory.
 
 The shared machinery around the registry is:
 
 - **`hooks_installer`** has `install_hooks(kind)`, `uninstall_hooks(kind)` and `is_hooks_installed(kind)`. They share the existing "replace our entries, keep everyone else's" rules and the `is_am_hook_command` marker. A settings file that exists but can't be parsed is now an error rather than being treated as empty, because Gemini allows comments in `settings.json` and a rewrite would silently drop them.
 - **`am-hook`** takes `--agent <id>` (default `claude`, so existing Claude hook entries keep working unchanged), normalises the event through the provider and records the agent on the status row. Older binaries ignore the unknown flag.
 - **DB schema v3** adds a nullable `agent TEXT` column to `agent_status` and `standalone_sessions`. NULL means Claude, which is what every 1.x row is. An unknown id, such as a plugin that has since been removed, also reads as Claude. The change is additive, so 1.x can still read the DB.
-- **`launch`**: `Session` and `Resume` carry an `AgentKind`. `discover_sessions` merges every enabled provider's sessions. `resume_for(root, known_agent, default_agent)` uses the agent the hooks last saw, otherwise the newest session of any agent, otherwise `defaultAgent`. `agent_command` builds `<program> <resume args>`.
+- **`launch`**: `Session` and `Resume` carry an `HarnessKind`. `discover_sessions` merges every enabled provider's sessions. `resume_for(root, known_agent, default_agent)` uses the agent the hooks last saw, otherwise the newest session of any agent, otherwise `defaultAgent`. `agent_command` builds `<program> <resume args>`.
 - **`procscan`** excludes any registered agent CLI, and anything it spawns directly, from a worktree's running processes.
 - **TUI**: a non-Claude row gets a blue `✦ <id>` badge (`✦` below 100 columns). `c` is now "agent". The wizard's hook step installs for every detected, enabled plugin.
 
@@ -92,7 +95,7 @@ Verified against `google-gemini/gemini-cli` at `51617c1` (0.65.0-nightly, 2026-1
 
 ### Hooks
 
-All of the following is declared in `crates/am-core/src/agents/gemini.json`.
+All of the following is declared in `crates/am-core/src/harness/gemini.json`.
 
 Gemini's hook system is modelled on Claude Code's. It has the same `{"hooks": {"<Event>": [{"matcher", "hooks": [{"type": "command", "command", "timeout"}]}]}}` shape in `~/.gemini/settings.json`, the same common stdin keys (`session_id`, `transcript_path`, `cwd`, `hook_event_name`), and `timeout` in milliseconds. Hooks are on by default (`hooksConfig.enabled`).
 
@@ -202,7 +205,7 @@ Invalid files are skipped and reported on the plugin page and in `am doctor`. Th
 
 ### As a built-in (when a manifest isn't enough)
 
-1. Add a module in `crates/am-core/src/agents/` that implements `AgentProvider`. Start from a manifest, as `gemini.rs` does, if most of the agent is declarative.
-2. Add one entry to `agents::BUILTIN`. Nothing else in am changes.
+1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. Start from a manifest, as `gemini.rs` does, if most of the agent is declarative.
+2. Add one entry to `harness::BUILTIN`. Nothing else in am changes.
 3. Give it unit tests next to the module: normalisation, a full turn through `map_event_to_status`, the hook entry shape, and session discovery against a temp dir. Add an `am-hook` integration test that replays native payloads.
 4. Update this file, `README.md`, `CLAUDE.md` and `STATUS_MAPPING.md`.

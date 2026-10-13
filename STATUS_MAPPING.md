@@ -2,7 +2,7 @@
 
 How hook events become a worktree's agent status. The rules live in `crates/am-core/src/status.rs` (`map_event_to_status`, unit-tested there); the hook handler that applies them is `crates/am-hook/src/lib.rs`.
 
-The rules are written against Claude Code's event vocabulary, which is am's **canonical** format. Other agent CLIs are translated into it by their provider (`crates/am-core/src/agents/`) before these rules run; see [Other agents](#other-agents) and `docs/agent-providers.md`.
+The rules are written against Claude Code's event vocabulary, which is am's **canonical** format. Other agent CLIs are translated into it by their provider (`crates/am-core/src/harness/`) before these rules run; see [Other agents](#other-agents) and `docs/agent-providers.md`.
 
 ## Status Types
 
