@@ -5,7 +5,7 @@ expression: "render(&app, 100, 24)"
 ╭─Worktrees ─────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available ╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ ⬆ am v2.2.0 is available (you have v2.1.1)                                       │░ 121k │
-│ ◐ fix/│ Update: brew upgrade agent-monitor                                               │░ 185k │
+│ ◐ fix/│ Update: brew update && brew upgrade agent-monitor                                │░ 185k │
 │       │                                                                                  │       │
 │gridsig│ General                                                                          │───────│
 │ · main│▌  Open in                       vscode                                           │       │
