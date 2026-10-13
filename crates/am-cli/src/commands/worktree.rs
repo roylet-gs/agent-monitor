@@ -159,6 +159,7 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
                     "branch": w.branch,
                     "path": w.path,
                     "agent": agent.unwrap_or("unknown"),
+                    "agentCli": v.agent.as_ref().map(|a| a.agent.id()),
                     "git": git_json(&git),
                     "lastCommit": v.last_commit.as_ref().map(commit_json),
                     "pr": (!pr_label.is_empty()).then_some(&pr_label),
@@ -245,7 +246,7 @@ pub fn info(target: &str, repo_path: Option<&str>, as_json: bool) {
             "exists": exists,
             "repo": repo.name,
             "repoPath": repo.path,
-            "agent": agent.as_ref().map(|a| json!({ "status": a.status, "sessionId": a.session_id, "updatedAt": a.updated_at })),
+            "agent": agent.as_ref().map(|a| json!({ "status": a.status, "sessionId": a.session_id, "updatedAt": a.updated_at, "cli": a.agent.id() })),
             "git": git.as_ref().map(git_json),
             "lastCommit": commit.as_ref().map(commit_json),
             "pr": pr,
@@ -259,7 +260,7 @@ pub fn info(target: &str, repo_path: Option<&str>, as_json: bool) {
         ("Path:".into(), wt.path.clone()),
         ("Exists:".into(), if exists { "yes".into() } else { "NO — worktree directory missing".into() }),
         ("Repo:".into(), format!("{} ({})", repo.name, repo.path)),
-        ("Agent:".into(), agent.as_ref().map(|a| a.status.clone()).unwrap_or_else(|| "unknown".into())),
+        ("Agent:".into(), agent.as_ref().map(|a| format!("{} ({})", a.status, a.agent.provider().name())).unwrap_or_else(|| "unknown".into())),
     ];
     if let Some(sid) = agent.as_ref().and_then(|a| a.session_id.clone()).filter(|s| !s.is_empty()) {
         pairs.push(("Session:".into(), sid));

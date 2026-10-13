@@ -264,8 +264,11 @@ impl Worker {
             debug!("tui", "git refresh for {} worktree(s) in {:?}", fresh.len(), started.elapsed());
             self.git.extend(fresh);
             for w in &stale {
-                let session = agents.get(&w.id).and_then(|a| a.session_id.as_deref());
-                let usage = session.and_then(|sid| context::usage_for(Path::new(&w.path), sid));
+                // Each agent plugin reads its own transcripts (Claude's only, so far).
+                let usage = agents.get(&w.id).and_then(|a| {
+                    let sid = a.session_id.as_deref()?;
+                    a.agent.provider().context_usage(Path::new(&w.path), sid)
+                });
                 self.ctx.insert(w.id.clone(), usage);
             }
         }
@@ -651,6 +654,7 @@ mod tests {
                 is_open: true,
                 active_subagents: 0,
                 updated_at: "2026-10-11 21:00:00".into(),
+                agent: Default::default(),
             }),
             git: None,
             last_commit: None,

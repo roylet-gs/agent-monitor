@@ -2,7 +2,7 @@
 //! `src/cli.tsx` + `src/commands/**`: same command names, aliases, flags,
 //! output formats and exit codes. With no subcommand it execs `am-tui`.
 //!
-//! `hook-event` runs on every Claude Code hook, so it is dispatched before
+//! `hook-event` runs on every agent hook, so it is dispatched before
 //! clap or any other initialisation and shares its code with `am-hook`.
 
 mod commands;
@@ -30,7 +30,7 @@ pub fn fail_stdout(msg: &str) -> ! {
     name = "am",
     bin_name = "am",
     version,
-    about = "Agent Monitor — TUI dashboard for git worktrees & Claude Code agents"
+    about = "Agent Monitor — TUI dashboard for git worktrees & coding agents (Claude Code, Gemini CLI)"
 )]
 struct Cli {
     /// Launch with log panel open
@@ -59,7 +59,7 @@ enum Cmd {
     /// Manage worktrees
     #[command(subcommand, alias = "wt")]
     Worktree(WorktreeCmd),
-    /// Manage Claude sessions per worktree
+    /// Manage agent sessions per worktree
     #[command(subcommand, alias = "a")]
     Agent(AgentCmd),
     /// Manage tracked repositories
@@ -68,13 +68,13 @@ enum Cmd {
     /// View and modify settings
     #[command(subcommand)]
     Settings(SettingsCmd),
-    /// Manage Claude Code hooks
+    /// Manage agent hooks (Claude Code, Gemini CLI)
     #[command(subcommand)]
     Hooks(HooksCmd),
-    /// Install Claude hooks (alias for: hooks install)
-    InstallHooks,
-    /// Remove Claude hooks (alias for: hooks uninstall)
-    UninstallHooks,
+    /// Install agent hooks (alias for: hooks install)
+    InstallHooks(AgentOpt),
+    /// Remove agent hooks (alias for: hooks uninstall)
+    UninstallHooks(AgentOpt),
     /// Show PR info for a worktree branch
     #[command(args_conflicts_with_subcommands = true)]
     Pr(TargetCmd),
@@ -113,6 +113,9 @@ enum Cmd {
         /// Hook is managed by Claude Code (accepted for compatibility)
         #[arg(long)]
         managed: bool,
+        /// Agent CLI that sent the event (claude, gemini); default claude
+        #[arg(short, long, value_name = "id")]
+        agent: Option<String>,
     },
     /// List worktrees (alias for: worktree list)
     Ls(ListArgs),
@@ -199,7 +202,7 @@ enum WorktreeCmd {
 
 #[derive(Subcommand)]
 enum AgentCmd {
-    /// Resume the worktree's latest Claude session in this terminal (claude --resume)
+    /// Resume the worktree's latest agent session in this terminal (claude --resume, gemini --resume)
     Attach {
         target: String,
         #[command(flatten)]
@@ -245,12 +248,19 @@ enum SettingsCmd {
 
 #[derive(Subcommand)]
 enum HooksCmd {
-    /// Install Claude hooks into ~/.claude/settings.json
-    Install,
-    /// Remove agent-monitor hooks from ~/.claude/settings.json
-    Uninstall,
-    /// Check if hooks are installed
+    /// Install hooks (~/.claude/settings.json, ~/.gemini/settings.json); default: every detected agent
+    Install(AgentOpt),
+    /// Remove agent-monitor hooks; default: from every agent
+    Uninstall(AgentOpt),
+    /// Check which agents have hooks installed
     Status(JsonOpt),
+}
+
+#[derive(Args)]
+struct AgentOpt {
+    /// Only this agent (claude, gemini); repeatable
+    #[arg(short, long = "agent", value_name = "id")]
+    agents: Vec<String>,
 }
 
 #[derive(Args)]
@@ -357,7 +367,7 @@ fn main() {
     let mut argv = std::env::args();
     if argv.nth(1).as_deref() == Some("hook-event") {
         match am_hook::parse_hook_args(argv) {
-            Ok(a) => am_hook::run_hook_event(&a.worktree, a.event.as_deref()),
+            Ok(a) => am_hook::run_hook_event(&a.worktree, a.event.as_deref(), a.agent.as_deref()),
             Err(e) => fail(&e),
         }
         return;
@@ -405,12 +415,12 @@ fn main() {
             SettingsCmd::Reset => settings::reset(),
         },
         Some(Cmd::Hooks(h)) => match h {
-            HooksCmd::Install => hooks::install(),
-            HooksCmd::Uninstall => hooks::uninstall(),
+            HooksCmd::Install(a) => hooks::install(&a.agents),
+            HooksCmd::Uninstall(a) => hooks::uninstall(&a.agents),
             HooksCmd::Status(j) => hooks::status(j.json),
         },
-        Some(Cmd::InstallHooks) => hooks::install(),
-        Some(Cmd::UninstallHooks) => hooks::uninstall(),
+        Some(Cmd::InstallHooks(a)) => hooks::install(&a.agents),
+        Some(Cmd::UninstallHooks(a)) => hooks::uninstall(&a.agents),
         Some(Cmd::Pr(t)) => match t.sub {
             None => pr::show(t.target.as_deref(), t.repo.repo.as_deref(), t.json.json),
             Some(TargetSub::Show { target, repo, json }) => pr::show(target.as_deref(), repo.repo.as_deref(), json.json),
@@ -446,7 +456,9 @@ fn main() {
         }),
         Some(Cmd::Status { worktree, set }) => status::run(&worktree, set.as_deref()),
         // Normally caught by the fast path above (e.g. reached via `am --watch hook-event`).
-        Some(Cmd::HookEvent { worktree, event, managed: _ }) => am_hook::run_hook_event(&worktree, event.as_deref()),
+        Some(Cmd::HookEvent { worktree, event, managed: _, agent }) => {
+            am_hook::run_hook_event(&worktree, event.as_deref(), agent.as_deref())
+        }
     }
 }
 

@@ -8,6 +8,7 @@ use am_core::themes;
 use serde_json::{Map, Value};
 
 use crate::app::Key;
+use crate::plugins_ui::{self, PluginEditor, PluginOutcome};
 use crate::theme_builder::{BuilderOutcome, ThemeBuilder};
 
 #[derive(Debug, Clone, Copy)]
@@ -24,6 +25,8 @@ pub enum Kind {
     Theme,
     /// Opens the theme builder.
     ThemeBuilder,
+    /// Opens the agent plugins page.
+    Plugins,
 }
 
 pub struct Field {
@@ -42,7 +45,8 @@ const SOUNDS: &[&str] =
 
 pub const FIELDS: &[Field] = &[
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in", section: "General", kind: Kind::Choice(&["cursor", "vscode", "terminal"]) },
-    Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent Claude session", section: "General", kind: Kind::Bool },
+    Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
+    Field { key: "agentPlugins", label: "Agent plugins…", help: "Turn agent CLIs on/off, install their hooks, pick the default agent", section: "General", kind: Kind::Plugins },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
     Field { key: "startupScriptMode", label: "Run startup script in", help: "pane: output in the Jobs pane; window: a new terminal window", section: "General", kind: Kind::Choice(&["pane", "window"]) },
     Field { key: "defaultBranchPrefix", label: "Branch prefix", help: "Prefix for new worktree branches", section: "General", kind: Kind::Text { secret: false } },
@@ -94,6 +98,7 @@ pub struct SettingsEditor {
     pub editing: Option<String>,
     pub sort: Option<SortEditor>,
     pub builder: Option<ThemeBuilder>,
+    pub plugins: Option<PluginEditor>,
     pub values: Map<String, Value>,
     pub error: Option<String>,
 }
@@ -104,13 +109,14 @@ impl SettingsEditor {
             Ok(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, values, error: None }
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, values, error: None }
     }
 
     /// A click on field `i`: selects it, or changes it (like ⏎) when it is
-    /// already selected. Ignored while the sort editor or theme builder is open.
+    /// already selected. Ignored while a sub-page (agent plugins, sort editor,
+    /// theme builder) covers the field list.
     pub fn click(&mut self, i: usize) -> Outcome {
-        if self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
+        if self.plugins.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
             return Outcome::None;
         }
         if i == self.cursor {
@@ -139,6 +145,12 @@ impl SettingsEditor {
             },
             Kind::ThemeBuilder => "⏎ open".into(),
             Kind::Tokens { .. } => v.and_then(Value::as_u64).map(context::short_tokens).unwrap_or_else(|| "—".into()),
+            Kind::Plugins => {
+                let s = self.settings();
+                let on: Vec<&str> = am_core::agents::enabled(&s).iter().map(|k| k.id()).collect();
+                let on = if on.is_empty() { "none".to_string() } else { on.join(", ") };
+                format!("{on} · default {}", s.default_agent().id())
+            }
             Kind::Sort => {
                 let crits: Vec<SortCriterion> = v.cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                 let on: Vec<&str> = crits.iter().filter(|c| c.enabled).map(|c| sort_label(c.key)).collect();
@@ -153,7 +165,16 @@ impl SettingsEditor {
         }
     }
 
+    /// The editor's current values as typed settings.
+    fn settings(&self) -> Settings {
+        serde_json::from_value(Value::Object(self.values.clone())).unwrap_or_default()
+    }
+
     pub fn on_key(&mut self, key: Key) -> Outcome {
+        if let Some(plugins) = &mut self.plugins {
+            let out = plugins.on_key(key);
+            return self.plugin_effect(out);
+        }
         if let Some(builder) = &mut self.builder {
             match builder.on_key(key) {
                 BuilderOutcome::Stay => {}
@@ -242,6 +263,13 @@ impl SettingsEditor {
                 self.builder = Some(open_builder(self.values.get("theme").and_then(Value::as_str).unwrap_or("ansi")));
                 Outcome::None
             }
+            Kind::Plugins => {
+                let s = self.settings();
+                let errors = am_core::agents::plugin_errors().to_vec();
+                let dir = am_core::hooks_installer::tilde(&am_core::agents::plugins_dir());
+                self.plugins = Some(PluginEditor::new(plugins_ui::load_rows(&s), &s.default_agent, errors, dir));
+                Outcome::None
+            }
             Kind::Number { .. } => {
                 self.editing = Some(self.values.get(f.key).map(|v| v.to_string()).unwrap_or_default());
                 Outcome::None
@@ -311,6 +339,69 @@ impl SettingsEditor {
                 Outcome::None
             }
         }
+    }
+}
+
+impl SettingsEditor {
+    /// Apply an agent-plugins action: persist `disabledAgents` /
+    /// `defaultAgent`, install or remove the plugin's hooks, refresh the rows.
+    fn plugin_effect(&mut self, out: PluginOutcome) -> Outcome {
+        use am_core::agents::AgentKind;
+        use am_core::hooks_installer as hi;
+        let (id, mut outcome) = match &out {
+            PluginOutcome::Stay => return Outcome::None,
+            PluginOutcome::Close => {
+                self.plugins = None;
+                return Outcome::None;
+            }
+            PluginOutcome::SetEnabled(id, _) | PluginOutcome::InstallHooks(id) | PluginOutcome::SetDefault(id) => (id.clone(), Outcome::None),
+        };
+        let Some(kind) = AgentKind::get(&id) else { return Outcome::None };
+        let p = kind.provider();
+        let message = match out {
+            PluginOutcome::SetEnabled(_, on) => {
+                let mut disabled: Vec<String> = self.settings().disabled_agents;
+                disabled.retain(|d| *d != id);
+                if !on {
+                    disabled.push(id.clone());
+                }
+                outcome = self.set("disabledAgents", Value::from(disabled));
+                am_core::info!("agents", "Plugin {id} turned {} via settings", if on { "on" } else { "off" });
+                let s = self.settings();
+                // The default must stay usable: hand it to the first enabled agent.
+                if !on && s.default_agent().id() == id
+                    && let Some(next) = am_core::agents::enabled(&s).first()
+                {
+                    outcome = self.set("defaultAgent", Value::from(next.id()));
+                }
+                match (on, hi::is_hooks_installed(kind)) {
+                    (true, _) if kind == AgentKind::CLAUDE || p.is_present() => match hi::install_hooks(kind) {
+                        Ok(_) => (true, format!("{} on · hooks installed into {}", p.name(), hi::display_path(p))),
+                        Err(e) => (false, format!("{} on, but hooks failed: {e}", p.name())),
+                    },
+                    (true, _) => (true, format!("{} on · not set up on this machine yet (i installs hooks anyway)", p.name())),
+                    (false, true) => match hi::uninstall_hooks(kind) {
+                        Ok(()) => (true, format!("{} off · hooks removed from {}", p.name(), hi::display_path(p))),
+                        Err(e) => (false, format!("{} off, but removing hooks failed: {e}", p.name())),
+                    },
+                    (false, false) => (true, format!("{} off", p.name())),
+                }
+            }
+            PluginOutcome::InstallHooks(_) => match hi::install_hooks(kind) {
+                Ok(_) => (true, format!("Hooks installed into {}", hi::display_path(p))),
+                Err(e) => (false, format!("Couldn't install hooks: {e}")),
+            },
+            PluginOutcome::SetDefault(_) => {
+                outcome = self.set("defaultAgent", Value::from(id.as_str()));
+                (true, format!("c now starts {} where no session has run", p.name()))
+            }
+            PluginOutcome::Stay | PluginOutcome::Close => unreachable!(),
+        };
+        let s = self.settings();
+        if let Some(ed) = &mut self.plugins {
+            ed.refresh(plugins_ui::load_rows(&s), &s.default_agent, message);
+        }
+        outcome
     }
 }
 
@@ -607,5 +698,52 @@ mod tests {
         let ed = SettingsEditor::new(&s);
         let f = FIELDS.iter().find(|f| f.key == "linearApiKey").unwrap();
         assert_eq!(ed.display(f), "••••1234");
+    }
+
+    #[test]
+    fn plugin_page_toggles_hooks_and_the_default() {
+        let (_lock, dir) = data_dir();
+        // Hooks go to $HOME: point it at the temp dir for this test.
+        let home = dir.join("home");
+        std::fs::create_dir_all(home.join(".gemini")).unwrap();
+        let real_home = std::env::var_os("HOME");
+        // SAFETY: settings tests hold LOCK; HOME is restored below.
+        unsafe { std::env::set_var("HOME", &home) };
+
+        let mut ed = SettingsEditor::new(&Settings::parse(r#"{"defaultAgent":"gemini"}"#));
+        goto(&mut ed, "agentPlugins");
+        assert_eq!(ed.display(ed.field()), "claude, gemini · default gemini");
+        ed.on_key(Key::Enter);
+        let rows = &ed.plugins.as_ref().unwrap().rows;
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["claude", "gemini"]);
+        assert!(rows.iter().all(|r| r.enabled && !r.hooks));
+
+        // Install Gemini's hooks, then switch it off: hooks go, and so does the default.
+        ed.on_key(Key::Char('j'));
+        ed.on_key(Key::Char('i'));
+        let gemini = am_core::agents::AgentKind::GEMINI;
+        assert!(am_core::hooks_installer::is_hooks_installed(gemini));
+        let Outcome::Changed(s) = ed.on_key(Key::Char(' ')) else { panic!("expected change") };
+        assert_eq!(s.disabled_agents, ["gemini"]);
+        assert_eq!(s.default_agent, "claude");
+        assert!(!am_core::hooks_installer::is_hooks_installed(gemini));
+        let pl = ed.plugins.as_ref().unwrap();
+        assert_eq!(pl.selected().unwrap().id, "gemini");
+        assert!(!pl.selected().unwrap().enabled);
+        assert!(pl.message.as_ref().is_some_and(|(ok, m)| *ok && m.contains("hooks removed")));
+
+        // On again (installs, the CLI is present), and make it the default.
+        ed.on_key(Key::Char(' '));
+        assert!(am_core::hooks_installer::is_hooks_installed(gemini));
+        let Outcome::Changed(s) = ed.on_key(Key::Char('d')) else { panic!() };
+        assert_eq!((s.default_agent.as_str(), s.disabled_agents.len()), ("gemini", 0));
+        ed.on_key(Key::Esc);
+        assert!(ed.plugins.is_none());
+
+        match real_home {
+            // SAFETY: as above.
+            Some(h) => unsafe { std::env::set_var("HOME", h) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
     }
 }

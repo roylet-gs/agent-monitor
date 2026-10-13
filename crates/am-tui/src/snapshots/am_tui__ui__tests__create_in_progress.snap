@@ -17,4 +17,4 @@ expression: screen
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 ╰────────────────────────────────────────────────────────────────────── 3 of 3 ╯╰──────────────────────────────────────╯
- ⇥ jobs  │ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⇥ jobs  │ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

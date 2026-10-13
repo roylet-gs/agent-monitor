@@ -83,11 +83,12 @@ pub struct StatusRow {
     pub transcript_summary: Option<String>,
     pub is_open: bool,
     pub updated_at: String,
+    pub agent: am_core::agents::AgentKind,
 }
 
 pub fn agent_status(conn: &Connection, worktree_id: &str) -> Option<StatusRow> {
     conn.query_row(
-        "SELECT status, session_id, last_response, transcript_summary, is_open, updated_at
+        "SELECT status, session_id, last_response, transcript_summary, is_open, updated_at, agent
          FROM agent_status WHERE worktree_id = ?1",
         [worktree_id],
         |r| {
@@ -98,6 +99,7 @@ pub fn agent_status(conn: &Connection, worktree_id: &str) -> Option<StatusRow> {
                 transcript_summary: r.get(3)?,
                 is_open: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
                 updated_at: r.get(5)?,
+                agent: am_core::agents::AgentKind::from_db(r.get::<_, Option<String>>(6)?.as_deref()),
             })
         },
     )

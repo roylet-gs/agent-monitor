@@ -8,7 +8,7 @@ expression: out
 │ ◐ fix/offline-cache                                                                4m ▉░░░░ 185k │
 │        ╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮        │
 │gridsigh│                                                                                │────────│
-│ · main │  ✓ Editor  ›  ✓ Claude hooks  ›  ✓ Repositories  ›  ✓ Integrations  ›  Context │        │
+│ · main │  ✓ Editor  ›  ✓ Agent hooks  ›  ✓ Repositories  ›  ✓ Integrations  ›  Context  │        │
 │        │                                                                                │        │
 │        │ How many tokens of context should the bar measure against?                     │        │
 │        │ A session past it doubles the scale until it fits.                             │        │
@@ -21,4 +21,4 @@ expression: out
 │                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

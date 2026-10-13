@@ -10,6 +10,7 @@ mod jobs;
 mod launcher;
 mod modals;
 mod ops;
+mod plugins_ui;
 mod settings_ui;
 mod setup;
 mod theme;
@@ -68,11 +69,9 @@ fn main() -> io::Result<()> {
     // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
     let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
     let show_log = args.iter().any(|a| a == "--log");
-    let (ide, ctx_window) = (settings.ide.clone(), settings.context_window_tokens);
+    let setup = first_run.then(|| setup::Setup::new(Vec::new(), &settings));
     let mut app = App::new(settings);
-    if first_run {
-        app.setup = Some(setup::Setup::new(Vec::new(), &ide, ctx_window));
-    }
+    app.setup = setup;
     app.show_log = show_log;
 
     // ratatui::init enables raw mode + alt screen and installs a panic hook
@@ -303,7 +302,7 @@ fn dispatch(
         Action::Refresh => collector.refresh(true),
         Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
         Action::OpenTerminal(v) => launcher::open_terminal(*v, launch_tx.clone()),
-        Action::OpenClaude(v) => launcher::open_claude(*v, launch_tx.clone()),
+        Action::OpenAgent(v) => launcher::open_agent(*v, &app.settings, launch_tx.clone()),
         Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
         Action::SettingsChanged => {
             *theme = theme::Theme::load(&app.settings.theme);
@@ -314,9 +313,18 @@ fn dispatch(
         Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
         Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
         Action::InstallHooks => {
-            let r = am_core::hooks_installer::install_global_hooks()
-                .map(|bin| bin.map(|b| b.display().to_string()))
-                .map_err(|e| e.to_string());
+            // Every agent the wizard listed; the first failure is reported.
+            let kinds: Vec<_> = app.setup.as_ref().map(|s| s.agents.iter().map(|(k, _)| *k).collect()).unwrap_or_default();
+            let mut r = Ok(None);
+            for kind in kinds {
+                match am_core::hooks_installer::install_hooks(kind) {
+                    Ok(bin) => r = r.map(|prev: Option<String>| prev.or(bin.map(|b| b.display().to_string()))),
+                    Err(e) => {
+                        r = Err(format!("{}: {e}", kind.provider().name()));
+                        break;
+                    }
+                }
+            }
             if let Some(s) = &mut app.setup {
                 s.on_hooks_installed(r);
             }

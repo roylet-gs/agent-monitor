@@ -1,4 +1,5 @@
-//! How full an agent's context window is, read from the tail of its Claude Code
+//! How full an agent's context window is (Claude Code's implementation of
+//! `AgentProvider::context_usage`), read from the tail of its Claude Code
 //! transcript (`~/.claude/projects/<encoded cwd>/<session_id>.jsonl`). Every
 //! main-chain assistant message carries the API `usage`; the prompt size of the
 //! last one (input + cache read + cache creation) is the context in use.
@@ -13,7 +14,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::{debug, launch, paths};
+use crate::agents::claude::encode_project_path;
+use crate::{debug, paths};
 
 /// Smallest `contextWindowTokens` the editors accept.
 pub const MIN_WINDOW: u64 = 1_000;
@@ -115,7 +117,7 @@ pub fn transcript_path_in(projects_dir: &Path, root: &Path, session_id: &str) ->
         return None;
     }
     let file = format!("{session_id}.jsonl");
-    let prefix = launch::encode_project_path(&root.to_string_lossy());
+    let prefix = encode_project_path(&root.to_string_lossy());
     let exact = projects_dir.join(&prefix).join(&file);
     if exact.is_file() {
         return Some(exact);

@@ -31,7 +31,18 @@ export class RustTui extends TuiPage {
   async openUrl(url: string): Promise<void> {
     await this.pg.goto(url);
     await this.pg.waitForSelector(".xterm-screen", { timeout: 15_000 });
-    await this.pg.waitForTimeout(1500);
+    await this.pg.waitForFunction(
+      () => {
+        const term = (window as any).term?.terminal ?? (window as any).terminal ?? (window as any).term;
+        const buf = term?.buffer?.active;
+        if (!buf) return false;
+        for (let i = 0; i < buf.length; i++) {
+          if (buf.getLine(i)?.translateToString(true).trim()) return true;
+        }
+        return false;
+      },
+      { timeout: 15_000 }
+    );
   }
 
   async lines(): Promise<string[]> {
@@ -67,8 +78,16 @@ export class RustTui extends TuiPage {
     for (let pass = 0; pass < 3; pass++) {
       await this.sendKey("Home");
       for (let i = 0; i < max; i++) {
-        if ((await this.selectedName()).startsWith(branch)) return;
+        const name = await this.selectedName();
+        if (name.startsWith(branch)) return;
         await this.sendKey("j");
+        // A redraw elsewhere (a job spinner) can end sendKey's wait before
+        // the selection moved, so wait for the selection itself. At the
+        // bottom of the list `j` changes nothing; give up after 500 ms.
+        const start = Date.now();
+        while (Date.now() - start < 500 && (await this.selectedName()) === name) {
+          await this.pg.waitForTimeout(20);
+        }
       }
     }
     throw new Error(`Row "${branch}" not found.\n${await this.getScreenText()}`);
@@ -134,8 +153,29 @@ export class RustTui extends TuiPage {
     throw new Error(`"${text}" not on screen.\n${lines.join("\n")}`);
   }
 
+  /**
+   * Wait until the screen has not changed for `quiet` ms (at most `max` ms).
+   * Rows can still shift just after `open()` (e.g. a `— ENG-123 —` header
+   * appears when Linear data lands), which would move a click target.
+   */
+  async waitForStableScreen(quiet = 300, max = 3_000): Promise<void> {
+    const start = Date.now();
+    let last = await this.getScreenText();
+    let since = Date.now();
+    while (Date.now() - start < max && Date.now() - since < quiet) {
+      await this.pg.waitForTimeout(50);
+      const now = await this.getScreenText();
+      if (now !== last) {
+        last = now;
+        since = Date.now();
+      }
+    }
+  }
+
   /** Left-click (or double-click) the first occurrence of `text`. */
   async clickText(text: string, opts: { double?: boolean } = {}): Promise<void> {
+    // Clicks are aimed by position, so don't aim at a layout that's moving.
+    await this.waitForStableScreen();
     const { col, row } = await this.findCell(text);
     const { x, y } = await this.cellCenter(col, row);
     if (opts.double) await this.pg.mouse.dblclick(x, y);

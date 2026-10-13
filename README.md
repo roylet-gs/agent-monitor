@@ -1,7 +1,7 @@
 <h1 align="center">Agent Monitor</h1>
 
 <p align="center">
-  <strong>A terminal dashboard for managing git worktrees and monitoring Claude Code agents</strong>
+  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Gemini CLI)</strong>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each Claude Code agent is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
+  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code or Gemini CLI) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
 </p>
 
 ---
@@ -54,7 +54,7 @@ brew install agent-monitor
 am
 ```
 
-On first launch a setup wizard picks your editor, installs the Claude Code hooks, adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
+On first launch a setup wizard picks your editor, installs the agent hooks (Claude Code, plus Gemini CLI when `~/.gemini` exists), adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
 
 ---
 
@@ -62,7 +62,7 @@ On first launch a setup wizard picks your editor, installs the Claude Code hooks
 
 - **macOS or Linux** (arm64 or x64)
 - **git**
-- **Claude Code**, for agent monitoring
+- **Claude Code** and/or **Gemini CLI** (a version with hooks), for agent monitoring
 - **gh CLI** (optional), for PR and CI status ([install](https://cli.github.com)); run `gh auth login` once
 - **Linear API key** (optional), for ticket tracking
 - **Node.js >= 18** only if you install through npm (the package is a small launcher for the native binary)
@@ -71,7 +71,7 @@ On first launch a setup wizard picks your editor, installs the Claude Code hooks
 
 ## Installation
 
-Every install method gives you three binaries: `am` (the CLI, and the dashboard launcher), `am-tui` (the dashboard) and `am-hook` (the Claude Code hook handler).
+Every install method gives you three binaries: `am` (the CLI, and the dashboard launcher), `am-tui` (the dashboard) and `am-hook` (the hook handler the agent CLIs run).
 
 ### npm (GitHub Packages)
 
@@ -128,7 +128,7 @@ Prebuilt tarballs for each platform (with `SHA256SUMS`) are also attached to eve
 Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walks through:
 
 1. **Editor**: Cursor, VS Code or Terminal (what `Enter` opens worktrees in)
-2. **Claude Code hooks**: installs am's hooks into `~/.claude/settings.json`, pointing at the native `am-hook`
+2. **Agent hooks**: installs am's hooks into `~/.claude/settings.json` (and `~/.gemini/settings.json` when Gemini CLI is in use), pointing at the native `am-hook`
 3. **Repositories**: type a path (Tab completes) to start tracking a repo and its worktrees
 4. **Integrations**: GitHub PR status (needs `gh`) and an optional Linear API key
 5. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
@@ -139,7 +139,7 @@ Everything can be changed later: `s` for settings, `A` to add a repository, `am 
 
 ## The Dashboard
 
-One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for Claude sessions running in directories am doesn't track. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
+One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for agent sessions running in directories am doesn't track. Gemini CLI sessions carry a blue `✦ gemini` badge; Claude Code sessions have none. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
 
 Agent status changes show up within about 200 ms of the hook firing.
 
@@ -150,9 +150,9 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `j` / `k`, `↑` / `↓` | Move the selection |
 | `Home` / `G` (`End`) | Jump to top / bottom |
 | `Ctrl-d` / `Ctrl-u` (`PgDn` / `PgUp`) | Page down / up |
-| `Enter` | Open the worktree in your editor (and resume its last Claude session, see below) |
+| `Enter` | Open the worktree in your editor (and resume its last agent session, see below) |
 | `t` | Open a terminal at the worktree (or focus the one already open there) |
-| `c` | Open a terminal running `claude --resume` for the worktree's latest session |
+| `c` | Open a terminal resuming the worktree's latest session (`claude --resume <id>` or `gemini --resume <id>`); with no session yet, starts the `defaultAgent` |
 | `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
 | `l` | Open the Linear ticket |
 | `p` | Open the Linear project |
@@ -179,7 +179,7 @@ The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
 
 While am captures the mouse, your terminal's click-and-drag text selection needs a modifier (usually `Shift`, or `Option` in iTerm2/Terminal.app). Turn `mouseEnabled` off to get plain selection back. The change applies immediately.
 
-**Resume last session.** With `resumeLastSession` on (the default), `Enter` also picks up the worktree's most recent Claude session (started at the worktree root or any subdirectory) unless one is already open:
+**Resume last session.** With `resumeLastSession` on (the default), `Enter` also picks up the worktree's most recent agent session (Claude Code or Gemini CLI, whichever ran last; started at the worktree root or any subdirectory) unless one is already open:
 
 - **Terminal** mode: the new terminal runs `claude --resume <id>` directly.
 - **Cursor / VS Code** mode: `claude --resume <id>` is copied to the clipboard, a popup tells you so, and the editor opens. Paste it into the editor's terminal. am doesn't type into the editor's terminal for you, because that needs macOS Accessibility permission and fails silently without it.
@@ -298,7 +298,9 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | Key | Default | Description |
 | --- | ------- | ----------- |
 | `ide` | `"cursor"` | What `Enter` opens worktrees in: `cursor`, `vscode`, `terminal` |
-| `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest Claude session |
+| `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
+| `defaultAgent` | `"claude"` | Agent plugin `c` starts in a worktree with no session yet (set it in Settings → Agent plugins) |
+| `disabledAgents` | `[]` | Agent plugins switched off: no hooks, no session discovery (Settings → Agent plugins) |
 | `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
@@ -415,7 +417,7 @@ am --version
 | `am repo list` | List tracked repositories | `--json` |
 | `am repo add <path>` | Track a repository (and its existing worktrees) | `--json` |
 | `am repo remove <name-or-path>` | Stop tracking a repository | |
-| `am agent attach <target>` (`am a attach`) | Resume the worktree's latest Claude session in this terminal (`claude --resume`) | `--repo` |
+| `am agent attach <target>` (`am a attach`) | Resume the worktree's latest agent session in this terminal (`claude --resume` / `gemini --resume`) | `--repo` |
 | `am pr [target]` / `am pr show [target]` | PR info for a branch (default: current branch) | `--repo`, `--json` |
 | `am pr open [target]` | Open the PR in the browser | `--repo` |
 | `am linear [target]` / `am linear show [target]` | Linear ticket for a branch | `--repo`, `--json` |
@@ -430,9 +432,9 @@ am --version
 
 | Command | Description | Options |
 | ------- | ----------- | ------- |
-| `am hooks install` (`am install-hooks`) | Install Claude Code hooks into `~/.claude/settings.json` | |
-| `am hooks uninstall` (`am uninstall-hooks`) | Remove am's hooks (other hooks are kept) | |
-| `am hooks status` | Check whether hooks are installed | `--json` |
+| `am hooks install` (`am install-hooks`) | Install hooks for Claude Code (`~/.claude/settings.json`) and every other agent CLI in use (Gemini: `~/.gemini/settings.json`) | `-a, --agent <id>` (repeatable) |
+| `am hooks uninstall` (`am uninstall-hooks`) | Remove am's hooks (other hooks are kept) | `-a, --agent <id>` |
+| `am hooks status` | Check which agents have hooks installed | `--json` |
 | `am settings list` | Show all settings | `--json` |
 | `am settings get <key>` | Get one setting | `--json` |
 | `am settings set <key> <value>` | Set one setting (booleans and numbers are parsed) | |
@@ -446,7 +448,7 @@ am --version
 | `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear` |
 | `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run) | |
-| `am hook-event` | Receive a hook event on stdin (used by Claude Code; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>` |
+| `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
 
 </details>
 
@@ -455,12 +457,12 @@ am --version
 ## How It Works
 
 ```
-Claude Code hook ─▶ am-hook ─▶ SQLite (WAL) ◀── am-tui collector (PRAGMA data_version, every 200 ms)
+Agent CLI hook ──▶ am-hook ─▶ SQLite (WAL) ◀── am-tui collector (PRAGMA data_version, every 200 ms)
                                     ▲
            gh / Linear ─▶ integrations thread (cached in the DB)
 ```
 
-1. **Claude Code runs `am-hook`** on every hook event (11 events: tool use, prompts, stops, notifications, permission requests, session and subagent lifecycle). It takes about 3 ms, maps the event to a status and writes it to SQLite. It never blocks or fails Claude Code.
+1. **The agent CLI runs `am-hook`** on every hook event (Claude Code: 11 events covering tool use, prompts, stops, notifications, permission requests, session and subagent lifecycle; Gemini CLI: 7, run with `--agent gemini`). It takes about 3 ms, translates the agent's native event into am's canonical one, maps it to a status and writes it to SQLite. It never blocks or fails the agent. See `docs/agent-providers.md`.
 2. **Subagents are tracked individually** by their agent id, so a background subagent's tool calls don't overwrite the parent's status, and the worktree shows **delegating** until the last one finishes.
 3. **The dashboard** watches SQLite's change counter, so a hook write shows up within about 200 ms. Git status is refreshed for worktrees whose agent just acted, plus a full sweep every `pollingIntervalMs`. Terminals, editor windows and dev servers are detected with a native process scan every 2 seconds.
 4. **GitHub and Linear** are fetched on a background thread, batched per repository, and cached in the database so the data survives restarts and outages.
@@ -499,7 +501,7 @@ This points your Claude Code hooks at the native `am-hook` binary by absolute pa
 
 ## Troubleshooting
 
-Run `am doctor` first. It checks the data directory, database, settings, Claude hooks, the native `am-hook` binary, `gh`, and your Linear key.
+Run `am doctor` first. It checks the data directory, database, settings, the hooks of each agent CLI in use, the native `am-hook` binary, `gh`, and your Linear key.
 
 `am logs` shows the debug log, with filters:
 
@@ -519,7 +521,9 @@ You can also press `w` in the dashboard to see the log live.
 
 - `am hooks status` should report the hooks as installed; if not, run `am hooks install`.
 - After upgrading from 1.x, run `am hooks install` once so the hooks use `am-hook`.
-- Check `am logs --module hook-event` while Claude is working. No lines means the hooks aren't firing; for more detail, `am settings set logLevel debug`.
+- **Agent plugins:** `s` → **Agent plugins…** lists every agent plugin (Claude Code, Gemini CLI, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `c`. To add an agent CLI without code, see `docs/agent-providers.md`.
+- **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.
+- Check `am logs --module hook-event` while the agent is working. No lines means the hooks aren't firing; for more detail, `am settings set logLevel debug`.
 - A session in a directory am doesn't track shows up under **Other sessions**. Add the repository with `A` or `am repo add <path>`.
 
 **`am-tui not found` or `no native build for …`**
@@ -566,7 +570,8 @@ cargo run -p am-tui                                     # the dashboard
 cargo run -p am-cli -- ls                               # the CLI
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-pnpm test:e2e                                           # Docker E2E (Playwright against the real binaries)
+pnpm test:e2e                                           # Docker E2E: only the specs this branch affects
+pnpm test:e2e:all                                       # Docker E2E: every spec
 ```
 
 Set `AM_DATA_DIR=/tmp/am-dev` to run against an isolated data directory. See [CLAUDE.md](./CLAUDE.md) for the architecture, test setup and release process.

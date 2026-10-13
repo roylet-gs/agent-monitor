@@ -5,7 +5,11 @@
 # host ports are picked by Docker (the tests reach the app over the compose
 # network, not the host).
 #
-#   e2e/run.sh test    build, run the specs, exit with the tests' exit code
+#   e2e/run.sh test    build, run the specs the branch affects (see
+#                      e2e/affected-specs.sh), exit with the tests' exit code;
+#                      exits 0 without building when no spec is affected
+#   e2e/run.sh test --all       build and run every spec
+#   e2e/run.sh test 04 09-new   run only these specs (Playwright file filters)
 #   e2e/run.sh build   build the images only
 #   e2e/run.sh clean   tear down containers, local images and volumes
 #   e2e/run.sh ports   print the host ports of a running stack (debugging)
@@ -22,8 +26,32 @@ compose=(docker compose -p "$project" -f "$root/e2e/docker-compose.yml")
 
 case "${1:-test}" in
   test)
+    shift || true
+    [ "${1:-}" = "--" ] && shift # `pnpm test:e2e -- 04` passes the `--` on
+    if [ "${1:-}" = "--all" ]; then
+      specs=""
+    elif [ $# -gt 0 ]; then
+      specs="$*"
+    else
+      echo "Changed files → E2E specs:"
+      specs=$(bash "$root/e2e/affected-specs.sh" --explain)
+      if [ -z "$specs" ]; then
+        echo "No E2E-relevant changes; skipping the build and the specs (run with --all to force)."
+        exit 0
+      fi
+      [ "$specs" = ALL ] && specs=""
+      specs=$(echo $specs) # one line
+    fi
     echo "E2E compose project: $project"
-    "${compose[@]}" up --build --force-recreate --abort-on-container-exit --exit-code-from tests
+    echo "Specs: ${specs:-all}"
+    export E2E_SPECS="$specs"
+    start=$SECONDS
+    "${compose[@]}" build
+    built=$SECONDS
+    status=0
+    "${compose[@]}" up --force-recreate --abort-on-container-exit --exit-code-from tests || status=$?
+    echo "E2E timings: build $((built - start))s, specs $((SECONDS - built))s"
+    exit $status
     ;;
   build) "${compose[@]}" build ;;
   clean) "${compose[@]}" down -v --rmi local ;;
@@ -34,5 +62,5 @@ case "${1:-test}" in
       echo "$p → $("${compose[@]}" port $p)"
     done
     ;;
-  *) echo "usage: $0 [test|build|clean|ports|logs]" >&2; exit 2 ;;
+  *) echo "usage: $0 [test [--all | spec...]|build|clean|ports|logs]" >&2; exit 2 ;;
 esac

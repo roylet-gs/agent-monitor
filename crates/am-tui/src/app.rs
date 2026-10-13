@@ -48,8 +48,9 @@ pub enum Action {
     Open(Box<WorktreeView>),
     /// `t`: terminal at the worktree.
     OpenTerminal(Box<WorktreeView>),
-    /// `c`: terminal running `claude --resume <latest>`.
-    OpenClaude(Box<WorktreeView>),
+    /// `c`: terminal resuming the worktree's agent (`claude --resume <latest>`,
+    /// `gemini --resume <id>`).
+    OpenAgent(Box<WorktreeView>),
     /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
     OpenUrl(String),
     /// A setting was saved; theme/collector need to pick it up.
@@ -453,7 +454,7 @@ impl App {
             }
             Key::Enter => return self.with_selected(Action::Open),
             Key::Char('t') => return self.with_selected(Action::OpenTerminal),
-            Key::Char('c') => return self.with_selected(Action::OpenClaude),
+            Key::Char('c') => return self.with_selected(Action::OpenAgent),
             Key::Char('g') | Key::Char('o') => return self.url_action(|v, _| {
                 let pr = v.pr.as_ref()?;
                 // Same rule as the TS app: a merged PR jumps to its last active check.
@@ -570,8 +571,11 @@ impl App {
         self.settings = settings;
         if let Some(e) = &mut self.settings_editor {
             let cursor = e.cursor;
+            // The agent-plugins page reports changes while it stays open.
+            let plugins = e.plugins.take();
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
             e.cursor = cursor;
+            e.plugins = plugins;
         }
         let snap = self.snapshot.clone();
         self.apply(snap);

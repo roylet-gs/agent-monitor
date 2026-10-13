@@ -52,5 +52,7 @@ services:
       - TUI_URL=http://app:7681
       - TUI_FRESH_URL=http://app:7682
       - MOCK_API_URL=http://mock-api:4100
+      # Playwright file filters picked by e2e/run.sh; empty = every spec.
+      - E2E_SPECS=${E2E_SPECS:-}
     volumes:
       - ../tests/e2e/tmp:/work/tests/e2e/tmp

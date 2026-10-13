@@ -3,6 +3,7 @@
 //! ratatui diffs each frame against the previous one cell by cell, so a
 //! redraw only writes what changed — no full-screen clears, no flicker.
 
+use am_core::agents::AgentKind;
 use am_core::model::{ChecksStatus, WorktreeView};
 use am_core::status::Status;
 use am_core::{context, timefmt};
@@ -172,6 +173,11 @@ fn draw_settings(
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), banner);
     }
 
+    if let Some(pl) = &ed.plugins {
+        draw_plugins(f, theme, list, help, pl);
+        return;
+    }
+
     if let Some(sort) = &ed.sort {
         let mut lines = vec![
             Line::styled(" Sort order — space on/off · d direction · J/K move · ⏎ save · esc cancel", theme.faint()),
@@ -238,6 +244,55 @@ fn draw_settings(
     let help_line = match &ed.error {
         Some(e) => Line::styled(format!(" {e}"), theme.fg(theme.red)),
         None => Line::styled(format!(" {}", field.help), theme.faint()),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// Settings → Agent plugins.
+fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate::plugins_ui::PluginEditor) {
+    let mut lines = vec![
+        Line::styled(" Agent plugins — space on/off · i install hooks · d default · esc back", theme.faint()),
+        Line::raw(""),
+    ];
+    for (i, r) in pl.rows.iter().enumerate() {
+        let sel = i == pl.cursor;
+        let hooks = match (r.enabled, r.hooks, r.present) {
+            (_, true, _) => Span::styled("hooks ✓      ", theme.fg(theme.green)),
+            (true, false, true) => Span::styled("hooks ✗      ", theme.fg(theme.yellow)),
+            (true, false, false) => Span::styled("not set up   ", theme.faint()),
+            (false, false, _) => Span::styled("—            ", theme.faint()),
+        };
+        let default = if r.id == pl.default_agent { "★ default" } else { "" };
+        let line = Line::from(vec![
+            Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(if r.enabled { " [x] " } else { " [ ] " }, theme.fg(if r.enabled { theme.green } else { theme.faint })),
+            Span::styled(format!("{:<14}", truncate(&r.name, 14)), if r.enabled { theme.fg(theme.text) } else { theme.faint() }),
+            Span::styled(format!("{:<12}", truncate(&r.source, 12)), theme.faint()),
+            hooks,
+            Span::styled(format!("{default:<10}"), theme.fg(theme.accent)),
+        ]);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+    }
+    if !pl.errors.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(" Skipped plugin files:", theme.fg(theme.yellow)));
+        for e in &pl.errors {
+            lines.push(Line::styled(format!("   {}", truncate(e, (list.width as usize).saturating_sub(4))), theme.faint()));
+        }
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(
+        format!(" Add plugins as JSON manifests in {}", pl.plugins_dir),
+        theme.faint(),
+    ));
+    f.render_widget(Paragraph::new(lines), list);
+    let help_line = match (&pl.message, pl.selected()) {
+        (Some((ok, m)), _) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
+        (None, Some(r)) => {
+            let note = r.note.as_deref().map(|n| format!(" · {n}")).unwrap_or_default();
+            Line::styled(format!(" {} · hooks in {}{note}", r.id, r.settings_path), theme.faint())
+        }
+        (None, None) => Line::raw(""),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
 }
@@ -541,7 +596,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
     use crate::setup::{CONTEXT_CHOICES, CONTEXT_CUSTOM, IDES, Step};
     let steps = [
         (Step::Editor, "Editor"),
-        (Step::Hooks, "Claude hooks"),
+        (Step::Hooks, "Agent hooks"),
         (Step::Repos, "Repositories"),
         (Step::Integrations, "Integrations"),
         (Step::Context, "Context"),
@@ -571,8 +626,17 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
             hint = "↑↓ choose  ⏎ next";
         }
         Step::Hooks => {
-            lines.push(Line::raw("am learns what each agent is doing from Claude Code hooks"));
-            lines.push(Line::raw("(written to ~/.claude/settings.json; other hooks are kept)."));
+            lines.push(Line::raw("am learns what each agent is doing from its CLI's hooks"));
+            lines.push(Line::raw("(other hooks in those files are kept):"));
+            lines.push(Line::raw(""));
+            for (kind, on) in &s.agents {
+                let p = kind.provider();
+                lines.push(Line::from(vec![
+                    Span::styled(if *on { "  ✓ " } else { "  ○ " }, theme.fg(if *on { theme.green } else { theme.faint })),
+                    Span::styled(format!("{:<12}", p.name()), theme.fg(theme.text)),
+                    Span::styled(am_core::hooks_installer::display_path(p), theme.faint()),
+                ]));
+            }
             lines.push(Line::raw(""));
             if s.hooks_installed {
                 lines.push(Line::styled("✓ Hooks are installed", theme.fg(theme.green)));
@@ -684,7 +748,8 @@ fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
     let w = 72.min(area.width.saturating_sub(4));
     let mut lines: Vec<Line> = Vec::new();
     for raw in msg.lines() {
-        let style = if raw.starts_with("claude") || raw.starts_with("cd ") { theme.bold(theme.accent) } else { theme.fg(theme.text) };
+        let is_command = raw.starts_with("cd ") || am_core::agents::all().iter().any(|k| raw.starts_with(k.provider().program()));
+        let style = if is_command { theme.bold(theme.accent) } else { theme.fg(theme.text) };
         lines.push(Line::styled(raw.to_string(), style));
     }
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -897,6 +962,14 @@ fn worktree_line<'a>(
     if !deleting && !v.running_processes.is_empty() {
         badge.push_str(" ▶");
     }
+    // Which agent CLI, for anything but the default (Claude Code).
+    let agent_badge = match v.agent.as_ref().map(|a| a.agent) {
+        Some(kind) if !deleting && kind != AgentKind::CLAUDE => {
+            if width >= 100 { format!(" ✦ {}", kind.id()) } else { " ✦".to_string() }
+        }
+        _ => String::new(),
+    };
+    badge.push_str(&agent_badge);
     if !deleting && subagents > 0 {
         if width >= 100 {
             badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
@@ -944,6 +1017,10 @@ fn worktree_line<'a>(
     }
     if let Some(r) = rest.strip_prefix(" ▶") {
         left.push(Span::styled(" ▶", theme.fg(theme.green)));
+        rest = r;
+    }
+    if let Some(r) = rest.strip_prefix(agent_badge.as_str()).filter(|_| !agent_badge.is_empty()) {
+        left.push(Span::styled(agent_badge.clone(), theme.fg(theme.blue)));
         rest = r;
     }
     if let Some(r) = rest.strip_prefix(" deleting…") {
@@ -1349,7 +1426,7 @@ fn git_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>>
 const KEYS: &[(&str, &str, u8)] = &[
     ("⏎", "open", 0),
     ("t", "terminal", 2),
-    ("c", "claude", 1),
+    ("c", "agent", 1),
     ("|", "", 0),
     ("g", "PR", 0),
     ("l", "linear", 0),
@@ -1496,9 +1573,9 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         ("j / k  ↑ / ↓", "move"),
         ("home / G", "top / bottom"),
         ("ctrl-d / ctrl-u", "page down / up"),
-        ("enter", "open (IDE; resumes last Claude session)"),
+        ("enter", "open (IDE; resumes last agent session)"),
         ("t", "terminal at worktree"),
-        ("c", "terminal running claude --resume"),
+        ("c", "terminal resuming the agent (claude / gemini)"),
         ("g / l / p", "open PR / Linear ticket / Linear project"),
         ("w", "toggle log pane"),
         ("n / d / tab", "new / delete worktree / focus jobs pane"),
@@ -1537,6 +1614,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect) {
         pr_legend.push(Span::styled(format!("{note}  "), theme.faint()));
     }
     lines.push(Line::from(pr_legend));
+    lines.push(Line::from(vec![
+        Span::styled("✦ gemini", theme.fg(theme.blue)),
+        Span::styled(" session from another agent plugin, by id (no badge: Claude Code)", theme.faint()),
+    ]));
     let w = 80.min(area.width.saturating_sub(4));
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
@@ -1617,6 +1698,7 @@ mod tests {
                 is_open: true,
                 active_subagents: 0,
                 updated_at: "2025-10-11 09:59:00".into(),
+                agent: Default::default(),
             }),
             git: Some(GitStatus { ahead: 2, behind: 0, dirty: 3 }),
             last_commit: Some(CommitInfo { hash: "eaa3440".into(), message: "bump".into(), timestamp: NOW - 240 }),
@@ -1761,6 +1843,77 @@ mod tests {
     #[test]
     fn dashboard_narrow_stacks_panes() {
         insta::assert_snapshot!(render(&fixture(), 80, 24));
+    }
+
+    #[test]
+    fn gemini_rows_carry_an_agent_badge() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.groups[0].worktrees[1].agent.as_mut().unwrap().agent = AgentKind::GEMINI;
+        app.apply(snap);
+        let row = |w: u16| render(&app, w, 12).lines().find(|l| l.contains("fix/offline-cache")).unwrap().to_string();
+        assert!(row(120).contains("fix/offline-cache ✦ gemini"), "{}", row(120));
+        let narrow = row(90);
+        assert!(narrow.contains(" ✦") && !narrow.contains("✦ gemini"), "{narrow}");
+        // Claude (the default) rows stay unbadged.
+        assert!(!render(&app, 120, 12).lines().any(|l| l.contains("feature/refactor") && l.contains('✦')));
+    }
+
+    #[test]
+    fn settings_changes_keep_the_plugin_page_open() {
+        // Regression: toggling a plugin persists settings, and rebuilding the
+        // editor on that change used to close the page under the user.
+        let mut app = fixture();
+        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
+        ed.plugins = Some(crate::plugins_ui::PluginEditor::new(vec![], "claude", vec![], String::new()));
+        app.settings_editor = Some(ed);
+        app.set_settings(Settings { disabled_agents: vec!["gemini".into()], ..app.settings.clone() });
+        assert!(app.settings_editor.as_ref().is_some_and(|e| e.plugins.is_some()));
+    }
+
+    #[test]
+    fn clicks_on_the_hidden_field_list_leave_the_plugin_page_alone() {
+        let mut ed = crate::settings_ui::SettingsEditor::new(&Settings::default());
+        let plugins_row = crate::settings_ui::FIELDS.iter().position(|f| f.key == "agentPlugins").unwrap();
+        ed.cursor = plugins_row;
+        ed.plugins = Some(crate::plugins_ui::PluginEditor::new(vec![], "claude", vec![], String::new()));
+        // Same row as the cursor (would be ⏎) and another row (would move the cursor).
+        for i in [plugins_row, 0] {
+            assert!(matches!(ed.click(i), crate::settings_ui::Outcome::None));
+            assert!(ed.plugins.is_some());
+            assert_eq!(ed.cursor, plugins_row);
+        }
+    }
+
+    #[test]
+    fn agent_plugins_page() {
+        use crate::plugins_ui::{PluginEditor, PluginRow};
+        let mut app = fixture();
+        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
+        let row = |id: &str, name: &str, source: &str, enabled, hooks, present| PluginRow {
+            id: id.into(),
+            name: name.into(),
+            source: source.into(),
+            enabled,
+            hooks,
+            present,
+            settings_path: format!("~/.{id}/settings.json"),
+            note: None,
+        };
+        let mut pl = PluginEditor::new(
+            vec![
+                row("claude", "Claude Code", "built-in", true, true, true),
+                row("gemini", "Gemini CLI", "built-in", true, false, true),
+                row("mycli", "My CLI", "mycli.json", false, false, false),
+            ],
+            "claude",
+            vec!["broken.json: expected value at line 1 column 3".into()],
+            "~/.agent-monitor/agents".into(),
+        );
+        pl.cursor = 1;
+        ed.plugins = Some(pl);
+        app.settings_editor = Some(ed);
+        insta::assert_snapshot!(render(&app, 100, 24));
     }
 
     #[test]
@@ -2009,6 +2162,7 @@ mod tests {
             step: crate::setup::Step::Context,
             ide: 0,
             hooks_installed: true,
+            agents: vec![(am_core::agents::AgentKind::CLAUDE, true)],
             hook_binary: None,
             repo_input: "~/".into(),
             repos_added: vec![],

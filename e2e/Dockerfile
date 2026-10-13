@@ -102,4 +102,5 @@ COPY tests/e2e/docker/ ./tests/e2e/docker/
 ENV TUI_URL=http://app:7681
 ENV MOCK_API_URL=http://mock-api:4100
 
-CMD ["pnpm", "exec", "playwright", "test", "--config", "e2e/playwright.config.ts"]
+# E2E_SPECS (set by e2e/run.sh) narrows the run to the affected specs.
+CMD ["sh", "-c", "exec pnpm exec playwright test --config e2e/playwright.config.ts $E2E_SPECS"]

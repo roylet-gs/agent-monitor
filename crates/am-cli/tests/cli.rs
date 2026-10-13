@@ -334,7 +334,10 @@ fn hooks_install_status_uninstall() {
     env.ok(&["hooks", "install"]);
     let again: Value = serde_json::from_str(&std::fs::read_to_string(&claude_settings).unwrap()).unwrap();
     assert_eq!(again, v);
-    assert_eq!(env.ok(&["hooks", "status", "--json"]).json(), json!({"installed": true}));
+    assert_eq!(
+        env.ok(&["hooks", "status", "--json"]).json(),
+        json!({"installed": true, "agents": {"claude": true, "gemini": false}})
+    );
 
     // Opting out of the native binary falls back to the TS command.
     env.extra_env = vec![("AM_NO_NATIVE_HOOK".into(), "1".into())];
@@ -361,6 +364,119 @@ fn hooks_install_prefers_am_hook_next_to_the_binary() {
     } else {
         assert!(cmd.starts_with("cat | am hook-event"), "{cmd}");
     }
+}
+
+#[test]
+fn hooks_for_gemini() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // No ~/.gemini: Gemini is neither installed by default nor listed.
+    assert_eq!(env.ok(&["hooks", "install"]).stdout, "Hooks installed into ~/.claude/settings.json\n");
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\n");
+    assert!(!env.home().join(".gemini").exists());
+
+    // Once Gemini CLI has been used, install covers it and keeps its other settings and hooks.
+    let gemini_settings = env.home().join(".gemini/settings.json");
+    std::fs::create_dir_all(gemini_settings.parent().unwrap()).unwrap();
+    let mine = json!({"matcher": "write_file", "hooks": [{"type": "command", "command": "./lint.sh"}]});
+    std::fs::write(&gemini_settings, json!({"general": {"vimMode": true}, "hooks": {"BeforeTool": [mine]}}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\nGemini hooks: not installed\n");
+    assert_eq!(
+        env.ok(&["hooks", "install"]).stdout,
+        "Hooks installed into ~/.claude/settings.json\nHooks installed into ~/.gemini/settings.json\n"
+    );
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&gemini_settings).unwrap()).unwrap();
+    assert_eq!(v["general"]["vimMode"], true);
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(
+        hooks.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["BeforeTool", "SessionStart", "SessionEnd", "BeforeAgent", "AfterAgent", "AfterTool", "Notification"]
+    );
+    let before = hooks["BeforeTool"].as_array().unwrap();
+    assert_eq!(before[0], mine);
+    assert_eq!(before[1]["matcher"], "*");
+    assert_eq!(
+        before[1]["hooks"][0]["command"],
+        format!("\"{}\" hook-event --agent gemini --worktree \"$GEMINI_PROJECT_DIR\" --event BeforeTool", fake_hook.display())
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"], json!({"claude": true, "gemini": true}));
+
+    // --agent narrows uninstall; the user's own Gemini hook stays.
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "gemini"]).stdout, "Hooks removed from ~/.gemini/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&gemini_settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"general": {"vimMode": true}, "hooks": {"BeforeTool": [mine]}}));
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\nGemini hooks: not installed\n");
+
+    // Gemini allows comments in settings.json: refuse rather than rewrite (and lose) them.
+    let commented = "{\n  // my settings\n  \"general\": {}\n}\n";
+    std::fs::write(&gemini_settings, commented).unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "gemini"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Failed to install Gemini CLI hooks: can't parse"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&gemini_settings).unwrap(), commented);
+
+    let o = env.run(&["hooks", "install", "--agent", "codex"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Unknown agent: codex. Valid agents: claude, gemini"), "{}", o.stderr);
+}
+
+/// A JSON manifest in `<data>/agents/` is a full agent plugin: no code.
+#[test]
+fn manifest_plugins_need_no_code() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    std::fs::create_dir_all(env.data().join("agents")).unwrap();
+    std::fs::write(
+        env.data().join("agents/mycli.json"),
+        json!({
+            "id": "mycli", "name": "My CLI", "shortName": "MyCLI", "program": "mycli", "configDir": "~/.mycli",
+            "hooks": {"settingsPath": "~/.mycli/hooks.json", "projectDirVar": "MYCLI_DIR"},
+            "events": {"Prompt": "UserPromptSubmit", "Done": "Stop"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(env.data().join("agents/broken.json"), "{").unwrap();
+
+    // Installed by default once the CLI has been used here.
+    std::fs::create_dir_all(env.home().join(".mycli")).unwrap();
+    assert_eq!(
+        env.ok(&["hooks", "install"]).stdout,
+        "Hooks installed into ~/.claude/settings.json\nHooks installed into ~/.mycli/hooks.json\n"
+    );
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(env.home().join(".mycli/hooks.json")).unwrap()).unwrap();
+    assert_eq!(
+        v["hooks"]["Done"][0]["hooks"][0]["command"],
+        format!("\"{}\" hook-event --agent mycli --worktree \"$MYCLI_DIR\" --event Done", fake_hook.display())
+    );
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\nMyCLI hooks: installed\n");
+    env.ok(&["settings", "set", "defaultAgent", "mycli"]);
+    let o = env.run(&["settings", "set", "defaultAgent", "nope"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Available: claude, gemini, mycli"), "{}", o.stderr);
+
+    // Doctor reports the plugin's hooks and the file it skipped.
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("MyCLI hooks: Installed in ~/.mycli/hooks.json"), "{doctor}");
+    assert!(doctor.contains("Agent plugins: Skipped in") && doctor.contains("broken.json"), "{doctor}");
+
+    // Disabled plugins are left out of a default install and refuse an explicit one.
+    env.ok(&["settings", "set", "defaultAgent", "claude"]);
+    let settings_path = env.data().join("settings.json");
+    let mut st: Value = serde_json::from_str(&std::fs::read_to_string(&settings_path).unwrap()).unwrap();
+    st["disabledAgents"] = json!(["mycli"]);
+    std::fs::write(&settings_path, st.to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install"]).stdout, "Hooks installed into ~/.claude/settings.json\n");
+    let o = env.run(&["hooks", "install", "--agent", "mycli"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("My CLI is disabled"), "{}", o.stderr);
 }
 
 // --- status ---

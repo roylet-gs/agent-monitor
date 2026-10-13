@@ -19,4 +19,4 @@ expression: screen
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 ╰────────────────────────────────────────────────────────────────────── 1 of 3 ╯╰──────────────────────────── ⇥ answer ╯
- ⇥ answer  │ ⏎ open  c claude  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⇥ answer  │ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit

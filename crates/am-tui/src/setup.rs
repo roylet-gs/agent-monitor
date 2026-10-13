@@ -1,8 +1,10 @@
 //! First-run setup (shown when settings.json has no `setupCompleted`).
 //! Port of the TS SetupWizard, trimmed to what a first run needs: editor,
-//! Claude hooks, repositories, integrations, context window. Everything is also reachable
+//! agent hooks (Claude Code plus any other agent CLI found), repositories,
+//! integrations, context window. Everything is also reachable
 //! later via `s` (settings), `A` (add repo) and `am hooks install`.
 
+use am_core::agents::{self, AgentKind};
 use serde_json::Value;
 
 use crate::app::Key;
@@ -20,7 +22,10 @@ pub enum Step {
 pub struct Setup {
     pub step: Step,
     pub ide: usize,
+    /// True once every agent in `agents` has hooks.
     pub hooks_installed: bool,
+    /// Agent CLIs the hooks step installs for, and whether each has hooks.
+    pub agents: Vec<(AgentKind, bool)>,
     pub hook_binary: Option<String>,
     pub repo_input: String,
     pub repos_added: Vec<String>,
@@ -49,12 +54,18 @@ pub enum SetupEffect {
 }
 
 impl Setup {
-    pub fn new(existing_repos: Vec<String>, ide: &str, context_window: u64) -> Setup {
+    pub fn new(existing_repos: Vec<String>, settings: &am_core::settings::Settings) -> Setup {
+        let ide = settings.ide.as_str();
+        let agents: Vec<(AgentKind, bool)> =
+            agents::detected(settings).into_iter().map(|k| (k, am_core::hooks_installer::is_hooks_installed(k))).collect();
+        let hooks_installed = agents.iter().all(|(_, on)| *on);
+        let context_window = settings.context_window_tokens;
         let preset = CONTEXT_CHOICES.iter().position(|(n, _)| *n == context_window);
         Setup {
             step: Step::Editor,
             ide: IDES.iter().position(|(k, _)| *k == ide).unwrap_or(0),
-            hooks_installed: am_core::hooks_installer::is_global_hooks_installed(),
+            agents,
+            hooks_installed,
             hook_binary: am_core::hooks_installer::find_native_hook_binary().map(|p| p.display().to_string()),
             repo_input: "~/".into(),
             repos_added: existing_repos,
@@ -159,6 +170,9 @@ impl Setup {
         match result {
             Ok(bin) => {
                 self.hooks_installed = true;
+                for a in &mut self.agents {
+                    a.1 = true;
+                }
                 self.hook_binary = bin.or(self.hook_binary.take());
                 self.step = Step::Repos;
             }
@@ -198,6 +212,7 @@ mod tests {
             step: Step::Editor,
             ide: 0,
             hooks_installed: false,
+            agents: vec![(AgentKind::CLAUDE, false), (AgentKind::GEMINI, true)],
             hook_binary: None,
             repo_input: "~/".into(),
             repos_added: vec![],
@@ -220,6 +235,7 @@ mod tests {
         assert!(matches!(s.on_key(Key::Enter), SetupEffect::InstallHooks));
         s.on_hooks_installed(Ok(Some("/x/am-hook".into())));
         assert_eq!(s.step, Step::Repos);
+        assert!(s.agents.iter().all(|(_, on)| *on));
         for _ in 0..2 {
             s.on_key(Key::Backspace);
         }
@@ -277,9 +293,10 @@ mod tests {
 
     #[test]
     fn new_preselects_the_current_window() {
-        assert_eq!(Setup::new(vec![], "cursor", 1_000_000).ctx_choice, 0);
-        assert_eq!(Setup::new(vec![], "cursor", 200_000).ctx_choice, 1);
-        let s = Setup::new(vec![], "cursor", 128_000);
+        let with = |n: u64| Setup::new(vec![], &am_core::settings::Settings { context_window_tokens: n, ..Default::default() });
+        assert_eq!(with(1_000_000).ctx_choice, 0);
+        assert_eq!(with(200_000).ctx_choice, 1);
+        let s = with(128_000);
         assert_eq!((s.ctx_choice, s.ctx_input.as_str()), (CONTEXT_CUSTOM, "128k"));
     }
 

@@ -1,0 +1,28 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 24)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
+│▌◑ feat│ Agent plugins — space on/off · i install hooks · d default · esc back            │░ 121k │
+│ ◐ fix/│                                                                                  │░ 185k │
+│       │  [x] Claude Code   built-in    hooks ✓      ★ default                            │       │
+│gridsig│▌ [x] Gemini CLI    built-in    hooks ✗                                           │───────│
+│ · main│  [ ] My CLI        mycli.json  —                                                 │       │
+│       │                                                                                  │       │
+│       │ Skipped plugin files:                                                            │       │
+│       │   broken.json: expected value at line 1 column 3                                 │       │
+│       │                                                                                  │       │
+│       │ Add plugins as JSON manifests in ~/.agent-monitor/agents                         │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │ gemini · hooks in ~/.gemini/settings.json                                        │       │
+╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
+ ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
