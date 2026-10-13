@@ -1,6 +1,6 @@
 //! Slim settings editor (`s`). Edits `settings.json` key by key so unknown
 //! keys (written by the TS app or a newer version) survive. `e` opens the
-//! whole file in $EDITOR for anything not listed here.
+//! whole file in the IDE (or $EDITOR) for anything not listed here.
 
 use am_core::context;
 use am_core::settings::{Direction, SortCriterion, SortKey, Settings};

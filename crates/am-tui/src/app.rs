@@ -57,7 +57,8 @@ pub enum Action {
     OpenUrl(String),
     /// A setting was saved; theme/collector need to pick it up.
     SettingsChanged,
-    /// `e` in settings: open settings.json in $EDITOR.
+    /// `e` in settings: open settings.json in the `ide` (editor or custom command), or
+    /// `$EDITOR` in this terminal when `ide` is `terminal`.
     EditSettingsFile,
     /// Job id, repo and request.
     Create(u64, Box<Repository>, Box<am_core::worktrees::CreateRequest>),
