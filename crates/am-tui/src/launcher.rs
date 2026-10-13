@@ -1,5 +1,5 @@
 //! Runs the open actions off the UI thread and reports back as messages.
-//! Port of `handleOpen` / `handleOpenClaude` in `src/app.tsx`, generalised to
+//! Port of `handleOpen` in `src/app.tsx`, generalised to
 //! any agent CLI (`am_core::harness`).
 
 use std::path::Path;
@@ -75,23 +75,6 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
             }
         };
         report(&tx, result, format!("Opened {label}"));
-    });
-}
-
-pub fn open_terminal(v: WorktreeView, tx: Sender<Msg>) {
-    std::thread::spawn(move || {
-        let label = v.worktree.display_name().to_string();
-        let r = if v.has_terminal { launch::focus_terminal_app() } else { launch::open_terminal(Path::new(&v.worktree.path), None) };
-        report(&tx, r, format!("Terminal for {label}"));
-    });
-}
-
-pub fn open_agent(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
-    let default_agent = settings.default_agent();
-    std::thread::spawn(move || {
-        let path = Path::new(&v.worktree.path);
-        let cmd = launch::agent_command(&launch::resume_for(path, known_agent(&v), default_agent));
-        report(&tx, launch::open_terminal(path, Some(&cmd)), format!("Started `{cmd}`"));
     });
 }
 

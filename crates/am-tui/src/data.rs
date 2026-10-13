@@ -18,6 +18,7 @@ use am_core::model::{AgentState, CommitInfo, GitStatus, Ide, LinearInfo, PrInfo,
 use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::context::ContextUsage;
+use am_core::usage::DailyUsage;
 use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
 
@@ -30,6 +31,8 @@ const PROCESS_INTERVAL: Duration = Duration::from_secs(2);
 /// Pick up worktrees created/removed outside am (`git worktree add`, other
 /// tools): one `git worktree list` per repo.
 const SYNC_INTERVAL: Duration = Duration::from_secs(10);
+/// Re-read the transcripts' appended bytes for today's token total.
+const USAGE_INTERVAL: Duration = Duration::from_secs(10);
 /// Recently finished subagents stay visible this long.
 const RECENT_SUBAGENT_MINUTES: u32 = 30;
 /// How far back a stopped subagent can still be "parked" (waiting on a
@@ -138,6 +141,9 @@ struct Worker {
     procs: HashMap<String, ProcData>,
     /// Context usage per worktree id, re-read with the git data.
     ctx: HashMap<String, Option<ContextUsage>>,
+    /// Today's token usage, read incrementally (only while `showDailyTokens`).
+    usage: DailyUsage,
+    last_usage: Option<Instant>,
     last_procs: Option<Instant>,
     last_sync: Option<Instant>,
     /// Per repo: (branch-tips signature, trunk ref, git view) — rev-lists only
@@ -166,6 +172,8 @@ impl Worker {
             git: HashMap::new(),
             procs: HashMap::new(),
             ctx: HashMap::new(),
+            usage: DailyUsage::new(),
+            last_usage: None,
             last_procs: None,
             parked: HashSet::new(),
             plugins_stamp: am_core::harness::plugins_stamp(),
@@ -195,6 +203,10 @@ impl Worker {
                     // Filters/sort/process filter may have changed: rebuild now.
                     self.settings = *s;
                     self.last_procs = None;
+                    self.last_usage = None;
+                    if !self.settings.show_daily_tokens {
+                        self.usage = DailyUsage::new();
+                    }
                     self.data_version = -1;
                 }
                 Err(RecvTimeoutError::Timeout) => {}
@@ -208,6 +220,8 @@ impl Worker {
     fn cycle(&mut self, force: bool) -> rusqlite::Result<()> {
         let full_due = force || self.last_full.is_none_or(|t| t.elapsed() >= self.poll_interval());
         let procs_due = self.last_procs.is_none_or(|t| t.elapsed() >= PROCESS_INTERVAL);
+        let usage_due = self.settings.show_daily_tokens
+            && (force || self.last_usage.is_none_or(|t| t.elapsed() >= USAGE_INTERVAL));
         let mut ints_changed = false;
         while let Ok(u) = self.integrations.try_recv() {
             self.fields = u.fields;
@@ -215,7 +229,7 @@ impl Worker {
             ints_changed = true;
         }
         let dv = db::data_version(&self.conn)?;
-        if !full_due && !procs_due && !ints_changed && dv == self.data_version {
+        if !full_due && !procs_due && !usage_due && !ints_changed && dv == self.data_version {
             return Ok(());
         }
         self.data_version = dv;
@@ -233,6 +247,10 @@ impl Worker {
                     }
                 }
             }
+        }
+        if usage_due {
+            self.usage.refresh(&am_core::harness::enabled(&self.settings));
+            self.last_usage = Some(Instant::now());
         }
         let worktrees = db::worktrees(&self.conn)?;
         if procs_due || full_due {
@@ -327,11 +345,14 @@ impl Worker {
             self.refresh_stack_git(&repos, &worktrees_for_stacks(&views));
         }
         let stack = self.infer_stacks(&views);
+        let mut roots: Vec<String> = views.iter().map(|v| v.worktree.path.clone()).collect();
         let mut groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
         if let Some(g) = self.standalone_group()? {
+            roots.extend(g.worktrees.iter().map(|v| v.worktree.path.clone()));
             groups.push(g);
         }
-        let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone(), stack };
+        let today_tokens = self.today_tokens(&roots, &groups);
+        let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone(), stack, today_tokens };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());
             self.last_sent = Some(snapshot);
@@ -345,6 +366,23 @@ fn worktrees_for_stacks(views: &[WorktreeView]) -> Vec<Worktree> {
 }
 
 impl Worker {
+    /// Today's tokens: everything, or (`dailyTokensScope: "visible"`) only
+    /// the usage attributed to a row on screen. Each session's cwd goes to
+    /// the most specific of *all* known roots, so a visible main checkout
+    /// doesn't pick up its hidden nested worktrees.
+    fn today_tokens(&self, roots: &[String], groups: &[am_core::model::WorktreeGroup]) -> Option<u64> {
+        if !self.settings.show_daily_tokens || self.last_usage.is_none() {
+            return None;
+        }
+        if !self.settings.daily_tokens_visible_only() {
+            return Some(self.usage.total());
+        }
+        let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
+        let by_root = self.usage.by_root(&roots);
+        let visible: HashSet<&str> = groups.iter().flat_map(|g| &g.worktrees).map(|v| v.worktree.path.as_str()).collect();
+        Some(by_root.iter().filter(|(r, _)| visible.contains(r.as_str())).map(|(_, n)| n).sum())
+    }
+
     fn refresh_stack_git(&mut self, repos: &[am_core::model::Repository], worktrees: &[Worktree]) {
         for repo in repos {
             let path = Path::new(&repo.path);

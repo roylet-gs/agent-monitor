@@ -21,4 +21,4 @@ expression: "render(&app, 100, 20)"
 │       │                                                                                  │       │
 │       │ Publish toycli? Stops capturing, drops the draft badge · y yes · any key no      │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
- ⏎ open  c agent  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

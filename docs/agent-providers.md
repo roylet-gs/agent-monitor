@@ -39,7 +39,7 @@ Gemini is built as **both**. Its mapping, hooks, resume arguments and process pa
 - **Settings → Agent plugins…** (TUI sub-page, `crates/am-tui/src/plugins_ui.rs`) lists every registered plugin with its source (`built-in` or the manifest file), whether it is on, its hook status and the default marker. It also shows manifest files that failed to load.
   - **space** turns a plugin on or off. Off removes am's hooks from that CLI, and on installs them (when the CLI is set up on this machine).
   - **i** (re)installs the hooks.
-  - **d** makes the plugin the default agent that `c` starts.
+  - **d** makes the plugin the default agent that `Enter` starts in a worktree with no session yet.
 - The state lives in `settings.json`: `disabledAgents` (ids) and `defaultAgent`. A disabled plugin is left out of `am hooks install`, the setup wizard and session discovery.
 - `am doctor` checks every plugin's hooks and lists manifest files it skipped. `am hooks install|uninstall --agent <id>` and `am settings set defaultAgent <id>` accept any registered id.
 
@@ -70,9 +70,13 @@ pub trait Harness: Sync + Send {
     fn discover_sessions(&self, root: &Path) -> Vec<Session>;
     fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>;
     fn context_usage(&self, root: &Path, session_id: &str) -> Option<ContextUsage>; // default None
+    fn usage_files(&self, since: SystemTime) -> Vec<PathBuf>;           // default empty
+    fn usage_record(&self, line: &str) -> Option<UsageRecord>;          // default None
     fn matches_process(&self, name: &str, argv: &[String]) -> bool;
 }
 ```
+
+`usage_files` and `usage_record` feed today's token total (`am_core::usage`). The first lists transcript files modified since local midnight, subagent transcripts included. The second parses one line into `{ id, at, cwd, tokens }`, with `tokens` summing every billed class (input, cache creation, cache read, output). The tracker reads only appended bytes, de-duplicates by `id`, and attributes each `cwd` to the most specific worktree root. Claude implements both. Gemini and manifest plugins use the defaults for now, so their sessions don't count yet.
 
 `HarnessKind` is a copyable handle to a registered provider, compared by id. `harness::all()` returns the built-ins followed by manifest plugins, which are loaded once per process. `HarnessKind::get(id)` checks the built-ins first, so a Claude or Gemini hook never reads the plugin directory.
 
@@ -83,7 +87,7 @@ The shared machinery around the registry is:
 - **DB schema v3** adds a nullable `agent TEXT` column to `agent_status` and `standalone_sessions`. NULL means Claude, which is what every 1.x row is. An unknown id, such as a plugin that has since been removed, also reads as Claude. The change is additive, so 1.x can still read the DB.
 - **`launch`**: `Session` and `Resume` carry an `HarnessKind`. `discover_sessions` merges every enabled provider's sessions. `resume_for(root, known_agent, default_agent)` uses the agent the hooks last saw, otherwise the newest session of any agent, otherwise `defaultAgent`. `agent_command` builds `<program> <resume args>`.
 - **`procscan`** excludes any registered agent CLI, and anything it spawns directly, from a worktree's running processes.
-- **TUI**: a non-Claude row gets a blue `✦ <id>` badge (`✦` below 100 columns). `c` is now "agent". The wizard's hook step installs for every detected, enabled plugin.
+- **TUI**: a non-Claude row gets a blue `✦ <id>` badge (`✦` below 100 columns). The wizard's hook step installs for every detected, enabled plugin.
 
 ### What stays Claude-only
 

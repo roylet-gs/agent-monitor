@@ -92,6 +92,10 @@ pub fn set(key: &str, value: &str) {
         fail(&format!("Unknown agent: {value}\nAvailable: {}", am_core::harness::ids().join(", ")));
     }
 
+    if key == "dailyTokensScope" && !["all", "visible"].contains(&value) {
+        fail(&format!("Invalid value for dailyTokensScope: {value}. Use all or visible."));
+    }
+
     let defaults = Settings::default().to_view();
     let coerced = if key == "contextWindowTokens" {
         // Token counts also take `200k` / `1m`, like the TUI editor.
