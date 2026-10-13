@@ -32,19 +32,51 @@ pub fn discover_sessions(root: &Path) -> Vec<Session> {
     sessions
 }
 
+/// What `Enter` opens a worktree in (the `ide` setting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IdeChoice {
-    Cursor,
     Vscode,
+    Cursor,
+    Zed,
+    Windsurf,
     Terminal,
+    /// The `ideCommand` setting.
+    Custom,
 }
 
 impl IdeChoice {
+    /// Every `ide` value with its label, in the order the settings editor,
+    /// setup wizard and CLI offer them.
+    pub const ALL: [(&'static str, &'static str); 6] = [
+        ("vscode", "VS Code"),
+        ("cursor", "Cursor"),
+        ("zed", "Zed"),
+        ("windsurf", "Windsurf"),
+        ("terminal", "Terminal"),
+        ("custom", "Custom command"),
+    ];
+    pub const IDS: [&'static str; 6] = ["vscode", "cursor", "zed", "windsurf", "terminal", "custom"];
+
+    /// Unknown values fall back to VS Code.
     pub fn from_setting(s: &str) -> IdeChoice {
         match s {
-            "vscode" => IdeChoice::Vscode,
+            "cursor" => IdeChoice::Cursor,
+            "zed" => IdeChoice::Zed,
+            "windsurf" => IdeChoice::Windsurf,
             "terminal" => IdeChoice::Terminal,
-            _ => IdeChoice::Cursor,
+            "custom" => IdeChoice::Custom,
+            _ => IdeChoice::Vscode,
+        }
+    }
+
+    /// Shell CLI and macOS app name of a built-in editor.
+    fn editor(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            IdeChoice::Vscode => Some(("code", "Visual Studio Code")),
+            IdeChoice::Cursor => Some(("cursor", "Cursor")),
+            IdeChoice::Zed => Some(("zed", "Zed")),
+            IdeChoice::Windsurf => Some(("windsurf", "Windsurf")),
+            IdeChoice::Terminal | IdeChoice::Custom => None,
         }
     }
 }
@@ -137,13 +169,22 @@ fn run(cmd: &mut Command) -> Result<(), String> {
     }
 }
 
-/// Open the worktree in Cursor / VS Code via their CLI, falling back to
-/// `open -a` when the shell command isn't installed.
-pub fn open_in_editor(path: &Path, ide: IdeChoice) -> Result<(), String> {
-    let (cli, app) = match ide {
-        IdeChoice::Cursor => ("cursor", "Cursor"),
-        IdeChoice::Vscode => ("code", "Visual Studio Code"),
-        IdeChoice::Terminal => return open_terminal(path, None),
+/// The shell line for a custom editor command: `{path}` becomes the quoted
+/// path, or the quoted path is appended when the command has no `{path}`.
+pub fn custom_command(cmd: &str, path: &Path) -> String {
+    let quoted = sh_quote(&path.to_string_lossy());
+    let cmd = cmd.trim();
+    if cmd.contains("{path}") { cmd.replace("{path}", &quoted) } else { format!("{cmd} {quoted}") }
+}
+
+/// Open `path` (a worktree, or a file) in the editor: a built-in one via its
+/// CLI, falling back to `open -a` when the shell command isn't installed; a
+/// custom one by running `custom_cmd` through `sh -c`.
+pub fn open_in_editor(path: &Path, ide: IdeChoice, custom_cmd: &str) -> Result<(), String> {
+    let (cli, app) = match ide.editor() {
+        Some(e) => e,
+        None if ide == IdeChoice::Terminal => return open_terminal(path, None),
+        None => return open_custom(path, custom_cmd),
     };
     let result = run(Command::new(cli).arg(path)).or_else(|e| {
         if cfg!(target_os = "macos") {
@@ -157,6 +198,52 @@ pub fn open_in_editor(path: &Path, ide: IdeChoice) -> Result<(), String> {
         Err(e) => warn!("launch", "Failed to open {} in {app}: {e}", path.display()),
     }
     result.map_err(|e| format!("Couldn't open {app}: {e}"))
+}
+
+/// How long a custom editor command gets to fail before it counts as started.
+const CUSTOM_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Run a command that may stay in the foreground (an editor binary that
+/// doesn't detach): an early non-zero exit is an error, still running after
+/// [`CUSTOM_GRACE`] is success and the process is left to run.
+fn run_detached(cmd: &mut Command) -> Result<(), String> {
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    let start = std::time::Instant::now();
+    while start.elapsed() < CUSTOM_GRACE {
+        match child.try_wait() {
+            Ok(Some(st)) if st.success() => return Ok(()),
+            Ok(Some(st)) => return Err(match st.code() {
+                Some(127) => "command not found".into(),
+                Some(n) => format!("exited with status {n}"),
+                None => "killed by a signal".into(),
+            }),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    // Reap it whenever it exits so it doesn't linger as a zombie.
+    std::thread::spawn(move || child.wait());
+    Ok(())
+}
+
+fn open_custom(path: &Path, cmd: &str) -> Result<(), String> {
+    if cmd.trim().is_empty() {
+        warn!("launch", "Open in is set to custom but ideCommand is empty");
+        return Err("Open in is set to Custom command but no command is set (Settings → Editor command)".into());
+    }
+    let line = custom_command(cmd, path);
+    let mut c = Command::new("sh");
+    c.args(["-c", &line]);
+    // A file (`am script edit`) opens from its directory.
+    if let Some(dir) = if path.is_dir() { Some(path) } else { path.parent() } {
+        c.current_dir(dir);
+    }
+    let result = run_detached(&mut c);
+    match &result {
+        Ok(()) => info!("launch", "Opened {} with custom command: {line}", path.display()),
+        Err(e) => warn!("launch", "Custom command failed for {}: {line}: {e}", path.display()),
+    }
+    result.map_err(|e| format!("Couldn't run `{line}`: {e}"))
 }
 
 /// Which terminal app to drive. Inside an editor's integrated terminal
@@ -286,5 +373,31 @@ mod tests {
         assert_eq!(sh_quote("/plain/path-1.2"), "/plain/path-1.2");
         assert_eq!(sh_quote("it's"), "'it'\\''s'");
         assert_eq!(applescript_string("a \"b\" \\c"), "\"a \\\"b\\\" \\\\c\"");
+    }
+
+    #[test]
+    fn ide_setting_falls_back_to_vscode() {
+        for (id, _) in &IdeChoice::ALL[1..] {
+            assert_ne!(IdeChoice::from_setting(id), IdeChoice::Vscode, "{id}");
+        }
+        assert_eq!(IdeChoice::from_setting("bogus"), IdeChoice::Vscode);
+        assert_eq!(IdeChoice::IDS.to_vec(), IdeChoice::ALL.map(|(id, _)| id).to_vec());
+    }
+
+    #[test]
+    fn custom_command_places_the_quoted_path() {
+        let p = Path::new("/w/it's here");
+        assert_eq!(custom_command("subl -n", p), "subl -n '/w/it'\\''s here'");
+        assert_eq!(custom_command(" open -a \"Sublime Text\" {path} ", p), "open -a \"Sublime Text\" '/w/it'\\''s here'");
+        assert_eq!(custom_command("idea", Path::new("/w/x")), "idea /w/x");
+    }
+
+    #[test]
+    fn custom_command_runs_and_reports_failures() {
+        let dir = std::env::temp_dir();
+        assert!(open_in_editor(&dir, IdeChoice::Custom, "  ").unwrap_err().contains("Editor command"));
+        assert!(open_in_editor(&dir, IdeChoice::Custom, "true").is_ok());
+        assert!(open_in_editor(&dir, IdeChoice::Custom, "exit 3 ;").unwrap_err().contains("status 3"));
+        assert!(open_in_editor(&dir, IdeChoice::Custom, "am-no-such-editor-xyz").unwrap_err().contains("not found"));
     }
 }

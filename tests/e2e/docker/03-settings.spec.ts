@@ -25,7 +25,9 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
 
   const before = await resumeValue(tui);
   const after = before === "on" ? "off" : "on";
-  await tui.sendKey("j"); // cursor → "Resume last session on open"
+  await tui.sendKey("j"); // cursor → "Editor command"
+  await tui.waitForText("For Open in = custom");
+  await tui.sendKey("j"); // → "Resume last session on open"
   await tui.waitForText("Enter also resumes the worktree's most recent agent session");
   await tui.sendKey(" ");
   expect(await resumeValue(tui)).toBe(after);
@@ -39,7 +41,8 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
   await tui.waitForText("esc close");
   expect(await resumeValue(tui)).toBe(after);
 
-  // Restore.
+  // Restore (Open in → Editor command → Resume last session).
+  await tui.sendKey("j");
   await tui.sendKey("j");
   await tui.sendKey(" ");
   expect(await resumeValue(tui)).toBe(before);

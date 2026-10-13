@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use am_core::{info, paths, settings, warn};
+use am_core::{info, launch, paths, settings, warn};
 
 use crate::resolve::resolve_repo;
 use crate::{fail, output, store};
@@ -43,25 +43,27 @@ fn create_startup_script(repo_id: &str) -> PathBuf {
     path
 }
 
-/// Port of `openFileInEditor`: cursor/code CLIs, or the system opener for `terminal`.
-fn open_file_in_editor(path: &Path, ide: &str) -> Result<(), String> {
-    let mut cmd = match ide {
-        "vscode" => Command::new("code"),
-        "terminal" if cfg!(target_os = "macos") => {
-            let mut c = Command::new("open");
-            c.args(["-a", "Terminal"]);
-            c
-        }
-        "terminal" => Command::new("xdg-open"),
-        _ => Command::new("cursor"),
+/// Port of `openFileInEditor`: the configured editor (`launch::open_in_editor`),
+/// or the system opener for `terminal`.
+fn open_file_in_editor(path: &Path, s: &settings::Settings) -> Result<(), String> {
+    let ide = launch::IdeChoice::from_setting(&s.ide);
+    if ide != launch::IdeChoice::Terminal {
+        return launch::open_in_editor(path, ide, &s.ide_command);
+    }
+    let mut cmd = if cfg!(target_os = "macos") {
+        let mut c = Command::new("open");
+        c.args(["-a", "Terminal"]);
+        c
+    } else {
+        Command::new("xdg-open")
     };
     let ok = cmd.arg(path).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
     if ok {
-        info!("scripts", "Opened file in {ide}: {}", path.display());
+        info!("scripts", "Opened file in terminal: {}", path.display());
         Ok(())
     } else {
-        warn!("scripts", "Failed to open file in {ide}: {}", path.display());
-        Err(format!("Failed to open file in {ide}. Is it installed and in PATH?"))
+        warn!("scripts", "Failed to open file in terminal: {}", path.display());
+        Err("Failed to open file in terminal.".into())
     }
 }
 
@@ -70,7 +72,7 @@ pub fn edit(repo_path: Option<&str>) {
     let repo = resolve_repo(&conn, repo_path);
     let s = settings::load();
     let path = create_startup_script(&repo.id);
-    if let Err(e) = open_file_in_editor(&path, &s.ide) {
+    if let Err(e) = open_file_in_editor(&path, &s) {
         fail(&e);
     }
     println!("Opened startup script for {} in {}", repo.name, s.ide);

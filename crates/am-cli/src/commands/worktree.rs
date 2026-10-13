@@ -363,7 +363,7 @@ pub fn open(target: &str, repo_path: Option<&str>) {
         Ok(true) => println!("Switched to branch {}", wt.branch),
         Ok(false) => {}
     }
-    if let Err(e) = launch::open_in_editor(path, IdeChoice::from_setting(&s.ide)) {
+    if let Err(e) = launch::open_in_editor(path, IdeChoice::from_setting(&s.ide), &s.ide_command) {
         fail(&e);
     }
     println!("Opened {} in {}", wt.branch, s.ide);
