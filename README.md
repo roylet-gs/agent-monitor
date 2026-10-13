@@ -224,12 +224,13 @@ When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket tit
 Each agent session keeps its own status, so two agents in the same worktree never overwrite each other. That holds for two Claude Code sessions as well as different harnesses. With two or more live sessions, the row shows `⧉ N sessions` and lists each one under it:
 
 ```
-● feature/api ⧉ 2 sessions                       ENG-412 #127✓ ↑2  4m
- ├ ● claude  executing · 2m ◆ 1 subagent                       ███░░░░░ 300k
+● feature/api ⧉ 3 sessions                          ENG-412 #127✓ ↑2  4m
+ ├ ● claude #3a7c  executing · 2m ◆ 1 subagent                  ██▌░░░░░ 300k
+ ├ ◑ claude #9e41  delegating · 1m ◆ 2 subagents                █░░░░░░░ 120k
  └ ✓ gemini  done · 30s
 ```
 
-Each session row has its own status glyph, harness, status and age, subagent badge and context bar. The worktree row's glyph is its most urgent session: waiting, then executing, planning, delegating, done, idle. Session rows aren't selectable, and clicking one selects its worktree. A session killed without ending properly drops off once am's process scan sees fewer agent CLIs running in the worktree than it has open sessions.
+Each session row has its own status glyph, harness (with a short session id when two sessions share a harness), status and age, subagent badge and context bar. The worktree row's glyph is its most urgent session: waiting, then executing, planning, delegating, done, idle. Session rows aren't selectable, and clicking one selects its worktree. A session killed without ending properly drops off once am's process scan sees fewer agent CLIs running in the worktree than it has open sessions.
 
 ### Stacked Branches
 

@@ -1075,7 +1075,8 @@ fn worktree_line<'a>(
 }
 
 /// One of several live sessions in a worktree, under its row:
-/// `├ ● claude  executing · 2m  ◆ 1 subagent` with its own context bar in the
+/// `├ ● claude  executing · 2m  ◆ 1 subagent` (plus a short `#3f2a` session
+/// id when two sessions share a harness), with its own context bar in the
 /// worktree's context column. The other columns are left blank.
 #[allow(clippy::too_many_arguments)]
 fn session_line<'a>(
@@ -1131,17 +1132,23 @@ fn session_line<'a>(
         n => format!(" ◆{n}"),
     };
 
+    // Two sessions of one harness: a short session id tells them apart.
+    let twins = v.sessions.iter().filter(|o| o.agent == s.agent).count() > 1;
+    let tag = if twins { format!(" #{}", s.session_id.chars().take(4).collect::<String>()) } else { String::new() };
+
     let fixed = indent.width() + connector.width() + 2 + right_w;
     let avail = (width as usize).saturating_sub(fixed);
     let harness = truncate(&harness, avail);
-    let detail = truncate(&detail, avail.saturating_sub(harness.width() + badge.width()));
-    let used = harness.width() + detail.width() + badge.width();
+    let tag = truncate(&tag, avail.saturating_sub(harness.width()));
+    let detail = truncate(&detail, avail.saturating_sub(harness.width() + tag.width() + badge.width()));
+    let used = harness.width() + tag.width() + detail.width() + badge.width();
     let mut spans = vec![
         Span::raw(indent),
         Span::styled(connector, theme.fg(theme.border)),
         Span::styled(status_glyph(status), glyph_style),
         Span::raw(" "),
         Span::styled(harness, harness_style),
+        Span::styled(tag, theme.faint()),
         Span::styled(detail, theme.faint()),
     ];
     if used <= avail {
@@ -2419,34 +2426,50 @@ mod tests {
     }
 
     #[test]
-    fn two_sessions_in_a_worktree_are_listed_under_it() {
+    fn three_sessions_in_a_worktree_are_listed_under_it() {
         let mut app = fixture();
         let mut snap = app.snapshot.clone();
-        // feature/refactor: the fixture's Claude session "s" (two running
-        // subagents) plus a Gemini session waiting on a permission prompt.
+        // feature/refactor runs two Claude sessions and a Gemini one at once,
+        // each with its own subagents. (Rendering doesn't care which harness
+        // reported a subagent; Gemini CLI's hooks don't report them today.)
         let w1 = &mut snap.groups[0].worktrees[0];
         w1.agent.as_mut().unwrap().status = Status::Waiting;
         w1.sessions = vec![
             session(HarnessKind::CLAUDE, "s", Status::Delegating, "2025-10-11 09:58:00", Some(121_000)),
+            session(HarnessKind::CLAUDE, "7b1e-claude", Status::Executing, "2025-10-11 09:59:50", Some(310_000)),
             session(HarnessKind::GEMINI, "g", Status::Waiting, "2025-10-11 09:59:30", Some(40_000)),
         ];
+        let mut in_session = |sid: &str, id: &str, desc: &str| {
+            let (wt, mut s) = sub("w1", id, desc, true, Some(("Read", "src/db.rs")));
+            s.session_id = sid.into();
+            snap.subagents.push((wt, s));
+        };
+        in_session("7b1e-claude", "b1", "Write migration tests");
+        in_session("g", "c1", "Investigate codebase");
         app.apply(snap);
         assert_eq!(app.flat.len(), 3, "session rows take no selection index");
-        assert!(matches!(app.rows[1..4], [Row::Worktree(0), Row::Session(0, 0), Row::Session(0, 1)]), "{:?}", app.rows);
+        assert!(
+            matches!(app.rows[1..5], [Row::Worktree(0), Row::Session(0, 0), Row::Session(0, 1), Row::Session(0, 2)]),
+            "{:?}",
+            app.rows
+        );
 
-        let out = render(&app, 120, 10);
+        let out = render(&app, 120, 11);
         let line = |needle: &str| out.lines().find(|l| l.contains(needle)).unwrap_or_default().to_string();
         let parent = line("feature/refactor");
-        assert!(parent.contains("⧉ 2 sessions") && !parent.contains("◆") && !parent.contains("121k"), "{parent}");
-        let claude = line("├ ");
-        assert!(claude.contains("claude  delegating") && claude.contains("◆ 2 subagents") && claude.contains("121k"), "{claude}");
+        assert!(parent.contains("⧉ 3 sessions") && !parent.contains("◆") && !parent.contains("121k"), "{parent}");
+        let first = line("claude #s ");
+        assert!(first.contains("delegating") && first.contains("◆ 2 subagents") && first.contains("121k"), "{first}");
+        let second = line("claude #7b1e");
+        assert!(second.contains("executing") && second.contains("◆ 1 subagent ") && second.contains("310k"), "{second}");
         let gemini = line("└ ");
-        assert!(gemini.contains("gemini  waiting") && !gemini.contains("◆") && gemini.contains("40k"), "{gemini}");
+        assert!(gemini.contains("gemini  waiting") && gemini.contains("◆ 1 subagent") && gemini.contains("40k"), "{gemini}");
+        assert!(!gemini.contains('#'), "a harness with one session needs no id: {gemini}");
         insta::assert_snapshot!(out);
-        insta::assert_snapshot!("two_sessions_narrow", render(&app, 90, 10));
+        insta::assert_snapshot!("three_sessions_narrow", render(&app, 90, 11));
 
         // A click on a session row selects its worktree.
-        let area = Rect::new(0, 0, 120, 10);
+        let area = Rect::new(0, 0, 120, 11);
         let y = out.lines().position(|l| l.contains("└ ")).unwrap() as u16;
         assert_eq!(worktree_at(&app, area, 10, y), Some(0));
     }
