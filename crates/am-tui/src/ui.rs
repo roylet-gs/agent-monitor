@@ -586,6 +586,16 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             }
             (title, if g.dirty > 0 || g.ahead > 0 { theme.yellow } else { theme.red }, "", lines)
         }
+        Modal::ConfirmReset => {
+            let lines = vec![
+                Line::raw("Put every setting back to its default, then run setup again?"),
+                Line::styled("Repositories, worktrees, history, themes, startup scripts and agent hooks are kept.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "y", "Reset", true),
+                key_line(theme, "any key", "Cancel", false),
+            ];
+            ("Reset settings".into(), theme.red, "", lines)
+        }
         Modal::AddRepo { path, error } => {
             let mut lines = vec![
                 Line::raw("Path to a git repository:"),
@@ -683,7 +693,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
             if let Some(e) = &s.ide_error {
                 lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
             }
-            hint = "↑↓ choose  ⏎ next";
+            hint = if s.cancellable { "↑↓ choose  ⏎ next  esc cancel" } else { "↑↓ choose  ⏎ next" };
         }
         Step::Hooks => {
             lines.push(Line::raw("am learns what each agent is doing from its CLI's hooks"));
@@ -2039,6 +2049,41 @@ mod tests {
     }
 
     #[test]
+    fn reset_settings_asks_first() {
+        let mut app = fixture();
+        app.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&app.settings));
+        app.settings_editor.as_mut().unwrap().cursor =
+            crate::settings_ui::FIELDS.iter().position(|f| f.key == "resetSettings").unwrap();
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::None);
+        assert!(matches!(app.modal, Some(crate::modals::Modal::ConfirmReset)));
+        insta::assert_snapshot!(render(&app, 100, 24));
+        // ⏎ again (or any key but y) cancels and leaves the editor open.
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::None);
+        assert!(app.modal.is_none() && app.settings_editor.is_some());
+        app.on_key(Key::Enter);
+        assert_eq!(app.on_key(Key::Char('y')), crate::app::Action::ResetSettings);
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn run_setup_again_opens_and_esc_cancels() {
+        let mut app = fixture();
+        app.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&app.settings));
+        app.settings_editor.as_mut().unwrap().cursor =
+            crate::settings_ui::FIELDS.iter().position(|f| f.key == "rerunSetup").unwrap();
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::RunSetup);
+        // main.rs opens the wizard; a re-run is cancellable from its first step.
+        app.settings_editor = None;
+        let mut s = crate::setup::Setup::new(vec!["work".into()], &Settings::parse(r#"{"setupCompleted":true}"#));
+        s.hook_binary = None;
+        app.setup = Some(s);
+        assert!(render(&app, 100, 30).contains("esc cancel"));
+        assert_eq!(app.on_key(Key::Esc), crate::app::Action::None);
+        assert!(app.setup.is_none());
+        assert_eq!(app.notice.as_deref(), Some("Setup closed — settings unchanged"));
+    }
+
+    #[test]
     fn settings_show_update_banner_with_upgrade_command() {
         let mut app = fixture();
         app.update_available = Some(update("2.2.0"));
@@ -2496,6 +2541,7 @@ mod tests {
             ctx_choice: crate::setup::CONTEXT_CUSTOM,
             ctx_input: "128k".into(),
             ctx_error: None,
+            cancellable: false,
         });
         let out = render(&app, 100, 20);
         assert!(out.contains("✓ Integrations  ›  Context"), "breadcrumbs cut off:\n{out}");
@@ -2522,6 +2568,7 @@ mod tests {
             ctx_choice: 0,
             ctx_input: String::new(),
             ctx_error: None,
+            cancellable: false,
         });
         let out = render(&app, 100, 22);
         assert!(out.contains("● Custom command: subl -n▏"), "{out}");
