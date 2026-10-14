@@ -60,6 +60,8 @@ pub enum Action {
     /// `e` in settings: open settings.json in the `ide` (editor or custom command), or
     /// `$EDITOR` in this terminal when `ide` is `terminal`.
     EditSettingsFile,
+    /// Open debug.log in the `ide`, or reveal the log folder once it has rotated.
+    ViewLogs,
     /// Job id, repo and request.
     Create(u64, Box<Repository>, Box<am_core::worktrees::CreateRequest>),
     /// Job id, worktree, and whether to delete the branch too.
@@ -547,6 +549,7 @@ impl App {
                 "No Linear project",
             ),
             C::ToggleLog => self.show_log = !self.show_log,
+            C::ViewLogs => return Action::ViewLogs,
             C::NewWorktree => {
                 if self.snapshot.repos.is_empty() {
                     self.modal = Some(self.add_repo_modal());

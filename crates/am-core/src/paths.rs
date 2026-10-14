@@ -24,6 +24,16 @@ pub fn log_path() -> PathBuf {
     app_dir().join("debug.log")
 }
 
+/// Where `log::rotate_if_needed` moves the full log: `debug.log.1`.
+pub fn rotated_log_path() -> PathBuf {
+    log_path().with_extension("log.1")
+}
+
+/// The log files that exist, `debug.log` first.
+pub fn log_files() -> Vec<PathBuf> {
+    [log_path(), rotated_log_path()].into_iter().filter(|p| p.is_file()).collect()
+}
+
 pub fn socket_path() -> PathBuf {
     app_dir().join("am.sock")
 }

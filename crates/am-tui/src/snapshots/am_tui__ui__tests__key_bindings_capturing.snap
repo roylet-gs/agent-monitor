@@ -14,6 +14,7 @@ expression: "render(&app, 100, 34)"
 │       │   Delete worktree         d                                                      │       │
 │       │   Add repository          A                                                      │       │
 │       │   Toggle log pane         w                                                      │       │
+│       │   View logs               L                                                      │       │
 │       │   Settings                s                                                      │       │
 │       │   Suggest a feature       f                                                      │       │
 │       │▌  Refresh now             press a key…                                           │       │
@@ -27,7 +28,6 @@ expression: "render(&app, 100, 34)"
 │       │   Jump to bottom          G                                                      │       │
 │       │                                                                                  │       │
 │       │ Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit      │       │
-│       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │

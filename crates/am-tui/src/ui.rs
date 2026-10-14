@@ -1724,6 +1724,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::AddRepo), 3),
     (None, 0),
     (Some(Command::ToggleLog), 3),
+    (Some(Command::ViewLogs), 3),
     (Some(Command::Settings), 1),
     (Some(Command::Feedback), 3),
     (Some(Command::Refresh), 1),
@@ -1896,7 +1897,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::PageDown, C::PageUp], "", "page down / up"),
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
-        (&[C::ToggleLog], "", "toggle log pane"),
+        (&[C::ToggleLog, C::ViewLogs], "", "toggle log pane / open the log file (or folder)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
         (&[C::AddRepo], "", "add repository"),
         (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
@@ -2373,6 +2374,15 @@ mod tests {
     }
 
     #[test]
+    fn l_views_the_logs_and_can_be_rebound() {
+        let mut app = fixture();
+        assert_eq!(app.on_key(Key::Char('L')), crate::app::Action::ViewLogs);
+        let mut app = rebound(r#"{"viewLogs":"V"}"#);
+        assert_eq!(app.on_key(Key::Char('L')), crate::app::Action::None);
+        assert_eq!(app.on_key(Key::Char('V')), crate::app::Action::ViewLogs);
+    }
+
+    #[test]
     fn rebound_keys_drive_the_dashboard() {
         let mut app = rebound(r#"{"newWorktree":"N","moveDown":"J","open":"O"}"#);
         assert_eq!(app.on_key(Key::Char('n')), crate::app::Action::None);
@@ -2419,7 +2429,7 @@ mod tests {
         app.settings_editor = Some(ed);
         insta::assert_snapshot!("key_bindings_page", render(&app, 100, 34));
         let keys = app.settings_editor.as_mut().unwrap().keys.as_mut().unwrap();
-        keys.cursor = 10;
+        keys.cursor = 11;
         keys.on_key(Key::Enter);
         insta::assert_snapshot!("key_bindings_capturing", render(&app, 100, 34));
     }

@@ -22,6 +22,9 @@ test("a dashboard key can be rebound in Settings → Key bindings, then reset", 
   expect(await tui.keyBar()).toContain("n new");
 
   await openKeyBindings(tui);
+  // The View logs command is listed with its default key.
+  await tui.waitForMatch(/View logs\s+L\s/);
+  await tui.screenshot("key-bindings-view-logs");
   await tui.press("j", 4); // Open worktree → … → New worktree
   await tui.waitForText("New worktree form");
   await tui.sendKey("Enter");

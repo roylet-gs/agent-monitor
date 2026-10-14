@@ -1,9 +1,11 @@
-//! `am logs` (src/commands/logs.ts): tail with level/module filters, follow, clear.
+//! `am logs` (src/commands/logs.ts): tail with level/module filters, follow, clear,
+//! and `--open` in the editor.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::time::Duration;
 
-use am_core::paths;
+use am_core::launch::{self, IdeChoice, LogView};
+use am_core::{info, paths, settings};
 
 pub struct Options {
     pub lines: usize,
@@ -11,6 +13,7 @@ pub struct Options {
     pub level: Option<String>,
     pub module: Option<String>,
     pub clear: bool,
+    pub open: bool,
 }
 
 /// Levels shown for a `--level` filter (that level and above).
@@ -38,7 +41,47 @@ pub fn keep_line(line: &str, level: Option<&str>, module: Option<&str>) -> bool 
     true
 }
 
+/// `--open`: debug.log in the `ide` (`$VISUAL`/`$EDITOR` here for `terminal`),
+/// or the log folder in the file manager once it has rotated.
+fn open() {
+    let result = match launch::log_view(&paths::log_files()) {
+        LogView::Missing => {
+            println!("No log file found at {}", paths::log_path().display());
+            return;
+        }
+        LogView::Reveal(path) => launch::reveal_in_file_manager(&path).map(|()| format!("Opened the log folder {}", paths::app_dir().display())),
+        LogView::Edit(path) => {
+            let s = settings::load();
+            let ide = IdeChoice::from_setting(&s.ide);
+            let r = if ide == IdeChoice::Terminal { edit_here(&path) } else { launch::open_in_editor(&path, ide, &s.ide_command) };
+            r.map(|()| format!("Opened {}", path.display()))
+        }
+    };
+    match result {
+        Ok(msg) => {
+            info!("cli", "logs --open: {msg}");
+            println!("{msg}");
+        }
+        Err(e) => crate::fail(&e),
+    }
+}
+
+/// `$VISUAL`/`$EDITOR` (default `vi`) on `path` in this terminal.
+fn edit_here(path: &std::path::Path) -> Result<(), String> {
+    let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
+    // $EDITOR may carry arguments (e.g. `code --wait`), so run it via the shell.
+    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).status();
+    match status {
+        Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(format!("{editor} exited with {s}")),
+        Err(e) => Err(format!("Couldn't run {editor}: {e}")),
+    }
+}
+
 pub fn run(o: Options) {
+    if o.open {
+        return open();
+    }
     let path = paths::log_path();
     if o.clear {
         if path.exists() {

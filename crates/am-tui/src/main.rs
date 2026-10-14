@@ -426,6 +426,24 @@ fn dispatch(
             *theme = theme::Theme::load(&app.settings.theme);
             collector.update_settings(app.settings.clone());
         }
+        Action::ViewLogs => {
+            use am_core::launch::{IdeChoice, LogView};
+            let files = am_core::paths::log_files();
+            let view = am_core::launch::log_view(&files);
+            info!("tui", "View logs: {view:?} ({} file(s))", files.len());
+            match view {
+                LogView::Missing => app.popup = Some(format!("No log file yet at {}", am_core::paths::log_path().display())),
+                LogView::Reveal(path) => launcher::reveal(path, launch_tx.clone()),
+                LogView::Edit(path) => {
+                    let ide = IdeChoice::from_setting(&app.settings.ide);
+                    if ide == IdeChoice::Terminal {
+                        edit_file(terminal, mouse_before, &path)?;
+                    } else {
+                        launcher::open_file(path, ide, app.settings.ide_command.clone(), launch_tx.clone());
+                    }
+                }
+            }
+        }
         Action::RunSetup => open_setup(app),
         Action::ResetSettings => {
             // Dropping setupCompleted means quitting mid-wizard shows it again next start.
@@ -502,7 +520,7 @@ fn settings_file_mtime() -> Option<std::time::SystemTime> {
 }
 
 /// Hand the terminal to $EDITOR (default `vi`) for a file (settings.json, a
-/// startup script), then take it back.
+/// startup script, debug.log), then take it back.
 fn edit_file(terminal: &mut ratatui::DefaultTerminal, mouse: bool, path: &std::path::Path) -> io::Result<()> {
     let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
     set_mouse(false);
