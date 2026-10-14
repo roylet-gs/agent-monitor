@@ -3244,7 +3244,8 @@ mod tests {
                 Row::Session(..) => "session",
             })
             .collect();
-        assert_eq!(kinds, ["repo", "project", "wt", "spacer", "project", "wt", "spacer", "repo", "project", "wt"]);
+        // The last repo's worktree has no project: no `No project` header for it.
+        assert_eq!(kinds, ["repo", "project", "wt", "spacer", "project", "wt", "spacer", "repo", "wt"]);
     }
 
     #[test]

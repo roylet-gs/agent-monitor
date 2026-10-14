@@ -281,7 +281,10 @@ impl App {
                             if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Spacer)) {
                                 self.rows.push(Row::Spacer);
                             }
-                            self.rows.push(Row::Project(project.clone().unwrap_or_else(|| "No project".into())));
+                            // Rows without a project get the spacer but no header.
+                            if let Some(name) = &project {
+                                self.rows.push(Row::Project(name.clone()));
+                            }
                             last_project = Some(project);
                         }
                     }
