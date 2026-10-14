@@ -69,6 +69,10 @@ pub enum Action {
     RemoveStandalone(String),
     AddRepo(String),
     InstallHooks,
+    /// Settings → Run setup again: open the wizard (main.rs reads the repos).
+    RunSetup,
+    /// Settings → Reset settings, confirmed: reset settings.json, then run setup.
+    ResetSettings,
     Suggest { title: String, body: String },
 }
 
@@ -369,6 +373,11 @@ impl App {
                 SetupEffect::None => Action::None,
                 SetupEffect::InstallHooks => Action::InstallHooks,
                 SetupEffect::AddRepo(p) => Action::AddRepo(p),
+                SetupEffect::Cancel => {
+                    self.setup = None;
+                    self.notice = Some("Setup closed — settings unchanged".into());
+                    Action::None
+                }
                 SetupEffect::Finish(kv) => {
                     let mut latest = None;
                     for (k, v) in kv {
@@ -418,6 +427,10 @@ impl App {
                     self.modal = Some(crate::modals::Modal::busy(format!("Adding {path}…")));
                     Action::AddRepo(path)
                 }
+                Effect::ResetSettings => {
+                    self.modal = None;
+                    Action::ResetSettings
+                }
             };
         }
         if let Some(editor) = &mut self.settings_editor {
@@ -465,6 +478,11 @@ impl App {
                 Action::SettingsChanged
             }
             Outcome::EditFile => Action::EditSettingsFile,
+            Outcome::RunSetup => Action::RunSetup,
+            Outcome::ConfirmReset => {
+                self.modal = Some(crate::modals::Modal::ConfirmReset);
+                Action::None
+            }
         }
     }
 

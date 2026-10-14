@@ -261,6 +261,22 @@ impl Settings {
     }
 }
 
+/// `current` with every known key back at its default. Keys the settings
+/// model doesn't know (another version's, the TS app's) are kept, and so is
+/// `setupCompleted` unless `keep_setup_completed` is false, which makes the
+/// next start show the setup wizard.
+pub fn reset_to_defaults(current: Settings, keep_setup_completed: bool) -> Settings {
+    let known = Settings::default().to_view();
+    Settings {
+        raw: current
+            .raw
+            .into_iter()
+            .filter(|(k, _)| !known.contains_key(k) && (keep_setup_completed || k != "setupCompleted"))
+            .collect(),
+        ..Settings::default()
+    }
+}
+
 pub fn load() -> Settings {
     match std::fs::read_to_string(paths::settings_path()) {
         Ok(raw) => Settings::parse(&raw),
@@ -288,6 +304,20 @@ pub fn save(settings: &Settings) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reset_keeps_unknown_keys_and_optionally_setup_completed() {
+        let s = Settings::parse(r#"{"logLevel":"debug","hideMainBranch":false,"setupCompleted":true,"futureKey":7}"#);
+        let kept = reset_to_defaults(s.clone(), true);
+        assert_eq!(kept.log_level(), Settings::default().log_level());
+        assert!(kept.hide_main_branch);
+        assert!(!kept.raw.contains_key("logLevel"));
+        assert_eq!(kept.raw.get("futureKey"), Some(&serde_json::json!(7)));
+        assert_eq!(kept.raw.get("setupCompleted"), Some(&serde_json::json!(true)));
+        let wiped = reset_to_defaults(s, false);
+        assert!(!wiped.raw.contains_key("setupCompleted"));
+        assert!(wiped.raw.contains_key("futureKey"));
+    }
 
     #[test]
     fn missing_keys_fall_back_to_defaults_and_unknown_keys_are_kept() {
