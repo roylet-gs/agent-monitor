@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/am-core", "crates/am-hook", "crates/am-tui", "crates/am-cli"]
 
 [workspace.package]
-version = "2.1.32"
+version = "2.1.33"
 edition = "2024"
 license = "MIT"
 
