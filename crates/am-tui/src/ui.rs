@@ -1182,6 +1182,15 @@ fn worktree_line<'a>(
     if !deleting && !v.running_processes.is_empty() {
         badge.push_str(" ▶");
     }
+    // An agent's shell command (tests, a build…) is still running here.
+    let commands = if deleting { 0 } else { v.shell_commands };
+    let command_badge = match commands {
+        0 => String::new(),
+        n if width >= 100 => format!(" $ {n} command{}", if n == 1 { "" } else { "s" }),
+        1 => " $".to_string(),
+        n => format!(" ${n}"),
+    };
+    badge.push_str(&command_badge);
     // Which agent CLI, for anything but the default (Claude Code).
     let agent_badge = match v.agent.as_ref().map(|a| a.agent) {
         _ if listed && !deleting => {
@@ -1222,6 +1231,8 @@ fn worktree_line<'a>(
         theme.faint()
     } else if status == Some(Status::Waiting) {
         theme.bold(theme.yellow)
+    } else if commands > 0 {
+        theme.bold(theme.teal)
     } else if selected {
         theme.bold(theme.text)
     } else {
@@ -1241,6 +1252,10 @@ fn worktree_line<'a>(
     }
     if let Some(r) = rest.strip_prefix(" ▶") {
         left.push(Span::styled(" ▶", theme.fg(theme.green)));
+        rest = r;
+    }
+    if let Some(r) = rest.strip_prefix(command_badge.as_str()).filter(|_| !command_badge.is_empty()) {
+        left.push(Span::styled(command_badge.clone(), theme.bold(theme.teal)));
         rest = r;
     }
     if let Some(r) = rest.strip_prefix(agent_badge.as_str()).filter(|_| !agent_badge.is_empty()) {
@@ -1979,6 +1994,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         Span::styled("⧉ 2 sessions", theme.fg(theme.magenta)),
         Span::styled(" agents in one worktree, each listed below it with its own status", theme.faint()),
     ]));
+    lines.push(Line::from(vec![
+        Span::styled("$ 1 command", theme.bold(theme.teal)),
+        Span::styled(" an agent's shell command (tests, a build…) is running; the name turns teal", theme.faint()),
+    ]));
     let w = 80.min(area.width.saturating_sub(4));
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
@@ -2068,6 +2087,7 @@ mod tests {
             has_terminal: false,
             open_ide: None,
             running_processes: vec![],
+            shell_commands: 0,
             context: None,
             sessions: Vec::new(),
         }
@@ -2793,6 +2813,27 @@ mod tests {
         let out = render(&app, 100, 22);
         assert!(out.contains("● Custom command: subl -n▏"), "{out}");
         insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn rows_running_a_shell_command_are_highlighted() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.groups[0].worktrees[1].shell_commands = 2;
+        app.apply(snap);
+        let row = |w: u16| render(&app, w, 12).lines().find(|l| l.contains("fix/offline-cache")).unwrap().to_string();
+        assert!(row(120).contains("fix/offline-cache $ 2 commands"), "{}", row(120));
+        assert!(row(90).contains(" $2") && !row(90).contains("commands"), "{}", row(90));
+        assert!(!render(&app, 120, 12).lines().any(|l| l.contains("feature/refactor") && l.contains('$')));
+
+        // The name and the badge are bold teal (a waiting row stays yellow).
+        let theme = Theme::ansi();
+        let i = app.flat.iter().position(|v| v.worktree.branch == "fix/offline-cache").unwrap();
+        let line = worktree_line(&app, &theme, &app.flat[i], "", false, true, &cols_for(&app), 120, NOW);
+        let style_of = |text: &str| line.spans.iter().find(|s| s.content.contains(text)).map(|s| s.style.fg);
+        let expected = if app.flat[i].status() == Some(Status::Waiting) { theme.yellow } else { theme.teal };
+        assert_eq!(style_of(app.flat[i].worktree.display_name()), Some(Some(expected)));
+        assert_eq!(style_of("$ 2 commands"), Some(Some(theme.teal)));
     }
 
     #[test]

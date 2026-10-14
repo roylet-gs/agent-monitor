@@ -56,7 +56,7 @@ specs_for() {
     crates/am-tui/src/modals.rs) echo 09 10 22 23 ;;
     crates/am-tui/src/jobs.rs) echo 09 10 22 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 ;;
-    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 24 ;;
+    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 24 25 ;;
     crates/am-tui/src/launcher.rs) echo 21 23 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens
 
     # --- am-core ----------------------------------------------------------
@@ -82,7 +82,7 @@ specs_for() {
     crates/am-core/src/integrations/cache.rs | crates/am-core/src/integrations/breaker.rs) echo 06 ;;
     crates/am-core/src/integrations/mod.rs) echo 04 05 06 ;;
     crates/am-core/src/launch.rs) echo 21 ;; # open_in_editor's failure path (no IDE in the container)
-    crates/am-core/src/procscan.rs | \
+    crates/am-core/src/procscan.rs) echo 25 ;; # the seeded agent shell command
     crates/am-core/src/stacks.rs) echo - ;; # unit / snapshot tests only
 
     # --- am-hook: seeds the delegating main, feature/pair and the standalone sessions

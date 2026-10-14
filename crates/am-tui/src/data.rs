@@ -338,6 +338,7 @@ impl Worker {
                     has_terminal: p.has_terminal,
                     open_ide: p.open_ide,
                     running_processes: p.running,
+                    shell_commands: p.claude_shells,
                     context: self.ctx.get(&w.id).cloned().flatten(),
                     sessions,
                     worktree: w,
@@ -483,6 +484,7 @@ impl Worker {
                     has_terminal: false,
                     open_ide: None,
                     running_processes: Vec::new(),
+                    shell_commands: 0,
                     context,
                     sessions: Vec::new(),
                 }
@@ -784,6 +786,7 @@ mod tests {
             has_terminal: false,
             open_ide: None,
             running_processes: Vec::new(),
+            shell_commands: 0,
             context: None,
             sessions: Vec::new(),
         }

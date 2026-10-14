@@ -195,6 +195,9 @@ pub struct WorktreeView {
     pub has_terminal: bool,
     pub open_ide: Option<Ide>,
     pub running_processes: Vec<RunningProcess>,
+    /// Shell commands an agent started here (its Bash tool: tests, builds,
+    /// background jobs) that are still running.
+    pub shell_commands: usize,
     /// Context window used by the agent's session (from its transcript).
     pub context: Option<crate::context::ContextUsage>,
     /// Live agent sessions here, oldest first. The dashboard lists them under

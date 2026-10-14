@@ -130,11 +130,14 @@ impl ProcessSnapshot {
     /// worktree nested beneath it). Claude wraps every Bash tool command in
     /// `<shell> -c source ~/.claude/shell-snapshots/…`, so while its agents are
     /// between turns these are the background commands they're waiting on.
+    /// A subshell the command forks (`cmd &`, `( … )`) keeps the wrapper's
+    /// argv, so a match whose parent matches too is the same command.
     pub fn claude_shell_commands(&self, worktree_root: &Path) -> usize {
         let root = canonical(worktree_root);
         self.procs
             .values()
             .filter(|p| is_claude_shell_command(p) && cwd_belongs_to(p.cwd.as_deref(), &root, has_git_entry))
+            .filter(|p| !self.procs.get(&p.ppid).is_some_and(is_claude_shell_command))
             .count()
     }
 
@@ -845,6 +848,8 @@ mod tests {
                 // A non-shell mentioning the path doesn't count either.
                 proc(6, 0, "/usr/bin/cat", "/wt/a", &["cat", "/Users/me/.claude/shell-snapshots/x.sh"]),
                 proc(7, 0, "/bin/bash", "/wt/b", &["bash", "-c", wrapper]),
+                // A subshell forked by pid 7 (`cmd &`) is the same command.
+                proc(8, 7, "/bin/bash", "/wt/b", &["bash", "-c", wrapper]),
             ],
             999,
         );
