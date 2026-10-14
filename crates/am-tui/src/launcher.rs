@@ -86,11 +86,15 @@ fn report(tx: &Sender<Msg>, r: Result<(), String>, ok: String) {
     });
 }
 
-/// Open a file in an editor `ide`: settings.json (`e` in settings; the TUI
-/// picks up the saved file through its settings-file watch in `main.rs`) or
-/// debug.log (`L`). `ok` is the notice on success.
-pub fn open_file(path: std::path::PathBuf, ide: IdeChoice, ide_command: String, ok: String, tx: Sender<Msg>) {
-    std::thread::spawn(move || report(&tx, launch::open_in_editor(&path, ide, &ide_command), ok));
+/// Open a file (settings.json via `e` in settings, a startup script, debug.log via `L`) in an
+/// editor `ide`. The TUI picks up a saved settings.json through its
+/// settings-file watch (`main.rs`).
+pub fn open_file(path: std::path::PathBuf, ide: IdeChoice, ide_command: String, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let done = if name == "settings.json" { format!("Opened {name} — saved changes apply automatically") } else { format!("Opened {name}") };
+        report(&tx, launch::open_in_editor(&path, ide, &ide_command), done);
+    });
 }
 
 /// `L` once the log has rotated: show the log folder in the file manager.

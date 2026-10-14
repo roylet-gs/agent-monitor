@@ -3,6 +3,8 @@
 //! agent hooks (Claude Code plus any other agent CLI found), repositories,
 //! integrations, context window. Everything is also reachable
 //! later via `s` (settings), `A` (add repo) and `am hooks install`.
+//! Settings → Run setup again (or `am setup`) walks it again over the current
+//! settings: it starts from their values, and Esc on the first step cancels.
 
 use am_core::harness::{self, HarnessKind};
 use serde_json::Value;
@@ -40,6 +42,9 @@ pub struct Setup {
     pub ctx_choice: usize,
     pub ctx_input: String,
     pub ctx_error: Option<String>,
+    /// A re-run (setup was done before): Esc on the first step leaves
+    /// without changing anything.
+    pub cancellable: bool,
 }
 
 pub const IDES: [(&str, &str); 6] = am_core::launch::IdeChoice::ALL;
@@ -53,6 +58,8 @@ pub enum SetupEffect {
     None,
     InstallHooks,
     AddRepo(String),
+    /// Esc on the first step of a re-run: close, nothing saved.
+    Cancel,
     /// Finished: these keys go into settings.json (plus setupCompleted).
     Finish(Vec<(&'static str, Value)>),
 }
@@ -65,6 +72,9 @@ impl Setup {
         let hooks_installed = agents.iter().all(|(_, on)| *on);
         let context_window = settings.context_window_tokens;
         let preset = CONTEXT_CHOICES.iter().position(|(n, _)| *n == context_window);
+        // A re-run starts from what's saved, so finishing it keeps the Linear
+        // key and the PR setting; a first run guesses from what's installed.
+        let rerun = !needed(settings);
         Setup {
             step: Step::Editor,
             ide: IDES.iter().position(|(k, _)| *k == ide).unwrap_or(0),
@@ -76,12 +86,13 @@ impl Setup {
             repo_input: "~/".into(),
             repos_added: existing_repos,
             repo_error: None,
-            gh: which("gh"),
-            linear_key: String::new(),
+            gh: if rerun { settings.gh_pr_status } else { which("gh") },
+            linear_key: if rerun { settings.linear_api_key.clone() } else { String::new() },
             integration_field: 0,
             ctx_choice: preset.unwrap_or(CONTEXT_CUSTOM),
             ctx_input: if preset.is_some() { String::new() } else { am_core::context::short_tokens(context_window) },
             ctx_error: None,
+            cancellable: rerun,
         }
     }
 
@@ -106,6 +117,7 @@ impl Setup {
                         self.ide_error = Some("Type the command that opens a folder, e.g. idea or subl -n".into());
                     }
                     Key::Enter => self.step = Step::Hooks,
+                    Key::Esc if self.cancellable => return SetupEffect::Cancel,
                     _ => {}
                 }
             }
@@ -251,6 +263,7 @@ mod tests {
             ctx_choice: 0,
             ctx_input: String::new(),
             ctx_error: None,
+            cancellable: false,
         }
     }
 
@@ -307,6 +320,29 @@ mod tests {
         let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
         assert!(v.contains(&("ide", Value::from("custom"))));
         assert!(v.contains(&("ideCommand", Value::from("subl -n"))));
+    }
+
+    #[test]
+    fn rerun_starts_from_saved_settings_and_can_be_cancelled() {
+        let saved = am_core::settings::Settings::parse(r#"{"setupCompleted":true,"ghPrStatus":false,"linearApiKey":"lin_x"}"#);
+        let mut s = Setup::new(vec!["work".into()], &saved);
+        assert!(s.cancellable);
+        assert!(!s.gh);
+        assert_eq!(s.linear_key, "lin_x");
+        assert_eq!(s.repos_added, vec!["work".to_string()]);
+        s.step = Step::Context;
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        assert!(v.contains(&("linearEnabled", Value::Bool(true))));
+        assert!(v.contains(&("linearApiKey", Value::from("lin_x"))));
+        assert!(v.contains(&("ghPrStatus", Value::Bool(false))));
+        s.step = Step::Editor;
+        assert!(matches!(s.on_key(Key::Esc), SetupEffect::Cancel));
+
+        let first = Setup::new(vec![], &am_core::settings::Settings::parse(r#"{"linearApiKey":"lin_x"}"#));
+        assert!(!first.cancellable);
+        assert!(first.linear_key.is_empty());
+        let mut first = first;
+        assert!(matches!(first.on_key(Key::Esc), SetupEffect::None));
     }
 
     #[test]

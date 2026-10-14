@@ -134,7 +134,7 @@ Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walk
 4. **Integrations**: GitHub PR status (needs `gh`) and an optional Linear API key
 5. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
 
-Everything can be changed later: `s` for settings, `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use `am setup`. Run `am doctor` to check the setup.
+Everything can be changed later: `s` for settings (**Repositories…** manages the tracked repos), `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use **Settings → Run setup again…** or `am setup`. It starts from your current settings and repositories, nothing is saved until you finish it, and `Esc` on the first step closes it. **Settings → Reset settings…** (confirm with `y`) puts every setting back to its default and then opens the wizard. Repositories, worktrees, history, custom themes, startup scripts and agent hooks are kept. Run `am doctor` to check the setup.
 
 ---
 
@@ -158,7 +158,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `n` | New worktree (adds a repository first if none is tracked) |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
-| `A` | Add a repository |
+| `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `L` | Open `debug.log` in your editor (the `Open in` setting); once the log has rotated into `debug.log.1`, open the log folder in Finder instead |
 | `s` | Settings |
@@ -469,7 +469,7 @@ am --version
 | `am theme remove <name>` | Delete a custom theme (switches back to `ansi` if it was active) | |
 | `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear`, `--open` (in your editor, or the folder once rotated) |
-| `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run) | |
+| `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run; also Settings → Run setup again…) | |
 | `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
 
 </details>
@@ -560,6 +560,7 @@ You can also press `w` in the dashboard to see the log live, or `L` to open it i
 
 - `am hooks status` should report the hooks as installed; if not, run `am hooks install`.
 - After upgrading from 1.x, run `am hooks install` once so the hooks use `am-hook`.
+- **Repositories:** `s` → **Repositories…** lists the tracked repositories with their worktree count and whether they have a startup script. `a` adds one through the folder browser, `x` stops tracking one (after a `y`; its worktrees and files stay on disk), `s` opens its startup script in your editor (created from a template if it has none), and `S` removes the script.
 - **Harness plugins:** `s` → **Harness plugins…** lists every harness plugin (the built-ins below, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
 - **Codex CLI:** Codex runs a user hook only after you trust it in `/hooks`, and again after `am hooks install` rewrites it.
 - **Cursor:** Cursor also runs Claude Code's hooks by default; am ignores those for Cursor sessions and tracks them through Cursor's own `~/.cursor/hooks.json`. Cursor has no permission hook, so its sessions never show `waiting`, and the `cursor-agent` CLI may not fire every hook the editor does.
