@@ -7,6 +7,9 @@ import { RustTui, resetMock } from "./helpers/rust-tui";
 // - an untracked /home/user/elsewhere session: 849,880 tokens today, plus a line
 //   from two days ago that never counts.
 // So "all" shows 1.0M and "visible" shows main's 150k.
+// By class (all): input 49,882, cache write 1,998, cache read 848,000, output
+// 100,120 → weighted 638k; main is claude-opus-5-5 ($0.04), the other session's
+// model "m" has no price (so "+").
 
 test.beforeEach(async () => {
   await resetMock();
@@ -27,6 +30,7 @@ async function activateSetting(tui: RustTui, help: string): Promise<void> {
 
 const SCOPE_HELP = "all: every session today; visible: only the rows shown";
 const SHOW_HELP = "Tokens used today (input, cache and output)";
+const MODE_HELP = "tokens: all billed; weighted: by price";
 
 test("today's token usage sits bottom right and follows its scope", async ({ page }) => {
   const tui = new RustTui(page);
@@ -43,6 +47,26 @@ test("today's token usage sits bottom right and follows its scope", async ({ pag
 
   // Back to "all".
   await activateSetting(tui, SCOPE_HELP);
+  await tui.waitForMatch(/─ today 1\.0M ╯/);
+});
+
+test("the token total cycles through its display modes", async ({ page }) => {
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.waitForMatch(/─ today 1\.0M ╯/);
+
+  await activateSetting(tui, MODE_HELP);
+  await tui.waitForMatch(/─ today 638k weighted ╯/);
+  await tui.screenshot("daily-tokens-weighted");
+  await activateSetting(tui, MODE_HELP);
+  await tui.waitForMatch(/─ today ~\$0\.04\+ ╯/);
+  await tui.screenshot("daily-tokens-cost");
+  await activateSetting(tui, MODE_HELP);
+  await tui.waitForMatch(/─ today in 50k · write 2k · read 848k · out 100k ╯/);
+  await tui.screenshot("daily-tokens-breakdown");
+
+  // Back to raw tokens.
+  await activateSetting(tui, MODE_HELP);
   await tui.waitForMatch(/─ today 1\.0M ╯/);
 });
 

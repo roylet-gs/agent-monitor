@@ -393,7 +393,7 @@ impl Worker {
     /// the usage attributed to a row on screen. Each session's cwd goes to
     /// the most specific of *all* known roots, so a visible main checkout
     /// doesn't pick up its hidden nested worktrees.
-    fn today_tokens(&self, roots: &[String], groups: &[am_core::model::WorktreeGroup]) -> Option<u64> {
+    fn today_tokens(&self, roots: &[String], groups: &[am_core::model::WorktreeGroup]) -> Option<am_core::usage::Tally> {
         if !self.settings.show_daily_tokens || self.last_usage.is_none() {
             return None;
         }
@@ -403,7 +403,9 @@ impl Worker {
         let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
         let by_root = self.usage.by_root(&roots);
         let visible: HashSet<&str> = groups.iter().flat_map(|g| &g.worktrees).map(|v| v.worktree.path.as_str()).collect();
-        Some(by_root.iter().filter(|(r, _)| visible.contains(r.as_str())).map(|(_, n)| n).sum())
+        let mut tally = am_core::usage::Tally::default();
+        by_root.iter().filter(|(r, _)| visible.contains(r.as_str())).for_each(|(_, t)| tally.add(t));
+        Some(tally)
     }
 
     fn refresh_stack_git(&mut self, repos: &[am_core::model::Repository], worktrees: &[Worktree]) {

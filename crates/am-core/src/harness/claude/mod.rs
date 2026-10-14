@@ -12,6 +12,7 @@ use super::{Harness, HarnessKind, ProcessSpec, home_join, is_within};
 use crate::launch::Session;
 use crate::status::HookEvent;
 
+pub mod pricing;
 pub mod transcript;
 
 pub const HOOK_EVENTS: [&str; 11] = [
@@ -198,8 +199,10 @@ pub fn usage_files_in(projects_dir: &Path, since: SystemTime) -> Vec<PathBuf> {
     out
 }
 
-/// Token usage on an assistant line: input + cache creation + cache read +
-/// output. Sidechain (subagent) turns count; `<synthetic>` ones don't.
+/// Token usage on an assistant line, per class, with its estimated cost.
+/// Cache writes are split by TTL from `usage.cache_creation` when present
+/// (otherwise counted as 5-minute writes). Sidechain (subagent) turns count;
+/// `<synthetic>` ones don't.
 pub fn usage_record(line: &str) -> Option<crate::usage::UsageRecord> {
     if !line.contains("\"usage\"") || !line.contains("\"assistant\"") {
         return None;
@@ -209,17 +212,35 @@ pub fn usage_record(line: &str) -> Option<crate::usage::UsageRecord> {
         return None;
     }
     let msg = v.get("message")?;
-    if msg.get("model").and_then(Value::as_str) == Some("<synthetic>") {
+    let model = msg.get("model").and_then(Value::as_str).unwrap_or_default();
+    if model == "<synthetic>" {
         return None;
     }
     let usage = msg.get("usage")?;
     let n = |k: &str| usage.get(k).and_then(Value::as_u64).unwrap_or(0);
-    let tokens = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens") + n("output_tokens");
+    let write = n("cache_creation_input_tokens");
+    let split = usage.get("cache_creation").map(|c| {
+        let n = |k: &str| c.get(k).and_then(Value::as_u64).unwrap_or(0);
+        (n("ephemeral_5m_input_tokens"), n("ephemeral_1h_input_tokens"))
+    });
+    let (cache_write_5m, cache_write_1h) = match split {
+        Some((w5, w1h)) if w5 + w1h > 0 => (w5, w1h),
+        _ => (write, 0),
+    };
+    let tokens = crate::usage::TokenCounts {
+        input: n("input_tokens"),
+        cache_write_5m,
+        cache_write_1h,
+        cache_read: n("cache_read_input_tokens"),
+        output: n("output_tokens"),
+    };
+    let fast = usage.get("speed").and_then(Value::as_str) == Some("fast");
     let id = [msg.get("id"), v.get("requestId"), v.get("uuid")].into_iter().flatten().find_map(Value::as_str)?;
     Some(crate::usage::UsageRecord {
         id: id.to_owned(),
         at: crate::timefmt::parse_iso(v.get("timestamp")?.as_str()?)?,
         cwd: v.get("cwd").and_then(Value::as_str).filter(|c| !c.is_empty()).map(str::to_owned),
+        cost_usd: pricing::cost_usd(model, &tokens, fast),
         tokens,
     })
 }
@@ -232,7 +253,16 @@ mod tests {
     fn usage_records_count_every_token_class() {
         let line = r#"{"type":"assistant","isSidechain":true,"cwd":"/w","timestamp":"1970-01-01T00:01:00.5Z","message":{"id":"msg_1","model":"m","usage":{"input_tokens":2,"cache_creation_input_tokens":30,"cache_read_input_tokens":400,"output_tokens":5000}}}"#;
         let r = usage_record(line).unwrap();
-        assert_eq!((r.id.as_str(), r.at, r.cwd.as_deref(), r.tokens), ("msg_1", 60, Some("/w"), 5432));
+        assert_eq!((r.id.as_str(), r.at, r.cwd.as_deref(), r.tokens.total()), ("msg_1", 60, Some("/w"), 5432));
+        assert_eq!((r.tokens.cache_write_5m, r.tokens.cache_read, r.cost_usd), (30, 400, None), "model `m` has no price");
+        // A TTL split moves writes to the 1-hour class; a known model gets a cost.
+        let split = line.replace(r#""model":"m""#, r#""model":"claude-opus-5-5""#).replace(
+            r#""cache_creation_input_tokens":30,"#,
+            r#""cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":10,"ephemeral_1h_input_tokens":20},"#,
+        );
+        let r = usage_record(&split).unwrap();
+        assert_eq!((r.tokens.cache_write_5m, r.tokens.cache_write_1h), (10, 20));
+        assert!(r.cost_usd.is_some_and(|c| c > 0.0));
         let synthetic = line.replace(r#""model":"m""#, r#""model":"<synthetic>""#);
         assert_eq!(usage_record(&synthetic), None);
         let user = line.replace(r#""type":"assistant""#, r#""type":"user""#);

@@ -103,6 +103,9 @@ pub struct Settings {
     /// What that total counts: `"all"` of today's usage, or only the usage of
     /// the rows currently `"visible"`. Unknown values count all.
     pub daily_tokens_scope: String,
+    /// How that total is shown (see [`DailyTokensMode`]); unknown values show
+    /// raw tokens.
+    pub daily_tokens_mode: String,
     /// Check GitHub Releases for a newer `am` and show it in the dashboard.
     pub check_for_updates: bool,
     /// Where a repo's startup script runs after creating a worktree: `pane`
@@ -180,6 +183,7 @@ impl Default for Settings {
             context_window_tokens: 1_000_000,
             show_daily_tokens: true,
             daily_tokens_scope: "all".into(),
+            daily_tokens_mode: "tokens".into(),
             check_for_updates: true,
             startup_script_mode: "pane".into(),
             key_bindings: Default::default(),
@@ -201,6 +205,10 @@ impl Settings {
     /// Today's token total counts only the visible rows.
     pub fn daily_tokens_visible_only(&self) -> bool {
         self.daily_tokens_scope == "visible"
+    }
+
+    pub fn daily_tokens_mode(&self) -> DailyTokensMode {
+        DailyTokensMode::parse(&self.daily_tokens_mode).unwrap_or(DailyTokensMode::Tokens)
     }
 
     pub fn log_level(&self) -> Level {
@@ -227,6 +235,33 @@ impl Settings {
         let mut s: Settings = serde_json::from_value(serde_json::Value::Object(merged)).unwrap_or_default();
         s.raw = map;
         s
+    }
+}
+
+/// What today's token total shows (`dailyTokensMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DailyTokensMode {
+    /// Every billed token, unweighted (cache reads dominate).
+    Tokens,
+    /// Input-equivalent tokens: each class weighted by its price ratio.
+    Weighted,
+    /// Estimated US dollars at API list prices.
+    Cost,
+    /// Raw tokens per class (input, cache write, cache read, output).
+    Breakdown,
+}
+
+impl DailyTokensMode {
+    pub const IDS: [&str; 4] = ["tokens", "weighted", "cost", "breakdown"];
+
+    pub fn parse(s: &str) -> Option<DailyTokensMode> {
+        Some(match s {
+            "tokens" => DailyTokensMode::Tokens,
+            "weighted" => DailyTokensMode::Weighted,
+            "cost" => DailyTokensMode::Cost,
+            "breakdown" => DailyTokensMode::Breakdown,
+            _ => return None,
+        })
     }
 }
 
@@ -363,6 +398,9 @@ mod tests {
         assert!(!Settings::parse(r#"{"dailyTokensScope":"bogus"}"#).daily_tokens_visible_only());
         assert!(Settings::parse(r#"{"dailyTokensScope":"visible"}"#).daily_tokens_visible_only());
         assert!(!Settings::parse(r#"{"showDailyTokens":false}"#).show_daily_tokens);
+        assert_eq!(d.daily_tokens_mode(), DailyTokensMode::Tokens);
+        assert_eq!(Settings::parse(r#"{"dailyTokensMode":"bogus"}"#).daily_tokens_mode(), DailyTokensMode::Tokens);
+        assert_eq!(Settings::parse(r#"{"dailyTokensMode":"cost"}"#).daily_tokens_mode(), DailyTokensMode::Cost);
     }
 
     #[test]

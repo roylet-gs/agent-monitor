@@ -271,6 +271,12 @@ fn settings_set_coerces_and_validates() {
     let o = env.run(&["settings", "set", "dailyTokensScope", "some"]);
     assert_eq!(o.code, 1);
     assert!(o.stderr.contains("Use all or visible"));
+
+    env.ok(&["settings", "set", "dailyTokensMode", "cost"]);
+    assert_eq!(env.settings()["dailyTokensMode"], "cost");
+    let o = env.run(&["settings", "set", "dailyTokensMode", "dollars"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Use one of: tokens, weighted, cost, breakdown"));
 }
 
 #[test]
