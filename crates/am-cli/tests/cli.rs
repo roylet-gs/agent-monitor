@@ -1069,6 +1069,52 @@ fn mcp_install_registers_with_each_agent() {
 }
 
 #[test]
+fn mcp_install_registers_with_claude_desktop() {
+    let env = Env::new();
+    let rel = if cfg!(target_os = "macos") { "Library/Application Support/Claude" } else { ".config/Claude" };
+    let dir = env.home().join(rel);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("claude_desktop_config.json");
+    std::fs::write(&file, r#"{"mcpServers":{"other":{"command":"x"}},"preferences":{"a":1}}"#).unwrap();
+
+    // Present, so the default install picks it up; it has no CLI, so the file is edited.
+    let o = env.ok(&["mcp", "install"]);
+    assert!(o.stdout.contains("MCP server registered with Claude Desktop (~/"), "{}", o.stdout);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let entry = &v["mcpServers"]["agent-monitor"];
+    assert_eq!(entry["args"], json!(["mcp"]));
+    assert!(entry["env"]["PATH"].as_str().unwrap().contains("/usr/bin"), "{entry}");
+    assert_eq!(v["mcpServers"]["other"]["command"], "x");
+    assert_eq!(v["preferences"]["a"], 1);
+
+    let status = env.ok(&["mcp", "status", "--json"]).json();
+    assert_eq!(status["agents"]["claude-desktop"]["installed"], true);
+    assert!(env.ok(&["mcp", "status"]).stdout.contains("Claude Desktop MCP server: registered"));
+
+    env.ok(&["mcp", "uninstall", "--agent", "claude-desktop"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v, json!({"mcpServers": {"other": {"command": "x"}}, "preferences": {"a": 1}}));
+}
+
+#[test]
+fn mcp_tools_outside_a_repo_use_the_only_tracked_one() {
+    let env = Env::new();
+    env.seed_repo();
+    // Claude Desktop starts the server in `/`.
+    let replies = mcp_session(
+        &env,
+        Path::new("/"),
+        &[rpc(1, "tools/call", json!({"name": "worktree_info", "arguments": {"target": "feature/login"}}))],
+    );
+    assert_eq!(replies[0]["result"]["isError"], false, "{}", replies[0]);
+
+    // The CLI itself doesn't guess, and says what is tracked.
+    let o = env.run_in(Some(Path::new("/")), &["worktree", "info", "feature/login"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Tracked: ") && o.stderr.contains("myrepo"), "{}", o.stderr);
+}
+
+#[test]
 fn mcp_install_uses_the_claude_cli_when_present() {
     let env = Env::new();
     let log = env.root().join("claude-args");

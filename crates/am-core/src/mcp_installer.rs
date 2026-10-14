@@ -5,6 +5,10 @@
 //! file's server map; everyone else's servers are kept. A CLI that rewrites its
 //! config while it runs (Claude Code's `~/.claude.json`) is driven through its
 //! own `mcp add`/`mcp remove` commands when it is installed.
+//!
+//! Besides the harness plugins there are MCP-only apps ([`Target::Desktop`],
+//! Claude Desktop): they read MCP servers but run no hooks, so they are not
+//! harnesses and live here instead.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -31,10 +35,104 @@ pub fn server_entry(cfg: &McpConfig, program: &Path) -> Value {
     Value::Object(e)
 }
 
-fn unsupported(kind: HarnessKind) -> std::io::Error {
+/// Something `am mcp install` can register with: a harness plugin, or an
+/// app that only reads MCP servers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Agent(HarnessKind),
+    /// Claude Desktop (`claude_desktop_config.json`). It has no CLI to drive,
+    /// starts servers in `/` and with a minimal `$PATH`, so its entry carries
+    /// the installing shell's `PATH` for the `git`/`gh` that am runs.
+    Desktop,
+}
+
+pub const DESKTOP_ID: &str = "claude-desktop";
+
+/// Claude Desktop's config file (macOS; the Linux path community builds use).
+pub fn desktop_config_path() -> PathBuf {
+    let rel = if cfg!(target_os = "macos") {
+        "Library/Application Support/Claude/claude_desktop_config.json"
+    } else {
+        ".config/Claude/claude_desktop_config.json"
+    };
+    crate::paths::home_dir().join(rel)
+}
+
+impl Target {
+    /// Every target: the registered harnesses, then the MCP-only apps.
+    pub fn all() -> Vec<Target> {
+        crate::harness::all().iter().map(|k| Target::Agent(*k)).chain([Target::Desktop]).collect()
+    }
+
+    /// By `--agent` id (a harness id or `claude-desktop`).
+    pub fn get(id: &str) -> Option<Target> {
+        if id == DESKTOP_ID {
+            return Some(Target::Desktop);
+        }
+        HarnessKind::get(id).map(Target::Agent)
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Target::Agent(k) => k.id(),
+            Target::Desktop => DESKTOP_ID,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Target::Agent(k) => k.provider().name(),
+            Target::Desktop => "Claude Desktop",
+        }
+    }
+
+    pub fn short_name(self) -> &'static str {
+        match self {
+            Target::Agent(k) => k.provider().short_name(),
+            Target::Desktop => "Claude Desktop",
+        }
+    }
+
+    /// Installed on this machine (its config dir exists).
+    pub fn is_present(self) -> bool {
+        match self {
+            Target::Agent(k) => k.provider().is_present(),
+            Target::Desktop => desktop_config_path().parent().is_some_and(Path::is_dir),
+        }
+    }
+
+    pub fn config(self) -> Option<McpConfig> {
+        match self {
+            Target::Agent(k) => k.provider().mcp_config(),
+            Target::Desktop => {
+                let mut entry = Map::new();
+                if let Some(path) = std::env::var_os("PATH") {
+                    entry.insert("env".into(), json!({"PATH": path.to_string_lossy()}));
+                }
+                Some(McpConfig { path: desktop_config_path(), key: "mcpServers".into(), entry })
+            }
+        }
+    }
+
+    fn add_command(self, entry: &Value) -> Option<Vec<String>> {
+        match self {
+            Target::Agent(k) => k.provider().mcp_add_command(SERVER_NAME, entry),
+            Target::Desktop => None,
+        }
+    }
+
+    fn remove_command(self) -> Option<Vec<String>> {
+        match self {
+            Target::Agent(k) => k.provider().mcp_remove_command(SERVER_NAME),
+            Target::Desktop => None,
+        }
+    }
+}
+
+fn unsupported(target: Target) -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        format!("am can't register MCP servers with {} yet", kind.provider().name()),
+        format!("am can't register MCP servers with {} yet", target.name()),
     )
 }
 
@@ -57,59 +155,57 @@ fn via_cli(argv: Option<Vec<String>>) -> Option<Vec<String>> {
     argv.filter(|a| a.first().is_some_and(|p| on_path(p)))
 }
 
-/// Register am's server with `kind`. Returns where it went, for display
+/// Register am's server with `target`. Returns where it went, for display
 /// (`~/.gemini/settings.json`, or `claude mcp add-json`).
-pub fn install_mcp(kind: HarnessKind) -> std::io::Result<String> {
-    let p = kind.provider();
-    let cfg = p.mcp_config().ok_or_else(|| unsupported(kind))?;
+pub fn install_mcp(target: Target) -> std::io::Result<String> {
+    let cfg = target.config().ok_or_else(|| unsupported(target))?;
     let program = am_program();
     let entry = server_entry(&cfg, &program);
-    if let Some(add) = via_cli(p.mcp_add_command(SERVER_NAME, &entry)) {
+    if let Some(add) = via_cli(target.add_command(&entry)) {
         // `add` refuses an existing name, so replace it.
         if is_installed_in(&cfg)
-            && let Some(remove) = p.mcp_remove_command(SERVER_NAME)
+            && let Some(remove) = target.remove_command()
         {
             run(&remove)?;
         }
         run(&add)?;
-        info!("mcp", "Registered MCP server with {} via `{}` using {}", p.name(), add[..3].join(" "), program.display());
+        info!("mcp", "Registered MCP server with {} via `{}` using {}", target.name(), add[..3].join(" "), program.display());
         return Ok(add[..3].join(" "));
     }
     install_in(&cfg, entry)?;
-    info!("mcp", "Registered MCP server with {} in {} using {}", p.name(), cfg.path.display(), program.display());
+    info!("mcp", "Registered MCP server with {} in {} using {}", target.name(), cfg.path.display(), program.display());
     Ok(tilde(&cfg.path))
 }
 
-/// Remove am's server from `kind`'s config; a no-op when it isn't there.
-pub fn uninstall_mcp(kind: HarnessKind) -> std::io::Result<String> {
-    let p = kind.provider();
-    let cfg = p.mcp_config().ok_or_else(|| unsupported(kind))?;
+/// Remove am's server from `target`'s config; a no-op when it isn't there.
+pub fn uninstall_mcp(target: Target) -> std::io::Result<String> {
+    let cfg = target.config().ok_or_else(|| unsupported(target))?;
     if !is_installed_in(&cfg) {
         return Ok(tilde(&cfg.path));
     }
-    if let Some(remove) = via_cli(p.mcp_remove_command(SERVER_NAME)) {
+    if let Some(remove) = via_cli(target.remove_command()) {
         run(&remove)?;
-        info!("mcp", "Removed MCP server from {} via `{}`", p.name(), remove[..3].join(" "));
+        info!("mcp", "Removed MCP server from {} via `{}`", target.name(), remove[..3].join(" "));
         return Ok(remove[..3].join(" "));
     }
     uninstall_in(&cfg)?;
-    info!("mcp", "Removed MCP server from {} ({})", p.name(), cfg.path.display());
+    info!("mcp", "Removed MCP server from {} ({})", target.name(), cfg.path.display());
     Ok(tilde(&cfg.path))
 }
 
-pub fn is_mcp_installed(kind: HarnessKind) -> bool {
-    kind.provider().mcp_config().is_some_and(|c| is_installed_in(&c))
+pub fn is_mcp_installed(target: Target) -> bool {
+    target.config().is_some_and(|c| is_installed_in(&c))
 }
 
-/// The program `kind`'s registered entry runs, if registered.
-pub fn installed_program(kind: HarnessKind) -> Option<String> {
-    let cfg = kind.provider().mcp_config()?;
+/// The program `target`'s registered entry runs, if registered.
+pub fn installed_program(target: Target) -> Option<String> {
+    let cfg = target.config()?;
     servers(&read_settings(&cfg.path).ok()?, &cfg.key).get(SERVER_NAME)?.get("command")?.as_str().map(String::from)
 }
 
-/// Display form of where `kind` keeps MCP servers.
-pub fn display_path(kind: HarnessKind) -> Option<String> {
-    kind.provider().mcp_config().map(|c| tilde(&c.path))
+/// Display form of where `target` keeps MCP servers.
+pub fn display_path(target: Target) -> Option<String> {
+    target.config().map(|c| tilde(&c.path))
 }
 
 fn servers(settings: &Map<String, Value>, key: &str) -> Map<String, Value> {
@@ -197,5 +293,16 @@ mod tests {
         assert_eq!(with, ["claude", "gemini", "qwen", "cursor"]);
         let add = HarnessKind::CLAUDE.provider().mcp_add_command(SERVER_NAME, &json!({"command": "am"})).unwrap();
         assert_eq!(add, ["claude", "mcp", "add-json", "--scope", "user", SERVER_NAME, r#"{"command":"am"}"#]);
+    }
+
+    #[test]
+    fn claude_desktop_is_a_target_edited_in_place() {
+        assert_eq!(Target::get(DESKTOP_ID), Some(Target::Desktop));
+        assert_eq!(Target::get("claude"), Some(Target::Agent(HarnessKind::CLAUDE)));
+        assert_eq!(Target::all().last(), Some(&Target::Desktop));
+        let cfg = Target::Desktop.config().unwrap();
+        assert!(cfg.path.ends_with("Claude/claude_desktop_config.json"), "{}", cfg.path.display());
+        assert_eq!(cfg.key, "mcpServers");
+        assert!(Target::Desktop.add_command(&json!({})).is_none());
     }
 }

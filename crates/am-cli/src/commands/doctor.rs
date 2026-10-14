@@ -115,17 +115,17 @@ pub fn run(as_json: bool) {
     });
 
     // Optional, so never worse than a warning, and only for a dangling binary.
-    let registered: Vec<(am_core::harness::HarnessKind, Option<String>)> = am_core::harness::all()
-        .iter()
-        .filter(|k| am_core::mcp_installer::is_mcp_installed(**k))
-        .map(|k| (*k, am_core::mcp_installer::installed_program(*k)))
+    let registered: Vec<(am_core::mcp_installer::Target, Option<String>)> = am_core::mcp_installer::Target::all()
+        .into_iter()
+        .filter(|t| am_core::mcp_installer::is_mcp_installed(*t))
+        .map(|t| (t, am_core::mcp_installer::installed_program(t)))
         .collect();
     let missing: Vec<&str> = registered
         .iter()
         .filter_map(|(_, prog)| prog.as_deref())
         .filter(|p| p.starts_with('/') && !std::path::Path::new(p).exists())
         .collect();
-    let names = registered.iter().map(|(k, _)| k.provider().short_name()).collect::<Vec<_>>().join(", ");
+    let names = registered.iter().map(|(t, _)| t.short_name()).collect::<Vec<_>>().join(", ");
     checks.push(Check {
         name: "MCP server".into(),
         status: if missing.is_empty() { "ok" } else { "warn" },

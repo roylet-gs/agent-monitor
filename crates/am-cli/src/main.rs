@@ -267,7 +267,7 @@ enum HooksCmd {
 enum McpCmd {
     /// Run the MCP server on stdin/stdout (the default; what agent CLIs launch)
     Serve,
-    /// Register the MCP server with agent CLIs; default: every detected agent that supports it
+    /// Register the MCP server with agent CLIs and Claude Desktop (`--agent claude-desktop`); default: every detected one that supports it
     Install(AgentOpt),
     /// Remove the MCP server registration; default: from every agent
     Uninstall(AgentOpt),
