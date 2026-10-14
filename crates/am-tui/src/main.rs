@@ -366,13 +366,33 @@ fn dispatch(
         Action::EditSettingsFile => {
             let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
             if ide != am_core::launch::IdeChoice::Terminal {
-                launcher::open_settings_file(am_core::paths::settings_path(), ide, app.settings.ide_command.clone(), launch_tx.clone());
+                let ok = "Opened settings.json — saved changes apply automatically".to_string();
+                launcher::open_file(am_core::paths::settings_path(), ide, app.settings.ide_command.clone(), ok, launch_tx.clone());
                 return Ok(false);
             }
-            edit_settings_file(terminal, mouse_before)?;
+            edit_in_terminal(terminal, mouse_before, &am_core::paths::settings_path())?;
             app.set_settings(settings::load());
             *theme = theme::Theme::load(&app.settings.theme);
             collector.update_settings(app.settings.clone());
+        }
+        Action::ViewLogs => {
+            use am_core::launch::{IdeChoice, LogView};
+            let files = am_core::paths::log_files();
+            let view = am_core::launch::log_view(&files);
+            info!("tui", "View logs: {view:?} ({} file(s))", files.len());
+            match view {
+                LogView::Missing => app.popup = Some(format!("No log file yet at {}", am_core::paths::log_path().display())),
+                LogView::Reveal(path) => launcher::reveal(path, launch_tx.clone()),
+                LogView::Edit(path) => {
+                    let ide = IdeChoice::from_setting(&app.settings.ide);
+                    if ide == IdeChoice::Terminal {
+                        edit_in_terminal(terminal, mouse_before, &path)?;
+                    } else {
+                        let ok = format!("Opened {}", path.display());
+                        launcher::open_file(path, ide, app.settings.ide_command.clone(), ok, launch_tx.clone());
+                    }
+                }
+            }
         }
         Action::None => {}
     }
@@ -430,19 +450,19 @@ fn settings_file_mtime() -> Option<std::time::SystemTime> {
     std::fs::metadata(am_core::paths::settings_path()).and_then(|m| m.modified()).ok()
 }
 
-/// Hand the terminal to $EDITOR (default `vi`) for settings.json, then take it back.
-fn edit_settings_file(terminal: &mut ratatui::DefaultTerminal, mouse: bool) -> io::Result<()> {
-    let path = am_core::paths::settings_path();
+/// Hand the terminal to `$VISUAL`/`$EDITOR` (default `vi`) for `path`
+/// (`ide: "terminal"`), then take it back.
+fn edit_in_terminal(terminal: &mut ratatui::DefaultTerminal, mouse: bool, path: &std::path::Path) -> io::Result<()> {
     let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
     set_mouse(false);
     ratatui::restore();
     // $EDITOR may carry arguments (e.g. `code --wait`), so run it via the shell.
-    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
+    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).status();
     *terminal = ratatui::init();
     set_mouse(mouse);
     terminal.clear()?;
     if let Err(e) = status {
-        am_core::warn!("settings", "Failed to run editor {editor}: {e}");
+        am_core::warn!("tui", "Failed to run editor {editor} on {}: {e}", path.display());
     }
     Ok(())
 }

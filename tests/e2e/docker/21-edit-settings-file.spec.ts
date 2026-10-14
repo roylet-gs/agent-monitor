@@ -22,6 +22,22 @@ async function checkValue(tui: RustTui): Promise<string> {
   return m[1];
 }
 
+test("L opens debug.log in the default ide: the failed launch shows a popup", async ({ page }) => {
+  const tui = new RustTui(page);
+  await tui.open();
+
+  // The seeded data dir has a debug.log (no rotated .1), so L opens it in the
+  // ide (vscode, not installed) rather than revealing the folder.
+  await tui.sendKey("L");
+  await tui.waitForText("✗ Couldn't open");
+  expect(await tui.getScreenText()).toContain("─Worktrees");
+  await tui.screenshot("view-logs-error");
+
+  await tui.sendKey("Escape");
+  await tui.waitForGone("Couldn't open");
+  expect(await tui.getScreenText()).toContain("─Worktrees");
+});
+
 test("e with the default ide reports the failed launch and keeps the TUI", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();

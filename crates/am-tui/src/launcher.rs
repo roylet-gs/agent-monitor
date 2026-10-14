@@ -86,13 +86,16 @@ fn report(tx: &Sender<Msg>, r: Result<(), String>, ok: String) {
     });
 }
 
-/// `e` in settings with an editor `ide`: open settings.json there. The TUI
-/// picks up the saved file through its settings-file watch (`main.rs`).
-pub fn open_settings_file(path: std::path::PathBuf, ide: IdeChoice, ide_command: String, tx: Sender<Msg>) {
-    std::thread::spawn(move || {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        report(&tx, launch::open_in_editor(&path, ide, &ide_command), format!("Opened {name} — saved changes apply automatically"));
-    });
+/// Open a file in an editor `ide`: settings.json (`e` in settings; the TUI
+/// picks up the saved file through its settings-file watch in `main.rs`) or
+/// debug.log (`L`). `ok` is the notice on success.
+pub fn open_file(path: std::path::PathBuf, ide: IdeChoice, ide_command: String, ok: String, tx: Sender<Msg>) {
+    std::thread::spawn(move || report(&tx, launch::open_in_editor(&path, ide, &ide_command), ok));
+}
+
+/// `L` once the log has rotated: show the log folder in the file manager.
+pub fn reveal(path: std::path::PathBuf, tx: Sender<Msg>) {
+    std::thread::spawn(move || report(&tx, launch::reveal_in_file_manager(&path), "Opened the log folder".into()));
 }
 
 pub fn open_url(url: String, tx: Sender<Msg>) {

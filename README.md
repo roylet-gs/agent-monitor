@@ -160,6 +160,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
 | `A` | Add a repository |
 | `w` | Toggle the log pane (tail of `debug.log`) |
+| `L` | Open `debug.log` in your editor (the `Open in` setting); once the log has rotated into `debug.log.1`, open the log folder in Finder instead |
 | `s` | Settings |
 | `f` | Suggest a feature (files a GitHub issue via `gh`) |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
@@ -467,7 +468,7 @@ am --version
 | `am theme import <file>` | Validate a theme file and copy it into `~/.agent-monitor/themes/` | `--name <name>`, `--force` |
 | `am theme remove <name>` | Delete a custom theme (switches back to `ansi` if it was active) | |
 | `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
-| `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear` |
+| `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear`, `--open` (in your editor, or the folder once rotated) |
 | `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run) | |
 | `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
 
@@ -547,9 +548,10 @@ am logs --level warn            # warnings and errors only
 am logs -f                      # follow
 am logs --module hook-event     # one module (e.g. hook-event, integrations, tui, sync)
 am logs -n 500 --level debug    # more history (set logLevel to debug first)
+am logs --open                  # the whole file in your editor
 ```
 
-You can also press `w` in the dashboard to see the log live.
+You can also press `w` in the dashboard to see the log live, or `L` to open it in your editor.
 
 <details>
 <summary><strong>Common issues</strong></summary>

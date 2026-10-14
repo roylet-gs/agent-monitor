@@ -20,6 +20,7 @@ pub enum Command {
     Delete,
     AddRepo,
     ToggleLog,
+    ViewLogs,
     Settings,
     Feedback,
     Refresh,
@@ -35,7 +36,7 @@ pub enum Command {
 
 impl Command {
     /// Every command, in the order the Key bindings page lists them.
-    pub const ALL: [Command; 19] = [
+    pub const ALL: [Command; 20] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -44,6 +45,7 @@ impl Command {
         Command::Delete,
         Command::AddRepo,
         Command::ToggleLog,
+        Command::ViewLogs,
         Command::Settings,
         Command::Feedback,
         Command::Refresh,
@@ -72,6 +74,7 @@ impl Command {
             Command::Delete => "deleteWorktree",
             Command::AddRepo => "addRepo",
             Command::ToggleLog => "toggleLog",
+            Command::ViewLogs => "viewLogs",
             Command::Settings => "settings",
             Command::Feedback => "feedback",
             Command::Refresh => "refresh",
@@ -101,6 +104,7 @@ impl Command {
             Command::Delete => "Delete worktree",
             Command::AddRepo => "Add repository",
             Command::ToggleLog => "Toggle log pane",
+            Command::ViewLogs => "View logs",
             Command::Settings => "Settings",
             Command::Feedback => "Suggest a feature",
             Command::Refresh => "Refresh now",
@@ -126,6 +130,7 @@ impl Command {
             Command::Delete => "Delete the selected worktree (asks first)",
             Command::AddRepo => "Track another repository",
             Command::ToggleLog => "Show or hide the debug.log pane",
+            Command::ViewLogs => "Open debug.log in the editor (the log folder once it has rotated)",
             Command::Settings => "Open this editor",
             Command::Feedback => "File a feature request on GitHub",
             Command::Refresh => "Refresh git, PRs and tickets now",
@@ -151,6 +156,7 @@ impl Command {
             Command::Delete => "delete",
             Command::AddRepo => "add repo",
             Command::ToggleLog => "log",
+            Command::ViewLogs => "logs",
             Command::Settings => "settings",
             Command::Feedback => "feedback",
             Command::Refresh => "refresh",
@@ -170,6 +176,7 @@ impl Command {
             Command::Delete => Key::Char('d'),
             Command::AddRepo => Key::Char('A'),
             Command::ToggleLog => Key::Char('w'),
+            Command::ViewLogs => Key::Char('L'),
             Command::Settings => Key::Char('s'),
             Command::Feedback => Key::Char('f'),
             Command::Refresh => Key::Char('r'),
@@ -406,6 +413,8 @@ mod tests {
         assert_eq!(m.command(Key::Down), Some(Command::MoveDown));
         assert_eq!(m.command(Key::CtrlC), Some(Command::Quit));
         assert_eq!(m.command(Key::Home), Some(Command::Top));
+        assert_eq!(m.command(Key::Char('L')), Some(Command::ViewLogs));
+        assert_eq!(Command::from_id("viewLogs"), Some(Command::ViewLogs));
         assert!(m.overrides().is_empty());
         // Every default is storable and not reserved.
         for c in Command::ALL {

@@ -105,7 +105,7 @@ fn rotate_if_needed() {
     }
     // rename is atomic; a racing writer either lands in the old file (now .1)
     // or creates a fresh debug.log — no lines are lost either way.
-    let _ = std::fs::rename(&path, path.with_extension("log.1"));
+    let _ = std::fs::rename(&path, paths::rotated_log_path());
 }
 
 #[macro_export]

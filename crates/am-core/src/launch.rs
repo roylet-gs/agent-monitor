@@ -7,7 +7,7 @@
 //! without it. Editors get the resume command via the clipboard instead.
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::SystemTime;
 
@@ -200,6 +200,41 @@ pub fn open_in_editor(path: &Path, ide: IdeChoice, custom_cmd: &str) -> Result<(
     result.map_err(|e| format!("Couldn't open {app}: {e}"))
 }
 
+/// What viewing the logs opens, given the log files that exist (`paths::log_files`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogView {
+    /// No log file yet.
+    Missing,
+    /// Only `debug.log`: open it in the editor.
+    Edit(PathBuf),
+    /// It has rotated too: show the folder, with this file selected.
+    Reveal(PathBuf),
+}
+
+pub fn log_view(files: &[PathBuf]) -> LogView {
+    match files {
+        [] => LogView::Missing,
+        [one] => LogView::Edit(one.clone()),
+        [first, ..] => LogView::Reveal(first.clone()),
+    }
+}
+
+/// Show `path` in the file manager: Finder with it selected on macOS, its
+/// folder through `xdg-open` elsewhere.
+pub fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    let result = if cfg!(target_os = "macos") {
+        run(Command::new("open").arg("-R").arg(path))
+    } else {
+        let dir = if path.is_dir() { path } else { path.parent().unwrap_or(path) };
+        run(Command::new("xdg-open").arg(dir))
+    };
+    match &result {
+        Ok(()) => info!("launch", "Revealed {} in the file manager", path.display()),
+        Err(e) => warn!("launch", "Failed to reveal {}: {e}", path.display()),
+    }
+    result.map_err(|e| format!("Couldn't show {}: {e}", path.display()))
+}
+
 /// How long a custom editor command gets to fail before it counts as started.
 const CUSTOM_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
 
@@ -353,6 +388,17 @@ mod tests {
         assert_eq!(resolve_open_action(true, false, Terminal, resume(None, false)), OpenAction::TerminalAgent(resume(None, false)));
         assert_eq!(resolve_open_action(true, false, Cursor, resume(Some("s"), false)), OpenAction::CopyAndOpen(resume(Some("s"), false)));
         assert_eq!(resolve_open_action(true, false, Vscode, resume(None, true)), OpenAction::CopyAndOpen(resume(None, true)));
+    }
+
+    #[test]
+    fn log_view_edits_one_file_and_reveals_rotated_logs() {
+        let log = PathBuf::from("/d/debug.log");
+        let old = PathBuf::from("/d/debug.log.1");
+        assert_eq!(log_view(&[]), LogView::Missing);
+        assert_eq!(log_view(std::slice::from_ref(&log)), LogView::Edit(log.clone()));
+        // Only the rotated file left (debug.log not recreated yet): still one file.
+        assert_eq!(log_view(std::slice::from_ref(&old)), LogView::Edit(old.clone()));
+        assert_eq!(log_view(&[log.clone(), old]), LogView::Reveal(log));
     }
 
     #[test]
