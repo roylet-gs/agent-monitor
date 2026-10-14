@@ -142,7 +142,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 
 **Podman memory:** the Podman VM defaults to 2 GB, and one stack (mock-api, app, Chromium) needs roughly 400 MB plus Chromium's peaks. Several worktrees running E2E at once can get Playwright OOM-killed (`Command was killed with SIGKILL`). Give the VM more memory (`podman machine stop && podman machine set --memory 8192 && podman machine start`) or run fewer stacks at once.
 
-**Helpers** (`tests/e2e/docker/helpers/`): `tui-page.ts` (`TuiPage`: `goto`, `getScreenText` from the xterm.js buffer, `waitForText`, `sendKey`/`type` (both focus the terminal via `term.focus()`, never a click, because am-tui captures the mouse; no fixed sleeps: they return once the screen redraws, at most 300 ms, so assert with `waitForText`/`waitForMatch` rather than relying on a delay), `screenshot(name)` → `tests/e2e/tmp/<name>.png`), `rust-tui.ts` (`RustTui extends TuiPage`: `open`, `openUrl(FRESH_URL)`, `lines`, `keyBar` (last row), `selectedRow` (the `│▌` row), `selectedName`, `selectRow(branch)`, `waitForGone`, `waitForMatch`, `createWorktree`, `skipStartupScript`, `press`, `findCell`/`cellCenter`/`clickText(text, {double})`/`wheel(ticks)`; re-exports the mock client), `mock-api-client.ts` (`setupMock({ gh?, linear?, ghVersion?, outage? })`, and `resetMock()` for `beforeEach`).
+**Helpers** (`tests/e2e/docker/helpers/`): `tui-page.ts` (`TuiPage`: `goto`, `getScreenText` from the xterm.js buffer, `waitForText`, `sendKey`/`type` (both focus the terminal via `term.focus()`, never a click, because am-tui captures the mouse; no fixed sleeps: they return once the screen redraws, at most 300 ms, so assert with `waitForText`/`waitForMatch` rather than relying on a delay), `screenshot(name)` → `tests/e2e/tmp/<name>.png`), `rust-tui.ts` (`RustTui extends TuiPage`: `open`, `openUrl(FRESH_URL)`, `lines`, `keyBar` (last row), `selectedRow` (the `│▌` row), `selectedName`, `selectRow(branch)`, `waitForGone`, `waitForMatch`, `createWorktree`, `skipStartupScript`, `press`, `findCell`/`cellCenter`/`clickText(text, {double})`/`wheel(ticks)`; re-exports the mock client), `mock-api-client.ts` (`setupMock({ gh?, linear?, ghVersion?, outage?, linearByBranch? })`, and `resetMock()` for `beforeEach`).
 
 **Specs** (numbered so they run in a deliberate order against the shared DB; each restores any setting it changes):
 
@@ -152,7 +152,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 | `02-help.spec.ts` | `?` help overlay (keys incl. the `w / L` log line, status legend, no `t`/`c` lines) opens and closes |
 | `03-settings.spec.ts` | `s` settings editor (Open in, then Editor command); toggling "Resume last session on open" persists across a process restart (then restored) |
 | `04-pr-status.spec.ts` | PR column: open (`#42✓`), draft (`#43`) and no PR, via the batched `gh api graphql` path; the Linear PR attachment stands in when GitHub has no PR |
-| `05-linear.spec.ts` | ENG-123 ticket column and `— ticket —` cluster header; making Linear project the top sort key in the sort editor renders `═ Dashboard Revamp ═` (headers take no selection index) and no `No project` header for the project-less `Other sessions` rows, then restores |
+| `05-linear.spec.ts` | ENG-123 ticket column and `— ticket —` cluster header; with `main` unticketed (`linearByBranch`) a blank line separates the cluster from `main`; making Linear project the top sort key in the sort editor renders `═ Dashboard Revamp ═` (headers take no selection index) and no `No project` header for the project-less `Other sessions` rows, then restores |
 | `06-offline-cache.spec.ts` | Mock outage → cached PR/ticket stay, with `⚠ GitHub + Linear offline — cached` on the key bar; `r` after recovery clears it |
 | `07-subagents.spec.ts` | Delegating `main`: green `◑` glyph + `◆ 1 subagent` badge; rows without running subagents have no badge |
 | `08-standalone.spec.ts` | `Other sessions ───` header with the hook-created standalone session row (executing `●`), selectable |
@@ -191,7 +191,7 @@ test("my feature works", async ({ page }) => {
 });
 ```
 
-**Mock API routes:** `POST /gh` (routed on args: `gh api graphql` with `-f bN=<branch>` aliases, `gh pr view`, `--version`), `POST /linear` (viewer query for key verification, aliased `issueVcsBranchSearch`), `POST /mock/setup` (`{ gh, linear, ghVersion, outage }`; `outage: true` fails both routes), `DELETE /mock/reset`, `GET /health`. New fixtures go in `e2e/mock-api/fixtures/`.
+**Mock API routes:** `POST /gh` (routed on args: `gh api graphql` with `-f bN=<branch>` aliases, `gh pr view`, `--version`), `POST /linear` (viewer query for key verification, aliased `issueVcsBranchSearch`), `POST /mock/setup` (`{ gh, linear, ghVersion, outage, linearByBranch }`; `outage: true` fails both routes; `linearByBranch` maps a branch to its own `issueVcsBranchSearch` payload, `null` = no ticket), `DELETE /mock/reset`, `GET /health`. New fixtures go in `e2e/mock-api/fixtures/`.
 
 New specs are picked up by the `tests` image's `COPY` on rebuild. On this macOS setup `docker` may be Podman (`docker compose` shells out to `docker-compose` v2 against the Podman socket); the Buildah backend honours the cache mounts.
 

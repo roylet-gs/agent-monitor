@@ -9,6 +9,11 @@ interface MockSetupConfig {
   ghVersion?: string;
   /** Make the gh and Linear routes fail, as if the network were down. */
   outage?: boolean;
+  /**
+   * Per-branch Linear answers: branch → `issueVcsBranchSearch` payload
+   * (`null` = no ticket). Unlisted branches get the `linear` fixture's issue.
+   */
+  linearByBranch?: Record<string, unknown>;
 }
 
 /** Configure mock-api fixtures for the current test. */
