@@ -17,6 +17,12 @@ let linearFixture: unknown = loadFixture("linear-issue.json");
 let ghVersionResponse = "gh version 2.62.0 (2024-12-05)";
 /** When set, the gh and Linear routes fail as if the network were down. */
 let outage = false;
+/**
+ * Per-branch Linear overrides: branch name → the `issueVcsBranchSearch`
+ * payload for that branch (`null` = no ticket). Branches not listed get the
+ * fixture's issue.
+ */
+let linearByBranch: Record<string, unknown> = {};
 
 interface GhFixture {
   number: number;
@@ -64,11 +70,20 @@ function toGraphqlPr(f: GhFixture, branch: string): unknown {
  * fixture's issue. Unaliased (TS app) queries and fixtures without an issue
  * payload (e.g. an `errors` body) pass through unchanged.
  */
-function aliasLinearFixture(fixture: unknown, query: string | undefined): unknown {
+function aliasLinearFixture(
+  fixture: unknown,
+  query: string | undefined,
+  variables: Record<string, unknown> | undefined,
+): unknown {
   const aliases = [...(query ?? "").matchAll(/\b(b\d+)\s*:\s*issueVcsBranchSearch/g)].map((m) => m[1]!);
   const data = (fixture as { data?: Record<string, unknown> } | null)?.data;
   if (aliases.length === 0 || !data || !("issueVcsBranchSearch" in data)) return fixture;
-  return { data: Object.fromEntries(aliases.map((a) => [a, data.issueVcsBranchSearch])) };
+  const answer = (alias: string): unknown => {
+    const branch = variables?.[alias];
+    if (typeof branch === "string" && branch in linearByBranch) return linearByBranch[branch];
+    return data.issueVcsBranchSearch;
+  };
+  return { data: Object.fromEntries(aliases.map((a) => [a, answer(a)])) };
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -175,7 +190,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const body = await readBody(req);
-    let parsed: { query?: string };
+    let parsed: { query?: string; variables?: Record<string, unknown> };
     try {
       parsed = JSON.parse(body);
     } catch {
@@ -193,7 +208,7 @@ const server = http.createServer(async (req, res) => {
 
     // Handle issue search
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(aliasLinearFixture(linearFixture, parsed.query)));
+    res.end(JSON.stringify(aliasLinearFixture(linearFixture, parsed.query, parsed.variables)));
     return;
   }
 
@@ -214,6 +229,9 @@ const server = http.createServer(async (req, res) => {
       if (config.outage !== undefined) {
         outage = Boolean(config.outage);
       }
+      if (config.linearByBranch !== undefined) {
+        linearByBranch = config.linearByBranch ?? {};
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "configured" }));
     } catch (err) {
@@ -229,6 +247,7 @@ const server = http.createServer(async (req, res) => {
     linearFixture = loadFixture("linear-issue.json");
     ghVersionResponse = "gh version 2.62.0 (2024-12-05)";
     outage = false;
+    linearByBranch = {};
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "reset" }));
     return;

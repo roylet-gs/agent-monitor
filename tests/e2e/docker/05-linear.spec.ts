@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { RustTui, resetMock } from "./helpers/rust-tui";
+import { RustTui, resetMock, setupMock } from "./helpers/rust-tui";
 
 // The default linear-issue fixture links every branch to ENG-123 in project
 // "Dashboard Revamp" (the mock answers each aliased issueVcsBranchSearch).
@@ -18,6 +18,37 @@ test("Linear ticket column and ticket cluster header", async ({ page }) => {
   // Adjacent worktrees with the same ticket get a "— ticket —" header.
   await tui.waitForText("— ENG-123 Implement dashboard feature —");
   await tui.screenshot("linear-ticket");
+});
+
+test("blank line after a ticket cluster before the next row", async ({ page }) => {
+  // Only main has no ticket. Default sort (non-main first, ticket first, newest
+  // first) gives feature/pair + feature/to-delete under one ENG-123 header,
+  // then main, which is set off by a blank line.
+  await setupMock({ linearByBranch: { main: null } });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.waitForText("— ENG-123 Implement dashboard feature —", 15_000);
+  // Wait until main has lost its ticket (the cache may hydrate it first).
+  await tui.waitForMatch(/^│▌?\s*\S main\b(?!.*ENG-123).*$/m, 15_000);
+
+  const lines = await tui.lines();
+  const header = lines.findIndex((l) => l.includes("— ENG-123 Implement dashboard feature —"));
+  expect(header).toBeGreaterThanOrEqual(0);
+  const mainRow = lines.findIndex((l, i) => i > header && /^│▌?\s*\S main\b/.test(l));
+  expect(mainRow).toBeGreaterThan(header + 2);
+  // The row right before main is a blank line inside the pane (borders + spaces).
+  expect(lines[mainRow - 1]).toMatch(/^│\s*│?\s*$/);
+  // …and the row before that is the cluster's last worktree, with the ticket.
+  expect(lines[mainRow - 2]).toContain("feature/to-delete");
+  expect(lines[mainRow - 2]).toContain("ENG-123");
+  expect(lines[mainRow]).not.toContain("ENG-123");
+  await tui.screenshot("ticket-cluster-blank-line");
+
+  // Restore: give main its ticket back and refresh, so later specs see the
+  // default cache (one cluster with every worktree).
+  await resetMock();
+  await tui.sendKey("r");
+  await tui.waitForMatch(/^│▌?\s*\S main\b.*ENG-123/m, 15_000);
 });
 
 /** Open Settings → Sort order in the sort editor. */
