@@ -11,6 +11,7 @@ pub mod hooks_installer;
 pub mod integrations;
 pub mod launch;
 pub mod log;
+pub mod mcp_installer;
 pub mod model;
 pub mod paths;
 pub mod procscan;

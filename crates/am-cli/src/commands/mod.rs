@@ -4,6 +4,7 @@ pub mod hooks;
 pub mod lifecycle;
 pub mod linear;
 pub mod logs;
+pub mod mcp;
 pub mod pr;
 pub mod repo;
 pub mod script;

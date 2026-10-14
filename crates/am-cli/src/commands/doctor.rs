@@ -114,6 +114,30 @@ pub fn run(as_json: bool) {
         },
     });
 
+    // Optional, so never worse than a warning, and only for a dangling binary.
+    let registered: Vec<(am_core::harness::HarnessKind, Option<String>)> = am_core::harness::all()
+        .iter()
+        .filter(|k| am_core::mcp_installer::is_mcp_installed(**k))
+        .map(|k| (*k, am_core::mcp_installer::installed_program(*k)))
+        .collect();
+    let missing: Vec<&str> = registered
+        .iter()
+        .filter_map(|(_, prog)| prog.as_deref())
+        .filter(|p| p.starts_with('/') && !std::path::Path::new(p).exists())
+        .collect();
+    let names = registered.iter().map(|(k, _)| k.provider().short_name()).collect::<Vec<_>>().join(", ");
+    checks.push(Check {
+        name: "MCP server".into(),
+        status: if missing.is_empty() { "ok" } else { "warn" },
+        message: if !missing.is_empty() {
+            format!("Registered for {names} but runs a missing {}. Run: am mcp install", missing.join(", "))
+        } else if registered.is_empty() {
+            "Not registered (optional; `am mcp install` gives agents am's commands as tools)".into()
+        } else {
+            format!("Registered for {names}")
+        },
+    });
+
     let gh = gh_available();
     checks.push(Check {
         name: "gh CLI".into(),

@@ -110,6 +110,10 @@ impl Harness for Embedded {
     fn matches_process(&self, name: &str, argv: &[String]) -> bool {
         self.manifest.process.matches(name, argv)
     }
+
+    fn mcp_config(&self) -> Option<super::McpConfig> {
+        self.manifest.mcp.as_ref().map(super::manifest::McpSpec::config)
+    }
 }
 
 /// Sessions of `kind` the hooks saw at `root` or below, newest first.

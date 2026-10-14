@@ -132,6 +132,37 @@ pub trait Harness: Sync + Send {
     fn matches_process(&self, _name: &str, _argv: &[String]) -> bool {
         false
     }
+
+    // --- MCP ---------------------------------------------------------------------
+
+    /// Where the CLI reads MCP server definitions, so `am mcp install` can
+    /// register am's MCP server (`am mcp`); `None` when am can't.
+    fn mcp_config(&self) -> Option<McpConfig> {
+        None
+    }
+
+    /// argv that registers `entry` as MCP server `name` through the CLI itself,
+    /// for a CLI that rewrites its config file while it runs; `None` edits
+    /// [`mcp_config`](Harness::mcp_config)'s file instead.
+    fn mcp_add_command(&self, _name: &str, _entry: &Value) -> Option<Vec<String>> {
+        None
+    }
+
+    /// argv that removes MCP server `name` through the CLI; pairs with
+    /// [`mcp_add_command`](Harness::mcp_add_command).
+    fn mcp_remove_command(&self, _name: &str) -> Option<Vec<String>> {
+        None
+    }
+}
+
+/// An agent CLI's MCP server config: a JSON file with a `name → server` map.
+#[derive(Debug, Clone, PartialEq)]
+pub struct McpConfig {
+    pub path: PathBuf,
+    /// Key of the server map (`mcpServers`).
+    pub key: String,
+    /// Extra keys for am's server entry besides `command`/`args` (`{"type": "stdio"}`).
+    pub entry: serde_json::Map<String, Value>,
 }
 
 /// Recognise a CLI process by name, by the basename of one of its first two

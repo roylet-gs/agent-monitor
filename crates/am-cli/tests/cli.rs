@@ -973,3 +973,112 @@ fn theme_list_show_export_import_use_remove() {
     assert!(!env.data().join("themes/mine.json").exists());
     assert_eq!(env.settings()["theme"], "ansi", "removing the active theme falls back to ansi");
 }
+
+// --- mcp ---
+
+/// Send JSON-RPC messages to `am mcp` (started in `cwd`) and collect the
+/// replies, one per request; notifications get none.
+fn mcp_session(env: &Env, cwd: &Path, messages: &[Value]) -> Vec<Value> {
+    let mut child = env.command(&["mcp"], Some(cwd)).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for m in messages {
+        writeln!(stdin, "{m}").unwrap();
+    }
+    writeln!(stdin, "not json").unwrap();
+    drop(stdin);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("non-protocol output on stdout ({e}): {l}")))
+        .collect()
+}
+
+fn rpc(id: u64, method: &str, params: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+}
+
+#[test]
+fn mcp_server_runs_cli_commands_as_tools() {
+    let env = Env::new();
+    let (repo, _wt) = env.seed_repo();
+    let replies = mcp_session(
+        &env,
+        &repo,
+        &[
+            rpc(1, "initialize", json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test"}})),
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            rpc(2, "tools/list", json!({})),
+            rpc(3, "tools/call", json!({"name": "worktree_list", "arguments": {}})),
+            rpc(4, "tools/call", json!({"name": "worktree_info", "arguments": {"target": "nope"}})),
+            rpc(5, "tools/call", json!({"name": "settings_get", "arguments": {"key": "ghPrStatus"}})),
+            rpc(6, "tools/call", json!({"name": "worktree_delete", "arguments": {"target": "--force"}})),
+        ],
+    );
+    assert_eq!(replies.len(), 7, "{replies:#?}");
+    assert_eq!(replies[0]["result"]["protocolVersion"], "2025-06-18");
+    let tools = replies[1]["result"]["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|t| t["name"] == "worktree_create"));
+
+    // Run from inside the repo: the CLI detects it from the cwd.
+    let list = &replies[2]["result"];
+    assert_eq!(list["isError"], false, "{list}");
+    let rows = list["structuredContent"]["result"].as_array().unwrap();
+    assert!(rows.iter().any(|r| r["branch"] == "feature/login"), "{rows:?}");
+
+    // A failing command is a tool error and the server keeps going.
+    assert_eq!(replies[3]["result"]["isError"], true);
+    assert_eq!(replies[4]["result"]["isError"], false);
+    assert_eq!(replies[5]["result"]["isError"], true);
+    assert!(replies[5]["result"]["content"][0]["text"].as_str().unwrap().contains("can't start with '-'"));
+    assert_eq!(replies[6]["error"]["code"], -32700);
+}
+
+#[test]
+fn mcp_install_registers_with_each_agent() {
+    let env = Env::new();
+    std::fs::create_dir_all(env.home().join(".gemini")).unwrap();
+    std::fs::write(env.home().join(".gemini/settings.json"), r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
+
+    // No `claude` on PATH: Claude Code's ~/.claude.json is edited directly.
+    let o = env.ok(&["mcp", "install"]);
+    assert!(o.stdout.contains("Claude Code (~/.claude.json)"), "{}", o.stdout);
+    assert!(o.stdout.contains("Gemini CLI (~/.gemini/settings.json)"), "{}", o.stdout);
+    let claude: Value = serde_json::from_str(&std::fs::read_to_string(env.home().join(".claude.json")).unwrap()).unwrap();
+    assert_eq!(claude["mcpServers"]["agent-monitor"]["args"], json!(["mcp"]));
+    assert_eq!(claude["mcpServers"]["agent-monitor"]["type"], "stdio");
+    let gemini: Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home().join(".gemini/settings.json")).unwrap()).unwrap();
+    assert_eq!(gemini["mcpServers"]["other"]["command"], "x");
+    assert!(gemini["mcpServers"]["agent-monitor"]["command"].as_str().unwrap().ends_with("am"));
+
+    let status = env.ok(&["mcp", "status", "--json"]).json();
+    assert_eq!(status["agents"]["claude"]["installed"], true);
+    assert_eq!(status["agents"]["gemini"]["installed"], true);
+    assert_eq!(status["agents"]["codex"]["supported"], false);
+
+    env.ok(&["mcp", "uninstall"]);
+    let gemini: Value =
+        serde_json::from_str(&std::fs::read_to_string(env.home().join(".gemini/settings.json")).unwrap()).unwrap();
+    assert_eq!(gemini, json!({"mcpServers": {"other": {"command": "x"}}}));
+
+    let o = env.run(&["mcp", "install", "--agent", "codex"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("can't register"), "{}", o.stderr);
+}
+
+#[test]
+fn mcp_install_uses_the_claude_cli_when_present() {
+    let env = Env::new();
+    let log = env.root().join("claude-args");
+    env.fake_bin("claude", &format!("echo \"$@\" >> '{}'", log.display()));
+    // Already registered: removed first, since `claude mcp add-json` refuses an existing name.
+    std::fs::write(env.home().join(".claude.json"), r#"{"mcpServers":{"agent-monitor":{"command":"old"}}}"#).unwrap();
+    let o = env.ok(&["mcp", "install", "--agent", "claude"]);
+    assert!(o.stdout.contains("claude mcp add-json"), "{}", o.stdout);
+    let calls = std::fs::read_to_string(&log).unwrap();
+    let calls: Vec<&str> = calls.lines().collect();
+    assert_eq!(calls[0], "mcp remove --scope user agent-monitor");
+    assert!(calls[1].starts_with("mcp add-json --scope user agent-monitor {\"type\":\"stdio\",\"command\":"), "{}", calls[1]);
+}

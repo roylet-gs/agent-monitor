@@ -44,7 +44,7 @@ pub fn is_am_hook_command(command: &str) -> bool {
     false
 }
 
-fn is_executable(path: &Path) -> bool {
+pub(crate) fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
@@ -59,16 +59,8 @@ fn is_cargo_build_output(bin: &Path) -> bool {
     }
 }
 
-/// The native `am-hook` binary to point hooks at: `$AM_HOOK_BIN`, then the
-/// one next to this executable (a `cargo install`/release puts them side by
-/// side), then `$PATH`, then `~/.cargo/bin`. `$AM_NO_NATIVE_HOOK` opts out.
-///
-/// Hook commands outlive the binary that wrote them, so two cases prefer a
-/// stable path: a sibling that `$PATH` reaches through a symlink (Homebrew's
-/// `bin/am-hook` → the versioned `Cellar/…` path `current_exe` resolves to,
-/// which `brew upgrade` removes) is written as the `$PATH` entry, and a
-/// sibling in a cargo `target/` dir (a dev build) is used only when no other
-/// `am-hook` is installed.
+/// The native `am-hook` binary to point hooks at: `$AM_HOOK_BIN`, then
+/// [`find_installed_binary`]. `$AM_NO_NATIVE_HOOK` opts out.
 pub fn find_native_hook_binary() -> Option<PathBuf> {
     if std::env::var_os("AM_NO_NATIVE_HOOK").is_some_and(|v| !v.is_empty()) {
         return None;
@@ -78,15 +70,29 @@ pub fn find_native_hook_binary() -> Option<PathBuf> {
     {
         return Some(p);
     }
+    find_installed_binary("am-hook")
+}
+
+/// An am binary (`am-hook`, `am`) for a config file to run later: the one
+/// next to this executable (a `cargo install`/release puts them side by
+/// side), then `$PATH`, then `~/.cargo/bin`.
+///
+/// Config outlives the binary that wrote it, so two cases prefer a stable
+/// path: a sibling that `$PATH` reaches through a symlink (Homebrew's
+/// `bin/am-hook` → the versioned `Cellar/…` path `current_exe` resolves to,
+/// which `brew upgrade` removes) is written as the `$PATH` entry, and a
+/// sibling in a cargo `target/` dir (a dev build) is used only when no other
+/// copy is installed.
+pub fn find_installed_binary(name: &str) -> Option<PathBuf> {
     let sibling = std::env::current_exe()
         .ok()
-        .and_then(|e| e.parent().map(|d| d.join("am-hook")))
+        .and_then(|e| e.parent().map(|d| d.join(name)))
         .filter(|p| is_executable(p));
     let mut installed: Vec<PathBuf> = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
-        installed.extend(std::env::split_paths(&path).filter(|d| !d.as_os_str().is_empty()).map(|d| d.join("am-hook")));
+        installed.extend(std::env::split_paths(&path).filter(|d| !d.as_os_str().is_empty()).map(|d| d.join(name)));
     }
-    installed.push(paths::home_dir().join(".cargo").join("bin").join("am-hook"));
+    installed.push(paths::home_dir().join(".cargo").join("bin").join(name));
     installed.retain(|p| is_executable(p));
 
     if let Some(sib) = sibling {
