@@ -271,9 +271,15 @@ impl App {
             let tops: Vec<usize> = ordered.iter().filter(|(_, prefix)| prefix.is_empty()).map(|(i, _)| *i).collect();
             let mut last_project: Option<Option<String>> = None;
             let mut top_pos: usize = 0;
+            // Set after the last top-level row of a ticket cluster: whatever
+            // follows the cluster (and its stacked children) gets a blank line.
+            let mut cluster_ended = false;
             for (i, prefix) in ordered {
                 let v = &group.worktrees[i];
                 if prefix.is_empty() {
+                    if std::mem::take(&mut cluster_ended) && !matches!(self.rows.last(), Some(Row::Spacer)) {
+                        self.rows.push(Row::Spacer);
+                    }
                     if by_project {
                         let project = v.linear.as_ref().and_then(|l| l.project.as_ref()).map(|p| p.name.clone());
                         if last_project.as_ref() != Some(&project) {
@@ -295,6 +301,7 @@ impl App {
                         let l = v.linear.as_ref().unwrap();
                         self.rows.push(Row::Ticket(format!("{} {}", l.identifier, l.title)));
                     }
+                    cluster_ended = ticket.is_some() && prev == Some(ticket) && next != Some(ticket);
                     top_pos += 1;
                 }
                 let i = self.flat.len();
@@ -308,6 +315,9 @@ impl App {
             pending.retain(|(job, repo_id, _)| {
                 let here = *repo_id == group.repo.id;
                 if here {
+                    if std::mem::take(&mut cluster_ended) {
+                        self.rows.push(Row::Spacer);
+                    }
                     self.rows.push(Row::Pending(*job));
                 }
                 !here
