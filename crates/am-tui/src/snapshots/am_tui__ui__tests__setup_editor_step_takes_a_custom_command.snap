@@ -4,7 +4,7 @@ expression: out
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▋░░░░ 121k │
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
 │ ◐ fix/o╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮░░ 185k │
 │        │                                                                                │        │
 │gridsigh│  Editor  ›  Agent hooks  ›  Repositories  ›  Integrations  ›  Context          │────────│

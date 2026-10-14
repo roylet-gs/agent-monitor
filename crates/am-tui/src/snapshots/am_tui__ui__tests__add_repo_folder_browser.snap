@@ -4,8 +4,8 @@ expression: "render(&app, 100, 26)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor╭─Add repository ──────────────────────────────────────────────────────╮─────────────│
-│▌◑ feature/re│ /src                                                                 │m ▋░░░░ 121k │
-│ ◐ fix/offlin│ › ▏type to filter, or a path (/… ~/…)                                │m ▉░░░░ 185k │
+│▌◑ feature/re│ /src                                                                 │m ▒░░░░ 121k │
+│ ◐ fix/offlin│ › ▏type to filter, or a path (/… ~/…)                                │m ▓░░░░ 185k │
 │             │                                                                      │             │
 │gridsight ───│   ../                                                                │─────────────│
 │ · main      │   agent-monitor/                                        ✓ tracked    │m            │

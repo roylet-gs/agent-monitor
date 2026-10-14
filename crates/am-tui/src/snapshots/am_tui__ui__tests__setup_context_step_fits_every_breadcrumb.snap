@@ -4,8 +4,8 @@ expression: out
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▋░░░░ 121k │
-│ ◐ fix/offline-cache                                                                4m ▉░░░░ 185k │
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
+│ ◐ fix/offline-cache                                                                4m ▓░░░░ 185k │
 │        ╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮        │
 │gridsigh│                                                                                │────────│
 │ · main │  ✓ Editor  ›  ✓ Agent hooks  ›  ✓ Repositories  ›  ✓ Integrations  ›  Context  │        │

@@ -4,8 +4,8 @@ expression: screen
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────││ ? Create feature/on-origin           │
-│▌◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ▋░░░░ 121k ││   Branch "feature/on-origin" exists  │
-│ ◐ fix/offline-cache                                            4m ▉░░░░ 185k ││   on origin                          │
+│▌◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││   Branch "feature/on-origin" exists  │
+│ ◐ fix/offline-cache                                            4m ▓░░░░ 185k ││   on origin                          │
 │ ? feature/on-origin waiting — ⇥ to answer                                    ││   ⏎ / p Pull remote (track           │
 │                                                                              ││         origin/feature/on-origin)    │
 │gridsight ────────────────────────────────────────────────────────────────────││   c     Create disconnected (new     │
