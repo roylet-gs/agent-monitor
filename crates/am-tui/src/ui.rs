@@ -1389,14 +1389,16 @@ fn ctx_spans<'a>(usage: Option<&ContextUsage>, theme: &Theme, bar_w: usize, conf
     ]
 }
 
-/// `frac` of `width` cells in eighth blocks: (filled part, `░` remainder).
+/// `frac` of `width` cells: (filled part, `░` remainder). A partly filled
+/// cell is a shade (`░▒▓`) rather than an eighth block like `▋`: those are
+/// left-aligned, so the rest of the cell would show as a gap before the track.
 fn bar_cells(frac: f64, width: usize) -> (String, String) {
-    const EIGHTHS: [char; 8] = [' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+    const PARTIAL: [char; 8] = [' ', '░', '░', '▒', '▒', '▒', '▓', '▓'];
     let eighths = (frac.clamp(0.0, 1.0) * (width * 8) as f64).round() as usize;
     let mut filled = "█".repeat(eighths / 8);
     let mut cells = eighths / 8;
     if !eighths.is_multiple_of(8) {
-        filled.push(EIGHTHS[eighths % 8]);
+        filled.push(PARTIAL[eighths % 8]);
         cells += 1;
     }
     (filled, "░".repeat(width - cells))
@@ -2805,7 +2807,7 @@ mod tests {
         };
         assert_eq!(at(&mut v, 100_000), ("████░░░░ 100k".into(), Some(theme.green), Some(theme.green)));
         assert_eq!(at(&mut v, 150_000), ("██████░░ 150k".into(), Some(theme.yellow), Some(theme.yellow)));
-        assert_eq!(at(&mut v, 190_000), ("███████▋ 190k".into(), Some(theme.red), Some(theme.red)));
+        assert_eq!(at(&mut v, 190_000), ("███████▒ 190k".into(), Some(theme.red), Some(theme.red)));
         // Past the configured window the scale doubles until it fits (400k) instead of pinning.
         assert_eq!(at(&mut v, 250_000), ("█████░░░ 250k".into(), Some(theme.green), Some(theme.green)));
         assert_eq!(at(&mut v, 700_000), ("███████░ 700k".into(), Some(theme.yellow), Some(theme.yellow)));

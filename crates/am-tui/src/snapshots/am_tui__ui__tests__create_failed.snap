@@ -4,8 +4,8 @@ expression: screen
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────││ ✗ Create feature/broken              │
-│▌◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ▋░░░░ 121k ││   ✗ Adding worktree…                 │
-│ ◐ fix/offline-cache                                            4m ▉░░░░ 185k ││   git: fatal: invalid reference: nope│
+│▌◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││   ✗ Adding worktree…                 │
+│ ◐ fix/offline-cache                                            4m ▓░░░░ 185k ││   git: fatal: invalid reference: nope│
 │                                                                              ││                                      │
 │gridsight ────────────────────────────────────────────────────────────────────││                                      │
 │ · main                                                  ↑2 ±3  4m            ││                                      │
