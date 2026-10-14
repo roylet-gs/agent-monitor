@@ -48,30 +48,30 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 ;;
     crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
-    crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 ;; # Settings → Repositories, add-repo browser
+    crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 24 ;; # Settings → Repositories, add-repo browser
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs) echo 09 10 22 23 ;;
     crates/am-tui/src/jobs.rs) echo 09 10 22 ;;
-    crates/am-tui/src/ops.rs) echo 09 10 11 23 ;;
-    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 ;;
+    crates/am-tui/src/ops.rs) echo 09 10 11 23 24 ;;
+    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 24 ;;
     crates/am-tui/src/launcher.rs) echo 21 23 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens
 
     # --- am-core ----------------------------------------------------------
     crates/am-core/src/lib.rs | crates/am-core/src/db.rs | crates/am-core/src/settings.rs | \
     crates/am-core/src/model.rs | crates/am-core/src/paths.rs) echo ALL ;;
-    crates/am-core/src/grouping.rs) echo 01 05 08 18 ;;
+    crates/am-core/src/grouping.rs) echo 01 05 08 18 24 ;;
     crates/am-core/src/gitinfo.rs) echo 01 ;;
     crates/am-core/src/timefmt.rs) echo 01 17 ;;
     crates/am-core/src/log.rs) echo 01 ;; # `w` log pane
-    crates/am-core/src/status.rs) echo 07 08 16 18 ;;
+    crates/am-core/src/status.rs) echo 07 08 16 18 24 ;;
     # Harness plugins: hook normalisation seeds every agent row; the installer
     # runs in the wizard; the plugin page and Gemini row are spec 16.
     crates/am-core/src/harness/claude/transcript.rs) echo 14 ;;  # Claude's context reader
     crates/am-core/src/harness/*|crates/am-core/src/agents/*) echo 07 08 11 16 17 ;; # agents/ = pre-rename paths
-    crates/am-core/src/worktrees.rs) echo 09 10 11 ;;
+    crates/am-core/src/worktrees.rs) echo 09 10 11 23 24 ;; # 23/24 add repos
     crates/am-core/src/hooks_installer.rs) echo 11 16 ;;
     crates/am-core/src/context.rs) echo 14 ;;      # context-window bar
     crates/am-core/src/usage.rs) echo 17 ;;        # today's token total
@@ -86,7 +86,8 @@ specs_for() {
     crates/am-core/src/stacks.rs) echo - ;; # unit / snapshot tests only
 
     # --- am-hook: seeds the delegating main, feature/pair and the standalone sessions
-    crates/am-hook/src/*) echo 07 08 16 18 ;;
+    # (24: a standalone session promoted when its repo is added)
+    crates/am-hook/src/*) echo 07 08 16 18 24 ;;
 
     # --- am-cli: the entrypoint runs `repo add/list`, `hook-event`, `status` ---
     crates/am-cli/src/main.rs | crates/am-cli/src/commands/mod.rs | \

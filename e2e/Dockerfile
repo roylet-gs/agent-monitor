@@ -77,7 +77,8 @@ ENV AM_MOCK_API_URL=http://mock-api:4100
 ENV AM_LINEAR_API_URL=http://mock-api:4100/linear
 
 # 7681: seeded dashboard. 7682: fresh data dir per connection (setup wizard).
-EXPOSE 7681 7682
+# 7683: seeded dashboard after a hook in the untracked /home/user/late-repo.
+EXPOSE 7681 7682 7683
 ENTRYPOINT ["/entrypoint.sh"]
 
 # ============================================================

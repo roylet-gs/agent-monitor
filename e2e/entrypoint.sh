@@ -180,5 +180,23 @@ chmod +x /usr/local/bin/am-tui-fresh
 # disableLeaveAlert: no "leave site?" prompt when a spec navigates away.
 ttyd -p 7682 --writable -t disableLeaveAlert=true am-tui-fresh &
 
+# 7683: the seeded dashboard, after a hook from an agent already running in
+# the untracked git repo /home/user/late-repo (24-repo-added-mid-session.spec.ts).
+# Fired per connection, so the spec can add the repo, stop tracking it and
+# still find a standalone session on a retry.
+mkdir -p /home/user/late-repo
+git -C /home/user/late-repo init --quiet
+echo "# late" > /home/user/late-repo/README.md
+git -C /home/user/late-repo add README.md
+git -C /home/user/late-repo commit -m "init" --quiet
+cat > /usr/local/bin/am-tui-late-session <<'SH'
+#!/bin/bash
+echo '{"hook_event_name":"UserPromptSubmit","session_id":"sess-late-1"}' \
+  | am hook-event --worktree /home/user/late-repo || true
+exec am-tui
+SH
+chmod +x /usr/local/bin/am-tui-late-session
+ttyd -p 7683 --writable -t disableLeaveAlert=true am-tui-late-session &
+
 # 7681: the seeded dashboard. ttyd spawns a new am-tui per connection.
 exec ttyd -p 7681 --writable -t disableLeaveAlert=true am-tui
