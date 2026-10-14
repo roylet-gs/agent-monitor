@@ -51,6 +51,13 @@ test("project headers when Linear project is the top sort key", async ({ page })
   expect(await tui.getScreenText()).toMatch(/ \d of 6 /);
   await tui.screenshot("linear-project");
 
+  // The standalone sessions under "Other sessions" have no Linear project:
+  // they get a blank spacer line but no "═ No project ═" header.
+  const projectSorted = await tui.getScreenText();
+  expect(projectSorted).toContain("Other sessions");
+  expect(projectSorted).not.toContain("No project");
+  await tui.screenshot("linear-project-sort-no-noproject-header");
+
   // Restore the default order (disable it, move it back down).
   await openSortEditor(tui);
   await tui.sendKey(" ");
