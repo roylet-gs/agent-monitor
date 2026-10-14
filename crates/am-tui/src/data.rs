@@ -455,7 +455,19 @@ impl Worker {
     fn standalone_group(&mut self) -> rusqlite::Result<Option<am_core::model::WorktreeGroup>> {
         use am_core::model::{Repository, STANDALONE_REPO_ID, WorktreeGroup};
         let home = am_core::paths::home_dir().to_string_lossy().into_owned();
-        let views: Vec<WorktreeView> = db::standalone_sessions(&self.conn)?
+        let mut sessions = db::standalone_sessions(&self.conn)?;
+        // A session whose directory is gone (a deleted worktree whose agent
+        // never sent SessionEnd) can never update again: forget it rather
+        // than show it as running forever.
+        sessions.retain(|(_, path, a)| {
+            if Path::new(path).exists() {
+                return true;
+            }
+            info!("collector", "Removed standalone session at {path} ({}): directory no longer exists", a.status.as_str());
+            let _ = db::remove_standalone_session(&self.conn, path);
+            false
+        });
+        let views: Vec<WorktreeView> = sessions
             .into_iter()
             .filter(|(_, _, a)| grouping::is_open_now(Some(a)))
             .map(|(id, path, agent)| {
