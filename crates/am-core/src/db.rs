@@ -929,7 +929,11 @@ pub fn standalone_sessions(conn: &Connection) -> rusqlite::Result<Vec<(String, S
     rows.collect()
 }
 
+/// Forget the standalone session at `path`, with its per-session and
+/// subagent rows.
 pub fn remove_standalone_session(conn: &Connection, path: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM sessions WHERE standalone_path = ?", [path])?;
+    conn.execute("DELETE FROM subagents WHERE standalone_path = ?", [path])?;
     conn.execute("DELETE FROM standalone_sessions WHERE path = ?", [path])?;
     Ok(())
 }
@@ -1130,6 +1134,33 @@ mod tests {
         let row = get_status(&conn, &o).unwrap().unwrap();
         assert_eq!(row.status, Some(Status::Waiting));
         assert_eq!(row.active_subagents, 1);
+    }
+
+    #[test]
+    fn removing_a_standalone_session_drops_its_session_and_subagent_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open_at(&dir.path().join("t.db")).unwrap();
+        for path in ["/gone", "/kept"] {
+            conn.execute("INSERT INTO standalone_sessions (id, path) VALUES (?1, ?1)", [path]).unwrap();
+            conn.execute("INSERT INTO sessions (agent, session_id, standalone_path) VALUES ('claude', ?1, ?1)", [path]).unwrap();
+            conn.execute(
+                "INSERT INTO subagents (session_id, agent_id, standalone_path, agent_type, status) VALUES (?1, 'a', ?1, 't', 'running')",
+                [path],
+            )
+            .unwrap();
+        }
+        remove_standalone_session(&conn, "/gone").unwrap();
+        for table in ["standalone_sessions", "sessions", "subagents"] {
+            let col = if table == "standalone_sessions" { "path" } else { "standalone_path" };
+            let left: Vec<String> = conn
+                .prepare(&format!("SELECT {col} FROM {table}"))
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(left, vec!["/kept".to_string()], "{table}");
+        }
     }
 
     #[test]

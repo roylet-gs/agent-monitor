@@ -142,6 +142,11 @@ git -C /home/user/other-repo commit -m "init" --quiet
 # --- Standalone session ("Other sessions"): hook-event on an untracked dir --
 mkdir -p /home/user/my-project
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"sess-standalone-1"}' | hook /home/user/my-project
+# A session whose directory was deleted mid-run (no SessionEnd): left
+# `executing`, it must not show (08-standalone.spec.ts).
+mkdir -p /home/user/gone-project
+echo '{"hook_event_name":"UserPromptSubmit","session_id":"sess-gone-1"}' | hook /home/user/gone-project
+rm -rf /home/user/gone-project
 
 # --- Gemini CLI session: native Gemini events through `--agent gemini` -------
 # The last event uses the `--harness` alias so both spellings stay covered.

@@ -26,3 +26,12 @@ test("standalone sessions are listed under Other sessions and selectable", async
   expect(await tui.selectedRow()).toMatch(/│▌● \/home\/user\/my-project/);
   await tui.screenshot("standalone");
 });
+
+test("a standalone session whose directory is gone is not listed", async ({ page }) => {
+  // Seeded executing on /home/user/gone-project, then the directory was removed.
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.waitForMatch(/● \/home\/user\/my-project/);
+  expect(await tui.getScreenText()).not.toContain("gone-project");
+  await tui.screenshot("standalone-gone-dir-hidden");
+});
