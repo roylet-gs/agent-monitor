@@ -6,6 +6,7 @@
 use am_core::harness::HarnessKind;
 use am_core::context::ContextUsage;
 use am_core::model::{ChecksStatus, SessionView, WorktreeView};
+use am_core::settings::DailyTokensMode;
 use am_core::status::Status;
 use am_core::{context, timefmt};
 use ratatui::Frame;
@@ -852,15 +853,34 @@ fn update_label(app: &App, width: u16) -> Option<String> {
 }
 
 /// Bottom-right ` today 4.1M ` (` today (visible) 4.1M ` for the visible
-/// scope), shortened or dropped when it doesn't fit beside ` N of M `.
+/// scope), shown per `dailyTokensMode`; shortened (scope first, then detail)
+/// or dropped when it doesn't fit beside ` N of M `.
 fn tokens_label(app: &App, width: u16) -> Option<String> {
-    let tokens = app.snapshot.today_tokens.filter(|_| app.settings.show_daily_tokens)?;
-    let n = context::short_tokens(tokens);
+    let tally = app.snapshot.today_tokens.filter(|_| app.settings.show_daily_tokens)?;
+    let t = &tally.tokens;
+    let n = context::short_tokens;
+    // Longest first.
+    let bodies: Vec<String> = match app.settings.daily_tokens_mode() {
+        DailyTokensMode::Tokens => vec![n(t.total())],
+        DailyTokensMode::Weighted => vec![format!("{} weighted", n(t.weighted())), n(t.weighted())],
+        DailyTokensMode::Cost => vec![usd_label(tally.cost_usd, tally.unpriced > 0)],
+        DailyTokensMode::Breakdown => vec![
+            format!("in {} · write {} · read {} · out {}", n(t.input), n(t.cache_write()), n(t.cache_read), n(t.output)),
+            n(t.total()),
+        ],
+    };
+    let scopes: &[&str] = if app.settings.daily_tokens_visible_only() { &["today (visible)", "today"] } else { &["today"] };
     let pos = if app.flat.is_empty() { 0 } else { format!(" {} of {} ", app.selected + 1, app.flat.len()).width() };
     // Two corners, one border cell on the left and one between the titles.
     let room = (width as usize).saturating_sub(2 + 1 + pos + 1);
-    let long = app.settings.daily_tokens_visible_only().then(|| format!(" today (visible) {n} "));
-    long.into_iter().chain([format!(" today {n} ")]).find(|l| l.width() <= room)
+    bodies.iter().flat_map(|b| scopes.iter().map(move |s| format!(" {s} {b} "))).find(|l| l.width() <= room)
+}
+
+/// `~$12.34` (whole dollars from $100); a trailing `+` when some usage had
+/// no known price.
+fn usd_label(usd: f64, unpriced: bool) -> String {
+    let amount = if usd < 100.0 { format!("{usd:.2}") } else { format!("{usd:.0}") };
+    format!("~${amount}{}", if unpriced { "+" } else { "" })
 }
 
 struct Columns {
@@ -2071,7 +2091,7 @@ mod tests {
         let mut app = fixture();
         assert_eq!(tokens_label(&app, 120), None, "no total yet");
         let mut snap = app.snapshot.clone();
-        snap.today_tokens = Some(4_120_000);
+        snap.today_tokens = Some(output_tally(4_120_000));
         app.apply(snap);
         assert_eq!(tokens_label(&app, 120).as_deref(), Some(" today 4.1M "));
         app.settings.daily_tokens_scope = "visible".into();
@@ -2083,11 +2103,55 @@ mod tests {
         assert_eq!(tokens_label(&app, 120), None);
     }
 
+    fn output_tally(output: u64) -> am_core::usage::Tally {
+        am_core::usage::Tally {
+            tokens: am_core::usage::TokenCounts { output, ..Default::default() },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tokens_label_follows_the_display_mode() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        let tokens = am_core::usage::TokenCounts {
+            input: 2_000,
+            cache_write_5m: 500_000,
+            cache_write_1h: 1_000_000,
+            cache_read: 18_600_000,
+            output: 60_000,
+        };
+        snap.today_tokens = Some(am_core::usage::Tally { tokens, cost_usd: 31.456, unpriced: 0 });
+        app.apply(snap);
+        let label = |app: &App, w| tokens_label(app, w);
+        assert_eq!(label(&app, 120).as_deref(), Some(" today 20M "));
+        app.settings.daily_tokens_mode = "weighted".into();
+        // 2k + 625k + 2M + 1.86M + 300k
+        assert_eq!(label(&app, 120).as_deref(), Some(" today 4.8M weighted "));
+        assert_eq!(label(&app, 30).as_deref(), Some(" today 4.8M "));
+        app.settings.daily_tokens_mode = "cost".into();
+        assert_eq!(label(&app, 120).as_deref(), Some(" today ~$31.46 "));
+        app.snapshot.today_tokens.as_mut().unwrap().unpriced = 3;
+        assert_eq!(label(&app, 120).as_deref(), Some(" today ~$31.46+ "));
+        app.settings.daily_tokens_mode = "breakdown".into();
+        app.settings.daily_tokens_scope = "visible".into();
+        assert_eq!(label(&app, 120).as_deref(), Some(" today (visible) in 2k · write 1.5M · read 19M · out 60k "));
+        assert_eq!(label(&app, 60).as_deref(), Some(" today in 2k · write 1.5M · read 19M · out 60k "));
+        assert_eq!(label(&app, 40).as_deref(), Some(" today (visible) 20M "));
+    }
+
+    #[test]
+    fn usd_label_rounds_large_amounts() {
+        assert_eq!(usd_label(0.004, false), "~$0.00");
+        assert_eq!(usd_label(99.994, false), "~$99.99");
+        assert_eq!(usd_label(1234.5, true), "~$1234+");
+    }
+
     #[test]
     fn dashboard_shows_todays_tokens_bottom_right() {
         let mut app = fixture();
         let mut snap = app.snapshot.clone();
-        snap.today_tokens = Some(182_400_000);
+        snap.today_tokens = Some(output_tally(182_400_000));
         app.apply(snap);
         insta::assert_snapshot!(render(&app, 120, 16));
     }

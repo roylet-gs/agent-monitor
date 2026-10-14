@@ -1,9 +1,12 @@
 //! Today's token usage, summed from the agents' session transcripts.
 //!
-//! Every billed token class counts (input, cache creation, cache read,
-//! output), subagent transcripts included. Which files to read and how to
-//! parse a line is up to each harness plugin ([`Harness::usage_files`] /
-//! [`Harness::usage_record`]); this module only adds them up.
+//! Every billed token class is kept apart (input, cache writes, cache reads,
+//! output), subagent transcripts included, along with an estimated cost when
+//! the harness knows the model's price. The dashboard shows them by the
+//! `dailyTokensMode` setting ([`Tally::weighted`] for the input-equivalent
+//! view). Which files to read and how to parse a line is up to each harness
+//! plugin ([`Harness::usage_files`] / [`Harness::usage_record`]); this module
+//! only adds them up.
 //!
 //! Reading is incremental: a file is read once, then only the bytes appended
 //! since, so a refresh costs milliseconds even with tens of MB of transcripts.
@@ -25,8 +28,81 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::harness::{HarnessKind, is_within};
 use crate::{debug, info};
 
+/// Token counts per billed class.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenCounts {
+    pub input: u64,
+    /// Cache writes with the 5-minute TTL (1.25× the input price).
+    pub cache_write_5m: u64,
+    /// Cache writes with the 1-hour TTL (2× the input price).
+    pub cache_write_1h: u64,
+    /// Cache reads (~0.1× the input price): every call re-reads the whole
+    /// cached conversation, so these dominate the raw total.
+    pub cache_read: u64,
+    pub output: u64,
+}
+
+impl TokenCounts {
+    pub fn cache_write(&self) -> u64 {
+        self.cache_write_5m + self.cache_write_1h
+    }
+
+    /// Every billed token, unweighted.
+    pub fn total(&self) -> u64 {
+        self.input + self.cache_write() + self.cache_read + self.output
+    }
+
+    /// Input-equivalent tokens: each class weighted by its usual price
+    /// relative to input (cache read 0.1×, 5-minute write 1.25×, 1-hour write
+    /// 2×, output 5×). Model-agnostic, so it tracks the bill's shape without a
+    /// price table.
+    pub fn weighted(&self) -> u64 {
+        let w = self.input as f64
+            + self.cache_write_5m as f64 * 1.25
+            + self.cache_write_1h as f64 * 2.0
+            + self.cache_read as f64 * 0.1
+            + self.output as f64 * 5.0;
+        w.round() as u64
+    }
+
+    fn add(&mut self, o: &TokenCounts) {
+        self.input += o.input;
+        self.cache_write_5m += o.cache_write_5m;
+        self.cache_write_1h += o.cache_write_1h;
+        self.cache_read += o.cache_read;
+        self.output += o.output;
+    }
+}
+
+/// Usage added up over many responses.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Tally {
+    pub tokens: TokenCounts,
+    /// Estimated cost in US dollars at API list prices, for the responses
+    /// whose model has a known price.
+    pub cost_usd: f64,
+    /// Responses without a known price (left out of `cost_usd`).
+    pub unpriced: u64,
+}
+
+impl Tally {
+    fn add_record(&mut self, r: &UsageRecord) {
+        self.tokens.add(&r.tokens);
+        match r.cost_usd {
+            Some(c) => self.cost_usd += c,
+            None => self.unpriced += 1,
+        }
+    }
+
+    pub fn add(&mut self, o: &Tally) {
+        self.tokens.add(&o.tokens);
+        self.cost_usd += o.cost_usd;
+        self.unpriced += o.unpriced;
+    }
+}
+
 /// One API response's usage, as parsed from a transcript line.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UsageRecord {
     /// Message id: the same response may appear on several lines.
     pub id: String,
@@ -34,8 +110,9 @@ pub struct UsageRecord {
     pub at: i64,
     /// Working directory of the session at that point, if recorded.
     pub cwd: Option<String>,
-    /// Every billed token class added up.
-    pub tokens: u64,
+    pub tokens: TokenCounts,
+    /// Estimated cost in US dollars; `None` when the model's price is unknown.
+    pub cost_usd: Option<f64>,
 }
 
 /// Where usage comes from: an harness plugin, or a fixture in tests.
@@ -72,8 +149,8 @@ pub struct DailyUsage {
     day: Option<Day>,
     files: HashMap<PathBuf, FileState>,
     seen: HashSet<String>,
-    /// Today's tokens per cwd ("" when unknown).
-    by_cwd: HashMap<String, u64>,
+    /// Today's usage per cwd ("" when unknown).
+    by_cwd: HashMap<String, Tally>,
 }
 
 impl DailyUsage {
@@ -105,7 +182,7 @@ impl DailyUsage {
         }
         debug!(
             "usage",
-            "Read {bytes} B from {files} transcript(s) in {:?}; today {} tokens",
+            "Read {bytes} B from {files} transcript(s) in {:?}; today {:?}",
             started.elapsed(),
             self.total()
         );
@@ -136,28 +213,30 @@ impl DailyUsage {
             if r.cwd.is_some() {
                 state.last_cwd.clone_from(&r.cwd);
             }
-            if local_day(r.at) != today || !self.seen.insert(r.id) {
+            if local_day(r.at) != today || !self.seen.insert(r.id.clone()) {
                 continue;
             }
-            let cwd = r.cwd.or_else(|| state.last_cwd.clone()).unwrap_or_default();
-            *self.by_cwd.entry(cwd).or_default() += r.tokens;
+            let cwd = r.cwd.clone().or_else(|| state.last_cwd.clone()).unwrap_or_default();
+            self.by_cwd.entry(cwd).or_default().add_record(&r);
         }
         chunk.len() as u64
     }
 
     /// Everything used today.
-    pub fn total(&self) -> u64 {
-        self.by_cwd.values().sum()
+    pub fn total(&self) -> Tally {
+        let mut t = Tally::default();
+        self.by_cwd.values().for_each(|v| t.add(v));
+        t
     }
 
     /// Today's usage attributed to `roots`: each cwd goes to the most specific
     /// root containing it (a nested worktree, not its parent checkout). Usage
     /// outside every root is left out.
-    pub fn by_root(&self, roots: &[&str]) -> HashMap<String, u64> {
-        let mut out: HashMap<String, u64> = HashMap::new();
-        for (cwd, &tokens) in &self.by_cwd {
+    pub fn by_root(&self, roots: &[&str]) -> HashMap<String, Tally> {
+        let mut out: HashMap<String, Tally> = HashMap::new();
+        for (cwd, tally) in &self.by_cwd {
             if let Some(root) = roots.iter().filter(|r| is_within(cwd, r)).max_by_key(|r| r.len()) {
-                *out.entry((*root).to_owned()).or_default() += tokens;
+                out.entry((*root).to_owned()).or_default().add(tally);
             }
         }
         out
@@ -197,7 +276,8 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    /// Lines are `id tokens at cwd`, `cwd` optional.
+    /// Lines are `id tokens at cwd`, `cwd` optional; `tokens` are input
+    /// tokens costing $1 each.
     struct Fixture(Vec<PathBuf>);
 
     impl UsageSource for Fixture {
@@ -206,9 +286,12 @@ mod tests {
         }
         fn record(&self, line: &str) -> Option<UsageRecord> {
             let mut p = line.split(' ');
+            let id = p.next()?.into();
+            let input: u64 = p.next()?.parse().ok()?;
             Some(UsageRecord {
-                id: p.next()?.into(),
-                tokens: p.next()?.parse().ok()?,
+                id,
+                tokens: TokenCounts { input, ..TokenCounts::default() },
+                cost_usd: Some(input as f64),
                 at: p.next()?.parse().ok()?,
                 cwd: p.next().map(Into::into),
             })
@@ -236,16 +319,17 @@ mod tests {
         u.refresh_at(n, &src);
         // m1 once, m2 is from two days ago; m3 has no cwd ever seen in b → ""…
         // except b saw /w on its m1 line first, so m3 falls back to /w.
-        assert_eq!(u.total(), 107);
-        assert_eq!(u.by_cwd.get("/w"), Some(&107));
+        assert_eq!(u.total().tokens.input, 107);
+        assert_eq!(u.by_cwd["/w"].tokens.input, 107);
+        assert_eq!(u.total().cost_usd, 107.0);
 
         // A partial trailing line waits until it is complete.
         append(&a, &format!("m4 5 {n} /w"));
         u.refresh_at(n, &src);
-        assert_eq!(u.total(), 107);
+        assert_eq!(u.total().tokens.input, 107);
         append(&a, "\n");
         u.refresh_at(n, &src);
-        assert_eq!(u.total(), 112);
+        assert_eq!(u.total().tokens.input, 112);
     }
 
     #[test]
@@ -257,32 +341,51 @@ mod tests {
         let src = [Fixture(vec![a.clone()])];
         let mut u = DailyUsage::new();
         u.refresh_at(n, &src);
-        assert_eq!(u.total(), 20);
+        assert_eq!(u.total().tokens.input, 20);
         std::fs::write(&a, format!("m3 1 {n} /w\n")).unwrap();
         u.refresh_at(n, &src);
-        assert_eq!(u.total(), 21);
+        assert_eq!(u.total().tokens.input, 21);
 
         let tomorrow = n + 86_400;
         append(&a, &format!("m4 4 {tomorrow} /w\n"));
         u.refresh_at(tomorrow, &src);
-        assert_eq!(u.total(), 4);
+        assert_eq!(u.total().tokens.input, 4);
     }
 
     #[test]
     fn attributes_to_the_most_specific_root() {
         let mut u = DailyUsage::new();
+        let t = |output| Tally { tokens: TokenCounts { output, ..TokenCounts::default() }, ..Tally::default() };
         u.by_cwd = HashMap::from([
-            ("/work".into(), 1),
-            ("/work/src".into(), 2),
-            ("/work/.claude/worktrees/x".into(), 4),
-            ("/work2".into(), 8),
-            ("".into(), 16),
+            ("/work".into(), t(1)),
+            ("/work/src".into(), t(2)),
+            ("/work/.claude/worktrees/x".into(), t(4)),
+            ("/work2".into(), t(8)),
+            ("".into(), t(16)),
         ]);
         let roots = u.by_root(&["/work", "/work/.claude/worktrees/x"]);
-        assert_eq!(roots.get("/work"), Some(&3));
-        assert_eq!(roots.get("/work/.claude/worktrees/x"), Some(&4));
+        assert_eq!(roots["/work"].tokens.output, 3);
+        assert_eq!(roots["/work/.claude/worktrees/x"].tokens.output, 4);
         assert_eq!(roots.len(), 2);
-        assert_eq!(u.total(), 31);
+        assert_eq!(u.total().tokens.output, 31);
+    }
+
+    #[test]
+    fn weighted_tokens_follow_the_price_ratios() {
+        let c = TokenCounts { input: 100, cache_write_5m: 400, cache_write_1h: 50, cache_read: 10_000, output: 20 };
+        assert_eq!(c.total(), 10_570);
+        assert_eq!(c.cache_write(), 450);
+        // 100 + 500 + 100 + 1000 + 100
+        assert_eq!(c.weighted(), 1_800);
+    }
+
+    #[test]
+    fn unpriced_responses_are_counted_apart() {
+        let mut t = Tally::default();
+        let r = |cost_usd| UsageRecord { id: "m".into(), at: 0, cwd: None, tokens: TokenCounts { input: 1, ..TokenCounts::default() }, cost_usd };
+        t.add_record(&r(Some(0.5)));
+        t.add_record(&r(None));
+        assert_eq!((t.tokens.input, t.cost_usd, t.unpriced), (2, 0.5, 1));
     }
 
     #[test]

@@ -71,6 +71,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "showContextWindow", label: "Show context window", help: "Bar of the agent's context used, coloured as it nears the limit", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showDailyTokens", label: "Show today's token usage", help: "Tokens used today (input, cache and output) at the bottom right of the list", section: "Dashboard", kind: Kind::Bool },
     Field { key: "dailyTokensScope", label: "Token usage counts", help: "all: every session today; visible: only the rows shown in the list", section: "Dashboard", kind: Kind::Choice(&["all", "visible"]) },
+    Field { key: "dailyTokensMode", label: "Token usage shows", help: "tokens: all billed; weighted: by price (cache read 0.1×); cost: est. $; breakdown: per class", section: "Dashboard", kind: Kind::Choice(&am_core::settings::DailyTokensMode::IDS) },
     Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Bar scale; a session past it doubles the scale until it fits (⏎ to type, e.g. 128k)", section: "Dashboard", kind: Kind::Tokens { min: context::MIN_WINDOW } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only count processes whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },

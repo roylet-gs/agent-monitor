@@ -108,6 +108,13 @@ pub fn set(key: &str, value: &str) {
         fail(&format!("Invalid value for dailyTokensScope: {value}. Use all or visible."));
     }
 
+    if key == "dailyTokensMode" && am_core::settings::DailyTokensMode::parse(value).is_none() {
+        fail(&format!(
+            "Invalid value for dailyTokensMode: {value}. Use one of: {}.",
+            am_core::settings::DailyTokensMode::IDS.join(", ")
+        ));
+    }
+
     let defaults = Settings::default().to_view();
     let coerced = if key == "contextWindowTokens" {
         // Token counts also take `200k` / `1m`, like the TUI editor.

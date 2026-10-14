@@ -218,7 +218,16 @@ Right-aligned columns, each of which can be turned off in settings:
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
 - **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's Claude Code transcript, so it updates after every turn. It is measured against `contextWindowTokens` (1M by default). A session that has gone past that is measured against the setting doubled until it fits (200k → 400k → 800k …), whatever model it runs. The bar clears after a compaction until the next turn
 
-At the bottom right of the list, `today 182M` is the number of tokens your agents have used today (local day). It covers input, cache writes, cache reads and output, subagents included, because each of these is billed. It is read incrementally from the session transcripts, so a refresh costs a few milliseconds. With `dailyTokensScope` set to `visible` it counts only sessions under a row on screen (`today (visible) 4.1M`), so filters and hidden rows change it. Turn it off with `showDailyTokens`.
+At the bottom right of the list, `today 182M` is the number of tokens your agents have used today (local day). It covers input, cache writes, cache reads and output, subagents included, because each of these is billed. Cache reads usually make up 90% or more of the raw count, since every turn re-reads the whole conversation from the cache, though they cost only about a tenth of the input price. `dailyTokensMode` picks how the total is shown:
+
+| Mode | Shows |
+|---|---|
+| `tokens` (default) | Every billed token, unweighted: `today 52M` |
+| `weighted` | Input-equivalent tokens, each class weighted by its price ratio (cache read 0.1×, 5-minute cache write 1.25×, 1-hour cache write 2×, output 5×): `today 9.9M weighted` |
+| `cost` | Estimated US dollars at Claude API list prices for each response's model: `today ~$28.90` (a trailing `+` means some usage had a model without a known price). Subscription plans aren't billed per token, so treat it as the API-equivalent cost |
+| `breakdown` | Raw tokens per class: `today in 1k · write 2.2M · read 50M · out 216k` |
+
+It is read incrementally from the session transcripts, so a refresh costs a few milliseconds. With `dailyTokensScope` set to `visible` it counts only sessions under a row on screen (`today (visible) 4.1M`), so filters and hidden rows change it. Turn it off with `showDailyTokens`.
 
 When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
