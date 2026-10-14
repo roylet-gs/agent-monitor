@@ -111,6 +111,8 @@ pub enum Modal {
     Suggest { title: String, body: String, on_body: bool, error: Option<String> },
     /// Spinner while a short job runs (add repo, feature request).
     Busy { text: String },
+    /// Settings → Reset settings: `y` resets, any other key cancels.
+    ConfirmReset,
 }
 
 pub enum Effect {
@@ -120,6 +122,8 @@ pub enum Effect {
     Delete { view: Box<WorktreeView>, delete_branch: bool },
     AddRepo(String),
     Suggest { title: String, body: String },
+    /// Put settings.json back to defaults, then run setup.
+    ResetSettings,
 }
 
 /// Expand `~` and complete the last path component to the longest common
@@ -186,6 +190,11 @@ impl Modal {
     pub fn on_key(&mut self, key: Key) -> Effect {
         match self {
             Modal::Busy { .. } => Effect::None,
+            // Only `y`: ⏎ opened this, so a double press mustn't reset.
+            Modal::ConfirmReset => match key {
+                Key::Char('y') | Key::Char('Y') => Effect::ResetSettings,
+                _ => Effect::Close,
+            },
             Modal::New(f) => {
                 let fields = f.fields();
                 let idx = fields.iter().position(|x| *x == f.field).unwrap_or(0);

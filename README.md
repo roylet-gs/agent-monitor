@@ -134,7 +134,7 @@ Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walk
 4. **Integrations**: GitHub PR status (needs `gh`) and an optional Linear API key
 5. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
 
-Everything can be changed later: `s` for settings (**Repositories…** manages the tracked repos), `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use `am setup`. Run `am doctor` to check the setup.
+Everything can be changed later: `s` for settings (**Repositories…** manages the tracked repos), `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use **Settings → Run setup again…** or `am setup`. It starts from your current settings and repositories, nothing is saved until you finish it, and `Esc` on the first step closes it. **Settings → Reset settings…** (confirm with `y`) puts every setting back to its default and then opens the wizard. Repositories, worktrees, history, custom themes, startup scripts and agent hooks are kept. Run `am doctor` to check the setup.
 
 ---
 
@@ -468,7 +468,7 @@ am --version
 | `am theme remove <name>` | Delete a custom theme (switches back to `ansi` if it was active) | |
 | `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear` |
-| `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run) | |
+| `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run; also Settings → Run setup again…) | |
 | `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
 
 </details>

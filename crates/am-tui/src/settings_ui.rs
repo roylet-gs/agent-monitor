@@ -33,6 +33,10 @@ pub enum Kind {
     KeyBindings,
     /// Opens the repositories page.
     Repos,
+    /// Reopens the setup wizard over the current settings.
+    RunSetup,
+    /// Asks, then puts every setting back to its default and runs setup.
+    Reset,
 }
 
 pub struct Field {
@@ -95,6 +99,9 @@ pub const FIELDS: &[Field] = &[
     Field { key: "maxWorktrees", label: "Max per repo", help: "Excludes the main checkout", section: "Limits", kind: Kind::Number { step: 1, min: 1 } },
     Field { key: "logLevel", label: "Log level", help: "debug.log verbosity", section: "Logging", kind: Kind::Choice(&["debug", "info", "warn", "error"]) },
     Field { key: "maxLogSizeMb", label: "Rotate log at (MB)", help: "debug.log is renamed to debug.log.1 past this size", section: "Logging", kind: Kind::Number { step: 1, min: 1 } },
+    // Actions, not settings: their keys are never written.
+    Field { key: "rerunSetup", label: "Run setup again…", help: "Walk the setup wizard again; nothing is saved until you finish (esc cancels)", section: "Setup", kind: Kind::RunSetup },
+    Field { key: "resetSettings", label: "Reset settings…", help: "Defaults for every setting, then setup (repos, themes, scripts, hooks kept)", section: "Setup", kind: Kind::Reset },
 ];
 
 pub enum Outcome {
@@ -108,6 +115,10 @@ pub enum Outcome {
     EditScript(String),
     /// A repository was removed: the dashboard should refresh.
     ReposChanged,
+    /// Run setup again: close the editor and open the wizard.
+    RunSetup,
+    /// Ask before resetting every setting.
+    ConfirmReset,
 }
 
 pub struct SettingsEditor {
@@ -164,7 +175,8 @@ impl SettingsEditor {
                 Some(s) if !s.is_empty() => format!("••••{}", &s[s.len().saturating_sub(4)..]),
                 _ => "not set".into(),
             },
-            Kind::ThemeBuilder => "⏎ open".into(),
+            Kind::ThemeBuilder | Kind::RunSetup => "⏎ open".into(),
+            Kind::Reset => "⏎ reset".into(),
             Kind::Repos => match self.repo_count {
                 1 => "1 tracked".into(),
                 n => format!("{n} tracked"),
@@ -334,6 +346,8 @@ impl SettingsEditor {
                 self.editing = Some(if secret { String::new() } else { cur.to_string() });
                 Outcome::None
             }
+            Kind::RunSetup => Outcome::RunSetup,
+            Kind::Reset => Outcome::ConfirmReset,
             Kind::Sort => {
                 let crits = self.values.get(f.key).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                 self.sort = Some(SortEditor::new(crits));
@@ -645,6 +659,19 @@ mod tests {
 
     fn goto(ed: &mut SettingsEditor, key: &str) {
         ed.cursor = FIELDS.iter().position(|f| f.key == key).unwrap();
+    }
+
+    #[test]
+    fn setup_rows_are_actions_and_never_written() {
+        let (_lock, dir) = data_dir();
+        let mut ed = SettingsEditor::new(&Settings::default());
+        goto(&mut ed, "rerunSetup");
+        assert_eq!(ed.display(ed.field()), "⏎ open");
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::RunSetup));
+        assert!(matches!(ed.on_key(Key::Right), Outcome::None));
+        goto(&mut ed, "resetSettings");
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::ConfirmReset));
+        assert!(!dir.join("settings.json").exists());
     }
 
     #[test]

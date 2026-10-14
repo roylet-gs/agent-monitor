@@ -73,7 +73,7 @@ fn main() -> io::Result<()> {
     // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
     let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
     let show_log = args.iter().any(|a| a == "--log");
-    let setup = first_run.then(|| setup::Setup::new(Vec::new(), &settings));
+    let setup = first_run.then(|| setup::Setup::new(repo_names(), &settings));
     let mut app = App::new(settings);
     app.setup = setup;
     app.show_log = show_log;
@@ -101,6 +101,25 @@ fn main() -> io::Result<()> {
     ratatui::restore();
     collector.shutdown();
     result
+}
+
+/// Names of the registered repositories, listed as already added by the
+/// setup wizard's Repositories step.
+fn repo_names() -> Vec<String> {
+    match am_core::db::open().and_then(|conn| am_core::db::repositories(&conn)) {
+        Ok(repos) => repos.into_iter().map(|r| r.name).collect(),
+        Err(e) => {
+            am_core::warn!("tui", "Couldn't list repositories for setup: {e}");
+            Vec::new()
+        }
+    }
+}
+
+/// Close the settings editor and open the setup wizard over the current settings.
+fn open_setup(app: &mut App) {
+    app.settings_editor = None;
+    app.setup = Some(setup::Setup::new(repo_names(), &app.settings));
+    info!("tui", "Setup wizard opened from settings");
 }
 
 /// Turn terminal mouse reporting on or off.
@@ -406,6 +425,25 @@ fn dispatch(
             app.set_settings(settings::load());
             *theme = theme::Theme::load(&app.settings.theme);
             collector.update_settings(app.settings.clone());
+        }
+        Action::RunSetup => open_setup(app),
+        Action::ResetSettings => {
+            // Dropping setupCompleted means quitting mid-wizard shows it again next start.
+            let next = settings::reset_to_defaults(settings::load(), false);
+            match settings::save(&next) {
+                Ok(()) => {
+                    info!("settings", "Settings reset to defaults from the TUI");
+                    // Re-read so `raw` matches the file (the mtime watch compares against it).
+                    app.set_settings(settings::load());
+                    *theme = theme::Theme::load(&app.settings.theme);
+                    collector.update_settings(app.settings.clone());
+                    open_setup(app);
+                }
+                Err(e) => {
+                    am_core::warn!("settings", "Couldn't reset settings: {e}");
+                    app.notice = Some(format!("Couldn't reset settings: {e}"));
+                }
+            }
         }
         Action::None => {}
     }
