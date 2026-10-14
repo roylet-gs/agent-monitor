@@ -133,12 +133,26 @@ impl ProcessSnapshot {
     /// A subshell the command forks (`cmd &`, `( … )`) keeps the wrapper's
     /// argv, so a match whose parent matches too is the same command.
     pub fn claude_shell_commands(&self, worktree_root: &Path) -> usize {
+        self.claude_shells(worktree_root).count()
+    }
+
+    /// The `claude_shell_commands` whose command line contains `filter`
+    /// (case-insensitive). A blank filter matches nothing: these drive the
+    /// dashboard's `$ N commands` highlight, which is opt-in.
+    pub fn claude_shell_commands_matching(&self, worktree_root: &Path, filter: &str) -> usize {
+        let needle = filter.trim().to_lowercase();
+        if needle.is_empty() {
+            return 0;
+        }
+        self.claude_shells(worktree_root).filter(|p| command_line(p).to_lowercase().contains(&needle)).count()
+    }
+
+    fn claude_shells(&self, worktree_root: &Path) -> impl Iterator<Item = &ProcInfo> {
         let root = canonical(worktree_root);
         self.procs
             .values()
-            .filter(|p| is_claude_shell_command(p) && cwd_belongs_to(p.cwd.as_deref(), &root, has_git_entry))
+            .filter(move |p| is_claude_shell_command(p) && cwd_belongs_to(p.cwd.as_deref(), &root, has_git_entry))
             .filter(|p| !self.procs.get(&p.ppid).is_some_and(is_claude_shell_command))
-            .count()
     }
 
     /// Which editor, if any, has `worktree_root` open. See the module docs for
@@ -856,6 +870,13 @@ mod tests {
         assert_eq!(snap.claude_shell_commands(Path::new("/wt/a")), 2);
         assert_eq!(snap.claude_shell_commands(Path::new("/wt/b")), 1);
         assert_eq!(snap.claude_shell_commands(Path::new("/wt/c")), 0);
+
+        // Only commands matching the filter highlight a row; no filter, none.
+        assert_eq!(snap.claude_shell_commands_matching(Path::new("/wt/a"), ""), 0);
+        assert_eq!(snap.claude_shell_commands_matching(Path::new("/wt/a"), "  "), 0);
+        assert_eq!(snap.claude_shell_commands_matching(Path::new("/wt/a"), "PNPM TEST"), 2);
+        assert_eq!(snap.claude_shell_commands_matching(Path::new("/wt/a"), "cargo"), 0);
+        assert_eq!(snap.claude_shell_commands_matching(Path::new("/wt/b"), "test:e2e"), 1);
     }
 
     #[test]

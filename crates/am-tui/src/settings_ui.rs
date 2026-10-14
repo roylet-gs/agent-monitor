@@ -82,7 +82,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "dailyTokensMode", label: "Token usage shows", help: "tokens: all billed; weighted: by price (cache read 0.1×); cost: est. $; breakdown: per class", section: "Dashboard", kind: Kind::Choice(&am_core::settings::DailyTokensMode::IDS) },
     Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Bar scale; a session past it doubles the scale until it fits (⏎ to type, e.g. 128k)", section: "Dashboard", kind: Kind::Tokens { min: context::MIN_WINDOW } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
-    Field { key: "runningProcessFilter", label: "Process filter", help: "Only count processes whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
+    Field { key: "runningProcessFilter", label: "Process filter", help: "Only show processes and agent commands whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
     Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
     Field { key: "audioWaitingSound", label: "Waiting sound", help: "Played when an agent needs you", section: "Notifications", kind: Kind::Choice(SOUNDS) },

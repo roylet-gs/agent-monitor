@@ -61,7 +61,8 @@ cat > "$AM_DATA_DIR/settings.json" <<'JSON'
   "hideMainBranch": false,
   "linearEnabled": true,
   "linearApiKey": "lin_api_mock",
-  "linearAutoNickname": false
+  "linearAutoNickname": false,
+  "runningProcessFilter": "sleep infinity"
 }
 JSON
 
@@ -170,7 +171,8 @@ echo '{"hook_event_name":"PermissionRequest","session_id":"cdx-1","cwd":"/home/u
 
 # --- A shell command an agent left running in feature/to-delete ------------
 # Claude Code wraps each Bash tool command in `<shell> -c source
-# ~/.claude/shell-snapshots/…`; procscan counts those per worktree, and the row
+# ~/.claude/shell-snapshots/…`; procscan counts those per worktree, and since
+# this one matches the seeded runningProcessFilter ("sleep infinity") the row
 # shows `$ 1 command` with its name in teal (25-shell-commands.spec.ts).
 # `& wait` forks a subshell that keeps the same argv, as a real `cmd &` in a
 # Bash tool command would; it still counts as one command.

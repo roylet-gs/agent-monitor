@@ -1996,7 +1996,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
     ]));
     lines.push(Line::from(vec![
         Span::styled("$ 1 command", theme.bold(theme.teal)),
-        Span::styled(" an agent's shell command (tests, a build…) is running; the name turns teal", theme.faint()),
+        Span::styled(" an agent's shell command matching the process filter is running; the name turns teal", theme.faint()),
     ]));
     let w = 80.min(area.width.saturating_sub(4));
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
