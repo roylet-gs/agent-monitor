@@ -105,8 +105,8 @@ pub struct DeleteState {
 pub enum Modal {
     New(NewForm),
     Delete(DeleteState),
-    /// `A`: register a repository by path (Tab completes directories).
-    AddRepo { path: String, error: Option<String> },
+    /// `A`: browse to a repository to register (typed paths work too).
+    AddRepo(crate::folder_browser::FolderBrowser),
     /// `f`: file a feature request as a GitHub issue on the app's repo.
     Suggest { title: String, body: String, on_body: bool, error: Option<String> },
     /// Spinner while a short job runs (add repo, feature request).
@@ -254,19 +254,13 @@ impl Modal {
                 (DeleteStep::LocalBranch, Key::Char('n')) => Effect::Delete { view: Box::new(d.view.clone()), delete_branch: false },
                 _ => Effect::None,
             },
-            Modal::AddRepo { path, error } => {
-                *error = None;
-                match key {
-                    Key::Esc => return Effect::Close,
-                    Key::Tab => *path = complete_dir(path),
-                    Key::Backspace => {
-                        path.pop();
-                    }
-                    Key::Char(c) => path.push(c),
-                    Key::Enter if !path.trim().is_empty() => return Effect::AddRepo(path.trim().to_string()),
-                    _ => {}
+            Modal::AddRepo(browser) => {
+                use crate::folder_browser::BrowserOutcome;
+                match browser.on_key(key) {
+                    BrowserOutcome::Stay => Effect::None,
+                    BrowserOutcome::Cancel => Effect::Close,
+                    BrowserOutcome::Add(path) => Effect::AddRepo(path),
                 }
-                Effect::None
             }
             Modal::Suggest { title, body, on_body, error } => {
                 *error = None;
