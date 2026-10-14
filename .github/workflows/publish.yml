@@ -96,6 +96,10 @@ jobs:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, so the release commit can be rebased onto a main
+          # that moved while this run was building.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -160,4 +164,12 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/agent-monitor.rb Cargo.toml Cargo.lock
           git commit -m "chore: release v$VERSION"
-          git push
+          # Another PR may have merged since this run checked out; its own
+          # Publish run waits on the concurrency group, so rebase and retry.
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            git rebase --abort 2>/dev/null || true
+            echo "push attempt $attempt failed, retrying"
+            sleep $((attempt * 5))
+          done
+          exit 1
