@@ -328,6 +328,25 @@ fn unknown_path_becomes_a_standalone_session() {
 }
 
 #[test]
+fn a_session_follows_its_directory_onto_a_worktree_added_mid_session() {
+    let env = Env::new();
+    // The repo isn't tracked yet: the session starts standalone.
+    env.db().execute("DELETE FROM worktrees", []).unwrap();
+    env.send("UserPromptSubmit", json!({}));
+    env.send("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } }));
+    assert_eq!(env.status_rows(), 0);
+
+    // The repo is added (raw insert, so the standalone row isn't promoted), then
+    // an event that doesn't change the session's status still moves it.
+    env.db()
+        .execute("INSERT INTO worktrees (id, repo_id, path, branch, name) VALUES ('w', 'r', ?1, 'feat', 'feat')", [env.root()])
+        .unwrap();
+    env.send("PostToolUse", json!({ "tool_name": "Bash" }));
+    assert_eq!(env.status(), ("executing".into(), 0));
+    assert_eq!(env.headline(), "s1");
+}
+
+#[test]
 fn garbage_input_never_fails_the_hook() {
     let env = Env::new();
     let mut child = Command::new(env!("CARGO_BIN_EXE_am-hook"))

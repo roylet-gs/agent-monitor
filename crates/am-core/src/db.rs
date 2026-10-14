@@ -569,10 +569,14 @@ pub fn upsert_session(
     Ok(())
 }
 
-pub fn touch_session(conn: &Connection, agent: HarnessKind, session_id: &str) -> rusqlite::Result<()> {
+/// Bump a session's `updated_at` and move it to `owner` (a session follows
+/// its latest event, e.g. onto a worktree whose repo was added mid-session).
+pub fn touch_session(conn: &Connection, owner: &Owner, agent: HarnessKind, session_id: &str) -> rusqlite::Result<()> {
+    let (wt, sp) = owner_cols(owner);
     conn.execute(
-        "UPDATE sessions SET updated_at = datetime('now') WHERE agent = ?1 AND session_id = ?2",
-        params![agent.id(), session_id],
+        "UPDATE sessions SET updated_at = datetime('now'), worktree_id = ?3, standalone_path = ?4
+         WHERE agent = ?1 AND session_id = ?2",
+        params![agent.id(), session_id, wt, sp],
     )?;
     Ok(())
 }
@@ -808,8 +812,38 @@ pub fn upsert_worktree(
          ON CONFLICT(repo_id, branch) DO UPDATE SET path = excluded.path, name = excluded.name, is_main = excluded.is_main",
         params![id, repo_id, path, branch, name, is_main as i64],
     )?;
-    conn.execute("DELETE FROM standalone_sessions WHERE path = ?1", [path])?;
-    worktree_by_branch(conn, repo_id, branch)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+    let wt = worktree_by_branch(conn, repo_id, branch)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    promote_standalone(conn, &wt.id, path)?;
+    Ok(wt)
+}
+
+/// Move a standalone session's rows (headline, sessions, subagents) onto the
+/// worktree now tracked at `path`, so an agent already running there keeps
+/// showing once its repo is added. A no-op when nothing is standalone there.
+fn promote_standalone(conn: &Connection, worktree_id: &str, path: &str) -> rusqlite::Result<()> {
+    let headline = conn.execute(
+        "INSERT OR IGNORE INTO agent_status
+           (worktree_id, status, last_response, transcript_summary, session_id, updated_at, is_open, active_subagents, agent)
+         SELECT ?1, status, last_response, transcript_summary, session_id, updated_at, is_open, active_subagents, agent
+         FROM standalone_sessions WHERE path = ?2",
+        params![worktree_id, path],
+    )?;
+    let sessions = conn.execute(
+        "UPDATE sessions SET worktree_id = ?1, standalone_path = NULL WHERE standalone_path = ?2",
+        params![worktree_id, path],
+    )?;
+    let subagents = conn.execute(
+        "UPDATE subagents SET worktree_id = ?1, standalone_path = NULL WHERE standalone_path = ?2",
+        params![worktree_id, path],
+    )?;
+    let removed = conn.execute("DELETE FROM standalone_sessions WHERE path = ?1", [path])?;
+    if headline + sessions + subagents + removed > 0 {
+        crate::info!(
+            "db",
+            "Promoted standalone session at {path} to worktree {worktree_id}: headline={headline} sessions={sessions} subagents={subagents}"
+        );
+    }
+    Ok(())
 }
 
 /// `getWorktrees`: one repo's worktrees, newest first.
@@ -954,6 +988,33 @@ mod tests {
         // Re-opening is a no-op.
         drop(conn);
         open_at(&path).unwrap();
+    }
+
+    #[test]
+    fn adding_a_repo_promotes_a_running_standalone_session() {
+        let (_d, conn) = fresh();
+        let alone = Owner::Standalone { path: "/todo".into() };
+        upsert_session(&conn, &alone, HarnessKind::CLAUDE, "s", Status::Executing, None, true).unwrap();
+        let update = StatusUpdate {
+            status: Status::Executing,
+            agent: Some(HarnessKind::CLAUDE),
+            session_id: Some("s"),
+            last_response: None,
+            transcript_summary: None,
+            is_open: true,
+        };
+        upsert_status(&conn, &alone, &update).unwrap();
+        subagent_started(&conn, &alone, &SubagentKey { session_id: "s", agent_id: "a" }, Some("general-purpose")).unwrap();
+
+        let w = upsert_worktree(&conn, "r", "/todo", "main", "main", true).unwrap();
+        let owner = Owner::Worktree { id: w.id.clone(), repo_id: "r".into(), branch: "main".into() };
+        let head = get_status(&conn, &owner).unwrap().expect("headline moved to the worktree");
+        assert_eq!(head.status, Some(Status::Executing));
+        assert!(head.is_open);
+        assert_eq!(sessions_at(&conn, &owner).unwrap().len(), 1);
+        assert_eq!(running_subagents(&conn, &owner).unwrap(), 1);
+        assert!(get_status(&conn, &alone).unwrap().is_none());
+        assert!(sessions_at(&conn, &alone).unwrap().is_empty());
     }
 
     #[test]

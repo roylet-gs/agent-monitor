@@ -57,7 +57,7 @@ case "${1:-test}" in
   clean) "${compose[@]}" down -v --rmi local ;;
   logs) "${compose[@]}" logs --no-color ;;
   ports)
-    for p in "app 7681" "app 7682" "mock-api 4100"; do
+    for p in "app 7681" "app 7682" "app 7683" "mock-api 4100"; do
       # shellcheck disable=SC2086
       echo "$p → $("${compose[@]}" port $p)"
     done

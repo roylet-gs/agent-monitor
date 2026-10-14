@@ -7,6 +7,12 @@ export { setupMock, resetMock } from "./mock-api-client";
 export const FRESH_URL = process.env.TUI_FRESH_URL || "http://localhost:7682";
 
 /**
+ * ttyd serving the seeded dashboard, after a hook (fired per connection) from
+ * an agent running in the untracked git repo /home/user/late-repo.
+ */
+export const LATE_SESSION_URL = process.env.TUI_LATE_SESSION_URL || "http://localhost:7683";
+
+/**
  * TuiPage plus helpers for the native (ratatui) dashboard. Layout reminder:
  * one full-width `─Worktrees` pane (bottom-right `N of M`), then the key bar
  * on the last terminal row (` ⏎ open  │ g PR … ? help  q quit`) with any

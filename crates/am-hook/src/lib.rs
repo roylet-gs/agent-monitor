@@ -159,7 +159,7 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
                     s.status == new_status && s.is_open == is_open && last_response.is_none()
                 });
                 if unchanged {
-                    db::touch_session(&conn, kind, sid)?;
+                    db::touch_session(&conn, &owner, kind, sid)?;
                 } else {
                     db::upsert_session(&conn, &owner, kind, sid, new_status, last_response, is_open)?;
                     info!(
@@ -174,7 +174,7 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
             None => {
                 debug!(MODULE, "No status change for session {sid} in {root_str} ({}, current={:?})", ev.event, current_status);
                 if session.is_some() {
-                    db::touch_session(&conn, kind, sid)?;
+                    db::touch_session(&conn, &owner, kind, sid)?;
                 }
             }
         }
