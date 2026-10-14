@@ -142,12 +142,7 @@ pub fn reset() {
     // Known keys go back to their defaults; keys the settings model doesn't
     // know (e.g. the TS app's `setupCompleted`) are kept so a reset doesn't
     // re-trigger the setup wizard.
-    let current = settings::load();
-    let known = Settings::default().to_view();
-    let next = Settings {
-        raw: current.raw.into_iter().filter(|(k, _)| !known.contains_key(k)).collect(),
-        ..Settings::default()
-    };
+    let next = settings::reset_to_defaults(settings::load(), true);
     if let Err(e) = settings::save(&next) {
         fail(&format!("Failed to save settings: {e}"));
     }

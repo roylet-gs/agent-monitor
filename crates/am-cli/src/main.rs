@@ -360,6 +360,9 @@ struct LogsArgs {
     /// Clear the log file
     #[arg(long)]
     clear: bool,
+    /// Open the log in the configured editor (the log folder once it has rotated)
+    #[arg(long, conflicts_with_all = ["follow", "clear"])]
+    open: bool,
 }
 
 fn main() {
@@ -453,6 +456,7 @@ fn main() {
             level: a.level,
             module: a.module,
             clear: a.clear,
+            open: a.open,
         }),
         Some(Cmd::Status { worktree, set }) => status::run(&worktree, set.as_deref()),
         // Normally caught by the fast path above (e.g. reached via `am --watch hook-event`).

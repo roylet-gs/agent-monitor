@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 use crate::app::Key;
 use crate::keys_ui::{KeyEditor, KeyOutcome};
 use crate::plugins_ui::{self, PluginEditor, PluginOutcome};
+use crate::repos_ui::{self, RepoEditor, RepoOutcome};
 use crate::theme_builder::{BuilderOutcome, ThemeBuilder};
 
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +31,12 @@ pub enum Kind {
     Plugins,
     /// Opens the key bindings page.
     KeyBindings,
+    /// Opens the repositories page.
+    Repos,
+    /// Reopens the setup wizard over the current settings.
+    RunSetup,
+    /// Asks, then puts every setting back to its default and runs setup.
+    Reset,
 }
 
 pub struct Field {
@@ -50,6 +57,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
+    Field { key: "repositories", label: "Repositories…", help: "Add or stop tracking repositories, edit their startup scripts", section: "General", kind: Kind::Repos },
     Field { key: "agentPlugins", label: "Harness plugins…", help: "Turn harnesses on/off, install their hooks, pick the default", section: "General", kind: Kind::Plugins },
     Field { key: "keyBindings", label: "Key bindings…", help: "Choose the dashboard's keys", section: "General", kind: Kind::KeyBindings },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
@@ -92,6 +100,9 @@ pub const FIELDS: &[Field] = &[
     Field { key: "maxWorktrees", label: "Max per repo", help: "Excludes the main checkout", section: "Limits", kind: Kind::Number { step: 1, min: 1 } },
     Field { key: "logLevel", label: "Log level", help: "debug.log verbosity", section: "Logging", kind: Kind::Choice(&["debug", "info", "warn", "error"]) },
     Field { key: "maxLogSizeMb", label: "Rotate log at (MB)", help: "debug.log is renamed to debug.log.1 past this size", section: "Logging", kind: Kind::Number { step: 1, min: 1 } },
+    // Actions, not settings: their keys are never written.
+    Field { key: "rerunSetup", label: "Run setup again…", help: "Walk the setup wizard again; nothing is saved until you finish (esc cancels)", section: "Setup", kind: Kind::RunSetup },
+    Field { key: "resetSettings", label: "Reset settings…", help: "Defaults for every setting, then setup (repos, themes, scripts, hooks kept)", section: "Setup", kind: Kind::Reset },
 ];
 
 pub enum Outcome {
@@ -99,6 +110,16 @@ pub enum Outcome {
     Close,
     Changed(Box<Settings>),
     EditFile,
+    /// Open the folder browser to add a repository.
+    AddRepo,
+    /// Open this repo's startup script (created from the template if missing).
+    EditScript(String),
+    /// A repository was removed: the dashboard should refresh.
+    ReposChanged,
+    /// Run setup again: close the editor and open the wizard.
+    RunSetup,
+    /// Ask before resetting every setting.
+    ConfirmReset,
 }
 
 pub struct SettingsEditor {
@@ -108,6 +129,9 @@ pub struct SettingsEditor {
     pub builder: Option<ThemeBuilder>,
     pub plugins: Option<PluginEditor>,
     pub keys: Option<KeyEditor>,
+    pub repos: Option<RepoEditor>,
+    /// Tracked repositories (the app keeps it in step with its snapshot).
+    pub repo_count: usize,
     pub values: Map<String, Value>,
     pub error: Option<String>,
 }
@@ -118,14 +142,14 @@ impl SettingsEditor {
             Ok(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, values, error: None }
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None }
     }
 
     /// A click on field `i`: selects it, or changes it (like ⏎) when it is
     /// already selected. Ignored while a sub-page (harness plugins, key
     /// bindings, sort editor, theme builder) covers the field list.
     pub fn click(&mut self, i: usize) -> Outcome {
-        if self.plugins.is_some() || self.keys.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
+        if self.plugins.is_some() || self.keys.is_some() || self.repos.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
             return Outcome::None;
         }
         if i == self.cursor {
@@ -152,7 +176,12 @@ impl SettingsEditor {
                 Some(s) if !s.is_empty() => format!("••••{}", &s[s.len().saturating_sub(4)..]),
                 _ => "not set".into(),
             },
-            Kind::ThemeBuilder => "⏎ open".into(),
+            Kind::ThemeBuilder | Kind::RunSetup => "⏎ open".into(),
+            Kind::Reset => "⏎ reset".into(),
+            Kind::Repos => match self.repo_count {
+                1 => "1 tracked".into(),
+                n => format!("{n} tracked"),
+            },
             Kind::KeyBindings => match self.settings().key_bindings.len() {
                 0 => "defaults".into(),
                 n => format!("{n} changed"),
@@ -184,6 +213,10 @@ impl SettingsEditor {
     }
 
     pub fn on_key(&mut self, key: Key) -> Outcome {
+        if let Some(repos) = &mut self.repos {
+            let out = repos.on_key(key);
+            return self.repo_effect(out);
+        }
         if let Some(plugins) = &mut self.plugins {
             let out = plugins.on_key(key);
             return self.plugin_effect(out);
@@ -293,6 +326,10 @@ impl SettingsEditor {
                 self.plugins = Some(PluginEditor::new(plugins_ui::load_rows(&s), &s.default_agent, errors, dir));
                 Outcome::None
             }
+            Kind::Repos => {
+                self.repos = Some(RepoEditor::new(repos_ui::load_rows()));
+                Outcome::None
+            }
             Kind::KeyBindings => {
                 self.keys = Some(KeyEditor::new(crate::keymap::Keymap::from_settings(&self.settings())));
                 Outcome::None
@@ -310,6 +347,8 @@ impl SettingsEditor {
                 self.editing = Some(if secret { String::new() } else { cur.to_string() });
                 Outcome::None
             }
+            Kind::RunSetup => Outcome::RunSetup,
+            Kind::Reset => Outcome::ConfirmReset,
             Kind::Sort => {
                 let crits = self.values.get(f.key).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                 self.sort = Some(SortEditor::new(crits));
@@ -370,6 +409,49 @@ impl SettingsEditor {
 }
 
 impl SettingsEditor {
+    /// Apply a repositories-page action. Removing runs here; adding and
+    /// editing a script need the app (folder browser, editor launch).
+    fn repo_effect(&mut self, out: RepoOutcome) -> Outcome {
+        let name = |ed: &RepoEditor, id: &str| ed.rows.iter().find(|r| r.id == id).map(|r| r.name.clone()).unwrap_or_default();
+        let (message, outcome) = match out {
+            RepoOutcome::Stay => return Outcome::None,
+            RepoOutcome::Close => {
+                self.repos = None;
+                return Outcome::None;
+            }
+            RepoOutcome::Add => return Outcome::AddRepo,
+            RepoOutcome::EditScript(id) => return Outcome::EditScript(id),
+            RepoOutcome::Remove(id) => {
+                let name = self.repos.as_ref().map(|ed| name(ed, &id)).unwrap_or_default();
+                let result = am_core::db::open().map_err(|e| e.to_string()).and_then(|c| am_core::worktrees::remove_repository(&c, &id));
+                match result {
+                    Ok(()) => ((true, format!("Stopped tracking {name} · nothing on disk was touched")), Outcome::ReposChanged),
+                    Err(e) => ((false, format!("Couldn't remove {name}: {e}")), Outcome::None),
+                }
+            }
+            RepoOutcome::RemoveScript(id) => {
+                let name = self.repos.as_ref().map(|ed| name(ed, &id)).unwrap_or_default();
+                match am_core::worktrees::remove_script(&id) {
+                    Ok(_) => {
+                        am_core::info!("scripts", "Removed startup script for {name} via settings");
+                        ((true, format!("Removed the startup script for {name}")), Outcome::None)
+                    }
+                    Err(e) => ((false, format!("Couldn't remove the script: {e}")), Outcome::None),
+                }
+            }
+        };
+        self.refresh_repos(Some(message));
+        outcome
+    }
+
+    /// Reload the repositories page (after an add, remove or script edit).
+    pub fn refresh_repos(&mut self, message: Option<(bool, String)>) {
+        if let Some(ed) = &mut self.repos {
+            ed.refresh(repos_ui::load_rows(), message);
+            self.repo_count = ed.rows.len();
+        }
+    }
+
     /// Apply an agent-plugins action: persist `disabledAgents` /
     /// `defaultAgent`, install or remove the plugin's hooks, refresh the rows.
     fn plugin_effect(&mut self, out: PluginOutcome) -> Outcome {
@@ -544,8 +626,53 @@ mod tests {
         (guard, d.path())
     }
 
+    #[test]
+    fn repositories_page_removes_scripts_and_repos() {
+        let (_g, dir) = data_dir();
+        let conn = am_core::db::open().unwrap();
+        let repo = am_core::db::add_repository(&conn, &dir.join("proj").display().to_string(), "proj").unwrap();
+        am_core::worktrees::create_script(&repo.id).unwrap();
+        let mut ed = SettingsEditor::new(&Settings::default());
+        ed.cursor = FIELDS.iter().position(|f| f.key == "repositories").unwrap();
+        ed.on_key(Key::Enter);
+        let rows = &ed.repos.as_ref().unwrap().rows;
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].script && !rows[0].exists);
+        assert_eq!(ed.repo_count, 0, "set by the app, not by opening the page");
+
+        assert!(matches!(ed.on_key(Key::Char('a')), Outcome::AddRepo));
+        assert!(matches!(ed.on_key(Key::Char('s')), Outcome::EditScript(id) if id == repo.id));
+        assert!(matches!(ed.on_key(Key::Char('S')), Outcome::None));
+        assert!(!am_core::worktrees::has_script(&repo.id));
+        assert!(!ed.repos.as_ref().unwrap().rows[0].script);
+
+        ed.on_key(Key::Char('x'));
+        assert!(matches!(ed.on_key(Key::Char('y')), Outcome::ReposChanged));
+        assert!(am_core::db::repository_by_id(&conn, &repo.id).unwrap().is_none());
+        let page = ed.repos.as_ref().unwrap();
+        assert!(page.rows.is_empty());
+        assert!(page.message.as_ref().is_some_and(|(ok, m)| *ok && m.contains("Stopped tracking proj")));
+        assert_eq!(ed.repo_count, 0);
+
+        assert!(matches!(ed.on_key(Key::Esc), Outcome::None));
+        assert!(ed.repos.is_none());
+    }
+
     fn goto(ed: &mut SettingsEditor, key: &str) {
         ed.cursor = FIELDS.iter().position(|f| f.key == key).unwrap();
+    }
+
+    #[test]
+    fn setup_rows_are_actions_and_never_written() {
+        let (_lock, dir) = data_dir();
+        let mut ed = SettingsEditor::new(&Settings::default());
+        goto(&mut ed, "rerunSetup");
+        assert_eq!(ed.display(ed.field()), "⏎ open");
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::RunSetup));
+        assert!(matches!(ed.on_key(Key::Right), Outcome::None));
+        goto(&mut ed, "resetSettings");
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::ConfirmReset));
+        assert!(!dir.join("settings.json").exists());
     }
 
     #[test]

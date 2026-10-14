@@ -8,7 +8,7 @@ expression: "render(&app, 100, 20)"
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │░░░ 185k │
 │         │               ⏎  open (IDE; resumes last agent session)                      │         │
 │gridsight│       g / l / p  open PR / Linear ticket / Linear project                    │─────────│
-│ · main  │               w  toggle log pane                                             │         │
+│ · main  │           w / L  toggle log pane / open the log file (or folder)             │         │
 │         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
 │         │               A  add repository                                              │         │
 │         │               f  suggest a feature (files a GitHub issue)                    │         │

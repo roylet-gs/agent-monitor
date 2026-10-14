@@ -60,6 +60,8 @@ pub enum Action {
     /// `e` in settings: open settings.json in the `ide` (editor or custom command), or
     /// `$EDITOR` in this terminal when `ide` is `terminal`.
     EditSettingsFile,
+    /// Open debug.log in the `ide`, or reveal the log folder once it has rotated.
+    ViewLogs,
     /// Job id, repo and request.
     Create(u64, Box<Repository>, Box<am_core::worktrees::CreateRequest>),
     /// Job id, worktree, and whether to delete the branch too.
@@ -68,7 +70,15 @@ pub enum Action {
     /// `d` on an "Other sessions" row: stop tracking it.
     RemoveStandalone(String),
     AddRepo(String),
+    /// Settings → Repositories… `s`: open the repo's startup script.
+    EditScript(String),
+    /// A repository was removed in Settings: refresh the dashboard.
+    ReposChanged,
     InstallHooks,
+    /// Settings → Run setup again: open the wizard (main.rs reads the repos).
+    RunSetup,
+    /// Settings → Reset settings, confirmed: reset settings.json, then run setup.
+    ResetSettings,
     Suggest { title: String, body: String },
 }
 
@@ -153,7 +163,23 @@ impl App {
         }
         self.selected = self.selected.min(self.flat.len().saturating_sub(1));
         self.track_status_changes();
+        if let Some(e) = &mut self.settings_editor {
+            e.repo_count = self.snapshot.repos.len();
+        }
         self.loaded = true;
+    }
+
+    /// The add-repository folder browser, opened next to the newest repo.
+    pub fn add_repo_modal(&self) -> crate::modals::Modal {
+        let paths: Vec<String> = self.snapshot.repos.iter().map(|r| r.path.clone()).collect();
+        let dir = crate::folder_browser::start_dir(&paths);
+        crate::modals::Modal::AddRepo(crate::folder_browser::FolderBrowser::open(dir, paths))
+    }
+
+    fn open_settings(&mut self) {
+        let mut e = crate::settings_ui::SettingsEditor::new(&self.settings);
+        e.repo_count = self.snapshot.repos.len();
+        self.settings_editor = Some(e);
     }
 
     /// Port of the TS "unseen" logic: a status change on a worktree the user
@@ -369,6 +395,11 @@ impl App {
                 SetupEffect::None => Action::None,
                 SetupEffect::InstallHooks => Action::InstallHooks,
                 SetupEffect::AddRepo(p) => Action::AddRepo(p),
+                SetupEffect::Cancel => {
+                    self.setup = None;
+                    self.notice = Some("Setup closed — settings unchanged".into());
+                    Action::None
+                }
                 SetupEffect::Finish(kv) => {
                     let mut latest = None;
                     for (k, v) in kv {
@@ -414,9 +445,11 @@ impl App {
                     self.modal = Some(crate::modals::Modal::busy("Filing feature request…".into()));
                     Action::Suggest { title, body }
                 }
-                Effect::AddRepo(path) => {
-                    self.modal = Some(crate::modals::Modal::busy(format!("Adding {path}…")));
-                    Action::AddRepo(path)
+                // The browser stays open (showing "Adding…") until the result comes back.
+                Effect::AddRepo(path) => Action::AddRepo(path),
+                Effect::ResetSettings => {
+                    self.modal = None;
+                    Action::ResetSettings
                 }
             };
         }
@@ -465,6 +498,17 @@ impl App {
                 Action::SettingsChanged
             }
             Outcome::EditFile => Action::EditSettingsFile,
+            Outcome::AddRepo => {
+                self.modal = Some(self.add_repo_modal());
+                Action::None
+            }
+            Outcome::EditScript(id) => Action::EditScript(id),
+            Outcome::ReposChanged => Action::ReposChanged,
+            Outcome::RunSetup => Action::RunSetup,
+            Outcome::ConfirmReset => {
+                self.modal = Some(crate::modals::Modal::ConfirmReset);
+                Action::None
+            }
         }
     }
 
@@ -505,9 +549,10 @@ impl App {
                 "No Linear project",
             ),
             C::ToggleLog => self.show_log = !self.show_log,
+            C::ViewLogs => return Action::ViewLogs,
             C::NewWorktree => {
                 if self.snapshot.repos.is_empty() {
-                    self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None });
+                    self.modal = Some(self.add_repo_modal());
                 } else {
                     let repo = self.selected_view().map(|v| v.worktree.repo_id.clone());
                     self.modal = Some(crate::modals::Modal::new_worktree(
@@ -533,8 +578,8 @@ impl App {
             C::Feedback => {
                 self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
-            C::AddRepo => self.modal = Some(crate::modals::Modal::AddRepo { path: "~/".into(), error: None }),
-            C::Settings => self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings)),
+            C::AddRepo => self.modal = Some(self.add_repo_modal()),
+            C::Settings => self.open_settings(),
             C::MoveDown => self.move_by(1),
             C::MoveUp => self.move_by(-1),
             C::PageDown => self.move_by(10),
@@ -610,10 +655,14 @@ impl App {
             // The agent-plugins and key-bindings pages report changes while they stay open.
             let plugins = e.plugins.take();
             let keys = e.keys.take();
+            let repos = e.repos.take();
+            let repo_count = e.repo_count;
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
             e.cursor = cursor;
             e.plugins = plugins;
             e.keys = keys;
+            e.repos = repos;
+            e.repo_count = repo_count;
         }
         let snap = self.snapshot.clone();
         self.apply(snap);

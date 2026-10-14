@@ -835,6 +835,31 @@ fn logs_filter_tail_and_clear() {
     assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
 }
 
+#[test]
+fn logs_open_edits_the_log_or_reveals_the_folder() {
+    let env = Env::new();
+    assert!(env.ok(&["logs", "--open"]).stdout.starts_with("No log file found at "));
+    let log = env.data().join("debug.log");
+    std::fs::write(&log, "[t1] [INFO] [git] one\n").unwrap();
+    let opened = env.root().join("opened.txt");
+    env.fake_bin("my-editor", &format!("echo \"$@\" >> {}", opened.display()));
+    env.ok(&["settings", "set", "ide", "custom"]);
+    env.ok(&["settings", "set", "ideCommand", "my-editor {path}"]);
+    assert_eq!(env.ok(&["logs", "--open"]).stdout, format!("Opened {}\n", log.display()));
+    assert_eq!(std::fs::read_to_string(&opened).unwrap().trim(), log.to_str().unwrap());
+
+    // Rotated: the folder opens instead (fake `open`/`xdg-open` record their args).
+    std::fs::write(env.data().join("debug.log.1"), "old\n").unwrap();
+    let revealed = env.root().join("revealed.txt");
+    for opener in ["open", "xdg-open"] {
+        env.fake_bin(opener, &format!("echo \"$@\" >> {}", revealed.display()));
+    }
+    assert!(env.ok(&["logs", "--open"]).stdout.starts_with("Opened the log folder "));
+    let args = std::fs::read_to_string(&revealed).unwrap();
+    let want = if cfg!(target_os = "macos") { format!("-R {}", log.display()) } else { env.data().display().to_string() };
+    assert_eq!(args.trim(), want);
+}
+
 fn git(dir: &Path, args: &[&str]) {
     let ok = Command::new("git")
         .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "init.defaultBranch=main"])

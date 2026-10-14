@@ -1,0 +1,30 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 26)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor╭─Add repository ──────────────────────────────────────────────────────╮─────────────│
+│▌◑ feature/re│ /src                                                                 │m ▋░░░░ 121k │
+│ ◐ fix/offlin│ › ▏type to filter, or a path (/… ~/…)                                │m ▉░░░░ 185k │
+│             │                                                                      │             │
+│gridsight ───│   ../                                                                │─────────────│
+│ · main      │   agent-monitor/                                        ✓ tracked    │m            │
+│             │ ▸ website/                                              git          │             │
+│             │   notes/                                                             │             │
+│             │   scratch/                                                           │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+│             │                                                                      │             │
+╰─────────────╰──────────────── ⏎ add/open  → open  ← up  type to filter  esc cancel ╯───── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit
