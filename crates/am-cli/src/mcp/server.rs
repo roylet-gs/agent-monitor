@@ -20,8 +20,8 @@ const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", 
 
 const INSTRUCTIONS: &str = "agent-monitor (am) tracks git worktrees and the coding agents running in them. \
 Use these tools to list worktrees with their agent status, git, PR/CI and Linear state, create or delete worktrees, \
-and read or change am's settings. Tools default to the repository containing your working directory; pass `repo` \
-to target another tracked repository. A worktree `target` is its branch name or path.";
+and read or change am's settings. Tools default to the repository containing your working directory (or the only tracked one); pass `repo` \
+to target another tracked repository; `repo_list` lists them. A worktree `target` is its branch name or path.";
 
 /// What one child `am` run produced.
 pub struct Output {
@@ -167,7 +167,7 @@ fn run_am(tool: &Tool, argv: &[String]) -> Output {
         Ok(e) => e,
         Err(e) => return failed(format!("can't find the am binary: {e}")),
     };
-    let mut child = match Command::new(&exe).args(argv).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+    let mut child = match Command::new(&exe).args(argv).env(crate::resolve::MCP_CHILD_ENV, "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(c) => c,
         Err(e) => {
             warn!("mcp", "Couldn't run {}: {e}", exe.display());

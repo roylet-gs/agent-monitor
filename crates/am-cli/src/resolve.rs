@@ -64,10 +64,27 @@ pub fn resolve_repo(conn: &Connection, repo_path: Option<&str>) -> RepoRow {
             .unwrap_or_else(|| fail(&format!("Repository not tracked: {abs}\nRun: am repo add {abs}")));
     }
     let cwd = std::env::current_dir().map(|d| d.to_string_lossy().into_owned()).unwrap_or_else(|_| "/".into());
-    detect_repo(conn, &cwd).unwrap_or_else(|| {
-        fail("Could not detect repository from CWD.\nSpecify --repo <path> or run from inside a tracked repo.")
-    })
+    if let Some(r) = detect_repo(conn, &cwd) {
+        return r;
+    }
+    let repos = store::repositories(conn);
+    // An MCP client such as Claude Desktop starts the server in `/`: with a
+    // single tracked repo there is nothing to ask.
+    if std::env::var_os(MCP_CHILD_ENV).is_some() && repos.len() == 1 {
+        return repos[0].clone();
+    }
+    let tracked = if repos.is_empty() {
+        "No repositories are tracked yet. Run: am repo add <path>".to_string()
+    } else {
+        format!("Tracked: {}", repos.iter().map(|r| r.path.as_str()).collect::<Vec<_>>().join(", "))
+    };
+    fail(&format!(
+        "Could not detect repository from CWD ({cwd}).\nSpecify --repo <path> or run from inside a tracked repo.\n{tracked}"
+    ))
 }
+
+/// Set on the `am` children the MCP server runs.
+pub const MCP_CHILD_ENV: &str = "AM_MCP_CHILD";
 
 /// A worktree by path, exact branch, or `…/<target>` / name suffix.
 pub fn resolve_worktree(conn: &Connection, target: &str, repo_id: Option<&str>) -> Worktree {

@@ -469,7 +469,7 @@ am --version
 | `am hooks uninstall` (`am uninstall-hooks`) | Remove am's hooks (other hooks are kept) | `-a, --agent <id>` |
 | `am hooks status` | Check which agents have hooks installed | `--json` |
 | `am mcp` | Run the MCP server on stdin/stdout (what agent CLIs launch; see below) | |
-| `am mcp install` | Register the MCP server with Claude Code and every other agent CLI in use that reads MCP config (Gemini, Qwen, Cursor) | `-a, --agent <id>` (repeatable) |
+| `am mcp install` | Register the MCP server with Claude Code, every other agent CLI in use that reads MCP config (Gemini, Qwen, Cursor), and Claude Desktop when installed | `-a, --agent <id>` (repeatable) |
 | `am mcp uninstall` | Remove the registration (other servers are kept) | `-a, --agent <id>` |
 | `am mcp status` | Check which agents have the MCP server registered | `--json` |
 | `am settings list` | Show all settings | `--json` |
@@ -496,13 +496,14 @@ am --version
 `am mcp` is a stdio [MCP](https://modelcontextprotocol.io) server that gives coding agents am's commands as tools, so an agent can list worktrees with their PR, CI and Linear state, create a worktree for a subtask, or check another agent's status. Register it once:
 
 ```bash
-am mcp install                 # Claude Code, plus Gemini CLI / Qwen Code / Cursor when in use
-am mcp install --agent claude  # just one
+am mcp install                         # Claude Code, plus Gemini CLI / Qwen Code / Cursor / Claude Desktop when in use
+am mcp install --agent claude          # just one
+am mcp install --agent claude-desktop  # Claude Desktop (quit with ⌘Q and reopen to load it)
 # or by hand:
 claude mcp add --scope user agent-monitor -- am mcp
 ```
 
-Each tool runs the matching `am` command (with `--json` where it has one) in the agent's working directory, so tools default to the repository the agent is in; pass `repo` to target another one.
+Each tool runs the matching `am` command (with `--json` where it has one) in the agent's working directory, so tools default to the repository the agent is in; pass `repo` to target another one. Claude Desktop starts the server outside any repo: with one tracked repo the tools use it, otherwise pass `repo`.
 
 | Tools | Command |
 | ----- | ------- |
