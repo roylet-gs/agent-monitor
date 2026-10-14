@@ -17,7 +17,8 @@
 //!   "resume": { "session": ["--resume", "{id}"], "continue": ["--continue"] },
 //!   "sessions": { "command": ["mycli", "sessions", "--json", "{root}"] },
 //!   "process": { "names": ["mycli"], "argvContains": ["/@acme/mycli/"] },
-//!   "notes": "hooks only run in trusted folders"
+//!   "notes": "hooks only run in trusted folders",
+//!   "mcp": { "file": "~/.mycli/settings.json", "key": "mcpServers", "entry": {"type": "stdio"} }
 //! }
 //! ```
 //!
@@ -44,6 +45,9 @@
 //!   `{"id", "cwd", "modified"}` (modified = unix seconds) for `{root}`;
 //!   without it, resuming falls back to `resume.continue`. Built-ins without
 //!   their own discovery offer the sessions am's hooks recorded instead.
+//! - `mcp` (optional) is where the CLI reads MCP servers: a JSON `file` with a
+//!   `name → {command, args}` map under `key` (default `mcpServers`), plus
+//!   `entry` keys for am's server. `am mcp install` registers `am mcp` there.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -101,6 +105,32 @@ pub struct Manifest {
     /// A caveat shown next to the hook status, e.g. a trust requirement.
     #[serde(default)]
     pub notes: Option<String>,
+    /// Where the CLI reads MCP servers, for `am mcp install`.
+    #[serde(default)]
+    pub mcp: Option<McpSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpSpec {
+    /// JSON file holding the server map (`~/.cursor/mcp.json`).
+    pub file: String,
+    /// Key of the `name → server` map.
+    #[serde(default = "default_mcp_key")]
+    pub key: String,
+    /// Extra keys for am's server entry (`{"type": "stdio"}`).
+    #[serde(default)]
+    pub entry: Map<String, Value>,
+}
+
+fn default_mcp_key() -> String {
+    "mcpServers".into()
+}
+
+impl McpSpec {
+    pub fn config(&self) -> super::McpConfig {
+        super::McpConfig { path: expand_home(&self.file), key: self.key.clone(), entry: self.entry.clone() }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -441,6 +471,9 @@ impl Harness for ManifestProvider {
     }
     fn matches_process(&self, name: &str, argv: &[String]) -> bool {
         self.manifest.process.matches(name, argv)
+    }
+    fn mcp_config(&self) -> Option<super::McpConfig> {
+        self.manifest.mcp.as_ref().map(McpSpec::config)
     }
 }
 

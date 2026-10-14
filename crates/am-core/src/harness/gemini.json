@@ -38,5 +38,6 @@
   "notificationTypes": { "ToolPermission": "permission_prompt" },
   "resume": { "session": ["--resume", "{id}"], "continue": ["--resume", "latest"] },
   "process": { "names": ["gemini", "gemini.js"], "argvContains": ["/@google/gemini-cli/"] },
-  "notes": "Gemini runs hooks only in trusted folders"
+  "notes": "Gemini runs hooks only in trusted folders",
+  "mcp": { "file": "~/.gemini/settings.json" }
 }

@@ -33,6 +33,7 @@
 - [Settings](#settings)
 - [Themes](#themes)
 - [CLI Reference](#cli-reference)
+- [Use am from your agents (MCP)](#use-am-from-your-agents-mcp)
 - [How It Works](#how-it-works)
   - [Supported harnesses](#supported-harnesses)
 - [Upgrading from 1.x](#upgrading-from-1x)
@@ -467,6 +468,10 @@ am --version
 | `am hooks install` (`am install-hooks`) | Install hooks for Claude Code (`~/.claude/settings.json`) and every other agent CLI in use (Gemini: `~/.gemini/settings.json`) | `-a, --agent <id>` (repeatable) |
 | `am hooks uninstall` (`am uninstall-hooks`) | Remove am's hooks (other hooks are kept) | `-a, --agent <id>` |
 | `am hooks status` | Check which agents have hooks installed | `--json` |
+| `am mcp` | Run the MCP server on stdin/stdout (what agent CLIs launch; see below) | |
+| `am mcp install` | Register the MCP server with Claude Code and every other agent CLI in use that reads MCP config (Gemini, Qwen, Cursor) | `-a, --agent <id>` (repeatable) |
+| `am mcp uninstall` | Remove the registration (other servers are kept) | `-a, --agent <id>` |
+| `am mcp status` | Check which agents have the MCP server registered | `--json` |
 | `am settings list` | Show all settings | `--json` |
 | `am settings get <key>` | Get one setting | `--json` |
 | `am settings set <key> <value>` | Set one setting (booleans and numbers are parsed) | |
@@ -483,6 +488,36 @@ am --version
 | `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
 
 </details>
+
+---
+
+## Use am from your agents (MCP)
+
+`am mcp` is a stdio [MCP](https://modelcontextprotocol.io) server that gives coding agents am's commands as tools, so an agent can list worktrees with their PR, CI and Linear state, create a worktree for a subtask, or check another agent's status. Register it once:
+
+```bash
+am mcp install                 # Claude Code, plus Gemini CLI / Qwen Code / Cursor when in use
+am mcp install --agent claude  # just one
+# or by hand:
+claude mcp add --scope user agent-monitor -- am mcp
+```
+
+Each tool runs the matching `am` command (with `--json` where it has one) in the agent's working directory, so tools default to the repository the agent is in; pass `repo` to target another one.
+
+| Tools | Command |
+| ----- | ------- |
+| `worktree_list`, `worktree_info` | `am worktree list` / `info` |
+| `worktree_create`, `worktree_delete`, `worktree_sync`, `worktree_open` | `am worktree create` / `delete` / `sync` / `open` |
+| `repo_list`, `repo_add`, `repo_remove` | `am repo …` |
+| `pr_show`, `pr_open`, `linear_show`, `linear_open` | `am pr …`, `am linear …` |
+| `agent_status` | `am status` (get, or `set`) |
+| `settings_list`, `settings_get`, `settings_set`, `settings_reset` | `am settings …` |
+| `theme_list`, `theme_show`, `theme_use` | `am theme …` |
+| `hooks_status`, `hooks_install`, `hooks_uninstall` | `am hooks …` |
+| `script_show`, `script_remove` | `am script …` |
+| `doctor`, `logs` | `am doctor`, `am logs` |
+
+Each tool is marked read-only, destructive or open-world (it talks to GitHub/Linear or opens an app), so your agent CLI can ask before running the risky ones. Commands that need the terminal (the dashboard, `agent attach`, `script edit`, `logs --follow`) have no tool. Calls are logged under the `mcp` module (`am logs --module mcp`).
 
 ---
 

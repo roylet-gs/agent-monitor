@@ -30,5 +30,6 @@
     "exit_plan_mode": "ExitPlanMode"
   },
   "resume": { "session": ["--resume", "{id}"], "continue": ["--continue"] },
-  "process": { "names": ["qwen"], "argvContains": ["/@qwen-code/qwen-code/"] }
+  "process": { "names": ["qwen"], "argvContains": ["/@qwen-code/qwen-code/"] },
+  "mcp": { "file": "~/.qwen/settings.json" }
 }

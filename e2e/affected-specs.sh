@@ -73,6 +73,7 @@ specs_for() {
     crates/am-core/src/harness/*|crates/am-core/src/agents/*) echo 07 08 11 16 17 ;; # agents/ = pre-rename paths
     crates/am-core/src/worktrees.rs) echo 09 10 11 23 24 ;; # 23/24 add repos
     crates/am-core/src/hooks_installer.rs) echo 11 16 ;;
+    crates/am-core/src/mcp_installer.rs) echo - ;; # am mcp install; cli.rs covers it
     crates/am-core/src/context.rs) echo 14 ;;      # context-window bar
     crates/am-core/src/usage.rs) echo 17 ;;        # today's token total
     crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice

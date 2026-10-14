@@ -183,7 +183,8 @@ Drop `~/.agent-monitor/agents/<id>.json` (or `$AM_DATA_DIR/agents/`) and restart
   "resume": { "session": ["--resume", "{id}"], "continue": ["--continue"] },
   "sessions": { "command": ["mycli", "sessions", "--json", "{root}"] },
   "process": { "names": ["mycli"], "argvContains": ["/@acme/mycli/"] },
-  "notes": "hooks only run in trusted folders"
+  "notes": "hooks only run in trusted folders",
+  "mcp": { "file": "~/.mycli/settings.json", "key": "mcpServers" }
 }
 ```
 
@@ -207,6 +208,7 @@ The fields are:
 - **`sessions.command`** (optional): prints a JSON array of `{"id", "cwd", "modified"}` (modified is unix seconds) for `{root}`. It is killed after 3 s. Without it, am resumes with `resume.continue`.
 - **`process`**: matches the CLI's processes so they are excluded from "running processes".
 - **`notes`** (optional): a caveat shown next to the hook status.
+- **`mcp`** (optional): where the CLI reads MCP servers, so `am mcp install --agent mycli` can register am's MCP server. `file` is a JSON file with a `name → {"command", "args"}` map under `key` (default `mcpServers`); `entry` adds keys to am's server entry (`{"type": "stdio"}`). Built-ins: Claude Code (through `claude mcp add-json --scope user` when `claude` is installed, else `~/.claude.json`), Gemini CLI, Qwen Code and Cursor. Codex (TOML config), Factory Droid and Copilot CLI aren't covered yet.
 
 Invalid files are skipped and reported on the plugin page and in `am doctor`. Then turn the plugin on (it is on by default) and install its hooks from **Settings → Harness plugins**, or with `am hooks install --agent mycli`.
 

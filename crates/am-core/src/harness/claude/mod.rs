@@ -119,6 +119,22 @@ impl Harness for Claude {
         });
         SPEC.matches(name, argv)
     }
+
+    /// User-scope servers live in `~/.claude.json`, which a running Claude
+    /// Code rewrites constantly, so registration goes through `claude mcp`
+    /// when it is installed and edits the file only when it isn't.
+    fn mcp_config(&self) -> Option<super::McpConfig> {
+        Some(super::McpConfig { path: home_join(".claude.json"), key: "mcpServers".into(), entry: json!({"type": "stdio"}).as_object().cloned().unwrap_or_default() })
+    }
+
+    fn mcp_add_command(&self, name: &str, entry: &Value) -> Option<Vec<String>> {
+        let argv = ["claude", "mcp", "add-json", "--scope", "user", name];
+        Some(argv.iter().map(|s| s.to_string()).chain([entry.to_string()]).collect())
+    }
+
+    fn mcp_remove_command(&self, name: &str) -> Option<Vec<String>> {
+        Some(["claude", "mcp", "remove", "--scope", "user", name].iter().map(|s| s.to_string()).collect())
+    }
 }
 
 /// Claude Code's project-dir name for a cwd: every non-alphanumeric → `-`.

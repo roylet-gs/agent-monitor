@@ -23,5 +23,6 @@
   "tools": { "Shell": "Bash" },
   "resume": { "session": ["--resume", "{id}"], "continue": ["resume"] },
   "process": { "names": ["cursor-agent"], "argvContains": ["/cursor-agent/"] },
-  "notes": "Covers the Cursor editor's agent and the cursor-agent CLI (which may skip some hooks); Cursor has no permission hook, so it never shows waiting"
+  "notes": "Covers the Cursor editor's agent and the cursor-agent CLI (which may skip some hooks); Cursor has no permission hook, so it never shows waiting",
+  "mcp": { "file": "~/.cursor/mcp.json" }
 }

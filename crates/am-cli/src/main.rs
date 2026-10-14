@@ -7,6 +7,7 @@
 
 mod commands;
 pub use am_core::hooks_installer;
+mod mcp;
 mod output;
 mod resolve;
 mod store;
@@ -87,6 +88,12 @@ enum Cmd {
     /// List, inspect and share colour themes
     #[command(subcommand)]
     Theme(ThemeCmd),
+    /// MCP server that gives agents am's commands as tools (stdio); `am mcp install` registers it
+    #[command(args_conflicts_with_subcommands = true)]
+    Mcp {
+        #[command(subcommand)]
+        cmd: Option<McpCmd>,
+    },
     /// Check system health (hooks, gh CLI, DB, etc.)
     Doctor(JsonOpt),
     /// Show recent logs
@@ -253,6 +260,18 @@ enum HooksCmd {
     /// Remove agent-monitor hooks; default: from every agent
     Uninstall(AgentOpt),
     /// Check which agents have hooks installed
+    Status(JsonOpt),
+}
+
+#[derive(Subcommand)]
+enum McpCmd {
+    /// Run the MCP server on stdin/stdout (the default; what agent CLIs launch)
+    Serve,
+    /// Register the MCP server with agent CLIs; default: every detected agent that supports it
+    Install(AgentOpt),
+    /// Remove the MCP server registration; default: from every agent
+    Uninstall(AgentOpt),
+    /// Check which agents have the MCP server registered
     Status(JsonOpt),
 }
 
@@ -448,6 +467,12 @@ fn main() {
             ThemeCmd::Export { name, output } => theme::export(&name, output.as_deref()),
             ThemeCmd::Import { file, name, force } => theme::import(&file, name.as_deref(), force),
             ThemeCmd::Remove { name } => theme::remove(&name),
+        },
+        Some(Cmd::Mcp { cmd }) => match cmd {
+            None | Some(McpCmd::Serve) => crate::mcp::server::serve(),
+            Some(McpCmd::Install(a)) => commands::mcp::install(&a.agents),
+            Some(McpCmd::Uninstall(a)) => commands::mcp::uninstall(&a.agents),
+            Some(McpCmd::Status(j)) => commands::mcp::status(j.json),
         },
         Some(Cmd::Doctor(j)) => doctor::run(j.json),
         Some(Cmd::Logs(a)) => logs::run(logs::Options {
