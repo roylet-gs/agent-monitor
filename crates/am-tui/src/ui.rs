@@ -175,6 +175,10 @@ fn draw_settings(
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), banner);
     }
 
+    if let Some(rp) = &ed.repos {
+        draw_repos(f, theme, list, help, rp);
+        return;
+    }
     if let Some(pl) = &ed.plugins {
         draw_plugins(f, theme, list, help, pl);
         return;
@@ -303,6 +307,112 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
         (None, None) => Line::raw(""),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// Settings → Repositories.
+fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::repos_ui::RepoEditor) {
+    let mut lines = vec![
+        Line::styled(" Repositories — a add · x remove · s startup script · S remove script · esc back", theme.faint()),
+        Line::raw(""),
+    ];
+    if ed.rows.is_empty() {
+        lines.push(Line::styled("   No repositories yet — press a to add one", theme.faint()));
+    }
+    let name_w = ed.rows.iter().map(|r| r.name.width() + 2).max().unwrap_or(0).clamp(12, 24);
+    // name, path, "12 worktrees", "script"
+    let path_w = (list.width as usize).saturating_sub(1 + 2 + name_w + 14 + 8).max(8);
+    let height = (list.height as usize).saturating_sub(lines.len());
+    let start = (ed.cursor + 1).saturating_sub(height);
+    for (i, r) in ed.rows.iter().enumerate().skip(start).take(height) {
+        let sel = i == ed.cursor;
+        let count = match r.worktrees {
+            1 => "1 worktree".to_string(),
+            n => format!("{n} worktrees"),
+        };
+        let line = Line::from(vec![
+            Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(format!("  {:<name_w$}", truncate(&r.name, name_w - 1)), theme.bold(theme.text)),
+            if r.exists {
+                Span::styled(format!("{:<path_w$}", truncate(&r.path, path_w - 1)), theme.faint())
+            } else {
+                Span::styled(format!("{:<path_w$}", truncate(&format!("{} (missing)", r.path), path_w - 1)), theme.fg(theme.red))
+            },
+            Span::styled(format!("{count:<14}"), theme.faint()),
+            if r.script { Span::styled("script", theme.fg(theme.green)) } else { Span::raw("") },
+        ]);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+    }
+    f.render_widget(Paragraph::new(lines), list);
+    let confirm = ed.confirm_remove.as_ref().and_then(|id| ed.rows.iter().find(|r| &r.id == id));
+    let help_line = match (confirm, &ed.message, ed.selected()) {
+        (Some(r), _, _) => Line::styled(
+            format!(" Stop tracking {}? Files stay on disk · y confirm, any other key cancels", r.name),
+            theme.bold(theme.yellow),
+        ),
+        (None, Some((ok, m)), _) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
+        (None, None, Some(r)) if r.script => Line::styled(" Startup script runs after each new worktree (s to edit)", theme.faint()),
+        (None, None, Some(_)) => Line::styled(" No startup script · s creates one from a template", theme.faint()),
+        (None, None, None) => Line::raw(""),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// The add-repository folder browser (a modal with a scrolling list).
+fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_browser::FolderBrowser, now: i64) {
+    let w = 72.min(area.width.saturating_sub(2));
+    let h = 24.min(area.height.saturating_sub(2));
+    let rect = modal_rect(area, w, h);
+    let hint = if b.path_mode() { "tab complete  ⏎ add/open  esc cancel" } else { "⏎ add/open  → open  ← up  type to filter  esc cancel" };
+    let dir = am_core::hooks_installer::tilde(&b.dir);
+    clear(f, theme, rect);
+    let block = modal_block(theme, "Add repository".into(), theme.border_focus, hint);
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let [head, list, foot] = Layout::vertical([Constraint::Length(3), Constraint::Min(1), Constraint::Length(2)]).areas(inner);
+    let iw = inner.width as usize;
+    let filter = if b.filter.is_empty() {
+        Line::from(vec![Span::styled("› ", theme.bold(theme.border_focus)), Span::styled("▏type to filter, or a path (/… ~/…)", theme.faint())])
+    } else {
+        Line::from(vec![Span::styled("› ", theme.bold(theme.border_focus)), Span::raw(format!("{}▏", b.filter))])
+    };
+    f.render_widget(
+        Paragraph::new(vec![Line::styled(truncate(&dir, iw), theme.bold(theme.text)), filter, Line::raw("")]),
+        head,
+    );
+    let rows = b.visible();
+    let height = list.height as usize;
+    let start = (b.cursor + 1).saturating_sub(height);
+    let mut lines: Vec<Line> = Vec::new();
+    if rows.is_empty() && !b.path_mode() {
+        lines.push(Line::styled(if b.filter.is_empty() { "  (no folders here)" } else { "  (no match)" }, theme.faint()));
+    }
+    for (i, e) in rows.iter().enumerate().skip(start).take(height) {
+        let sel = i == b.cursor;
+        let (tag, style, tag_style) = if e.tracked {
+            ("✓ tracked", theme.faint(), theme.faint())
+        } else if e.is_repo {
+            ("git", theme.bold(theme.accent), theme.fg(theme.green))
+        } else {
+            ("", theme.fg(theme.text), theme.faint())
+        };
+        let name = if e.name == ".." { "../".to_string() } else { format!("{}/", e.name) };
+        let line = Line::from(vec![
+            Span::styled(if sel { "▸ " } else { "  " }, theme.bold(theme.border_focus)),
+            Span::styled(format!("{:<w$}", truncate(&name, iw.saturating_sub(14)), w = iw.saturating_sub(14)), style),
+            Span::styled(tag, tag_style),
+        ]);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+    }
+    f.render_widget(Paragraph::new(lines), list);
+    let status = match (&b.adding, &b.error) {
+        (Some(p), _) => Line::from(vec![
+            Span::styled(format!("{} ", spinner(now)), theme.fg(theme.accent)),
+            Span::raw(format!("Adding {}…", am_core::hooks_installer::tilde(std::path::Path::new(p)))),
+        ]),
+        (None, Some(e)) => Line::styled(truncate(e, iw), theme.fg(theme.red)),
+        (None, None) => Line::raw(""),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), status]), foot);
 }
 
 /// Settings → Key bindings.
@@ -501,6 +611,10 @@ fn key_line<'a>(theme: &Theme, key: &str, text: impl Into<String>, danger: bool)
 
 fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::Modal, now: i64) {
     use crate::modals::{DeleteStep, FormField, Modal};
+    if let Modal::AddRepo(b) = modal {
+        draw_browser(f, theme, area, b, now);
+        return;
+    }
     let (title, color, hint, lines): (String, _, &str, Vec<Line>) = match modal {
         Modal::Busy { text } => {
             let line = Line::from(vec![Span::styled(format!("{} ", spinner(now)), theme.fg(theme.accent)), Span::raw(text.clone())]);
@@ -586,17 +700,7 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             }
             (title, if g.dirty > 0 || g.ahead > 0 { theme.yellow } else { theme.red }, "", lines)
         }
-        Modal::AddRepo { path, error } => {
-            let mut lines = vec![
-                Line::raw("Path to a git repository:"),
-                Line::from(vec![Span::styled("› ", theme.bold(theme.border_focus)), Span::raw(format!("{path}▏"))]),
-            ];
-            if let Some(e) = error {
-                lines.push(Line::raw(""));
-                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
-            }
-            ("Add repository".into(), theme.border_focus, "tab complete  ⏎ add  esc cancel", lines)
-        }
+        Modal::AddRepo(_) => unreachable!("drawn by draw_browser"),
         Modal::Suggest { title, body, on_body, error } => {
             let row = |label: &str, value: &str, active: bool, placeholder: &str| {
                 Line::from(vec![
@@ -2166,6 +2270,46 @@ mod tests {
         ed.plugins = Some(pl);
         app.settings_editor = Some(ed);
         insta::assert_snapshot!(render(&app, 100, 24));
+    }
+
+    #[test]
+    fn repositories_page() {
+        use crate::repos_ui::{RepoEditor, RepoRow};
+        let mut app = fixture();
+        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
+        let row = |id: &str, path: &str, exists, worktrees, script| RepoRow {
+            id: id.into(),
+            name: id.into(),
+            path: path.into(),
+            exists,
+            worktrees,
+            script,
+        };
+        let mut rp = RepoEditor::new(vec![
+            row("agent-monitor", "~/code/agent-monitor", true, 4, true),
+            row("website", "~/code/website", true, 1, false),
+            row("old-thing", "~/gone/old-thing", false, 2, false),
+        ]);
+        rp.cursor = 1;
+        rp.confirm_remove = Some("website".into());
+        ed.repos = Some(rp);
+        app.settings_editor = Some(ed);
+        insta::assert_snapshot!(render(&app, 100, 20));
+    }
+
+    #[test]
+    fn add_repo_folder_browser() {
+        use crate::folder_browser::{Entry, FolderBrowser};
+        let mut app = fixture();
+        let dir = std::path::PathBuf::from("/src");
+        let e = |name: &str, is_repo, tracked| Entry { name: name.into(), path: dir.join(name), is_repo, tracked };
+        let mut b = FolderBrowser::fixture(
+            dir.clone(),
+            vec![e("agent-monitor", true, true), e("website", true, false), e("notes", false, false), e("scratch", false, false)],
+        );
+        b.cursor = 2;
+        app.modal = Some(crate::modals::Modal::AddRepo(b));
+        insta::assert_snapshot!(render(&app, 100, 26));
     }
 
     #[test]

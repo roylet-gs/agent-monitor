@@ -129,6 +129,15 @@ echo '{"hook_event_name":"SessionStart","session_id":"pair-gem","source":"startu
 echo '{"hook_event_name":"BeforeAgent","session_id":"pair-gem","prompt":"review the diff"}' | pair_gemini BeforeAgent
 echo '{"hook_event_name":"AfterAgent","session_id":"pair-gem","prompt_response":"Looks good"}' | pair_gemini AfterAgent
 
+# --- An untracked git repo for the add-repository folder browser ----------
+# (22-repositories.spec.ts adds it through Settings → Repositories… and
+# removes it again.)
+mkdir -p /home/user/other-repo
+git -C /home/user/other-repo init --quiet
+echo "# other" > /home/user/other-repo/README.md
+git -C /home/user/other-repo add README.md
+git -C /home/user/other-repo commit -m "init" --quiet
+
 # --- Standalone session ("Other sessions"): hook-event on an untracked dir --
 mkdir -p /home/user/my-project
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"sess-standalone-1"}' | hook /home/user/my-project

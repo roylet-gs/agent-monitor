@@ -6,6 +6,7 @@
 
 mod app;
 mod data;
+mod folder_browser;
 mod jobs;
 mod keymap;
 mod keys_ui;
@@ -13,6 +14,7 @@ mod launcher;
 mod modals;
 mod ops;
 mod plugins_ui;
+mod repos_ui;
 mod settings_ui;
 mod setup;
 mod theme;
@@ -191,9 +193,18 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     Ok(name) => {
                         app.modal = None;
                         app.notice = Some(format!("Added repository {name}"));
+                        if let Some(e) = &mut app.settings_editor {
+                            e.refresh_repos(Some((true, format!("Added {name} ({path})"))));
+                            if let Some(page) = &mut e.repos {
+                                page.select_name(&name);
+                            }
+                        }
                         collector.refresh(false);
                     }
-                    Err(e) => app.modal = Some(modals::Modal::AddRepo { path, error: Some(e) }),
+                    Err(e) => match &mut app.modal {
+                        Some(modals::Modal::AddRepo(browser)) => browser.add_failed(e),
+                        _ => app.popup = Some(format!("✗ Couldn't add {path}: {e}")),
+                    },
                 },
                 launcher::Msg::UpdateAvailable(update) => app.update_available = Some(update),
                 launcher::Msg::Deleted(job, id, label, result) => {
@@ -335,6 +346,28 @@ fn dispatch(
         Action::Create(job, repo, req) => ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone()),
         Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),
         Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
+        Action::ReposChanged => collector.refresh(false),
+        Action::EditScript(repo_id) => {
+            let path = match am_core::worktrees::create_script(&repo_id) {
+                Ok(p) => p,
+                Err(e) => {
+                    am_core::warn!("scripts", "Couldn't create the startup script for {repo_id}: {e}");
+                    app.popup = Some(format!("✗ Couldn't create the startup script: {e}"));
+                    return Ok(false);
+                }
+            };
+            am_core::info!("scripts", "Editing startup script {}", path.display());
+            let shown = am_core::hooks_installer::tilde(&path);
+            let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
+            if ide != am_core::launch::IdeChoice::Terminal {
+                launcher::open_file(path, ide, app.settings.ide_command.clone(), launch_tx.clone());
+            } else {
+                edit_file(terminal, mouse_before, &path)?;
+            }
+            if let Some(e) = &mut app.settings_editor {
+                e.refresh_repos(Some((true, format!("Startup script: {shown}"))));
+            }
+        }
         Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
         Action::InstallHooks => {
             // Every agent the wizard listed; the first failure is reported.
@@ -366,10 +399,10 @@ fn dispatch(
         Action::EditSettingsFile => {
             let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
             if ide != am_core::launch::IdeChoice::Terminal {
-                launcher::open_settings_file(am_core::paths::settings_path(), ide, app.settings.ide_command.clone(), launch_tx.clone());
+                launcher::open_file(am_core::paths::settings_path(), ide, app.settings.ide_command.clone(), launch_tx.clone());
                 return Ok(false);
             }
-            edit_settings_file(terminal, mouse_before)?;
+            edit_file(terminal, mouse_before, &am_core::paths::settings_path())?;
             app.set_settings(settings::load());
             *theme = theme::Theme::load(&app.settings.theme);
             collector.update_settings(app.settings.clone());
@@ -430,19 +463,19 @@ fn settings_file_mtime() -> Option<std::time::SystemTime> {
     std::fs::metadata(am_core::paths::settings_path()).and_then(|m| m.modified()).ok()
 }
 
-/// Hand the terminal to $EDITOR (default `vi`) for settings.json, then take it back.
-fn edit_settings_file(terminal: &mut ratatui::DefaultTerminal, mouse: bool) -> io::Result<()> {
-    let path = am_core::paths::settings_path();
+/// Hand the terminal to $EDITOR (default `vi`) for a file (settings.json, a
+/// startup script), then take it back.
+fn edit_file(terminal: &mut ratatui::DefaultTerminal, mouse: bool, path: &std::path::Path) -> io::Result<()> {
     let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
     set_mouse(false);
     ratatui::restore();
     // $EDITOR may carry arguments (e.g. `code --wait`), so run it via the shell.
-    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(&path).status();
+    let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).status();
     *terminal = ratatui::init();
     set_mouse(mouse);
     terminal.clear()?;
     if let Err(e) = status {
-        am_core::warn!("settings", "Failed to run editor {editor}: {e}");
+        am_core::warn!("tui", "Failed to run editor {editor} on {}: {e}", path.display());
     }
     Ok(())
 }
