@@ -168,6 +168,18 @@ echo '{"hook_event_name":"SessionStart","session_id":"cdx-1","cwd":"/home/user/c
 echo '{"hook_event_name":"UserPromptSubmit","session_id":"cdx-1","cwd":"/home/user/codex-project","prompt":"bump deps","model":"gpt-5"}' | codex_hook UserPromptSubmit
 echo '{"hook_event_name":"PermissionRequest","session_id":"cdx-1","cwd":"/home/user/codex-project","tool_name":"Bash","tool_input":{"command":"cargo update"},"model":"gpt-5"}' | codex_hook PermissionRequest
 
+# --- A shell command an agent left running in feature/to-delete ------------
+# Claude Code wraps each Bash tool command in `<shell> -c source
+# ~/.claude/shell-snapshots/…`; procscan counts those per worktree, and the row
+# shows `$ 1 command` with its name in teal (25-shell-commands.spec.ts).
+# `& wait` forks a subshell that keeps the same argv, as a real `cmd &` in a
+# Bash tool command would; it still counts as one command.
+mkdir -p "$HOME/.claude/shell-snapshots"
+echo ': e2e snapshot' > "$HOME/.claude/shell-snapshots/snapshot-bash-e2e.sh"
+(cd /work/.claude/worktrees/feature-to-delete && \
+  setsid bash -c "source $HOME/.claude/shell-snapshots/snapshot-bash-e2e.sh && sleep infinity & wait" \
+  </dev/null >/dev/null 2>&1 &)
+
 # 7682: a fresh, empty data dir on every connection → first-run setup wizard.
 cat > /usr/local/bin/am-tui-fresh <<'SH'
 #!/bin/bash

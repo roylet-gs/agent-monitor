@@ -208,6 +208,7 @@ After the name (a nickname, if set, followed by the branch in dim text):
 
 - `•`: the status changed since you last selected this row
 - `▶`: processes such as dev servers are running in the worktree (with `showRunningProcesses` on)
+- `$ 2 commands` (bold teal, with the name turned teal too): an agent's shell command, such as tests or a build, is still running in the worktree
 - `◆ 2 subagents` (`◆2` on narrow terminals): background subagents currently running
 - `⧉ 2 sessions` (`⧉2`): two or more agents are working in this worktree at once (see below)
 
