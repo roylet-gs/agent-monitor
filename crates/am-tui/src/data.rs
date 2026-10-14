@@ -123,6 +123,9 @@ struct ProcData {
     running: Vec<RunningProcess>,
     /// Claude Code shell commands still running here (see `parked_subagents`).
     claude_shells: usize,
+    /// Those of `claude_shells` matching `runningProcessFilter`: the row's
+    /// `$ N commands` highlight (none without a filter).
+    matching_shells: usize,
     /// Agent CLI processes here by harness id (see `live_sessions`).
     agents: HashMap<&'static str, usize>,
 }
@@ -338,7 +341,7 @@ impl Worker {
                     has_terminal: p.has_terminal,
                     open_ide: p.open_ide,
                     running_processes: p.running,
-                    shell_commands: p.claude_shells,
+                    shell_commands: p.matching_shells,
                     context: self.ctx.get(&w.id).cloned().flatten(),
                     sessions,
                     worktree: w,
@@ -514,6 +517,7 @@ impl Worker {
                     open_ide: snap.open_ide(&root),
                     running: running.remove(&root).unwrap_or_default(),
                     claude_shells: snap.claude_shell_commands(&root),
+                    matching_shells: snap.claude_shell_commands_matching(&root, &self.settings.running_process_filter),
                     agents: agents.remove(&root).unwrap_or_default(),
                 };
                 (w.id.clone(), data)
