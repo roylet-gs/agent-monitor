@@ -28,7 +28,9 @@ test("three agents in one worktree are listed under its row with their own statu
   const first = lines[at + 1];
   expect(first).toMatch(/├ ● claude #3a7c\s+executing/);
   expect(first).toMatch(/◆ 1 subagent\s/);
-  expect(first).toMatch(/300k │/);
+  // 300k of 1M: 0.3 × 64 = 19.2 → 19 eighths = two full cells + a 3-eighth
+  // part cell drawn as a full-width ▒ (no gap before the ░ track).
+  expect(first).toMatch(/██▒░░░░░ 300k │/);
   const second = lines[at + 2];
   expect(second).toMatch(/├ ◑ claude #9e41\s+delegating/);
   expect(second).toContain("◆ 2 subagents");
