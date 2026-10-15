@@ -144,3 +144,24 @@ test("changes requested PR reads changes", async ({ page }) => {
   expect(await tui.selectedRow()).toContain("#42✓ changes");
   await tui.screenshot("pr-changes-requested");
 });
+
+test("closed (unmerged) PR reads closed", async ({ page }) => {
+  await setupMock({
+    gh: {
+      number: 44,
+      title: "feat: abandoned idea",
+      url: "https://github.com/test/repo/pull/44",
+      state: "CLOSED",
+      isDraft: false,
+      reviewDecision: "REVIEW_REQUIRED",
+      statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS", name: "build" }],
+    },
+  });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("main");
+  // A closed PR has no review state; `closed` takes its place.
+  await tui.waitForMatch(/│▌.*#44✓ closed/m, 15_000);
+  expect(await tui.selectedRow()).toContain("#44✓ closed");
+  await tui.screenshot("pr-closed");
+});
