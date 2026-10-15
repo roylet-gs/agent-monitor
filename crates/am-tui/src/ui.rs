@@ -1817,7 +1817,8 @@ fn pr_text(v: &WorktreeView, words: bool) -> String {
 }
 
 /// Where an open PR stands on review, combined with CI and conflicts so
-/// "approved and good to go" stands apart from "approved but failing".
+/// "approved and good to go" stands apart from "approved but failing";
+/// or `Closed` for a PR closed without merging.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Review {
     /// Approved, checks passing (or none), no merge conflicts: bold green `approved`.
@@ -1830,6 +1831,8 @@ enum Review {
     /// Waiting for a review.
     Pending,
     Draft,
+    /// Closed without merging (a merged PR shows `⇡` instead).
+    Closed,
 }
 
 impl Review {
@@ -1841,6 +1844,7 @@ impl Review {
             Review::ChangesRequested => "changes",
             Review::Pending => "review",
             Review::Draft => "draft",
+            Review::Closed => "closed",
         }
     }
 
@@ -1851,6 +1855,7 @@ impl Review {
             Review::ChangesRequested => "!",
             Review::Pending => "…",
             Review::Draft => "~",
+            Review::Closed => "⊘",
         }
     }
 
@@ -1858,13 +1863,16 @@ impl Review {
         match self {
             Review::Ready => |t| t.green,
             Review::Approved | Review::Conflicts => |t| t.yellow,
-            Review::ChangesRequested => |t| t.red,
+            Review::ChangesRequested | Review::Closed => |t| t.red,
             Review::Pending | Review::Draft => |t| t.faint,
         }
     }
 }
 
 fn review_state(pr: &am_core::model::PrInfo) -> Option<Review> {
+    if pr.state == "CLOSED" {
+        return Some(Review::Closed);
+    }
     if pr.state != "OPEN" {
         return None;
     }
@@ -2198,6 +2206,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (Review::Conflicts, ""),
         (Review::ChangesRequested, ""),
         (Review::Pending, "=awaiting"),
+        (Review::Closed, "=not merged"),
     ] {
         pr_legend.push(Span::styled(r.word(), theme.fg(r.color()(theme))));
         pr_legend.push(Span::styled(format!("{note}  "), theme.faint()));
@@ -3389,9 +3398,13 @@ mod tests {
         // Narrow terminals get a glyph instead of the word.
         set(&mut v, "APPROVED", ChecksStatus::Passing, None);
         assert_eq!(pr_text(&v, false), "#127✓ ✔");
-        // Merged / closed PRs have no review state.
+        // Merged PRs have no review state; closed ones say so in red.
         v.pr.as_mut().unwrap().state = "MERGED".into();
         assert_eq!(pr_text(&v, true), "#127✓⇡");
+        v.pr.as_mut().unwrap().state = "CLOSED".into();
+        assert_eq!(pr_text(&v, true), "#127✓ closed");
+        assert_eq!(label(&v, true), Some(("closed".into(), Some(theme.red))));
+        assert_eq!(pr_text(&v, false), "#127✓ ⊘");
     }
 
     #[test]
