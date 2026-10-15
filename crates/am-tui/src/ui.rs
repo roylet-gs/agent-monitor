@@ -35,33 +35,176 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     if theme.background.is_some() {
         f.render_widget(Block::new().style(theme.base()), area);
     }
+    // Each layer records what a click on it does; a layer drawn on top
+    // starts over, so only the top one takes the mouse.
+    let mut hits: Vec<Hit> = Vec::new();
     let areas = dashboard_areas(app, area);
-    draw_keybar(f, app, theme, areas.keys);
+    draw_keybar(f, app, theme, areas.keys, &mut hits);
     if app.show_log {
         draw_log(f, theme, areas.log, log_lines);
     }
 
-    draw_worktrees(f, app, theme, areas.list, now);
+    draw_worktrees(f, app, theme, areas.list, now, &mut hits);
     if let Some(jobs) = areas.jobs {
-        draw_jobs(f, app, theme, jobs, now);
+        draw_jobs(f, app, theme, jobs, now, &mut hits);
     }
     if app.show_help {
+        hits.clear();
         draw_help(f, theme, area, &app.keymap);
     }
     if let Some(editor) = &app.settings_editor {
+        hits.clear();
         match &editor.builder {
-            Some(b) => draw_theme_builder(f, theme, area, b),
-            None => draw_settings(f, theme, area, editor, shown_update(app)),
+            Some(b) => draw_theme_builder(f, theme, area, b, &mut hits),
+            None => draw_settings(f, theme, area, editor, shown_update(app), &mut hits),
         }
     }
     if let Some(setup) = &app.setup {
-        draw_setup(f, theme, area, setup);
+        hits.clear();
+        draw_setup(f, theme, area, setup, &mut hits);
     }
     if let Some(modal) = &app.modal {
-        draw_modal(f, theme, area, modal, now);
+        hits.clear();
+        draw_modal(f, theme, area, modal, now, &mut hits);
     }
     if let Some(msg) = &app.popup {
+        hits.clear();
         draw_popup(f, theme, area, msg);
+    }
+    if app.settings.mouse_enabled
+        && let Some(hit) = app.hover.and_then(|(x, y)| hit_at(&hits, x, y))
+        && !hit.selected
+    {
+        hover(f, theme, hit.rect);
+    }
+    *app.hits.borrow_mut() = hits;
+}
+
+/// What a click on part of the screen does. Every layer records these while
+/// it draws (`App::hits`), so clicks and hover always match what's shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    /// Exactly what pressing this key does (in whatever layer is on top).
+    Key(Key),
+    /// A dashboard command from the key bar.
+    Command(Command),
+    /// A worktree (or one of its session rows) in the dashboard list.
+    Worktree(usize),
+    /// Anywhere in the jobs pane: focus it.
+    JobsPane,
+    /// A key answering job `.0`'s question, as if pressed with it selected.
+    JobKey(usize, Key),
+    /// Row `.1` of a list in the top layer: a click moves the list's cursor
+    /// there; a click on the row already under the cursor acts on it.
+    Item(List, usize),
+}
+
+/// The lists `Target::Item` can point into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum List {
+    Settings,
+    Sort,
+    Plugins,
+    Repos,
+    Keys,
+    ThemeTokens,
+    Palette,
+    Browser,
+    SetupIde,
+    SetupIntegrations,
+    SetupContext,
+    NewForm,
+    Suggest,
+    Jobs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hit {
+    pub rect: Rect,
+    pub target: Target,
+    /// Already shows the selection highlight, so hover leaves it alone.
+    pub selected: bool,
+}
+
+/// The hit under a cell: the last one recorded wins (drawn on top).
+pub fn hit_at(hits: &[Hit], x: u16, y: u16) -> Option<Hit> {
+    hits.iter().rev().find(|h| contains(h.rect, x, y)).copied()
+}
+
+/// One full-width row of a list area, if `row` (0-based, after scrolling)
+/// is inside it.
+fn push_row(hits: &mut Vec<Hit>, area: Rect, row: usize, target: Target, selected: bool) {
+    if row < area.height as usize {
+        hits.push(Hit { rect: Rect::new(area.x, area.y + row as u16, area.width, 1), target, selected });
+    }
+}
+
+/// The key a hint like `⏎ save`, `esc cancel` or `x reset` stands for.
+fn hint_key(token: &str) -> Option<Key> {
+    match token {
+        t if t.starts_with('⏎') => Some(Key::Enter),
+        "esc" | "any" => Some(Key::Esc),
+        "space" => Some(Key::Char(' ')),
+        "tab" | "⇥" => Some(Key::Tab),
+        "→" => Some(Key::Right),
+        "←" => Some(Key::Left),
+        t => {
+            let mut chars = t.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) if c.is_ascii_graphic() => Some(Key::Char(c)),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Make each `key label` hint in `text` (drawn from column `x` on row `y`)
+/// clickable. Hints are separated by two spaces, ` · ` or ` — `; ones whose
+/// key isn't a single press (`←→ adjust`, `type to filter`) are skipped.
+fn hint_hits(hits: &mut Vec<Hit>, text: &str, x: u16, y: u16) {
+    let mut segments = Vec::new();
+    let (mut start, mut i) = (0, 0);
+    while i < text.len() {
+        let rest = &text[i..];
+        let sep = [" · ", " — ", "  "].into_iter().find(|p| rest.starts_with(p)).map_or(0, str::len);
+        if sep > 0 {
+            segments.push((start, &text[start..i]));
+            i += sep;
+            start = i;
+        } else {
+            i += rest.chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    segments.push((start, &text[start..]));
+    for (at, seg) in segments {
+        let lead = seg.len() - seg.trim_start().len();
+        let seg = seg.trim();
+        let Some(key) = seg.split(' ').next().and_then(hint_key) else { continue };
+        let col = x + text[..at + lead].width() as u16;
+        hits.push(Hit { rect: Rect::new(col, y, seg.width() as u16, 1), target: Target::Key(key), selected: false });
+    }
+}
+
+/// Hints in a bordered block's bottom-right title.
+fn bottom_hint_hits(hits: &mut Vec<Hit>, text: &str, rect: Rect) {
+    let x = (rect.x + rect.width).saturating_sub(1 + text.width() as u16);
+    hint_hits(hits, text, x, rect.y + rect.height.saturating_sub(1));
+}
+
+/// Tint the cells under the mouse pointer. Text drawn in the tint's own
+/// colour (faint text on `ansi`) switches to the text colour.
+fn hover(f: &mut Frame, theme: &Theme, rect: Rect) {
+    let bg = theme.hover_bg();
+    let rect = rect.intersection(f.area());
+    let buf = f.buffer_mut();
+    for y in rect.y..rect.y + rect.height {
+        for x in rect.x..rect.x + rect.width {
+            let cell = &mut buf[(x, y)];
+            if cell.fg == bg {
+                cell.set_fg(theme.text);
+            }
+            cell.set_bg(bg);
+        }
     }
 }
 
@@ -84,11 +227,6 @@ fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
     } else {
         DashAreas { list: body, jobs: None, log, keys }
     }
-}
-
-/// Whether a click landed in the jobs pane.
-pub fn in_jobs_pane(app: &App, area: Rect, x: u16, y: u16) -> bool {
-    dashboard_areas(app, area).jobs.is_some_and(|r| contains(r, x, y))
 }
 
 /// Settings box, then inside it the update banner, field list and help line.
@@ -130,22 +268,11 @@ fn settings_start(lines: &[Option<usize>], cursor: usize, height: usize) -> usiz
     (sel_line + 2).saturating_sub(height)
 }
 
-/// The settings field under a click, if any (field list only, not the
-/// sort editor or theme builder).
-pub fn settings_field_at(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
-    let ed = app.settings_editor.as_ref()?;
-    let (_, [_, list, _]) = settings_areas(area, shown_update(app));
-    if !contains(list, x, y) {
-        return None;
-    }
-    let lines = settings_lines();
-    let start = settings_start(&lines, ed.cursor, list.height as usize);
-    lines.get(start + (y - list.y) as usize).copied().flatten()
-}
-
 fn contains(r: Rect, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
+
+const SETTINGS_HINT: &str = " ⏎/space change  ←→ adjust  e edit file  esc close ";
 
 fn draw_settings(
     f: &mut Frame,
@@ -153,6 +280,7 @@ fn draw_settings(
     area: Rect,
     ed: &crate::settings_ui::SettingsEditor,
     update: Option<&am_core::update_check::Update>,
+    hits: &mut Vec<Hit>,
 ) {
     use crate::settings_ui::{FIELDS, Kind, sort_label};
     let (rect, [banner, list, help]) = settings_areas(area, update);
@@ -161,10 +289,10 @@ fn draw_settings(
         .border_type(BorderType::Rounded)
         .border_style(theme.bold(theme.border_focus))
         .title(Line::from(vec![Span::styled("─", theme.bold(theme.border_focus)), Span::styled("Settings ", theme.bold(theme.text))]))
-        .title_bottom(
-            Line::styled(" ⏎/space change  ←→ adjust  e edit file  esc close ", theme.faint()).alignment(Alignment::Right),
-        );
+        .title_bottom(Line::styled(SETTINGS_HINT, theme.faint()).alignment(Alignment::Right));
     f.render_widget(block, rect);
+    // The sub-pages take the same keys (⏎, esc…), so the hints work there too.
+    bottom_hint_hits(hits, SETTINGS_HINT, rect);
     if let Some(u) = update {
         let lines = vec![
             Line::from(vec![
@@ -177,23 +305,31 @@ fn draw_settings(
     }
 
     if let Some(rp) = &ed.repos {
-        draw_repos(f, theme, list, help, rp);
+        hits.clear();
+        draw_repos(f, theme, list, help, rp, hits);
         return;
     }
     if let Some(pl) = &ed.plugins {
-        draw_plugins(f, theme, list, help, pl);
+        hits.clear();
+        draw_plugins(f, theme, list, help, pl, hits);
         return;
     }
     if let Some(keys) = &ed.keys {
-        draw_key_bindings(f, theme, list, help, keys);
+        // While it waits for a key, a click mustn't count as one.
+        hits.clear();
+        if !keys.capturing {
+            draw_key_bindings(f, theme, list, help, keys, hits);
+        } else {
+            draw_key_bindings(f, theme, list, help, keys, &mut Vec::new());
+        }
         return;
     }
 
     if let Some(sort) = &ed.sort {
-        let mut lines = vec![
-            Line::styled(" Sort order — space on/off · d direction · J/K move · ⏎ save · esc cancel", theme.faint()),
-            Line::raw(""),
-        ];
+        hits.clear();
+        let header = " Sort order — space on/off · d direction · J/K move · ⏎ save · esc cancel";
+        hint_hits(hits, header, list.x, list.y);
+        let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
         for (i, c) in sort.items.iter().enumerate() {
             let sel = i == sort.cursor;
             let dir = match c.direction {
@@ -207,6 +343,7 @@ fn draw_settings(
                 Span::styled(format!("{:<16}", sort_label(c.key)), if c.enabled { theme.fg(theme.text) } else { theme.faint() }),
                 Span::styled(dir, theme.faint()),
             ]);
+            push_row(hits, list, lines.len(), Target::Item(List::Sort, i), sel);
             lines.push(if sel { line.style(theme.selected()) } else { line });
         }
         f.render_widget(Paragraph::new(lines), list);
@@ -249,6 +386,11 @@ fn draw_settings(
     }
     let height = list.height as usize;
     let start = settings_start(&layout, ed.cursor, height);
+    for (row, entry) in layout.iter().skip(start).take(height).enumerate() {
+        if let Some(i) = *entry {
+            push_row(hits, list, row, Target::Item(List::Settings, i), i == ed.cursor);
+        }
+    }
     f.render_widget(Paragraph::new(lines.into_iter().skip(start).take(height).collect::<Vec<_>>()), list);
 
     let field = ed.field();
@@ -260,11 +402,10 @@ fn draw_settings(
 }
 
 /// Settings → Harness plugins.
-fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate::plugins_ui::PluginEditor) {
-    let mut lines = vec![
-        Line::styled(" Harness plugins — space on/off · i install hooks · d default · esc back", theme.faint()),
-        Line::raw(""),
-    ];
+fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate::plugins_ui::PluginEditor, hits: &mut Vec<Hit>) {
+    let header = " Harness plugins — space on/off · i install hooks · d default · esc back";
+    hint_hits(hits, header, list.x, list.y);
+    let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
     // Wide enough for the longest name ("GitHub Copilot CLI") plus a gap.
     let name_w = pl.rows.iter().map(|r| r.name.chars().count() + 1).max().unwrap_or(0).clamp(14, 24);
     for (i, r) in pl.rows.iter().enumerate() {
@@ -284,6 +425,7 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
             hooks,
             Span::styled(format!("{default:<10}"), theme.fg(theme.accent)),
         ]);
+        push_row(hits, list, lines.len(), Target::Item(List::Plugins, i), sel);
         lines.push(if sel { line.style(theme.selected()) } else { line });
     }
     if !pl.errors.is_empty() {
@@ -311,11 +453,10 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
 }
 
 /// Settings → Repositories.
-fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::repos_ui::RepoEditor) {
-    let mut lines = vec![
-        Line::styled(" Repositories — a add · x remove · s startup script · S remove script · esc back", theme.faint()),
-        Line::raw(""),
-    ];
+fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::repos_ui::RepoEditor, hits: &mut Vec<Hit>) {
+    let header = " Repositories — a add · x remove · s startup script · S remove script · esc back";
+    hint_hits(hits, header, list.x, list.y);
+    let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
     if ed.rows.is_empty() {
         lines.push(Line::styled("   No repositories yet — press a to add one", theme.faint()));
     }
@@ -341,15 +482,21 @@ fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::
             Span::styled(format!("{count:<14}"), theme.faint()),
             if r.script { Span::styled("script", theme.fg(theme.green)) } else { Span::raw("") },
         ]);
+        push_row(hits, list, lines.len(), Target::Item(List::Repos, i), sel);
         lines.push(if sel { line.style(theme.selected()) } else { line });
     }
     f.render_widget(Paragraph::new(lines), list);
     let confirm = ed.confirm_remove.as_ref().and_then(|id| ed.rows.iter().find(|r| &r.id == id));
     let help_line = match (confirm, &ed.message, ed.selected()) {
-        (Some(r), _, _) => Line::styled(
-            format!(" Stop tracking {}? Files stay on disk · y confirm, any other key cancels", r.name),
-            theme.bold(theme.yellow),
-        ),
+        (Some(r), _, _) => {
+            let text = format!(" Stop tracking {}? Files stay on disk · y confirm, any other key cancels", r.name);
+            // `y confirm` and `any other key cancels` sit after the last ` · `.
+            if let Some(at) = text.rfind(" · ") {
+                let x = help.x + text[..at].width() as u16;
+                hint_hits(hits, &format!(" · {}", text[at + " · ".len()..].replace(", ", "  ")), x, help.y + 1);
+            }
+            Line::styled(text, theme.bold(theme.yellow))
+        }
         (None, Some((ok, m)), _) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
         (None, None, Some(r)) if r.script => Line::styled(" Startup script runs after each new worktree (s to edit)", theme.faint()),
         (None, None, Some(_)) => Line::styled(" No startup script · s creates one from a template", theme.faint()),
@@ -359,7 +506,7 @@ fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::
 }
 
 /// The add-repository folder browser (a modal with a scrolling list).
-fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_browser::FolderBrowser, now: i64) {
+fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_browser::FolderBrowser, now: i64, hits: &mut Vec<Hit>) {
     let w = 72.min(area.width.saturating_sub(2));
     let h = 24.min(area.height.saturating_sub(2));
     let rect = modal_rect(area, w, h);
@@ -369,6 +516,7 @@ fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_brow
     let block = modal_block(theme, "Add repository".into(), theme.border_focus, hint);
     let inner = block.inner(rect);
     f.render_widget(block, rect);
+    bottom_hint_hits(hits, &format!(" {hint} "), rect);
     let [head, list, foot] = Layout::vertical([Constraint::Length(3), Constraint::Min(1), Constraint::Length(2)]).areas(inner);
     let iw = inner.width as usize;
     let filter = if b.filter.is_empty() {
@@ -402,6 +550,7 @@ fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_brow
             Span::styled(format!("{:<w$}", truncate(&name, iw.saturating_sub(14)), w = iw.saturating_sub(14)), style),
             Span::styled(tag, tag_style),
         ]);
+        push_row(hits, list, lines.len(), Target::Item(List::Browser, i), sel);
         lines.push(if sel { line.style(theme.selected()) } else { line });
     }
     f.render_widget(Paragraph::new(lines), list);
@@ -417,12 +566,11 @@ fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_brow
 }
 
 /// Settings → Key bindings.
-fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::keys_ui::KeyEditor) {
+fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::keys_ui::KeyEditor, hits: &mut Vec<Hit>) {
     use crate::keymap::{self, Command};
-    let mut lines = vec![
-        Line::styled(" Key bindings — ⏎ change · x reset · R reset all · esc back", theme.faint()),
-        Line::raw(""),
-    ];
+    let header = " Key bindings — ⏎ change · x reset · R reset all · esc back";
+    hint_hits(hits, header, list.x, list.y);
+    let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
     for (i, cmd) in Command::ALL.into_iter().enumerate() {
         let sel = i == ed.cursor;
         let key = ed.keymap.key(cmd);
@@ -441,6 +589,7 @@ fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &
             }
         }
         let line = Line::from(spans);
+        push_row(hits, list, lines.len(), Target::Item(List::Keys, i), sel);
         lines.push(if sel { line.style(theme.selected()) } else { line });
     }
     lines.push(Line::raw(""));
@@ -463,7 +612,7 @@ fn swatch(theme: &Theme, c: am_core::themes::ThemeColor) -> Span<'static> {
     }
 }
 
-fn draw_theme_builder(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::theme_builder::ThemeBuilder) {
+fn draw_theme_builder(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::theme_builder::ThemeBuilder, hits: &mut Vec<Hit>) {
     use crate::theme_builder::{COLS, Mode};
     use am_core::themes::Token;
     let w = 100.min(area.width.saturating_sub(2));
@@ -482,6 +631,7 @@ fn draw_theme_builder(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::theme
         .title_bottom(Line::styled(hint, theme.faint()).alignment(Alignment::Right));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
+    bottom_hint_hits(hits, hint, rect);
     let [head, body, foot] = Layout::vertical([Constraint::Length(2), Constraint::Min(3), Constraint::Length(2)]).areas(inner);
     let [left, right] = Layout::horizontal([Constraint::Length(46), Constraint::Min(20)]).areas(body);
 
@@ -516,7 +666,12 @@ fn draw_theme_builder(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::theme
             value,
             Span::styled(if own { "" } else { " base" }, theme.faint()),
         ]);
-        lines.push(if sel && matches!(b.mode, Mode::Tokens | Mode::Hex(_)) { line.style(theme.selected()) } else { line });
+        let highlighted = sel && matches!(b.mode, Mode::Tokens | Mode::Hex(_));
+        // Typing a hex value or a name: clicks would only interrupt it.
+        if matches!(b.mode, Mode::Tokens | Mode::Picker { .. }) {
+            push_row(hits, Rect { width: 44.min(left.width), ..left }, i, Target::Item(List::ThemeTokens, i), highlighted);
+        }
+        lines.push(if highlighted { line.style(theme.selected()) } else { line });
     }
     lines.push(Line::raw(""));
     lines.push(Line::styled(format!("  {}: {}", b.token().key(), b.token().describe()), theme.faint()));
@@ -530,8 +685,15 @@ fn draw_theme_builder(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::theme
                 lines.push(Line::raw(""));
             }
             let mut spans = vec![Span::raw(" ")];
+            let y = right.y + lines.len() as u16;
             for (col, c) in chunk.iter().enumerate() {
                 let here = row * COLS + col == cursor;
+                // Each swatch is `[██]`: four cells.
+                let x = right.x + 1 + 4 * col as u16;
+                if y < right.y + right.height && x + 4 <= right.x + right.width {
+                    let target = Target::Item(List::Palette, row * COLS + col);
+                    hits.push(Hit { rect: Rect::new(x, y, 4, 1), target, selected: false });
+                }
                 spans.push(Span::styled(if here { "[" } else { " " }, theme.bold(theme.text)));
                 spans.push(swatch(theme, *c));
                 spans.push(Span::styled(if here { "]" } else { " " }, theme.bold(theme.text)));
@@ -610,19 +772,30 @@ fn key_line<'a>(theme: &Theme, key: &str, text: impl Into<String>, danger: bool)
     ])
 }
 
-fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::Modal, now: i64) {
+fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::Modal, now: i64, hits: &mut Vec<Hit>) {
     use crate::modals::{DeleteStep, FormField, Modal};
     if let Modal::AddRepo(b) = modal {
-        draw_browser(f, theme, area, b, now);
+        draw_browser(f, theme, area, b, now, hits);
         return;
     }
+    // Line index → what a click on it does (lines may wrap, so rows are
+    // worked out once the box width is known).
+    let mut marks: Vec<(usize, Target, bool)> = Vec::new();
     let (title, color, hint, lines): (String, _, &str, Vec<Line>) = match modal {
         Modal::Busy { text } => {
             let line = Line::from(vec![Span::styled(format!("{} ", spinner(now)), theme.fg(theme.accent)), Span::raw(text.clone())]);
             ("Working".into(), theme.accent, "", vec![line])
         }
         Modal::New(form) => {
-            let field = |label: &str, value: String, which: FormField, note: Option<Line<'static>>| -> Vec<Line<'static>> {
+            let field_index = |which: FormField| match which {
+                FormField::Repo => 0,
+                FormField::Branch => 1,
+                FormField::Name => 2,
+                FormField::Base => 3,
+            };
+            let mut lines = Vec::new();
+            let mut field = |lines: &mut Vec<Line<'static>>, label: &str, value: String, which: FormField, note: Option<Line<'static>>| {
+                marks.push((lines.len(), Target::Item(List::NewForm, field_index(which)), false));
                 let active = form.field == which;
                 let mut v = vec![Line::from(vec![
                     Span::styled(if active { "▌" } else { " " }, theme.bold(theme.border_focus)),
@@ -635,11 +808,10 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                 if let Some(n) = note {
                     v.push(n);
                 }
-                v
+                lines.extend(v);
             };
-            let mut lines = Vec::new();
             if form.repos.len() > 1 {
-                lines.extend(field("Repo", format!("‹ {} ›", form.repo().name), FormField::Repo, None));
+                field(&mut lines, "Repo", format!("‹ {} ›", form.repo().name), FormField::Repo, None);
             }
             let note = if form.remote_exists() {
                 Some(Line::styled("           ✓ exists on origin — Enter will offer to pull it", theme.fg(theme.green)))
@@ -650,12 +822,12 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             } else {
                 None
             };
-            lines.extend(field("Branch", form.branch.clone(), FormField::Branch, note));
-            lines.extend(field("Name", if form.name.is_empty() && form.field != FormField::Name { "(optional)".into() } else { form.name.clone() }, FormField::Name, None));
+            field(&mut lines, "Branch", form.branch.clone(), FormField::Branch, note);
+            field(&mut lines, "Name", if form.name.is_empty() && form.field != FormField::Name { "(optional)".into() } else { form.name.clone() }, FormField::Name, None);
             if form.remote_exists() {
                 lines.push(Line::styled(format!(" Base      tracks origin/{}", form.branch), theme.faint()));
             } else {
-                lines.extend(field("Base", form.base.clone(), FormField::Base, None));
+                field(&mut lines, "Base", form.base.clone(), FormField::Base, None);
             }
             if let Some(e) = &form.error {
                 lines.push(Line::raw(""));
@@ -688,14 +860,19 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                         "Remove this worktree from disk?".to_string()
                     }));
                     lines.push(Line::raw(""));
+                    marks.push((lines.len(), Target::Key(Key::Enter), false));
                     lines.push(key_line(theme, "⏎ / y", "Yes", true));
+                    marks.push((lines.len(), Target::Key(Key::Esc), false));
                     lines.push(key_line(theme, "n / esc", "Cancel", false));
                 }
                 DeleteStep::LocalBranch => {
                     lines.push(Line::raw(format!("Also delete local branch {}?", w.branch)));
                     lines.push(Line::raw(""));
+                    marks.push((lines.len(), Target::Key(Key::Enter), false));
                     lines.push(key_line(theme, "⏎ / y", "Yes", true));
+                    marks.push((lines.len(), Target::Key(Key::Char('n')), false));
                     lines.push(key_line(theme, "n", "No, keep it", false));
+                    marks.push((lines.len(), Target::Key(Key::Esc), false));
                     lines.push(key_line(theme, "esc", "Cancel", false));
                 }
             }
@@ -709,6 +886,8 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                 key_line(theme, "y", "Reset", true),
                 key_line(theme, "any key", "Cancel", false),
             ];
+            marks.push((3, Target::Key(Key::Char('y')), false));
+            marks.push((4, Target::Key(Key::Esc), false));
             ("Reset settings".into(), theme.red, "", lines)
         }
         Modal::AddRepo(_) => unreachable!("drawn by draw_browser"),
@@ -724,6 +903,8 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                     },
                 ])
             };
+            marks.push((2, Target::Item(List::Suggest, 0), false));
+            marks.push((3, Target::Item(List::Suggest, 1), false));
             let mut lines = vec![
                 Line::styled("Opens an issue on roylet-gs/agent-monitor via gh.", theme.faint()),
                 Line::raw(""),
@@ -739,10 +920,23 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
     };
     // Long names wrap rather than run off the edge; size the box to fit.
     let w = 72.min(area.width.saturating_sub(2));
+    let para_lines = lines.clone();
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = para.line_count(w.saturating_sub(4)) as u16 + 2;
     let rect = modal_rect(area, w, h);
     clear(f, theme, rect);
+    if !hint.is_empty() {
+        bottom_hint_hits(hits, &format!(" {hint} "), rect);
+    }
+    // Inside the border and one column of padding each side.
+    let inner = Rect { x: rect.x + 2, y: rect.y + 1, width: rect.width.saturating_sub(4), height: rect.height.saturating_sub(2) };
+    for (line, target, selected) in marks {
+        let row = Paragraph::new(para_lines[..line].to_vec()).wrap(Wrap { trim: false }).line_count(inner.width);
+        let tall = Paragraph::new(vec![para_lines[line].clone()]).wrap(Wrap { trim: false }).line_count(inner.width);
+        for r in row..row + tall {
+            push_row(hits, inner, r, target, selected);
+        }
+    }
     f.render_widget(para.block(modal_block(theme, title, color, hint)), rect);
 }
 
@@ -752,7 +946,7 @@ fn spinner(now: i64) -> &'static str {
 }
 
 #[allow(clippy::needless_late_init)] // each arm builds lines then picks its hint
-fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup) {
+fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup, hits: &mut Vec<Hit>) {
     use crate::setup::{CONTEXT_CHOICES, CONTEXT_CUSTOM, IDE_CUSTOM, IDES, Step};
     let steps = [
         (Step::Editor, "Editor"),
@@ -771,6 +965,8 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
         crumbs.push(Span::styled(format!("{} {name}", if i < cur { "✓" } else { "" }).trim().to_string(), style));
     }
     let mut lines = vec![Line::from(crumbs), Line::raw("")];
+    // Line index → what a click on it does.
+    let mut marks: Vec<(usize, Target, bool)> = Vec::new();
     let hint;
     match s.step {
         Step::Editor => {
@@ -778,6 +974,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
             lines.push(Line::raw(""));
             for (i, (_, label)) in IDES.iter().enumerate() {
                 let sel = i == s.ide;
+                marks.push((lines.len(), Target::Item(List::SetupIde, i), false));
                 let mut row = Line::from(vec![
                     Span::styled(if sel { "  ● " } else { "  ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
                     Span::styled(*label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
@@ -846,6 +1043,8 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
             lines.push(Line::raw("Optional: show PRs/CI and Linear tickets next to each branch."));
             lines.push(Line::raw(""));
             let f0 = s.integration_field == 0;
+            marks.push((lines.len(), Target::Item(List::SetupIntegrations, 0), false));
+            marks.push((lines.len() + 1, Target::Item(List::SetupIntegrations, 1), false));
             lines.push(Line::from(vec![
                 Span::styled(if f0 { "▌" } else { " " }, theme.bold(theme.border_focus)),
                 Span::raw(format!(" [{}] GitHub PR & CI status (via gh)", if s.gh { "x" } else { " " })),
@@ -869,8 +1068,10 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
                 ])
             };
             for (i, (_, label)) in CONTEXT_CHOICES.iter().enumerate() {
+                marks.push((lines.len(), Target::Item(List::SetupContext, i), false));
                 lines.push(radio(i == s.ctx_choice, label.to_string()));
             }
+            marks.push((lines.len(), Target::Item(List::SetupContext, CONTEXT_CUSTOM), false));
             let custom = s.ctx_choice == CONTEXT_CUSTOM;
             let mut row = radio(custom, "Custom: ".into());
             row.spans.push(Span::styled(
@@ -887,6 +1088,12 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup)
     // 82 columns fits the five breadcrumbs on one line.
     let rect = modal_rect(area, 82, lines.len() as u16 + 4);
     clear(f, theme, rect);
+    bottom_hint_hits(hits, &format!(" {hint} "), rect);
+    // Inside the border and the padding (1 left/right, 1 top).
+    let inner = Rect { x: rect.x + 2, y: rect.y + 2, width: rect.width.saturating_sub(4), height: rect.height.saturating_sub(3) };
+    for (line, target, selected) in marks {
+        push_row(hits, inner, line, target, selected);
+    }
     let block = modal_block(theme, "Welcome to agent-monitor".into(), theme.border_focus, hint).padding(ratatui::widgets::Padding::new(1, 1, 1, 0));
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
@@ -1009,7 +1216,7 @@ struct Columns {
     ctx_window: u64,
 }
 
-fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
+fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
     let focused = !app.jobs.focused;
     let mut block = pane_block(theme, title("Worktrees", theme), focused);
     if !app.flat.is_empty() {
@@ -1052,6 +1259,14 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64)
 
     let height = inner.height as usize;
     let start = list_start(app, height);
+    // Worktree and session rows select their worktree; the focused
+    // selection keeps its own highlight.
+    for (n, row) in app.rows.iter().skip(start).take(height).enumerate() {
+        if let Row::Worktree(i) | Row::Session(i, _) = row {
+            let selected = *row == Row::Worktree(app.selected) && focused;
+            push_row(hits, inner, n, Target::Worktree(*i), selected);
+        }
+    }
     let lines: Vec<Line> = app
         .rows
         .iter()
@@ -1097,19 +1312,6 @@ fn list_start(app: &App, height: usize) -> usize {
         start = start.saturating_sub(1);
     }
     start
-}
-
-/// The worktree (`flat` index) under a click; headers and blank space are `None`.
-pub fn worktree_at(app: &App, area: Rect, x: u16, y: u16) -> Option<usize> {
-    let inner = Block::bordered().inner(dashboard_areas(app, area).list);
-    if app.flat.is_empty() || !contains(inner, x, y) {
-        return None;
-    }
-    let start = list_start(app, inner.height as usize);
-    match app.rows.get(start + (y - inner.y) as usize) {
-        Some(Row::Worktree(i) | Row::Session(i, _)) => Some(*i),
-        _ => None,
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1450,23 +1652,32 @@ fn pending_line<'a>(app: &App, theme: &Theme, id: u64, width: u16, now: i64) -> 
 
 /// Right-hand jobs pane: each create/delete job with its stages, any
 /// question it is waiting on (answered with Tab-focus + key), and output.
-fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
+fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
     use crate::jobs::{JobKind, JobState, Question};
     let jobs = &app.jobs;
     let mut block = pane_block(theme, title("Jobs", theme), jobs.focused);
-    if jobs.waiting() && !jobs.focused {
+    // Anywhere in the pane focuses it; rows, answers and hints below win.
+    hits.push(Hit { rect: area, target: Target::JobsPane, selected: false });
+    let hint = if jobs.waiting() && !jobs.focused {
         block = block.border_style(theme.bold(theme.yellow)).title_bottom(Line::styled(" ⇥ answer ", theme.bold(theme.yellow)).alignment(Alignment::Right));
+        " ⇥ answer "
     } else if jobs.focused {
         block = block.title_bottom(Line::styled(" ⇥ back  x dismiss ", theme.faint()).alignment(Alignment::Right));
-    }
+        " ⇥ back  x dismiss "
+    } else {
+        ""
+    };
     let inner = block.inner(area);
     f.render_widget(block, area);
     let width = inner.width as usize;
 
     let mut lines: Vec<Line> = Vec::new();
+    // Lines a click acts on: the job's label row(s) and its answers.
+    let mut marks: Vec<(std::ops::Range<usize>, Target, bool)> = Vec::new();
     // `lead` (e.g. "   ✓ ") then `text`, wrapped with continuation lines
-    // indented under the text.
+    // indented under the text. Returns the lines it added.
     let mut push = |lead: Vec<Span<'static>>, text: &str, style: ratatui::style::Style| {
+        let first_line = lines.len();
         let indent: usize = lead.iter().map(|s| s.content.width()).sum();
         let mut rows = wrap_words(text, width.saturating_sub(indent).max(8)).into_iter();
         let mut first = lead;
@@ -1475,6 +1686,7 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
         for r in rows {
             lines.push(Line::from(vec![Span::raw(" ".repeat(indent)), Span::styled(r, style)]));
         }
+        first_line..lines.len()
     };
     for (i, job) in jobs.list.iter().enumerate() {
         if i > 0 {
@@ -1487,11 +1699,12 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
             JobState::Failed(_) => ("✗", theme.red),
         };
         let cursor = jobs.focused && i == jobs.cursor;
-        push(
+        let label = push(
             vec![Span::styled(if cursor { "▌" } else { " " }, theme.bold(theme.border_focus)), Span::styled(format!("{glyph} "), theme.bold(color))],
             &job.label,
             theme.bold(theme.text),
         );
+        marks.push((label, Target::Item(List::Jobs, i), false));
         for step in &job.steps {
             let (g, style) = match (&job.state, step.done) {
                 (_, true) => ("✓".to_string(), theme.faint()),
@@ -1518,21 +1731,28 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
                 push(vec![Span::raw("   ")], &header, theme.bold(theme.yellow));
                 if *remote {
                     let pull = if *local { "Pull remote (reset local to origin)".to_string() } else { format!("Pull remote (track origin/{b})") };
-                    push(choice("⏎ / p", false), &pull, theme.fg(theme.text));
+                    let r = push(choice("⏎ / p", false), &pull, theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Enter), false));
                     let disc = if *local { "Create disconnected (deletes local, no tracking)" } else { "Create disconnected (new branch from base, no tracking)" };
-                    push(choice("c", *local), disc, theme.fg(theme.text));
+                    let r = push(choice("c", *local), disc, theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Char('c')), false));
                 } else {
-                    push(choice("⏎ / r", false), "Reuse existing local branch", theme.fg(theme.text));
-                    push(choice("d", true), "Delete local branch and re-create from base", theme.fg(theme.text));
+                    let r = push(choice("⏎ / r", false), "Reuse existing local branch", theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Enter), false));
+                    let r = push(choice("d", true), "Delete local branch and re-create from base", theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Char('d')), false));
                 }
-                push(choice("n", false), "Cancel", theme.fg(theme.text));
+                let r = push(choice("n", false), "Cancel", theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Char('n')), false));
             }
             (Some(Question::RunScript { repo_id, .. }), _) => {
                 push(vec![Span::raw("   ")], "Run the repo's startup script?", theme.bold(theme.yellow));
                 push(vec![Span::raw("   ")], &am_core::worktrees::script_path(repo_id).display().to_string(), theme.faint());
                 let where_ = if app.settings.startup_script_in_window() { "Run in a new terminal window" } else { "Run here (output below)" };
-                push(choice("⏎ / y", false), where_, theme.fg(theme.text));
-                push(choice("n", false), "Skip", theme.fg(theme.text));
+                let r = push(choice("⏎ / y", false), where_, theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Enter), false));
+                let r = push(choice("n", false), "Skip", theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Char('n')), false));
             }
             _ => {}
         }
@@ -1542,6 +1762,16 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64) {
     }
     // Keep the bottom (newest output) in view.
     let scroll = (lines.len() as u16).saturating_sub(inner.height);
+    for (range, target, selected) in marks {
+        for line in range {
+            if let Some(row) = line.checked_sub(scroll as usize) {
+                push_row(hits, inner, row, target, selected);
+            }
+        }
+    }
+    if !hint.is_empty() {
+        bottom_hint_hits(hits, hint, area);
+    }
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
 }
 
@@ -1878,35 +2108,26 @@ fn keybar_areas(app: &App, area: Rect) -> [Rect; 2] {
     Layout::horizontal([Constraint::Min(0), Constraint::Length(status_w as u16)]).areas(area)
 }
 
-/// The key-bar hint under a click; dimmed hints count too, the command
-/// itself refuses them like a key press would.
-pub fn keybar_key_at(app: &App, area: Rect, x: u16, y: u16) -> Option<BarHit> {
-    let keys = dashboard_areas(app, area).keys;
-    let [keys, _] = keybar_areas(app, keys);
-    if !contains(keys, x, y) {
-        return None;
-    }
-    let mut col = keys.x as usize + 1;
-    for item in keybar_items(app, keys.width as usize) {
-        let w = item.width();
-        if let KeyItem::Key { hit, .. } = item
-            && (col..col + w).contains(&(x as usize))
-        {
-            return hit;
-        }
-        col += w;
-    }
-    None
-}
-
-fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect, hits: &mut Vec<Hit>) {
     let [keys_area, status_area] = keybar_areas(app, area);
     if let Some((text, warn)) = keybar_status(app) {
         let color = if warn { theme.yellow } else { theme.accent };
         f.render_widget(Paragraph::new(Line::from(Span::styled(text, theme.fg(color)))), status_area);
     }
     let mut spans = vec![Span::raw(" ")];
+    // Every hint is clickable; dimmed ones too, the command itself refuses
+    // them like a key press would.
+    let mut col = keys_area.x + 1;
     for item in keybar_items(app, keys_area.width as usize) {
+        let w = item.width() as u16;
+        if let KeyItem::Key { hit: Some(hit), .. } = &item {
+            let target = match *hit {
+                BarHit::Key(k) => Target::Key(k),
+                BarHit::Command(c) => Target::Command(c),
+            };
+            hits.push(Hit { rect: Rect::new(col, keys_area.y, w.saturating_sub(2), 1), target, selected: false });
+        }
+        col += w;
         match item {
             KeyItem::Sep => spans.push(Span::styled("│ ", theme.fg(theme.border))),
             // Actions the selected worktree can't take stay in place, dimmed.
@@ -2593,8 +2814,16 @@ mod tests {
             .unwrap_or_else(|| panic!("{needle:?} not on screen:\n{screen}"))
     }
 
+    /// Click a cell of a `w`×`h` screen (drawn first: clicks hit-test the last frame).
     fn click(app: &mut App, w: u16, h: u16, (x, y): (u16, u16), double: bool) -> crate::app::Action {
-        app.on_mouse(crate::app::Mouse::Click { x, y, double }, Rect::new(0, 0, w, h))
+        render(app, w, h);
+        app.on_mouse(crate::app::Mouse::Click { x, y, double })
+    }
+
+    /// What's under (x, y) on a freshly drawn `w`×`h` screen.
+    fn target_at(app: &App, w: u16, h: u16, (x, y): (u16, u16)) -> Option<Target> {
+        render(app, w, h);
+        hit_at(&app.hits.borrow(), x, y).map(|h| h.target)
     }
 
     #[test]
@@ -2639,27 +2868,78 @@ mod tests {
     #[test]
     fn wheel_moves_the_selection_and_clamps() {
         let mut app = fixture();
-        let area = Rect::new(0, 0, 120, 16);
-        app.on_mouse(crate::app::Mouse::Scroll(1), area);
-        app.on_mouse(crate::app::Mouse::Scroll(1), area);
-        app.on_mouse(crate::app::Mouse::Scroll(1), area);
+        app.on_mouse(crate::app::Mouse::Scroll(1));
+        app.on_mouse(crate::app::Mouse::Scroll(1));
+        app.on_mouse(crate::app::Mouse::Scroll(1));
         assert_eq!(app.selected, 2);
-        app.on_mouse(crate::app::Mouse::Scroll(-1), area);
+        app.on_mouse(crate::app::Mouse::Scroll(-1));
         assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn hovering_a_row_tints_it_but_not_the_selection_or_headers() {
+        let mut app = fixture();
+        let (w, h) = (120, 16);
+        let theme = Theme::ansi();
+        let bg_at = |app: &App, (x, y): (u16, u16)| {
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            term.draw(|f| draw(f, app, &theme, NOW, &[])).unwrap();
+            term.backend().buffer()[(x, y)].bg
+        };
+        let row = find(&app, w, h, "fix/offline-cache");
+        assert_ne!(app.selected_view().unwrap().worktree.branch, "fix/offline-cache");
+        app.on_mouse(crate::app::Mouse::Move { x: row.0, y: row.1 });
+        assert_eq!(bg_at(&app, row), theme.hover_bg());
+        // Moving the pointer selects nothing.
+        assert_ne!(app.selected_view().unwrap().worktree.branch, "fix/offline-cache");
+
+        // The selected row keeps its own highlight.
+        click(&mut app, w, h, row, false);
+        assert_ne!(bg_at(&app, row), theme.hover_bg());
+
+        // A repo header isn't a row.
+        let header = find(&app, w, h, "gridsight ─");
+        app.on_mouse(crate::app::Mouse::Move { x: header.0, y: header.1 });
+        assert_ne!(bg_at(&app, header), theme.hover_bg());
+        // Key-bar hints light up like buttons.
+        let help = find(&app, w, h, "? help");
+        app.on_mouse(crate::app::Mouse::Move { x: help.0, y: help.1 });
+        assert_eq!(bg_at(&app, help), theme.hover_bg());
+        // An overlay takes the mouse: the row behind help doesn't light up.
+        let other = find(&app, w, h, "feature/refactor");
+        app.on_mouse(crate::app::Mouse::Move { x: other.0, y: other.1 });
+        assert_eq!(bg_at(&app, other), theme.hover_bg());
+        app.show_help = true;
+        assert_eq!(target_at(&app, w, h, other), None);
+        app.show_help = false;
+        app.settings.mouse_enabled = false;
+        assert_ne!(bg_at(&app, other), theme.hover_bg());
+    }
+
+    #[test]
+    fn hover_colour_sits_between_background_and_selection() {
+        use ratatui::style::Color;
+        let mut t = Theme::ansi();
+        assert_eq!(t.hover_bg(), Color::DarkGray);
+        t.selection = crate::theme::Selection::Bg(Color::Rgb(100, 100, 100));
+        t.background = Some(Color::Rgb(200, 0, 100));
+        assert_eq!(t.hover_bg(), Color::Rgb(150, 50, 100));
+        t.background = None;
+        assert_eq!(t.hover_bg(), Color::Rgb(75, 75, 75));
     }
 
     #[test]
     fn key_bar_hints_are_clickable() {
         let mut app = fixture();
         let help = find(&app, 120, 16, "? help");
-        assert_eq!(keybar_key_at(&app, Rect::new(0, 0, 120, 16), help.0 + 3, help.1), Some(BarHit::Command(Command::Help)));
+        assert_eq!(target_at(&app, 120, 16, (help.0 + 3, help.1)), Some(Target::Command(Command::Help)));
         click(&mut app, 120, 16, help, false);
         assert!(app.show_help);
         // Any click closes help.
         click(&mut app, 120, 16, (0, 0), false);
         assert!(!app.show_help);
         let sep = find(&app, 120, 16, "│ g PR");
-        assert_eq!(keybar_key_at(&app, Rect::new(0, 0, 120, 16), sep.0, sep.1), None);
+        assert_eq!(target_at(&app, 120, 16, sep), None);
         let open = find(&app, 120, 16, "⏎ open");
         assert!(matches!(click(&mut app, 120, 16, open, false), crate::app::Action::Open(_)));
         let settings = find(&app, 120, 16, "s settings");
@@ -2671,7 +2951,7 @@ mod tests {
     fn clicks_close_popups_and_modals_ignore_the_mouse() {
         let mut app = fixture();
         app.popup = Some("hello".into());
-        app.on_mouse(crate::app::Mouse::Scroll(1), Rect::new(0, 0, 120, 16));
+        app.on_mouse(crate::app::Mouse::Scroll(1));
         assert!(app.popup.is_some());
         click(&mut app, 120, 16, (0, 0), false);
         assert!(app.popup.is_none());
@@ -2714,8 +2994,181 @@ mod tests {
         let header = find(&app, 120, 50, " Appearance");
         click(&mut app, 120, 50, header, false);
         assert_eq!(app.settings_editor.as_ref().unwrap().field().key, "mouseEnabled");
-        app.on_mouse(crate::app::Mouse::Scroll(1), Rect::new(0, 0, 120, 50));
+        app.on_mouse(crate::app::Mouse::Scroll(1));
         assert_eq!(app.settings_editor.as_ref().unwrap().field().key, "startupScriptMode");
+    }
+
+    #[test]
+    fn hints_parse_into_clickable_keys() {
+        let mut hits = Vec::new();
+        hint_hits(&mut hits, " Sort order — space on/off · J/K move · ⏎ save  esc cancel", 10, 3);
+        let keys: Vec<(u16, u16, Target)> = hits.iter().map(|h| (h.rect.x, h.rect.width, h.target)).collect();
+        // ` Sort order` and `J/K move` aren't one key; the rest are.
+        assert_eq!(
+            keys,
+            vec![
+                (10 + 14, 12, Target::Key(Key::Char(' '))),
+                (10 + 40, 6, Target::Key(Key::Enter)),
+                (10 + 48, 10, Target::Key(Key::Esc)),
+            ]
+        );
+        assert!(hits.iter().all(|h| h.rect.y == 3));
+    }
+
+    #[test]
+    fn settings_hint_and_field_hover() {
+        let mut app = fixture();
+        app.on_key(Key::Char('s'));
+        let theme = Theme::ansi();
+        let esc = find(&app, 120, 50, "esc close");
+        click(&mut app, 120, 50, esc, false);
+        assert!(app.settings_editor.is_none());
+        app.on_key(Key::Char('s'));
+        // Hovering a field that isn't the cursor tints it.
+        let at = find(&app, 120, 50, "Mouse");
+        app.on_mouse(crate::app::Mouse::Move { x: at.0, y: at.1 });
+        let mut term = Terminal::new(TestBackend::new(120, 50)).unwrap();
+        term.draw(|f| draw(f, &app, &theme, NOW, &[])).unwrap();
+        assert_eq!(term.backend().buffer()[at].bg, theme.hover_bg());
+        // A second click on the selected field changes it, like ⏎.
+        click(&mut app, 120, 50, at, false);
+        assert!(app.settings.mouse_enabled);
+        assert_eq!(app.settings_editor.as_ref().unwrap().field().key, "mouseEnabled");
+    }
+
+    #[test]
+    fn settings_sub_pages_take_clicks() {
+        use crate::repos_ui::{RepoEditor, RepoRow};
+        let mut app = fixture();
+        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
+        let row = |id: &str| RepoRow { id: id.into(), name: id.into(), path: format!("~/{id}"), exists: true, worktrees: 1, script: false };
+        ed.repos = Some(RepoEditor::new(vec![row("alpha"), row("beta")]));
+        app.settings_editor = Some(ed);
+        let beta = find(&app, 100, 20, "beta");
+        click(&mut app, 100, 20, beta, false);
+        assert_eq!(app.settings_editor.as_ref().unwrap().repos.as_ref().unwrap().cursor, 1);
+        // A click on the selected repo opens its script, like ⏎.
+        assert_eq!(click(&mut app, 100, 20, beta, false), crate::app::Action::EditScript("beta".into()));
+        // Header hints are buttons: `x remove` asks, `any other key cancels`.
+        let x = find(&app, 100, 20, "x remove");
+        click(&mut app, 100, 20, x, false);
+        assert!(app.settings_editor.as_ref().unwrap().repos.as_ref().unwrap().confirm_remove.is_some());
+        let cancel = find(&app, 100, 20, "any other key");
+        click(&mut app, 100, 20, cancel, false);
+        assert!(app.settings_editor.as_ref().unwrap().repos.as_ref().unwrap().confirm_remove.is_none());
+        // The settings footer belongs to the field list, not this page.
+        let back = find(&app, 100, 20, "esc back");
+        click(&mut app, 100, 20, back, false);
+        let ed = app.settings_editor.as_ref().unwrap();
+        assert!(ed.repos.is_none());
+
+        // Key bindings: a click on the selected row starts capturing, and
+        // then clicks don't count as the new key.
+        app.settings_editor.as_mut().unwrap().keys = Some(crate::keys_ui::KeyEditor::new(app.keymap.clone()));
+        let row = find(&app, 100, 34, "Move up");
+        click(&mut app, 100, 34, row, false);
+        click(&mut app, 100, 34, row, false);
+        assert!(app.settings_editor.as_ref().unwrap().keys.as_ref().unwrap().capturing);
+        let esc = find(&app, 100, 34, "Settings");
+        assert_eq!(target_at(&app, 100, 34, esc), None);
+        app.on_mouse(crate::app::Mouse::Scroll(1));
+        assert!(app.settings_editor.as_ref().unwrap().keys.as_ref().unwrap().capturing);
+    }
+
+    #[test]
+    fn theme_builder_palette_takes_clicks() {
+        use crate::theme_builder::Mode;
+        let mut app = with_builder("catppuccin-mocha");
+        let token = find(&app, 110, 28, " accent");
+        click(&mut app, 110, 28, token, false);
+        let b = app.settings_editor.as_ref().unwrap().builder.as_ref().unwrap();
+        assert_eq!(b.token().key(), "accent");
+        // Second click opens the palette; a swatch click moves its cursor, a
+        // second one picks it.
+        click(&mut app, 110, 28, token, false);
+        assert!(matches!(app.settings_editor.as_ref().unwrap().builder.as_ref().unwrap().mode, Mode::Picker { .. }));
+        render(&app, 110, 28);
+        let swatch = app.hits.borrow().iter().find(|h| h.target == Target::Item(List::Palette, 3)).map(|h| (h.rect.x, h.rect.y)).unwrap();
+        click(&mut app, 110, 28, swatch, false);
+        let b = app.settings_editor.as_ref().unwrap().builder.as_ref().unwrap();
+        assert_eq!(b.mode, Mode::Picker { cursor: 3 });
+        let picked = b.palette()[3];
+        click(&mut app, 110, 28, swatch, false);
+        let b = app.settings_editor.as_ref().unwrap().builder.as_ref().unwrap();
+        assert_eq!(b.mode, Mode::Tokens);
+        assert_eq!(b.color(am_core::themes::Token::Accent).0, picked);
+    }
+
+    #[test]
+    fn folder_browser_takes_clicks() {
+        use crate::folder_browser::{Entry, FolderBrowser};
+        let mut app = fixture();
+        let dir = std::path::PathBuf::from("/src");
+        let e = |name: &str, is_repo| Entry { name: name.into(), path: dir.join(name), is_repo, tracked: false };
+        app.modal = Some(crate::modals::Modal::AddRepo(FolderBrowser::fixture(dir.clone(), vec![e("website", true), e("notes", false)])));
+        let esc = find(&app, 100, 26, "esc cancel");
+        let website = find(&app, 100, 26, "website/");
+        click(&mut app, 100, 26, website, false);
+        assert_eq!(click(&mut app, 100, 26, website, false), crate::app::Action::AddRepo("/src/website".into()));
+        // While it adds, the browser waits; once that fails, esc closes it.
+        if let Some(crate::modals::Modal::AddRepo(b)) = &mut app.modal {
+            b.add_failed("nope".into());
+        }
+        click(&mut app, 100, 26, esc, false);
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn modals_take_clicks_but_the_dashboard_behind_does_not() {
+        let mut app = fixture();
+        app.on_key(Key::Char('d'));
+        assert!(matches!(app.modal, Some(crate::modals::Modal::Delete(_))));
+        // A row behind the dialog does nothing.
+        let behind = find(&app, 120, 30, "agent-monitor");
+        click(&mut app, 120, 30, behind, false);
+        assert!(app.modal.is_some());
+        let cancel = find(&app, 120, 30, "Cancel");
+        click(&mut app, 120, 30, cancel, false);
+        assert!(app.modal.is_none());
+        app.on_key(Key::Char('d'));
+        let yes = find(&app, 120, 30, "Yes");
+        assert!(matches!(click(&mut app, 120, 30, yes, false), crate::app::Action::Delete(..)));
+
+        // New worktree: clicking a field moves the focus there.
+        let repo = am_core::model::Repository { id: "r".into(), path: "/r".into(), name: "r".into() };
+        app.modal = Some(crate::modals::Modal::new_worktree(vec![repo], None, "", "main"));
+        let name = find(&app, 120, 30, "Name ");
+        click(&mut app, 120, 30, name, false);
+        assert!(matches!(&app.modal, Some(crate::modals::Modal::New(f)) if f.field == crate::modals::FormField::Name));
+    }
+
+    #[test]
+    fn setup_wizard_takes_clicks() {
+        let mut app = fixture();
+        let mut s = crate::setup::Setup::new(vec![], &Settings::parse("{}"));
+        s.hook_binary = None;
+        app.setup = Some(s);
+        let zed = find(&app, 100, 30, "Zed");
+        click(&mut app, 100, 30, zed, false);
+        let zed_index = crate::setup::IDES.iter().position(|(_, l)| *l == "Zed").unwrap();
+        assert_eq!(app.setup.as_ref().unwrap().ide, zed_index);
+        // A second click on the chosen editor goes on, like ⏎.
+        click(&mut app, 100, 30, zed, false);
+        assert_eq!(app.setup.as_ref().unwrap().step, crate::setup::Step::Hooks);
+        let skip = find(&app, 100, 30, "n skip");
+        click(&mut app, 100, 30, skip, false);
+        assert_eq!(app.setup.as_ref().unwrap().step, crate::setup::Step::Repos);
+    }
+
+    #[test]
+    fn job_answers_are_clickable() {
+        let mut app = fixture();
+        let repo = am_core::model::Repository { id: "r".into(), path: "/r".into(), name: "r".into() };
+        let job = app.jobs.start_create(repo, am_core::worktrees::CreateRequest { branch: "feat/x".into(), ..Default::default() });
+        app.jobs.ask(job, crate::jobs::Question::BranchExists { local: true, remote: false });
+        let cancel = find(&app, 120, 20, "Cancel");
+        click(&mut app, 120, 20, cancel, false);
+        assert!(app.jobs.get(job).is_none_or(|j| j.question.is_none()));
     }
 
     #[test]
@@ -3020,9 +3473,8 @@ mod tests {
         insta::assert_snapshot!("three_sessions_narrow", render(&app, 90, 11));
 
         // A click on a session row selects its worktree.
-        let area = Rect::new(0, 0, 120, 11);
         let y = out.lines().position(|l| l.contains("└ ")).unwrap() as u16;
-        assert_eq!(worktree_at(&app, area, 10, y), Some(0));
+        assert_eq!(target_at(&app, 120, 11, (10, y)), Some(Target::Worktree(0)));
     }
 
     #[test]

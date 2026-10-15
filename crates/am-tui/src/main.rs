@@ -310,14 +310,19 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             last_click = if double { None } else { Some((m.row, Instant::now())) };
                             Some(Mouse::Click { x: m.column, y: m.row, double })
                         }
-                        // Moves, drags, releases and other buttons don't redraw.
+                        MouseEventKind::Moved => Some(Mouse::Move { x: m.column, y: m.row }),
+                        // Drags, releases and other buttons don't redraw.
                         _ => None,
                     };
                     match mouse {
-                        Some(mouse) => {
-                            let size = terminal.size()?;
-                            Some(app.on_mouse(mouse, ratatui::layout::Rect::new(0, 0, size.width, size.height)))
+                        // A move only redraws when it lands on something else to highlight.
+                        Some(mouse @ Mouse::Move { x, y }) => {
+                            let before = app.hover.and_then(|(x, y)| ui::hit_at(&app.hits.borrow(), x, y));
+                            app.on_mouse(mouse);
+                            dirty |= ui::hit_at(&app.hits.borrow(), x, y) != before;
+                            None
                         }
+                        Some(mouse) => Some(app.on_mouse(mouse)),
                         None => None,
                     }
                 }
