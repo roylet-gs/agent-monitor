@@ -119,6 +119,12 @@ pub struct App {
     pub jobs: crate::jobs::Jobs,
     /// Dashboard keys (`keyBindings`), rebuilt whenever settings change.
     pub keymap: crate::keymap::Keymap,
+    /// Last mouse position (cell), for the hover highlight on list rows.
+    /// Hit-tested at draw time, so it follows scrolling and refreshes.
+    pub hover: Option<(u16, u16)>,
+    /// What a click does where, recorded by the last `ui::draw` for the
+    /// layer on top (so clicks always match what's on screen).
+    pub hits: std::cell::RefCell<Vec<crate::ui::Hit>>,
 }
 
 impl App {
@@ -146,6 +152,8 @@ impl App {
             sounds: Vec::new(),
             deleting: Default::default(),
             jobs: Default::default(),
+            hover: None,
+            hits: Default::default(),
         }
     }
 
@@ -606,56 +614,146 @@ impl App {
     /// Mouse input, with the same overlay priority as `on_key`. Clicks are
     /// hit-tested against the layout `ui` draws for a terminal of size `area`,
     /// then mostly turned into the equivalent key.
-    pub fn on_mouse(&mut self, m: Mouse, area: ratatui::layout::Rect) -> Action {
-        if self.popup.is_some() {
-            if matches!(m, Mouse::Click { .. }) {
-                self.popup = None;
+    /// Mouse input, hit-tested against what the last frame drew
+    /// (`App::hits`): the wheel acts like ↑/↓ in whatever is on top, and a
+    /// click does what its spot on screen says.
+    pub fn on_mouse(&mut self, m: Mouse) -> Action {
+        use crate::ui::Target;
+        let (x, y, double) = match m {
+            Mouse::Move { x, y } => {
+                self.hover = Some((x, y));
+                return Action::None;
             }
+            Mouse::Scroll(d) => {
+                // Help closes on any key; the reset prompt cancels on one;
+                // a key-capture would take the arrow as the new binding.
+                let capturing = self.settings_editor.as_ref().and_then(|e| e.keys.as_ref()).is_some_and(|k| k.capturing);
+                if self.popup.is_some()
+                    || (self.show_help && self.settings_editor.is_none() && self.setup.is_none() && self.modal.is_none())
+                    || matches!(self.modal, Some(crate::modals::Modal::ConfirmReset))
+                    || capturing
+                {
+                    return Action::None;
+                }
+                return self.on_key(if d > 0 { Key::Down } else { Key::Up });
+            }
+            Mouse::Click { x, y, double } => (x, y, double),
+        };
+        if self.popup.take().is_some() {
             return Action::None;
         }
-        if self.setup.is_some() || self.modal.is_some() {
-            return Action::None;
-        }
-        if self.settings_editor.is_some() {
-            let field = match m {
-                Mouse::Click { x, y, .. } => crate::ui::settings_field_at(self, area, x, y),
-                Mouse::Scroll(_) => None,
-            };
-            let Some(editor) = &mut self.settings_editor else { return Action::None };
-            let outcome = match (m, field) {
-                (Mouse::Scroll(d), _) => editor.on_key(if d > 0 { Key::Down } else { Key::Up }),
-                (Mouse::Click { .. }, Some(i)) => editor.click(i),
-                (Mouse::Click { .. }, None) => crate::settings_ui::Outcome::None,
-            };
-            return self.editor_outcome(outcome);
-        }
-        if self.show_help {
-            if matches!(m, Mouse::Click { .. }) {
+        let hit = crate::ui::hit_at(&self.hits.borrow(), x, y);
+        let Some(hit) = hit else {
+            // Help is a read-only overlay: a click anywhere closes it.
+            if self.show_help && self.settings_editor.is_none() && self.setup.is_none() && self.modal.is_none() {
                 self.show_help = false;
             }
             return Action::None;
-        }
-        match m {
-            // The wheel moves whatever the keys would: the job list when the pane has focus.
-            Mouse::Scroll(d) => self.on_key(if d > 0 { Key::Down } else { Key::Up }),
-            Mouse::Click { x, y, double } => {
-                if let Some(hit) = crate::ui::keybar_key_at(self, area, x, y) {
-                    // Exactly what pressing the key does (the jobs pane may have focus).
-                    return match hit {
-                        crate::ui::BarHit::Key(k) => self.on_key(k),
-                        crate::ui::BarHit::Command(c) => self.run_command(c),
-                    };
-                }
-                if crate::ui::in_jobs_pane(self, area, x, y) {
-                    self.jobs.focus();
-                    return Action::None;
-                }
-                let Some(i) = crate::ui::worktree_at(self, area, x, y) else { return Action::None };
+        };
+        match hit.target {
+            Target::Key(k) => self.on_key(k),
+            Target::Command(c) => self.run_command(c),
+            Target::JobsPane => {
+                self.jobs.focus();
+                Action::None
+            }
+            Target::JobKey(job, k) => {
+                self.jobs.focus();
+                self.jobs.cursor = job;
+                self.on_key(k)
+            }
+            Target::Worktree(i) => {
                 self.jobs.focused = false;
                 self.selected = i;
                 self.mark_selected_seen();
                 if double { self.run_command(crate::keymap::Command::Open) } else { Action::None }
             }
+            Target::Item(list, i) => self.pick(list, i),
+        }
+    }
+
+    /// A click on row `i` of `list`: move the list's cursor there, or, when
+    /// it's already there, act on the row like its main key does.
+    fn pick(&mut self, list: crate::ui::List, i: usize) -> Action {
+        use crate::modals::{FormField, Modal};
+        use crate::theme_builder::Mode;
+        use crate::ui::List as L;
+        // Move the cursor; `Some(key)` = it was already there, press `key`.
+        let act: Option<Key> = match list {
+            L::Settings => {
+                let Some(editor) = &mut self.settings_editor else { return Action::None };
+                let outcome = editor.click(i);
+                return self.editor_outcome(outcome);
+            }
+            L::Sort | L::Plugins | L::Repos | L::Keys | L::ThemeTokens | L::Palette => {
+                let Some(e) = &mut self.settings_editor else { return Action::None };
+                let at = |cursor: &mut usize| std::mem::replace(cursor, i) == i;
+                match list {
+                    L::Sort => e.sort.as_mut().and_then(|s| at(&mut s.cursor).then_some(Key::Char(' '))),
+                    L::Plugins => e.plugins.as_mut().and_then(|p| at(&mut p.cursor).then_some(Key::Char(' '))),
+                    L::Repos => e.repos.as_mut().and_then(|r| {
+                        r.confirm_remove = None;
+                        r.message = None;
+                        at(&mut r.cursor).then_some(Key::Enter)
+                    }),
+                    L::Keys => e.keys.as_mut().and_then(|k| {
+                        k.message = None;
+                        at(&mut k.cursor).then_some(Key::Enter)
+                    }),
+                    L::ThemeTokens => e.builder.as_mut().and_then(|b| {
+                        // From the palette, a token click goes back to the list.
+                        if matches!(b.mode, Mode::Picker { .. }) {
+                            b.mode = Mode::Tokens;
+                        }
+                        at(&mut b.cursor).then_some(Key::Enter)
+                    }),
+                    _ => e.builder.as_mut().and_then(|b| match &mut b.mode {
+                        Mode::Picker { cursor } => at(cursor).then_some(Key::Enter),
+                        _ => None,
+                    }),
+                }
+            }
+            L::Browser => match &mut self.modal {
+                Some(Modal::AddRepo(b)) if b.adding.is_none() => {
+                    b.error = None;
+                    (std::mem::replace(&mut b.cursor, i) == i).then_some(Key::Enter)
+                }
+                _ => None,
+            },
+            L::NewForm => match &mut self.modal {
+                Some(Modal::New(f)) => {
+                    let which = [FormField::Repo, FormField::Branch, FormField::Name, FormField::Base][i.min(3)];
+                    // The repo row cycles on a second click.
+                    (std::mem::replace(&mut f.field, which) == which && which == FormField::Repo).then_some(Key::Right)
+                }
+                _ => None,
+            },
+            L::Suggest => {
+                if let Some(Modal::Suggest { on_body, .. }) = &mut self.modal {
+                    *on_body = i == 1;
+                }
+                None
+            }
+            L::SetupIde | L::SetupIntegrations | L::SetupContext => {
+                let Some(s) = &mut self.setup else { return Action::None };
+                s.ide_error = None;
+                s.ctx_error = None;
+                match list {
+                    L::SetupIde => (std::mem::replace(&mut s.ide, i) == i).then_some(Key::Enter),
+                    L::SetupContext => (std::mem::replace(&mut s.ctx_choice, i) == i).then_some(Key::Enter),
+                    // The GitHub checkbox toggles on a second click.
+                    _ => (std::mem::replace(&mut s.integration_field, i) == i && i == 0).then_some(Key::Char(' ')),
+                }
+            }
+            L::Jobs => {
+                self.jobs.focus();
+                self.jobs.cursor = i;
+                None
+            }
+        };
+        match act {
+            Some(k) => self.on_key(k),
+            None => Action::None,
         }
     }
 
@@ -776,6 +874,8 @@ pub enum Mouse {
     /// Left button down at a terminal cell; `double` for a quick second
     /// click on the same row.
     Click { x: u16, y: u16, double: bool },
+    /// Pointer moved (no button held): drives the hover highlight.
+    Move { x: u16, y: u16 },
 }
 
 /// Backend-independent key events (mapped from crossterm in main.rs).

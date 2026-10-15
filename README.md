@@ -175,6 +175,8 @@ These are the defaults. To change them, open **Settings → Key bindings…**: p
 The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
 
 - **Scroll** to move the selection; **click** a row to select it; **double-click** to open it (same as `Enter`).
+- **Hover** over anything clickable to highlight it (a softer tint than the selection).
+- The mouse works everywhere: in Settings and its pages (repositories, harness plugins, key bindings, sort order, theme builder), dialogs, the folder browser, the setup wizard and the jobs pane. Click a row to select it, and click it again to act on it, as `Enter` or `space` would. Key hints such as `⏎ save` or `esc cancel` are clickable buttons.
 - **Click a key-bar hint** (`n new`, `s settings`, `? help`…) to run that action.
 - **Click the Jobs pane** to focus it (scrolling then moves through the jobs); click a worktree row to go back to the list.
 - In **Settings**, scroll to move, click a field to select it, and click it again to change it.
@@ -332,7 +334,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `defaultAgent` | `"claude"` | Harness plugin `Enter` starts in a worktree with no session yet (set it in Settings → Harness plugins) |
 | `disabledAgents` | `[]` | Harness plugins switched off: no hooks, no session discovery (Settings → Harness plugins) |
 | `keyBindings` | `{}` | Dashboard keys you changed: action id (`open`, `openPr`, `openLinear`, `openProject`, `newWorktree`, `deleteWorktree`, `addRepo`, `toggleLog`, `settings`, `feedback`, `refresh`, `help`, `quit`, `moveDown`, `moveUp`, `pageDown`, `pageUp`, `top`, `bottom`) → key. Edit it in Settings → Key bindings…; see [Keyboard Shortcuts](#keyboard-shortcuts) |
-| `mouseEnabled` | `true` | Mouse support (click, double-click, scroll); off restores the terminal's own text selection |
+| `mouseEnabled` | `true` | Mouse support (click, double-click, scroll, hover highlight); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
 | `defaultBaseBranch` | `"main"` | Default base branch for new worktrees |
