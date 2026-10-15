@@ -143,7 +143,9 @@ impl Theme {
     /// theme background toward the selection colour, so it reads as quieter
     /// than the selection. Dark themes keep the terminal's background, so
     /// there it's the selection colour darkened a quarter. Reverse-video
-    /// themes (`ansi`) get the palette's dark grey.
+    /// themes (`ansi`) get a fixed dark grey (256-colour 238, `#444444`):
+    /// ANSI bright black is a mid grey in many palettes, which washes out
+    /// coloured text on the hovered row.
     pub fn hover_bg(&self) -> Color {
         let mix = |a: u8, b: u8, t: f32| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
         match (self.selection, self.background) {
@@ -152,7 +154,7 @@ impl Theme {
             }
             (Selection::Bg(Color::Rgb(r, g, b)), _) => Color::Rgb(mix(r, 0, 0.25), mix(g, 0, 0.25), mix(b, 0, 0.25)),
             (Selection::Bg(c), _) => c,
-            (Selection::Reverse, _) => Color::DarkGray,
+            (Selection::Reverse, _) => Color::Indexed(238),
         }
     }
 

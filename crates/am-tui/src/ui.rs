@@ -2920,7 +2920,7 @@ mod tests {
     fn hover_colour_sits_between_background_and_selection() {
         use ratatui::style::Color;
         let mut t = Theme::ansi();
-        assert_eq!(t.hover_bg(), Color::DarkGray);
+        assert_eq!(t.hover_bg(), Color::Indexed(238));
         t.selection = crate::theme::Selection::Bg(Color::Rgb(100, 100, 100));
         t.background = Some(Color::Rgb(200, 0, 100));
         assert_eq!(t.hover_bg(), Color::Rgb(150, 50, 100));
