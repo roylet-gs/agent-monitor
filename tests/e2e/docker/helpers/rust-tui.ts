@@ -189,6 +189,28 @@ export class RustTui extends TuiPage {
     await this.pg.waitForTimeout(300);
   }
 
+  /** Move the pointer over the first occurrence of `text` (no click). */
+  async hoverText(text: string): Promise<{ col: number; row: number }> {
+    await this.waitForStableScreen();
+    const cell = await this.findCell(text);
+    const { x, y } = await this.cellCenter(cell.col, cell.row);
+    await this.pg.mouse.move(x, y);
+    await this.pg.waitForTimeout(300);
+    return cell;
+  }
+
+  /** Whether cell (col, row) has the terminal's default background. */
+  async bgIsDefault(col: number, row: number): Promise<boolean> {
+    return this.pg.evaluate(
+      ([c, r]) => {
+        const term = (window as any).term?.terminal ?? (window as any).terminal ?? (window as any).term;
+        const buf = term.buffer.active;
+        return buf.getLine(buf.viewportY + r).getCell(c).isBgDefault() === true;
+      },
+      [col, row],
+    );
+  }
+
   /** Scroll the wheel over the middle of the terminal (`ticks` > 0 = down). */
   async wheel(ticks: number): Promise<void> {
     const box = await this.pg.locator(".xterm-screen").boundingBox();
