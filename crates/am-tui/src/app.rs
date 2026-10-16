@@ -306,6 +306,10 @@ impl App {
                     let prev = top_pos.checked_sub(1).map(|p| ticket_of(&group.worktrees[tops[p]]));
                     let next = tops.get(top_pos + 1).map(|&n| ticket_of(&group.worktrees[n]));
                     if ticket.is_some() && prev != Some(ticket) && next == Some(ticket) {
+                        // A blank line above the cluster too, unless it opens a section.
+                        if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Project(_)) | Some(Row::Spacer)) {
+                            self.rows.push(Row::Spacer);
+                        }
                         let l = v.linear.as_ref().unwrap();
                         self.rows.push(Row::Ticket(format!("{} {}", l.identifier, l.title)));
                     }

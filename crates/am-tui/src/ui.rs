@@ -3742,6 +3742,35 @@ mod tests {
     }
 
     #[test]
+    fn ticket_cluster_is_preceded_by_a_blank_line() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        let ticket = snap.groups[0].worktrees[0].linear.clone();
+        let mut twin = snap.groups[0].worktrees[0].clone();
+        twin.worktree.id = "w4".into();
+        twin.worktree.branch = "feature/refactor-ui".into();
+        snap.groups[0].worktrees.push(twin);
+        snap.groups[0].worktrees[0].linear = None;
+        let n = snap.groups[0].worktrees.len();
+        snap.groups[0].worktrees[n - 2].linear = ticket;
+        app.apply(snap);
+        let kinds: Vec<&str> = app
+            .rows
+            .iter()
+            .map(|r| match r {
+                Row::Spacer => "spacer",
+                Row::Repo(_) => "repo",
+                Row::Project(_) => "project",
+                Row::Ticket(_) => "ticket",
+                Row::Worktree(_) => "wt",
+                Row::Pending(_) => "pending",
+                Row::Session(..) => "session",
+            })
+            .collect();
+        assert_eq!(kinds, ["repo", "wt", "spacer", "ticket", "wt", "wt", "spacer", "repo", "wt"]);
+    }
+
+    #[test]
     fn wrap_words_wraps_and_splits_long_words() {
         assert_eq!(wrap_words("one two three", 7), vec!["one two", "three"]);
         assert_eq!(wrap_words("abcdefghij", 4), vec!["abcd", "efgh", "ij"]);
