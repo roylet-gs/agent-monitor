@@ -17,7 +17,57 @@ test("Linear ticket column and ticket cluster header", async ({ page }) => {
   await tui.waitForMatch(/│▌.*\sENG-123\s/, 5_000);
   // Adjacent worktrees with the same ticket get a "— ticket —" header.
   await tui.waitForText("— ENG-123 Implement dashboard feature —");
+  // The cluster opens the repo section: no blank line between the repo header
+  // and the ticket header.
+  const lines = await tui.lines();
+  const header = lines.findIndex((l) => l.includes("— ENG-123 Implement dashboard feature —"));
+  expect(lines[header - 1]).toMatch(/work ─/);
   await tui.screenshot("linear-ticket");
+});
+
+test("blank line above a ticket cluster after another row", async ({ page }) => {
+  // feature/pair gets its own ticket (ENG-100). The default sort (non-main
+  // first, ticket ascending) gives feature/pair alone, then feature/to-delete +
+  // main under one ENG-123 header, which is set off from feature/pair (and its
+  // session rows) by a blank line above it.
+  const own = {
+    identifier: "ENG-100",
+    title: "Tidy settings page",
+    url: "https://linear.app/team/issue/ENG-100",
+    state: { name: "Todo", color: "#94a3b8", type: "unstarted" },
+    priorityLabel: "Medium",
+    assignee: { name: "Test User" },
+    project: null,
+    attachments: { nodes: [] },
+  };
+  await setupMock({ linearByBranch: { "feature/pair": own } });
+  const tui = new RustTui(page);
+  await tui.open();
+  // Wait until feature/pair carries its own ticket (the cache may hydrate ENG-123 first).
+  await tui.waitForMatch(/^│▌?\s*\S+ feature\/pair\b.*ENG-100/m, 15_000);
+  await tui.waitForText("— ENG-123 Implement dashboard feature —", 15_000);
+
+  const lines = await tui.lines();
+  const header = lines.findIndex((l) => l.includes("— ENG-123 Implement dashboard feature —"));
+  const pairRow = lines.findIndex((l) => /^│▌?\s*\S+ feature\/pair\b/.test(l));
+  expect(pairRow).toBeGreaterThanOrEqual(0);
+  expect(header).toBeGreaterThan(pairRow + 1);
+  // No header for a ticket only one row has.
+  expect(lines.join("\n")).not.toContain("— ENG-100");
+  // The line right above the ticket header is blank (borders + spaces)…
+  expect(lines[header - 1]).toMatch(/^│\s*│?\s*$/);
+  // …and the one above that is feature/pair's block (its last session row), not a header.
+  expect(lines[header - 2]).not.toMatch(/^│\s*│?\s*$/);
+  expect(lines[header - 2]).not.toMatch(/ ─{3}|═|— ENG/);
+  // The cluster follows the header: feature/to-delete, then main.
+  expect(lines[header + 1]).toContain("feature/to-delete");
+  expect(lines.findIndex((l, i) => i > header && /^│▌?\s*\S main\b.*ENG-123/.test(l))).toBeGreaterThan(header + 1);
+  await tui.screenshot("linear-blank-line-above-cluster");
+
+  // Restore the default cache (every worktree on ENG-123) for later specs.
+  await resetMock();
+  await tui.sendKey("r");
+  await tui.waitForMatch(/^│▌?\s*\S+ feature\/pair\b.*ENG-123/m, 15_000);
 });
 
 test("blank line after a ticket cluster before the next row", async ({ page }) => {
