@@ -417,3 +417,21 @@ fn a_new_session_keeps_another_live_sessions_subagents() {
     env.send("SessionStart", with_session("C", json!({ "source": "startup" })));
     assert_eq!(env.running_subagents_of("A"), 0);
 }
+
+#[test]
+fn a_push_or_gh_pr_command_leaves_a_pr_refresh_hint() {
+    let env = Env::new();
+    let hint = || -> Option<String> {
+        env.db().query_row("SELECT pr_hint_at FROM worktrees WHERE id = 'w'", [], |r| r.get(0)).unwrap()
+    };
+    env.send("PostToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "cargo test"}}));
+    assert_eq!(hint(), None);
+    // Only once the command has run: PreToolUse is too early.
+    env.send("PreToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "git push -u origin feat"}}));
+    assert_eq!(hint(), None);
+    env.send("PostToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "git push -u origin feat"}}));
+    let first = hint().expect("hint after a push");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    env.send("PostToolUse", json!({"tool_name": "Bash", "tool_input": {"command": "gh pr create --fill"}}));
+    assert_ne!(hint().unwrap(), first);
+}

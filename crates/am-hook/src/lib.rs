@@ -201,6 +201,18 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
         }
     }
 
+    // A push or a `gh pr …` just changed this worktree's PR: tell the TUI to
+    // refresh it now rather than at the next poll.
+    if ev.is("PostToolUse")
+        && ev.tool_name.as_deref() == Some("Bash")
+        && let Owner::Worktree { id, .. } = &owner
+        && let Some(cmd) = ev.tool_input.as_ref().and_then(|i| i.get("command")).and_then(|c| c.as_str())
+        && let Some(activity) = status::detect_git_activity(cmd)
+    {
+        db::set_pr_hint(&conn, id)?;
+        info!(MODULE, "PR refresh hint ({activity}) for {root_str}");
+    }
+
     if ev.is("Stop") || ev.is("SessionEnd") {
         db::checkpoint_passive(&conn);
     }
