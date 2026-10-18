@@ -24,20 +24,33 @@
 pub mod breaker;
 pub mod cache;
 pub mod github;
+pub mod gitpr;
 pub mod linear;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 
-use crate::debug;
-use crate::model::{LinearInfo, PrInfo};
+use crate::model::{ChecksStatus, LinearInfo, PrInfo};
+use crate::{debug, info, warn};
 use breaker::Breaker;
 use cache::{IntegrationCache, cache_key};
-use github::{GhRunner, SystemGh};
+use github::{Detector, GhRunner, SystemGh};
+use gitpr::{GitPr, GitRunner, RepoGit, SystemGit};
 use linear::{HttpTransport, UreqTransport};
+
+/// How often each repo's PR refs are listed over the git protocol (no API
+/// quota); see [`RepoGit::scan_every`] for very large remotes.
+pub const GIT_SCAN_EVERY: Duration = Duration::from_secs(30);
+/// How often local remote-tracking refs are checked for a push (local, ms).
+pub const LOCAL_CHECK_EVERY: Duration = Duration::from_secs(5);
+/// Full GraphQL sweep when the REST detector is watching a repo: a safety net
+/// only, since the detector reports every change for free.
+pub const SAFETY_SWEEP: Duration = Duration::from_secs(15 * 60);
+/// Below this many GraphQL points left, sweeps slow down until the reset.
+pub const RATE_LOW: u64 = 500;
 
 /// "Absent" vs "failed", exactly like the TS `FetchResult`: `Ok(None)` is a
 /// real answer ("this branch has no PR/ticket") that clears the cache;
@@ -102,11 +115,51 @@ pub enum RefreshOutcome {
 /// Not `Sync`; keep it on the worker thread and send snapshots to the UI.
 pub struct Integrations {
     gh: Box<dyn GhRunner>,
+    git: Box<dyn GitRunner>,
     http: Box<dyn HttpTransport>,
     linear_url: String,
     cache: IntegrationCache,
     github_breaker: Breaker,
     linear_breaker: Breaker,
+    /// Per-repo change tracking for [`Integrations::tick_github`].
+    watch: HashMap<String, RepoWatch>,
+    rate_low: bool,
+}
+
+/// Per-repo state of the event-driven GitHub refresh.
+#[derive(Debug, Default)]
+struct RepoWatch {
+    git: RepoGit,
+    detector: Detector,
+    /// Branches to fetch on the next tick.
+    dirty: HashSet<String>,
+    last_sweep: Option<Instant>,
+    scan_now: bool,
+}
+
+/// One [`Integrations::tick_github`] call (the TUI makes one a second).
+#[derive(Debug, Clone, Copy)]
+pub struct GithubTick<'a> {
+    /// Every repo with its worktree branches (as for [`Integrations::refresh_github`]).
+    pub repos: &'a [RepoBranches],
+    /// The user pressed `r`: fetch every branch now, bypassing the backoff.
+    pub force: bool,
+    /// New worktrees, or GitHub was just enabled: sweep (gated by git) now.
+    pub sweep: bool,
+    /// Plain polling interval (`ghPollingIntervalMs`), used where the
+    /// detector isn't available.
+    pub interval: Duration,
+    /// `(repo_id, branch)` an agent just pushed or ran `gh pr …` in.
+    pub hints: &'a [(String, String)],
+}
+
+/// What a tick did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TickOutcome {
+    /// Set when a GraphQL fetch ran.
+    pub fetch: Option<RefreshOutcome>,
+    /// The PR fields may have changed (fetch or git facts): resend them.
+    pub changed: bool,
 }
 
 impl Default for Integrations {
@@ -123,13 +176,21 @@ impl Integrations {
 
     /// Inject transports (tests, E2E).
     pub fn with_transports(gh: Box<dyn GhRunner>, http: Box<dyn HttpTransport>, linear_url: String) -> Self {
+        Self::with_git(gh, Box::new(SystemGit), http, linear_url)
+    }
+
+    /// Inject the git runner too (tests).
+    pub fn with_git(gh: Box<dyn GhRunner>, git: Box<dyn GitRunner>, http: Box<dyn HttpTransport>, linear_url: String) -> Self {
         Integrations {
             gh,
+            git,
             http,
             linear_url,
             cache: IntegrationCache::new(),
             github_breaker: Breaker::new("github"),
             linear_breaker: Breaker::new("linear"),
+            watch: HashMap::new(),
+            rate_low: false,
         }
     }
 
@@ -154,14 +215,21 @@ impl Integrations {
         if !self.github_breaker.allow(now, force) {
             return RefreshOutcome::SkippedBackoff;
         }
+        self.fetch_github(conn, repos, now).0
+    }
 
+    /// Fetch `targets` with the batched GraphQL query, commit the successes
+    /// and fold the cycle into the breaker. Returns the outcome and the keys
+    /// fetched successfully. The caller checked the breaker.
+    fn fetch_github(&mut self, conn: &Connection, targets: &[RepoBranches], now: Instant) -> (RefreshOutcome, HashSet<String>) {
         let (mut fetched, mut failed) = (0, 0);
         let mut first_error: Option<String> = None;
         let mut network_error: Option<String> = None;
+        let mut rate_remaining: Option<u64> = None;
         // Fetch everything first, then write in one short transaction: holding a
         // write lock across seconds of `gh` calls would stall the hook writers.
         let mut successes: Vec<(String, FetchResult<PrInfo>)> = Vec::new();
-        for repo in repos.iter().filter(|r| !r.branches.is_empty()) {
+        for repo in targets.iter().filter(|r| !r.branches.is_empty()) {
             if network_error.is_some() {
                 // Rest of the cycle aborted; these branches keep their cache.
                 failed += distinct(&repo.branches).len();
@@ -185,6 +253,7 @@ impl Integrations {
                 }
             }
             network_error = batch.network_error;
+            rate_remaining = batch.rate_remaining.or(rate_remaining);
         }
         let tx = conn.unchecked_transaction().ok();
         for (key, result) in &successes {
@@ -194,7 +263,136 @@ impl Integrations {
             let _ = tx.commit();
         }
         finish(&mut self.github_breaker, now, network_error.as_deref(), first_error.as_deref());
-        RefreshOutcome::Ran { fetched, failed, aborted: network_error.is_some() }
+        if let Some(left) = rate_remaining {
+            debug!("github", "GraphQL points left this hour: {left}");
+            if left < RATE_LOW && !self.rate_low {
+                warn!("github", "Only {left} GraphQL points left this hour; slowing PR sweeps until the reset");
+            } else if left >= RATE_LOW && self.rate_low {
+                info!("github", "GraphQL rate limit recovered ({left} points left)");
+            }
+            self.rate_low = left < RATE_LOW;
+        }
+        let ok_keys = successes.into_iter().map(|(k, _)| k).collect();
+        (RefreshOutcome::Ran { fetched, failed, aborted: network_error.is_some() }, ok_keys)
+    }
+
+    /// Event-driven GitHub refresh, called about once a second. Asks the API
+    /// only about branches that can have changed:
+    ///
+    /// 1. **git** ([`gitpr`]): every [`GIT_SCAN_EVERY`] (sooner after a local
+    ///    push or a hook hint) one `git ls-remote` per repo finds PR numbers,
+    ///    merges and conflicts with no API quota. A branch whose PR appeared,
+    ///    moved or merged becomes dirty.
+    /// 2. **REST detector** ([`github::Detector`]): conditional requests whose
+    ///    304s are free report PRs and CI runs that changed.
+    /// 3. **GraphQL**: the existing batched query, for the dirty branches only;
+    ///    plus a sweep every [`SAFETY_SWEEP`] (every `interval` where the
+    ///    detector isn't available) that skips branches git shows have no PR
+    ///    or a merged one. `force` fetches everything.
+    pub fn tick_github(&mut self, conn: &Connection, tick: GithubTick) -> TickOutcome {
+        self.cache.hydrate(conn);
+        let now = Instant::now();
+        let mut out = TickOutcome { fetch: None, changed: false };
+        self.watch.retain(|id, _| tick.repos.iter().any(|r| r.repo_id == *id && !r.branches.is_empty()));
+        if tick.sweep || tick.force {
+            self.cache.prune_prs(conn, &all_keys(tick.repos));
+        }
+        let mut backoff_ok: Option<bool> = None;
+        let mut targets: Vec<RepoBranches> = Vec::new();
+        let mut detector_offline = false;
+
+        for repo in tick.repos.iter().filter(|r| !r.branches.is_empty()) {
+            let branches = distinct(&repo.branches);
+            let w = self.watch.entry(repo.repo_id.clone()).or_default();
+            for (_, b) in tick.hints.iter().filter(|(id, b)| *id == repo.repo_id && branches.contains(b)) {
+                debug!("github", "hook hint for {b} in {}", repo.repo_path.display());
+                w.dirty.insert(b.clone());
+                w.scan_now = true;
+            }
+            if tick.sweep || tick.force {
+                w.scan_now = true;
+            }
+
+            // 1. git: a push from here, then the remote's PR refs.
+            if w.git.last_local.is_none_or(|t| now.duration_since(t) >= LOCAL_CHECK_EVERY) {
+                let pushed = w.git.check_local(self.git.as_ref(), &repo.repo_path, &branches, now);
+                if !pushed.is_empty() {
+                    debug!("github", "push seen for {pushed:?} in {}", repo.repo_path.display());
+                    w.dirty.extend(pushed);
+                    w.scan_now = true;
+                }
+            }
+            if w.scan_now || w.git.last_scan.is_none_or(|t| now.duration_since(t) >= w.git.scan_every(GIT_SCAN_EVERY)) {
+                w.scan_now = false;
+                let bases: HashMap<String, String> = branches
+                    .iter()
+                    .filter_map(|b| {
+                        let base = self.cache.pr(&repo.repo_id, b)?.base_ref_name.clone()?;
+                        Some((b.clone(), base))
+                    })
+                    .collect();
+                match w.git.scan(self.git.as_ref(), &repo.repo_path, &branches, &bases, now) {
+                    Ok(r) => {
+                        out.changed |= r.changed;
+                        w.dirty.extend(r.dirty);
+                    }
+                    Err((e, network)) => debug!("gitpr", "ls-remote failed in {} (network={network}): {e}", repo.repo_path.display()),
+                }
+            }
+
+            // 2. REST detector (gh): free 304s unless something changed.
+            if !detector_offline && w.detector.is_due(now) && *backoff_ok.get_or_insert_with(|| self.github_breaker.allow(now, tick.force)) {
+                let tracked: HashSet<String> = branches.iter().cloned().collect();
+                let d = w.detector.poll(self.gh.as_ref(), &repo.repo_path, &tracked, now);
+                if !d.dirty.is_empty() {
+                    debug!("github", "detector: {:?} changed in {} ({} call(s))", d.dirty, repo.repo_path.display(), d.calls);
+                }
+                w.dirty.extend(d.dirty);
+                if let Some(e) = d.network_error {
+                    debug!("github", "detector offline: {e}");
+                    detector_offline = true;
+                }
+            }
+
+            // 3. What to fetch.
+            let mut every = if w.detector.is_primed() { SAFETY_SWEEP.max(tick.interval) } else { tick.interval };
+            if self.rate_low {
+                every *= 4;
+            }
+            let sweep_due = tick.force || tick.sweep || w.last_sweep.is_none_or(|t| now.duration_since(t) >= every);
+            let want: Vec<String> = if tick.force {
+                branches.clone()
+            } else if sweep_due {
+                branches.iter().filter(|b| !skip_in_sweep(&w.git, self.cache.pr(&repo.repo_id, b), b)).cloned().collect()
+            } else {
+                branches.iter().filter(|b| w.dirty.contains(*b)).cloned().collect()
+            };
+            if sweep_due {
+                w.last_sweep = Some(now);
+                debug!(
+                    "github",
+                    "sweep {}: {} of {} branch(es) need the API",
+                    repo.repo_path.display(),
+                    want.len(),
+                    branches.len()
+                );
+            }
+            if !want.is_empty() {
+                targets.push(RepoBranches::new(repo.repo_id.clone(), repo.repo_path.clone(), want));
+            }
+        }
+
+        if !targets.is_empty() && *backoff_ok.get_or_insert_with(|| self.github_breaker.allow(now, tick.force)) {
+            let (outcome, ok_keys) = self.fetch_github(conn, &targets, now);
+            for t in &targets {
+                if let Some(w) = self.watch.get_mut(&t.repo_id) {
+                    w.dirty.retain(|b| !ok_keys.contains(&cache_key(&t.repo_id, b)));
+                }
+            }
+            out.fetch = Some(outcome);
+            out.changed = true;
+        }
+        out
     }
 
     /// Refresh Linear tickets. `issueVcsBranchSearch` is workspace-wide, so each
@@ -246,8 +444,15 @@ impl Integrations {
 
     /// `pr_info` / `linear_info` for one worktree: the gh PR, else the PR
     /// attached to its Linear ticket (port of `integrationFieldsFor`).
+    /// Git-derived facts ([`gitpr`]) are fresher than the cache: they show a
+    /// new PR's number, a merge or a conflict before the API is asked.
     pub fn fields_for(&self, repo_id: &str, branch: &str) -> (Option<PrInfo>, Option<LinearInfo>) {
-        self.cache.fields_for(repo_id, branch)
+        let (pr, linear) = self.cache.fields_for(repo_id, branch);
+        let pr = match self.watch.get(repo_id).and_then(|w| w.git.fact(branch).map(|f| (w, f))) {
+            Some((w, fact)) => overlay(pr, fact, || w.git.pr_url(fact.number)),
+            None => pr,
+        };
+        (pr, linear)
     }
 
     /// The gh-sourced PR only (no Linear fallback).
@@ -290,6 +495,56 @@ impl Integrations {
     /// Port of `verifyLinearApiKey`: the viewer's name, or Linear's message.
     pub fn verify_linear_key(&self, api_key: &str) -> Result<String, String> {
         linear::verify_api_key(self.http.as_ref(), &self.linear_url, api_key)
+    }
+}
+
+/// Sweeps skip what git settles: no PR ref and nothing cached (no PR), or a
+/// merge the API already confirmed (terminal).
+fn skip_in_sweep(git: &RepoGit, cached: Option<&PrInfo>, branch: &str) -> bool {
+    if !git.usable() {
+        return false;
+    }
+    match (git.fact(branch), cached) {
+        (None, None) => true,
+        (Some(f), Some(p)) => f.merged && p.number == f.number && p.state == "MERGED",
+        _ => false,
+    }
+}
+
+/// Lay a git fact over the cached PR (or synthesise one until the API answers).
+fn overlay(pr: Option<PrInfo>, fact: GitPr, url: impl FnOnce() -> Option<String>) -> Option<PrInfo> {
+    match pr {
+        Some(mut p) if p.number == fact.number => {
+            if p.state == "OPEN" {
+                if fact.merged {
+                    p.state = "MERGED".into();
+                } else if let Some(c) = fact.conflicts {
+                    if c {
+                        p.mergeable = Some("CONFLICTING".into());
+                    } else if p.mergeable.as_deref() == Some("CONFLICTING") {
+                        p.mergeable = Some("MERGEABLE".into());
+                    }
+                }
+            }
+            Some(p)
+        }
+        // The API knows a newer PR than the refs we listed.
+        Some(p) if p.number > fact.number => Some(p),
+        _ => Some(PrInfo {
+            number: fact.number,
+            title: String::new(),
+            url: url().unwrap_or_default(),
+            state: if fact.merged { "MERGED" } else { "OPEN" }.into(),
+            is_draft: false,
+            review_decision: String::new(),
+            has_feedback: false,
+            checks_status: ChecksStatus::None,
+            active_check_url: None,
+            active_check_name: None,
+            checks_waiting: false,
+            base_ref_name: None,
+            mergeable: fact.conflicts.map(|c| if c { "CONFLICTING" } else { "MERGEABLE" }.into()),
+        }),
     }
 }
 
@@ -643,6 +898,165 @@ mod tests {
         assert_eq!(pr.unwrap().number, 42);
         assert!(e.rows(cache::CacheKind::Linear).is_empty());
         assert_eq!(e.rows(cache::CacheKind::Pr).len(), 1);
+    }
+
+    // --- event-driven refresh (tick_github) ---
+
+    /// Scripted git: answers by subcommand.
+    #[derive(Clone, Default)]
+    struct FakeGit {
+        ls_remote: Arc<Mutex<String>>,
+        local: Arc<Mutex<String>>,
+        subjects: Arc<Mutex<String>>,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl gitpr::GitRunner for FakeGit {
+        fn run(&self, _cwd: &std::path::Path, args: &[String], _t: Duration) -> GhOutput {
+            self.calls.lock().unwrap().push(args.to_vec());
+            match args[0].as_str() {
+                "ls-remote" => GhOutput::success(self.ls_remote.lock().unwrap().clone()),
+                "for-each-ref" => GhOutput::success(self.local.lock().unwrap().clone()),
+                "log" => GhOutput::success(self.subjects.lock().unwrap().clone()),
+                "remote" => GhOutput::success("git@github.com:o/r.git\n"),
+                "merge-tree" => GhOutput::success("tree\n"),
+                _ => GhOutput::failure("not scripted"),
+            }
+        }
+    }
+
+    use std::sync::{Arc, Mutex};
+
+    fn tick_env() -> (Env, FakeGit) {
+        let mut e = env();
+        let git = FakeGit::default();
+        *git.ls_remote.lock().unwrap() = "ref: refs/heads/main\tHEAD\n\
+             aaa\trefs/heads/main\n\
+             bbb\trefs/heads/feat/a\n\
+             ccc\trefs/heads/feat/b\n\
+             bbb\trefs/pull/5/head\n\
+             zzz\trefs/pull/1/head\n"
+            .into();
+        *git.local.lock().unwrap() = "aaa refs/remotes/origin/main\nbbb refs/heads/feat/a\nccc refs/heads/feat/b\n".into();
+        *git.subjects.lock().unwrap() = "feat: a (#5)\ninit\n".into();
+        e.ints = Integrations::with_git(Box::new(e.gh.clone()), Box::new(git.clone()), Box::new(e.http.clone()), "http://linear".into());
+        (e, git)
+    }
+
+    fn tick_repos() -> Vec<RepoBranches> {
+        vec![RepoBranches::new("r1", "/repo", vec!["main".into(), "feat/a".into(), "feat/b".into()])]
+    }
+
+    fn tick<'a>(repos: &'a [RepoBranches], sweep: bool, hints: &'a [(String, String)]) -> GithubTick<'a> {
+        GithubTick { repos, force: false, sweep, interval: Duration::from_secs(3600), hints }
+    }
+
+    fn graphql_calls(gh: &FakeGh) -> Vec<Vec<String>> {
+        gh.calls.lock().unwrap().iter().filter(|a| a[..2] == ["api", "graphql"]).cloned().collect()
+    }
+
+    fn asks_for(call: &[String], branch: &str) -> bool {
+        call.iter().any(|a| a.split_once('=').is_some_and(|(k, v)| k.starts_with('b') && v == branch))
+    }
+
+    #[test]
+    fn tick_asks_the_api_only_about_what_git_cannot_settle() {
+        let (mut e, _git) = tick_env();
+        let repos = tick_repos();
+        // Detector unavailable (no status line): plain sweeps, gated by git.
+        e.gh.push(GhOutput::success(""));
+        e.gh.push(GhOutput::success(gql_response(vec![vec![gql_node(5, "feat/a", "MERGED", json!([]))]])));
+        let out = e.ints.tick_github(&e.conn, tick(&repos, true, &[]));
+        assert!(out.changed);
+        let calls = graphql_calls(&e.gh);
+        assert_eq!(calls.len(), 1);
+        // Only feat/a: its merge needs the API to confirm once. main and feat/b
+        // have no PR ref (and nothing cached), so git already answered.
+        assert!(asks_for(&calls[0], "feat/a"));
+        assert!(!asks_for(&calls[0], "main") && !asks_for(&calls[0], "feat/b"));
+        assert_eq!(e.ints.fields_for("r1", "feat/a").0.unwrap().state, "MERGED");
+
+        // The next sweep has nothing git can't answer: merged + confirmed is terminal.
+        let out = e.ints.tick_github(&e.conn, tick(&repos, true, &[]));
+        assert_eq!(out.fetch, None);
+        assert_eq!(graphql_calls(&e.gh).len(), 1);
+
+        // Between sweeps a quiet tick costs nothing.
+        let before = e.gh.call_count();
+        let out = e.ints.tick_github(&e.conn, tick(&repos, false, &[]));
+        assert_eq!(out, TickOutcome { fetch: None, changed: false });
+        assert_eq!(e.gh.call_count(), before);
+    }
+
+    #[test]
+    fn tick_shows_a_new_pr_from_git_before_the_api_answers() {
+        let (mut e, git) = tick_env();
+        let repos = tick_repos();
+        e.gh.push(GhOutput::success("")); // detector unavailable
+        e.gh.push(gh_offline()); // the API is down
+        e.ints.tick_github(&e.conn, tick(&repos, true, &[]));
+        // PR #5's merge shows from git alone, with a URL built from the remote.
+        let pr = e.ints.fields_for("r1", "feat/a").0.unwrap();
+        assert_eq!((pr.number, pr.state.as_str()), (5, "MERGED"));
+        assert_eq!(pr.url, "https://github.com/o/r/pull/5");
+
+        // feat/b gets PR #8 (not merged, no conflicts).
+        let ls = git.ls_remote.lock().unwrap().clone() + "ccc\trefs/pull/8/head\n";
+        *git.ls_remote.lock().unwrap() = ls;
+        let hint = vec![("r1".to_string(), "feat/b".to_string())];
+        e.gh.push(GhOutput::success(gql_response(vec![vec![gql_node(8, "feat/b", "OPEN", json!([]))]])));
+        // Backoff is open after the offline fetch; a user refresh goes through.
+        let out = e.ints.tick_github(&e.conn, GithubTick { force: true, ..tick(&repos, false, &hint) });
+        assert!(out.fetch.is_some());
+        let pr = e.ints.fields_for("r1", "feat/b").0.unwrap();
+        assert_eq!((pr.number, pr.state.as_str(), pr.mergeable.as_deref()), (8, "OPEN", Some("MERGEABLE")));
+    }
+
+    #[test]
+    fn tick_fetches_a_hinted_branch_outside_sweeps() {
+        let (mut e, _git) = tick_env();
+        let repos = tick_repos();
+        e.gh.push(GhOutput::success(""));
+        e.gh.push(GhOutput::success(gql_response(vec![vec![gql_node(5, "feat/a", "MERGED", json!([]))]])));
+        e.ints.tick_github(&e.conn, tick(&repos, true, &[]));
+        let hint = vec![("r1".to_string(), "feat/b".to_string())];
+        e.gh.push(GhOutput::success(gql_response(vec![vec![]])));
+        let out = e.ints.tick_github(&e.conn, tick(&repos, false, &hint));
+        assert!(out.fetch.is_some());
+        let calls = graphql_calls(&e.gh);
+        assert_eq!(calls.len(), 2);
+        assert!(asks_for(&calls[1], "feat/b") && !asks_for(&calls[1], "main") && !asks_for(&calls[1], "feat/a"));
+    }
+
+    #[test]
+    fn overlay_rules() {
+        let fact = |merged, conflicts| GitPr { number: 5, merged, conflicts };
+        let open = |n: u64| PrInfo {
+            number: n,
+            title: "t".into(),
+            url: "u".into(),
+            state: "OPEN".into(),
+            is_draft: true,
+            review_decision: String::new(),
+            has_feedback: false,
+            checks_status: ChecksStatus::Passing,
+            active_check_url: None,
+            active_check_name: None,
+            checks_waiting: false,
+            base_ref_name: None,
+            mergeable: Some("CONFLICTING".into()),
+        };
+        let p = overlay(Some(open(5)), fact(true, None), || None).unwrap();
+        assert_eq!(p.state, "MERGED");
+        let p = overlay(Some(open(5)), fact(false, Some(false)), || None).unwrap();
+        assert_eq!((p.state.as_str(), p.mergeable.as_deref(), p.is_draft), ("OPEN", Some("MERGEABLE"), true));
+        let p = overlay(Some(open(9)), fact(true, None), || None).unwrap();
+        assert_eq!((p.number, p.state.as_str()), (9, "OPEN"), "a newer PR from the API wins");
+        let mut closed = open(5);
+        closed.state = "CLOSED".into();
+        assert_eq!(overlay(Some(closed), fact(false, None), || None).unwrap().state, "CLOSED");
+        let p = overlay(Some(open(3)), fact(false, Some(true)), || Some("url".into())).unwrap();
+        assert_eq!((p.number, p.title.as_str(), p.url.as_str(), p.mergeable.as_deref()), (5, "", "url", Some("CONFLICTING")));
     }
 
     #[test]
