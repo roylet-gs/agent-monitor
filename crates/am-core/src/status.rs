@@ -275,20 +275,12 @@ pub fn map_event_to_status(
     Some(Idle)
 }
 
-/// `git push` / `gh pr create|merge|ready|close|reopen` in a Bash command →
-/// targeted PR refresh hint (`worktrees.pr_hint_at`).
+/// `git push` / `gh pr create` in a Bash command → targeted PR refresh hint.
 pub fn detect_git_activity(command: &str) -> Option<&'static str> {
     let words: Vec<&str> = command.split(|c: char| c.is_whitespace() || c == ';' || c == '&' || c == '|').filter(|w| !w.is_empty()).collect();
     for w in words.windows(3) {
-        if w[0] == "gh" && w[1] == "pr" {
-            match w[2] {
-                "create" => return Some("pr-create"),
-                "merge" => return Some("pr-merge"),
-                "ready" => return Some("pr-ready"),
-                "close" => return Some("pr-close"),
-                "reopen" => return Some("pr-reopen"),
-                _ => {}
-            }
+        if w[0] == "gh" && w[1] == "pr" && w[2] == "create" {
+            return Some("pr-create");
         }
     }
     for w in words.windows(2) {
@@ -517,9 +509,6 @@ mod tests {
         assert_eq!(detect_git_activity("git push"), Some("push"));
         assert_eq!(detect_git_activity("git push -u origin feat"), Some("push"));
         assert_eq!(detect_git_activity("pnpm test && gh pr create --fill"), Some("pr-create"));
-        assert_eq!(detect_git_activity("gh pr merge 12 --squash"), Some("pr-merge"));
-        assert_eq!(detect_git_activity("gh pr ready"), Some("pr-ready"));
-        assert_eq!(detect_git_activity("gh pr view --json state"), None);
         assert_eq!(detect_git_activity("git pull"), None);
         assert_eq!(detect_git_activity(""), None);
         assert_eq!(detect_git_activity("echo"), None);

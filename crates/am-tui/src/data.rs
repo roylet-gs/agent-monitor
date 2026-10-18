@@ -13,7 +13,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use am_core::integrations::{GithubTick, Integrations, RepoBranches};
+use am_core::integrations::{Integrations, RepoBranches};
 use am_core::harness::HarnessKind;
 use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
@@ -570,9 +570,6 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
     ints.hydrate(&conn);
     let (mut last_gh, mut last_linear): (Option<Instant>, Option<Instant>) = (None, None);
     let mut known_branches: Vec<(String, String)> = Vec::new();
-    // Hook hints already in the DB at startup are old news.
-    let mut seen_hints: HashMap<(String, String), String> = HashMap::new();
-    new_pr_hints(&conn, &mut seen_hints);
     let mut first = true;
 
     loop {
@@ -616,35 +613,24 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         // A new worktree should get its PR/ticket now, not in three minutes.
         let new_branches = !first && branches != known_branches;
 
+        let gh_due = settings.gh_pr_status
+            && ((force && settings.gh_refresh_on_manual) || new_branches || last_gh.is_none_or(|t| t.elapsed() >= gh_every));
         let linear_due = linear_on
             && ((force && settings.linear_refresh_on_manual) || new_branches || last_linear.is_none_or(|t| t.elapsed() >= linear_every));
 
+        if !(gh_due || linear_due || first || new_branches) {
+            continue;
+        }
         if first {
             // Publish what's cached before the (slow) first fetch.
             let _ = tx.send(update(&ints, &branches));
             first = false;
         }
-        // GitHub runs every second: git and the REST detector decide which
-        // branches need the API (see `Integrations::tick_github`).
-        let mut gh_changed = false;
-        if settings.gh_pr_status {
-            let hints = new_pr_hints(&conn, &mut seen_hints);
+        if gh_due {
             let started = Instant::now();
-            let outcome = ints.tick_github(
-                &conn,
-                GithubTick {
-                    repos: &groups,
-                    force: force && settings.gh_refresh_on_manual,
-                    sweep: new_branches || last_gh.is_none(),
-                    interval: gh_every,
-                    hints: &hints,
-                },
-            );
-            if let Some(fetch) = outcome.fetch {
-                info!("integrations", "github refresh: {fetch:?} in {:?}", started.elapsed());
-            }
+            let outcome = ints.refresh_github(&conn, &groups, force);
+            info!("integrations", "github refresh: {outcome:?} in {:?}", started.elapsed());
             last_gh = Some(Instant::now());
-            gh_changed = outcome.changed;
         }
         if linear_due {
             let started = Instant::now();
@@ -653,28 +639,11 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             last_linear = Some(Instant::now());
         }
         known_branches = branches.clone();
-        if !(gh_changed || linear_due || new_branches) {
-            continue;
-        }
         if settings.linear_enabled && settings.linear_auto_nickname {
             auto_nickname(&conn, &ints, &worktrees);
         }
         let _ = tx.send(update(&ints, &branches));
     }
-}
-
-/// Hook hints (`worktrees.pr_hint_at`) that are new since the last call.
-fn new_pr_hints(conn: &Connection, seen: &mut HashMap<(String, String), String>) -> Vec<(String, String)> {
-    let Ok(rows) = db::pr_hints(conn) else { return Vec::new() };
-    let mut fresh = Vec::new();
-    for (repo_id, branch, at) in rows {
-        let key = (repo_id, branch);
-        if seen.get(&key) != Some(&at) {
-            seen.insert(key.clone(), at);
-            fresh.push(key);
-        }
-    }
-    fresh
 }
 
 /// Port of `autoSetLinearNicknames`: name un-named worktrees after their
