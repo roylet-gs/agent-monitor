@@ -285,14 +285,7 @@ Worktrees created outside am (`git worktree add`, other tools) are picked up aut
 
 ## GitHub and Linear
 
-**GitHub** (`ghPrStatus`, needs an authenticated `gh`): you get the PR number, draft/merged/closed state, review decision, mergeability (conflicts) and CI checks. am only asks the API about branches that can have changed:
-
-- **git first, no API quota.** Every 30 seconds one `git ls-remote` per repository lists GitHub's `refs/pull/*/head` refs: a branch whose tip matches one has that PR. A `(#N)` squash subject or `Merge pull request #N` on the base branch shows it merged, and `git merge-tree` shows conflicts. A new PR, a merge or a push therefore shows within seconds, and branches with no PR or an already-confirmed merge are never sent to the API.
-- **Free change detection.** Conditional REST requests (`If-None-Match`) for the open-PR list and each open PR's check runs and statuses. GitHub doesn't count a `304 Not Modified` against the rate limit, so an idle dashboard costs nothing.
-- **Targeted GraphQL.** Only the branches either of those flagged go through the batched `gh api graphql` query, plus a safety sweep every 15 minutes. Where change detection isn't available (GitHub Enterprise quirks, a token without REST access), the sweep runs every `ghPollingIntervalMs` (default 3 minutes) instead.
-- **Agent hooks.** When an agent runs `git push` or `gh pr create|merge|ready|close|reopen`, its worktree is refreshed at once. A push from any tool is seen from the local remote-tracking ref within 5 seconds.
-
-`r` fetches every branch, and a new worktree is looked up right away.
+**GitHub** (`ghPrStatus`, needs an authenticated `gh`): am fetches the PR for every worktree branch with one batched `gh api graphql` call per repository, every `ghPollingIntervalMs` (default 3 minutes), right away when a new branch appears, and when you press `r`. You get the PR number, draft/merged/closed state, review decision, mergeability (conflicts) and CI checks.
 
 **Linear** (`linearEnabled` + `linearApiKey`): am looks up the Linear issue linked to each branch name (Linear's git-branch search, so branches named the way Linear suggests, e.g. `eng-123-fix-login`, match). You get the identifier, title, state, assignee and project. With `linearAutoNickname` on, worktrees without a nickname are named after their ticket's title. If GitHub has no PR for the branch, the PR attached to the Linear issue is shown instead (without checks).
 
@@ -367,7 +360,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `audioDoneSound` | `"Funk"` | Sound for done |
 | `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
-| `ghPollingIntervalMs` | `180000` | GitHub sweep interval when change detection isn't available (min 30000) |
+| `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
 | `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |
 | `linearEnabled` | `false` | Fetch Linear tickets |
 | `linearApiKey` | `""` | Linear personal API key |

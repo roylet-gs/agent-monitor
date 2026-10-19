@@ -25,8 +25,8 @@ use serde_json::Value;
 
 use super::FetchResult;
 use super::breaker::{is_network_error, summarize_error};
+use crate::debug;
 use crate::model::{ChecksStatus, PrInfo};
-use crate::{debug, info};
 
 /// Max branches per GraphQL request (5 PRs × 100 checks each stays far below
 /// GitHub's node limit).
@@ -70,60 +70,59 @@ pub struct SystemGh;
 
 impl GhRunner for SystemGh {
     fn run(&self, cwd: &Path, args: &[String], timeout: Duration) -> GhOutput {
-        run_program("gh", cwd, args, timeout, &[("GH_PROMPT_DISABLED", "1"), ("NO_COLOR", "1")])
-    }
-}
-
-/// Run `program <args>` in `cwd` with stdin closed, killing it after
-/// `timeout`. Shared by [`SystemGh`] and `gitpr::SystemGit`.
-pub(crate) fn run_program(program: &str, cwd: &Path, args: &[String], timeout: Duration, envs: &[(&str, &str)]) -> GhOutput {
-    let spawned = Command::new(program)
-        .args(args)
-        .current_dir(cwd)
-        .envs(envs.iter().copied())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let mut child = match spawned {
-        Ok(c) => c,
-        Err(e) => return GhOutput::failure(format!("failed to run {program}: {e}")),
-    };
-    // Drain both pipes on threads so a chatty child can't deadlock on a full pipe.
-    let mut out = child.stdout.take();
-    let mut err = child.stderr.take();
-    let t_out = std::thread::spawn(move || {
-        let mut s = String::new();
-        if let Some(o) = out.as_mut() {
-            let _ = o.read_to_string(&mut s);
-        }
-        s
-    });
-    let t_err = std::thread::spawn(move || {
-        let mut s = String::new();
-        if let Some(e) = err.as_mut() {
-            let _ = e.read_to_string(&mut s);
-        }
-        s
-    });
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
+        let spawned = Command::new("gh")
+            .args(args)
+            .current_dir(cwd)
+            .env("GH_PROMPT_DISABLED", "1")
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        let mut child = match spawned {
+            Ok(c) => c,
+            Err(e) => return GhOutput::failure(format!("failed to run gh: {e}")),
+        };
+        // Drain both pipes on threads so a chatty gh can't deadlock on a full pipe.
+        let mut out = child.stdout.take();
+        let mut err = child.stderr.take();
+        let t_out = std::thread::spawn(move || {
+            let mut s = String::new();
+            if let Some(o) = out.as_mut() {
+                let _ = o.read_to_string(&mut s);
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(_) => break None,
+            s
+        });
+        let t_err = std::thread::spawn(move || {
+            let mut s = String::new();
+            if let Some(e) = err.as_mut() {
+                let _ = e.read_to_string(&mut s);
+            }
+            s
+        });
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                Err(_) => break None,
+            }
+        };
+        let stdout = t_out.join().unwrap_or_default();
+        let stderr = t_err.join().unwrap_or_default();
+        match status {
+            Some(s) => GhOutput { ok: s.success(), stdout, stderr },
+            None => GhOutput {
+                ok: false,
+                stdout,
+                stderr: format!("gh timed out after {}s", timeout.as_secs()),
+            },
         }
-    };
-    let stdout = t_out.join().unwrap_or_default();
-    let stderr = t_err.join().unwrap_or_default();
-    match status {
-        Some(s) => GhOutput { ok: s.success(), stdout, stderr },
-        None => GhOutput { ok: false, stdout, stderr: format!("{program} timed out after {}s", timeout.as_secs()) },
     }
 }
 
@@ -359,8 +358,6 @@ pub struct PrBatch {
     pub network_error: Option<String>,
     /// How many `gh` processes were spawned (for logs/tests).
     pub gh_calls: usize,
-    /// GraphQL points left this hour, from the last response's `rateLimit`.
-    pub rate_remaining: Option<u64>,
 }
 
 /// Selection set for one page of rollup contexts (CheckRun | StatusContext).
@@ -384,7 +381,7 @@ fn build_query(n: usize) -> String {
     }
     // Single line on purpose: the E2E gh shim splits argv on newlines.
     format!(
-        "query({vars}) {{ rateLimit {{ cost remaining }} repository(owner: $owner, name: $name) {{{body} }} }} \
+        "query({vars}) {{ repository(owner: $owner, name: $name) {{{body} }} }} \
          fragment pr on PullRequestConnection {{ nodes {{ number title url state isDraft reviewDecision mergeable \
          headRefName baseRefName isCrossRepository commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ \
          contexts(first: 100) {{ checkRunCountsByState {{ state count }} \
@@ -519,12 +516,6 @@ fn pick_pr(nodes: Vec<GqlPr>, branch: &str) -> Option<GqlPr> {
     }
 }
 
-/// `rateLimit.remaining` from a GraphQL response, if present.
-fn rate_remaining(stdout: &str) -> Option<u64> {
-    let json: Value = serde_json::from_str(stdout.trim()).ok()?;
-    json.pointer("/data/rateLimit/remaining").and_then(Value::as_u64)
-}
-
 /// Parse a GraphQL response for `branches`. `Err` means the response as a whole
 /// is unusable (→ fall back to `gh pr view`).
 fn parse_graphql(stdout: &str, branches: &[String]) -> Result<Vec<(String, FetchResult<ParsedPr>)>, String> {
@@ -611,8 +602,7 @@ fn fill_active_check(gh: &dyn GhRunner, repo_path: &Path, pr: &mut ParsedPr, gh_
 pub fn fetch_prs(gh: &dyn GhRunner, repo_path: &Path, branches: &[String]) -> PrBatch {
     let mut seen = HashSet::new();
     let branches: Vec<String> = branches.iter().filter(|b| seen.insert(b.as_str())).cloned().collect();
-    let mut batch =
-        PrBatch { results: Vec::with_capacity(branches.len()), network_error: None, gh_calls: 0, rate_remaining: None };
+    let mut batch = PrBatch { results: Vec::with_capacity(branches.len()), network_error: None, gh_calls: 0 };
 
     for chunk in branches.chunks(GRAPHQL_CHUNK) {
         if batch.network_error.is_some() {
@@ -623,9 +613,6 @@ pub fn fetch_prs(gh: &dyn GhRunner, repo_path: &Path, branches: &[String]) -> Pr
         }
         batch.gh_calls += 1;
         let out = gh.run(repo_path, &graphql_args(chunk), GRAPHQL_TIMEOUT);
-        if let Some(r) = rate_remaining(&out.stdout) {
-            batch.rate_remaining = Some(r);
-        }
         // gh exits 1 on GraphQL errors but still prints the body; try stdout first.
         let parsed = if out.stdout.trim().is_empty() {
             Err(if out.ok { "empty gh graphql output".to_string() } else { out.stderr.clone() })
@@ -751,254 +738,6 @@ pub fn fetch_pr_view(gh: &dyn GhRunner, repo_path: &Path, branch: &str) -> (Fetc
         summary: None,
     });
     (FetchResult::Ok(Some(info)), false)
-}
-
-// ---------------------------------------------------------------------------
-// Change detection with conditional REST requests
-// ---------------------------------------------------------------------------
-//
-// GraphQL has no conditional requests, so every GraphQL poll costs points even
-// when nothing changed. REST does: a `304 Not Modified` to an `If-None-Match`
-// request "does not count against your primary rate limit" (GitHub docs,
-// verified with gh's token). The [`Detector`] polls three cheap REST
-// resources per repo and only reports the branches whose PR or CI changed;
-// the caller then fetches just those with the batched GraphQL query above.
-
-pub const REST_TIMEOUT: Duration = Duration::from_secs(10);
-/// How often the detector polls when GitHub doesn't ask for less
-/// (`X-Poll-Interval`).
-pub const DETECT_EVERY: Duration = Duration::from_secs(20);
-/// After a non-network failure (no REST via this gh, GHE quirk, the E2E shim)
-/// the detector rests this long before trying again.
-pub const DETECT_RETRY: Duration = Duration::from_secs(15 * 60);
-
-/// One `gh api -i` response.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RestResponse {
-    pub status: u16,
-    pub etag: Option<String>,
-    /// `X-Poll-Interval` in seconds, when GitHub sends one.
-    pub poll_interval: Option<u64>,
-    pub body: String,
-}
-
-/// Parse `gh api -i` output: `HTTP/2.0 200 OK`, headers, a blank line, body.
-/// `None` when it doesn't start with a status line.
-pub fn parse_include(stdout: &str) -> Option<RestResponse> {
-    let text = stdout.trim_start();
-    let (head, body) = match text.find("\r\n\r\n") {
-        Some(i) => (&text[..i], &text[i + 4..]),
-        None => match text.find("\n\n") {
-            Some(i) => (&text[..i], &text[i + 2..]),
-            None => (text, ""),
-        },
-    };
-    let mut lines = head.lines().map(|l| l.trim_end_matches('\r'));
-    let status_line = lines.next()?;
-    if !status_line.starts_with("HTTP/") {
-        return None;
-    }
-    let status = status_line.split_whitespace().nth(1)?.parse().ok()?;
-    let (mut etag, mut poll_interval) = (None, None);
-    for line in lines {
-        let Some((k, v)) = line.split_once(':') else { continue };
-        let v = v.trim();
-        if k.eq_ignore_ascii_case("etag") {
-            etag = Some(v.to_string());
-        } else if k.eq_ignore_ascii_case("x-poll-interval") {
-            poll_interval = v.parse().ok();
-        }
-    }
-    Some(RestResponse { status, etag, poll_interval, body: body.to_string() })
-}
-
-/// Conditional `GET` through `gh api -i`. gh exits 1 on a 304, so the status
-/// line, not the exit code, decides. `Err((message, is_network))`.
-pub fn rest_get(gh: &dyn GhRunner, repo_path: &Path, path: &str, etag: Option<&str>) -> Result<RestResponse, (String, bool)> {
-    let mut args: Vec<String> = vec!["api".into(), "-i".into()];
-    if let Some(e) = etag {
-        args.push("-H".into());
-        args.push(format!("If-None-Match: {e}"));
-    }
-    args.push(path.into());
-    let out = gh.run(repo_path, &args, REST_TIMEOUT);
-    match parse_include(&out.stdout) {
-        Some(r) => Ok(r),
-        None if !out.ok && is_network_error(&out.stderr) => Err((summarize_error(&out.stderr), true)),
-        None => {
-            let why = if out.ok { "no HTTP status line in gh api -i output".to_string() } else { summarize_error(&out.stderr) };
-            Err((why, false))
-        }
-    }
-}
-
-/// An open, same-repo PR as the detector last saw it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OpenPr {
-    updated_at: String,
-    head_sha: String,
-}
-
-#[derive(Deserialize)]
-struct RestPr {
-    #[serde(default)]
-    updated_at: String,
-    head: RestRef,
-    base: RestRef,
-}
-
-#[derive(Deserialize)]
-struct RestRef {
-    #[serde(rename = "ref")]
-    name: String,
-    sha: String,
-    repo: Option<RestRepo>,
-}
-
-#[derive(Deserialize)]
-struct RestRepo {
-    full_name: String,
-}
-
-/// Open same-repo PRs by head branch, from a `GET /pulls` body.
-fn parse_open_prs(body: &str) -> Result<std::collections::HashMap<String, OpenPr>, String> {
-    let prs: Vec<RestPr> = serde_json::from_str(body.trim()).map_err(|e| format!("unparseable pulls list: {e}"))?;
-    Ok(prs
-        .into_iter()
-        .filter(|p| match (&p.head.repo, &p.base.repo) {
-            (Some(h), Some(b)) => h.full_name == b.full_name,
-            _ => false,
-        })
-        .map(|p| (p.head.name, OpenPr { updated_at: p.updated_at, head_sha: p.head.sha }))
-        .collect())
-}
-
-/// What one detector poll found.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Detection {
-    /// Tracked branches whose PR or CI changed since the last poll.
-    pub dirty: Vec<String>,
-    /// gh calls made (all 304s cost no quota).
-    pub calls: usize,
-    /// Set when GitHub was unreachable; the poll stopped there.
-    pub network_error: Option<String>,
-}
-
-/// Per-repo REST change detector (see the section comment above).
-#[derive(Debug, Default)]
-pub struct Detector {
-    etags: std::collections::HashMap<String, String>,
-    open: std::collections::HashMap<String, OpenPr>,
-    primed: bool,
-    next_poll: Option<Instant>,
-    disabled_until: Option<Instant>,
-}
-
-impl Detector {
-    /// Usable now: not resting after a failure. Before the first poll it counts
-    /// as usable so the first tick tries it.
-    pub fn is_active(&self, now: Instant) -> bool {
-        self.disabled_until.is_none_or(|t| now >= t)
-    }
-
-    /// Whether at least one poll succeeded (its view of the repo is current).
-    pub fn is_primed(&self) -> bool {
-        self.primed && self.disabled_until.is_none()
-    }
-
-    pub fn is_due(&self, now: Instant) -> bool {
-        self.is_active(now) && self.next_poll.is_none_or(|t| now >= t)
-    }
-
-    /// Poll the open-PR list, then each tracked open PR's check runs and
-    /// commit statuses (CI finishing doesn't bump the PR's `updated_at`).
-    pub fn poll(&mut self, gh: &dyn GhRunner, repo_path: &Path, tracked: &HashSet<String>, now: Instant) -> Detection {
-        let mut d = Detection::default();
-        let pulls = "repos/{owner}/{repo}/pulls?state=open&sort=updated&direction=desc&per_page=100";
-        d.calls += 1;
-        let r = match rest_get(gh, repo_path, pulls, self.etags.get(pulls).map(String::as_str)) {
-            Ok(r) if r.status == 200 || r.status == 304 => r,
-            Ok(r) => return self.disable(repo_path, now, &format!("HTTP {} for the pulls list", r.status), d),
-            Err((e, true)) => {
-                d.network_error = Some(e);
-                return d;
-            }
-            Err((e, false)) => return self.disable(repo_path, now, &e, d),
-        };
-        let wait = r.poll_interval.map_or(DETECT_EVERY, |s| DETECT_EVERY.max(Duration::from_secs(s)));
-        self.next_poll = Some(now + wait);
-        if r.status == 200 {
-            let open = match parse_open_prs(&r.body) {
-                Ok(o) => o,
-                Err(e) => return self.disable(repo_path, now, &e, d),
-            };
-            if self.primed {
-                let changed = open
-                    .iter()
-                    .filter(|(b, p)| self.open.get(*b) != Some(p))
-                    .map(|(b, _)| b)
-                    .chain(self.open.keys().filter(|b| !open.contains_key(*b)));
-                d.dirty.extend(changed.filter(|b| tracked.contains(*b)).cloned());
-            }
-            self.open = open;
-            if let Some(e) = r.etag {
-                self.etags.insert(pulls.to_string(), e);
-            }
-        }
-        self.disabled_until = None;
-
-        let mut wanted: HashSet<String> = HashSet::from([pulls.to_string()]);
-        let mut heads: Vec<(&String, &OpenPr)> = self.open.iter().filter(|(b, _)| tracked.contains(*b)).collect();
-        heads.sort_by_key(|(b, _)| *b);
-        for (branch, pr) in heads {
-            for path in [
-                format!("repos/{{owner}}/{{repo}}/commits/{}/check-runs?per_page=100", pr.head_sha),
-                format!("repos/{{owner}}/{{repo}}/commits/{}/status", pr.head_sha),
-            ] {
-                wanted.insert(path.clone());
-                let prev = self.etags.get(&path).cloned();
-                d.calls += 1;
-                match rest_get(gh, repo_path, &path, prev.as_deref()) {
-                    Ok(r) if r.status == 200 => {
-                        // A first look at this commit only records the ETag:
-                        // a new head already made the branch dirty above.
-                        if prev.is_some() && !d.dirty.contains(branch) {
-                            d.dirty.push(branch.clone());
-                        }
-                        if let Some(e) = r.etag {
-                            self.etags.insert(path, e);
-                        }
-                    }
-                    Ok(r) if r.status == 304 => {}
-                    // e.g. a token without checks access: the PR list still works.
-                    Ok(r) => debug!("github", "detector: HTTP {} for {path} in {}", r.status, repo_path.display()),
-                    Err((e, true)) => {
-                        d.network_error = Some(e);
-                        return d;
-                    }
-                    Err((e, false)) => debug!("github", "detector: {path} failed in {}: {e}", repo_path.display()),
-                }
-            }
-        }
-        // Forget ETags of commits that are no longer an open PR's head.
-        self.etags.retain(|p, _| wanted.contains(p));
-        if !self.primed {
-            self.primed = true;
-            debug!("github", "detector primed for {}: {} open PR(s)", repo_path.display(), self.open.len());
-        }
-        d
-    }
-
-    fn disable(&mut self, repo_path: &Path, now: Instant, why: &str, d: Detection) -> Detection {
-        if self.disabled_until.is_none() {
-            info!("github", "PR change detection unavailable for {} ({why}); polling instead", repo_path.display());
-        }
-        self.disabled_until = Some(now + DETECT_RETRY);
-        self.primed = false;
-        self.etags.clear();
-        self.open.clear();
-        d
-    }
 }
 
 #[cfg(test)]
@@ -1395,99 +1134,6 @@ pub(crate) mod tests {
         let (r, net) = fetch_pr_view(&gh, Path::new("/r"), "x");
         assert!(matches!(r, FetchResult::Err(_)));
         assert!(net);
-    }
-
-    // --- REST change detector ---
-
-    fn http(status: &str, etag: &str, body: &str) -> GhOutput {
-        let out = format!("HTTP/2.0 {status}\r\nEtag: {etag}\r\nX-Poll-Interval: 60\r\n\r\n{body}");
-        // gh exits 1 on a 304 but still prints the headers.
-        GhOutput { ok: status.starts_with('2'), stdout: out, stderr: String::new() }
-    }
-
-    fn pulls(prs: &[(&str, &str, &str)]) -> String {
-        let v: Vec<Value> = prs
-            .iter()
-            .map(|(branch, sha, updated)| {
-                serde_json::json!({
-                    "updated_at": updated,
-                    "head": {"ref": branch, "sha": sha, "repo": {"full_name": "o/r"}},
-                    "base": {"ref": "main", "sha": "base", "repo": {"full_name": "o/r"}}
-                })
-            })
-            .collect();
-        Value::Array(v).to_string()
-    }
-
-    #[test]
-    fn parses_gh_api_include_output() {
-        let r = parse_include("HTTP/2.0 304 Not Modified\nEtag: W/\"abc\"\nX-Poll-Interval: 60\n\n").unwrap();
-        assert_eq!((r.status, r.etag.as_deref(), r.poll_interval), (304, Some("W/\"abc\""), Some(60)));
-        let r = parse_include("HTTP/1.1 200 OK\r\netag: \"x\"\r\n\r\n[1]").unwrap();
-        assert_eq!((r.status, r.body.as_str()), (200, "[1]"));
-        assert_eq!(parse_include(""), None);
-        assert_eq!(parse_include("[]"), None);
-    }
-
-    #[test]
-    fn detector_reports_only_what_changed() {
-        let gh = FakeGh::default();
-        let tracked: HashSet<String> = ["feat/a".to_string(), "feat/b".to_string()].into();
-        let mut d = Detector::default();
-        let t0 = Instant::now();
-        assert!(d.is_due(t0));
-
-        // First poll primes: PR list + feat/a's checks and statuses; nothing is dirty yet.
-        gh.push(http("200 OK", "p1", &pulls(&[("feat/a", "s1", "t1"), ("other", "s9", "t1")])));
-        gh.push(http("200 OK", "c1", "{}"));
-        gh.push(http("200 OK", "st1", "{}"));
-        let r = d.poll(&gh, Path::new("/r"), &tracked, t0);
-        assert_eq!((r.dirty.len(), r.calls), (0, 3), "untracked PRs aren't polled for checks");
-        assert!(!d.is_due(t0 + DETECT_EVERY), "X-Poll-Interval (60 s) is honoured");
-        assert!(d.is_due(t0 + Duration::from_secs(60)));
-
-        // CI moved on feat/a: only its check runs changed.
-        gh.push(http("304 Not Modified", "p1", ""));
-        gh.push(http("200 OK", "c2", "{}"));
-        gh.push(http("304 Not Modified", "st1", ""));
-        let r = d.poll(&gh, Path::new("/r"), &tracked, t0);
-        assert_eq!(r.dirty, vec!["feat/a"]);
-        let calls = gh.calls.lock().unwrap().clone();
-        assert!(calls[3].contains(&"If-None-Match: p1".to_string()), "{:?}", calls[3]);
-
-        // Nothing changed: all 304s.
-        for e in ["p1", "c2", "st1"] {
-            gh.push(http("304 Not Modified", e, ""));
-        }
-        assert!(d.poll(&gh, Path::new("/r"), &tracked, t0).dirty.is_empty());
-
-        // feat/a closed or merged (left the open list), feat/b opened.
-        gh.push(http("200 OK", "p2", &pulls(&[("feat/b", "s5", "t2")])));
-        gh.push(http("200 OK", "c5", "{}"));
-        gh.push(http("200 OK", "st5", "{}"));
-        let mut dirty = d.poll(&gh, Path::new("/r"), &tracked, t0).dirty;
-        dirty.sort();
-        assert_eq!(dirty, vec!["feat/a", "feat/b"]);
-    }
-
-    #[test]
-    fn detector_rests_after_a_non_network_failure() {
-        let tracked = HashSet::new();
-        let mut d = Detector::default();
-        let t0 = Instant::now();
-        // The E2E shim (and old setups) print nothing for `gh api -i`.
-        let gh = FakeGh::new(vec![GhOutput::success("")]);
-        d.poll(&gh, Path::new("/r"), &tracked, t0);
-        assert!(!d.is_active(t0 + Duration::from_secs(60)));
-        assert!(!d.is_primed());
-        assert!(d.is_active(t0 + DETECT_RETRY));
-
-        // Offline is not a reason to rest: try again next time.
-        let mut d = Detector::default();
-        let gh = FakeGh::new(vec![GhOutput::failure("error connecting to api.github.com")]);
-        let r = d.poll(&gh, Path::new("/r"), &tracked, t0);
-        assert!(r.network_error.is_some());
-        assert!(d.is_due(t0));
     }
 
     #[test]

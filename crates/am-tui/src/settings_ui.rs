@@ -88,7 +88,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "audioWaitingSound", label: "Waiting sound", help: "Played when an agent needs you", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "audioDoneSound", label: "Done sound", help: "Played when an agent finishes", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "ghPrStatus", label: "Fetch PRs", help: "GitHub PR and CI status via gh", section: "GitHub", kind: Kind::Bool },
-    Field { key: "ghPollingIntervalMs", label: "PR refresh (ms)", help: "PR sweep interval when GitHub change detection is unavailable", section: "GitHub", kind: Kind::Number { step: 30000, min: 30000 } },
+    Field { key: "ghPollingIntervalMs", label: "PR refresh (ms)", help: "How often to fetch PR status", section: "GitHub", kind: Kind::Number { step: 30000, min: 30000 } },
     Field { key: "ghRefreshOnManual", label: "Refresh on r", help: "Include GitHub when refreshing manually", section: "GitHub", kind: Kind::Bool },
     Field { key: "linearEnabled", label: "Fetch tickets", help: "Linked Linear tickets for each branch", section: "Linear", kind: Kind::Bool },
     Field { key: "linearApiKey", label: "API key", help: "Personal API key from Linear settings", section: "Linear", kind: Kind::Text { secret: true } },

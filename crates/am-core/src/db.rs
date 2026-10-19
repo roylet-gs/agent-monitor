@@ -121,9 +121,8 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
         )?;
     }
     if v < 6 {
-        // Set by hooks when an agent pushes or runs `gh pr create|merge|…`;
-        // the TUI then refreshes that worktree's PR at once instead of waiting
-        // for the next poll.
+        // Written by the removed hook PR-refresh hints; kept (unused) because
+        // v2.1.37 DBs are already at version 6 and migrations are additive.
         if !has_column(&tx, "worktrees", "pr_hint_at")? {
             tx.execute_batch("ALTER TABLE worktrees ADD COLUMN pr_hint_at TEXT")?;
         }
@@ -890,22 +889,6 @@ pub fn remove_worktree(conn: &Connection, id: &str) -> rusqlite::Result<()> {
 
 /// `updateWorktreeCustomName`: set (or clear with `None`) the nickname and
 /// where it came from (`None` = user, `Some("linear")` = auto-nickname).
-/// Hook side: an agent pushed or changed a PR in this worktree.
-pub fn set_pr_hint(conn: &Connection, worktree_id: &str) -> rusqlite::Result<()> {
-    conn.execute(
-        "UPDATE worktrees SET pr_hint_at = strftime('%Y-%m-%d %H:%M:%f', 'now') WHERE id = ?1",
-        params![worktree_id],
-    )?;
-    Ok(())
-}
-
-/// TUI side: `(repo_id, branch, pr_hint_at)` for every worktree with a hint.
-pub fn pr_hints(conn: &Connection) -> rusqlite::Result<Vec<(String, String, String)>> {
-    let mut stmt = conn.prepare("SELECT repo_id, branch, pr_hint_at FROM worktrees WHERE pr_hint_at IS NOT NULL")?;
-    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-    rows.collect()
-}
-
 pub fn update_worktree_custom_name(
     conn: &Connection,
     id: &str,
@@ -986,19 +969,6 @@ mod tests {
 
     fn wt() -> Owner {
         Owner::Worktree { id: "w".into(), repo_id: "r".into(), branch: "feat".into() }
-    }
-
-    #[test]
-    fn pr_hints_round_trip() {
-        let (_d, conn) = fresh();
-        assert!(pr_hints(&conn).unwrap().is_empty());
-        set_pr_hint(&conn, "w").unwrap();
-        let hints = pr_hints(&conn).unwrap();
-        assert_eq!(hints.len(), 1);
-        assert_eq!((hints[0].0.as_str(), hints[0].1.as_str()), ("r", "feat"));
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        set_pr_hint(&conn, "w").unwrap();
-        assert_ne!(pr_hints(&conn).unwrap()[0].2, hints[0].2, "each hint is a new value");
     }
 
     #[test]
