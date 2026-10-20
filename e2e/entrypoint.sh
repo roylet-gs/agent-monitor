@@ -187,6 +187,22 @@ echo ': e2e snapshot' > "$HOME/.claude/shell-snapshots/snapshot-bash-e2e.sh"
   setsid bash -c "source $HOME/.claude/shell-snapshots/snapshot-bash-e2e.sh && sleep infinity & wait" \
   </dev/null >/dev/null 2>&1 &)
 
+# --- A dev server an editor started directly in feature/pair ----------------
+# VS Code's npm scripts panel and tasks run `pnpm dev` with no shell in
+# between. A copy of coreutils `timeout` under ~/.vscode-server stands in for
+# the editor (procscan recognises it by its exe path; cwd `/`, so it is no
+# worktree's), and it forks + execs `env -C <worktree> e2e-dev-server` (a
+# copied `sleep`), so the server's parent is the editor itself. Without a
+# filter it is hidden as editor tooling; with runningProcessFilter
+# "e2e-dev-server" feature/pair shows ▶ (26-editor-spawned-process.spec.ts).
+# The seeded filter ("sleep infinity") doesn't match it, so no other spec sees it.
+mkdir -p /home/user/.vscode-server/bin/e2e
+cp "$(command -v timeout)" /home/user/.vscode-server/bin/e2e/node
+cp "$(command -v sleep)" /usr/local/bin/e2e-dev-server
+(cd / && setsid /home/user/.vscode-server/bin/e2e/node 1d \
+  env -C /work/.claude/worktrees/feature-pair /usr/local/bin/e2e-dev-server 86400 \
+  </dev/null >/dev/null 2>&1 &)
+
 # 7682: a fresh, empty data dir on every connection → first-run setup wizard.
 cat > /usr/local/bin/am-tui-fresh <<'SH'
 #!/bin/bash
