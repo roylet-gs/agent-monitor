@@ -48,7 +48,7 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 ;;
     crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
     crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 24 ;; # Settings → Repositories, add-repo browser
@@ -56,7 +56,7 @@ specs_for() {
     crates/am-tui/src/modals.rs) echo 09 10 22 23 ;;
     crates/am-tui/src/jobs.rs) echo 09 10 22 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 ;;
-    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 24 25 ;;
+    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 24 25 26 ;;
     crates/am-tui/src/launcher.rs) echo 21 23 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens
 
     # --- am-core ----------------------------------------------------------
@@ -83,7 +83,7 @@ specs_for() {
     crates/am-core/src/integrations/cache.rs | crates/am-core/src/integrations/breaker.rs) echo 06 ;;
     crates/am-core/src/integrations/mod.rs) echo 04 05 06 ;;
     crates/am-core/src/launch.rs) echo 21 ;; # open_in_editor's failure path (no IDE in the container)
-    crates/am-core/src/procscan.rs) echo 25 ;; # the seeded agent shell command
+    crates/am-core/src/procscan.rs) echo 25 26 ;; # the seeded agent shell command, the editor-spawned dev server
     crates/am-core/src/stacks.rs) echo - ;; # unit / snapshot tests only
 
     # --- am-hook: seeds the delegating main, feature/pair and the standalone sessions

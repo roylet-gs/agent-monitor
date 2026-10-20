@@ -191,10 +191,14 @@ impl ProcessSnapshot {
             if p.pid == self.self_pid || Some(p.pid) == self_parent {
                 continue;
             }
-            if self.exclusion(p).is_some() {
+            let matched = !needle.is_empty() && command_line(p).to_lowercase().contains(&needle);
+            if !needle.is_empty() && !matched {
                 continue;
             }
-            if !needle.is_empty() && !command_line(p).to_lowercase().contains(&needle) {
+            // A command the filter names is wanted even when an editor started it
+            // directly: VS Code's npm scripts panel and tasks run `pnpm dev` with
+            // no shell in between.
+            if self.exclusion(p, matched).is_some() {
                 continue;
             }
             out.entry(worktree_roots[idx].clone())
@@ -223,8 +227,10 @@ impl ProcessSnapshot {
         out
     }
 
-    /// Why `p` is not a user process worth showing, if it isn't.
-    fn exclusion(&self, p: &ProcInfo) -> Option<Cow<'static, str>> {
+    /// Why `p` is not a user process worth showing, if it isn't. With
+    /// `keep_spawned`, being started by an agent CLI, editor or am without a
+    /// shell in between doesn't exclude it.
+    fn exclusion(&self, p: &ProcInfo, keep_spawned: bool) -> Option<Cow<'static, str>> {
         if is_shell(p) {
             return Some(Cow::Borrowed("shell"));
         }
@@ -241,6 +247,9 @@ impl ProcessSnapshot {
         // or am: MCP servers, language servers, extension helpers, am's own
         // `git status` polls. A dev server started from Claude's Bash tool or a
         // terminal always has a shell between it and its owner, so it is kept.
+        if keep_spawned {
+            return None;
+        }
         for anc in self.ancestors(p) {
             if is_shell(anc) {
                 return None;
@@ -966,6 +975,28 @@ mod tests {
             99_999,
         );
         assert_eq!(pids(snap.running_processes(&roots(&["/wt"]), "").get(Path::new("/wt"))), [24, 25, 32]);
+    }
+
+    #[test]
+    fn filter_keeps_commands_an_editor_spawned_directly() {
+        let vscode = "/Applications/Visual Studio Code.app/Contents/MacOS/Code";
+        let helper = "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper";
+        let snap = ProcessSnapshot::from_processes(
+            [
+                proc(10, 1, vscode, "/", &[vscode]),
+                proc(11, 10, helper, "/", &[helper, "--type=utility"]),
+                // VS Code's npm scripts panel: no shell between it and pnpm.
+                proc(12, 11, "/usr/local/bin/node", "/wt/apps/web", &["node", "/opt/homebrew/bin/pnpm", "start:dev"]),
+                proc(13, 12, "/usr/local/bin/node", "/wt/apps/web", &["node", "/wt/node_modules/.bin/vite"]),
+                proc(14, 11, "/home/u/.vscode/extensions/rust-analyzer", "/wt", &["rust-analyzer"]),
+                // A matching shell is still not a process to show.
+                proc(15, 1, "/bin/zsh", "/wt", &["/bin/zsh", "-c", "pnpm start:dev"]),
+            ],
+            99_999,
+        );
+        let r = roots(&["/wt"]);
+        assert!(snap.running_processes(&r, "").is_empty());
+        assert_eq!(pids(snap.running_processes(&r, "pnpm start:dev").get(Path::new("/wt"))), [12]);
     }
 
     // --- has_terminal --------------------------------------------------------
