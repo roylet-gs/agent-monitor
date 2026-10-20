@@ -155,6 +155,26 @@ pub fn is_network_error(msg: &str) -> bool {
         "http 503",
         "http 504",
     ];
+    NEEDLES.iter().any(|n| m.contains(n)) || is_timeout_error(msg)
+}
+
+/// The subset of network-class errors that mean "the request took too long"
+/// rather than "the service is unreachable": GitHub's 10 s limit (HTTP 502/504,
+/// "We couldn't respond to your request in time"), a body cut off mid-way
+/// (gh's "unexpected end of JSON input"), or gh hitting our own timeout. A
+/// batched request that fails this way may simply be too heavy, so the GitHub
+/// fetcher splits it before treating the failure as an outage.
+pub fn is_timeout_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "timed out",
+        "timeout",
+        "http 502",
+        "http 504",
+        "couldn't respond to your request in time",
+        "unexpected end of json input",
+        "unexpected eof",
+    ];
     NEEDLES.iter().any(|n| m.contains(n))
 }
 
@@ -257,6 +277,22 @@ mod tests {
             "none of the git remotes configured for this repository point to a known GitHub host",
         ] {
             assert!(!is_network_error(msg), "{msg}");
+        }
+    }
+
+    #[test]
+    fn timeout_errors_are_a_subset_of_network_errors() {
+        for msg in [
+            "HTTP 504: We couldn't respond to your request in time",
+            "gh: HTTP 502",
+            "gh timed out after 15s",
+            "unexpected end of JSON input",
+        ] {
+            assert!(is_timeout_error(msg), "{msg}");
+            assert!(is_network_error(msg), "{msg}");
+        }
+        for msg in ["error connecting to api.github.com", "no such host", "HTTP 503: Service Unavailable", "HTTP 401"] {
+            assert!(!is_timeout_error(msg), "{msg}");
         }
     }
 

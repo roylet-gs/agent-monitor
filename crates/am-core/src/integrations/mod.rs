@@ -141,8 +141,9 @@ impl Integrations {
     }
 
     /// Refresh PR info for every branch of every repo: one `gh api graphql`
-    /// per repo (per 40 branches). Branches whose fetch failed keep their
-    /// cached PR. `force` (user refresh) bypasses the backoff.
+    /// per [`github::GRAPHQL_CHUNK`] branches of each repo, a few at a time.
+    /// Branches whose fetch failed keep their cached PR. `force` (user
+    /// refresh) bypasses the backoff.
     pub fn refresh_github(&mut self, conn: &Connection, repos: &[RepoBranches], force: bool) -> RefreshOutcome {
         self.cache.hydrate(conn);
         let all_keys = all_keys(repos);
