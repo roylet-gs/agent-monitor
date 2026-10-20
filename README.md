@@ -285,7 +285,7 @@ Worktrees created outside am (`git worktree add`, other tools) are picked up aut
 
 ## GitHub and Linear
 
-**GitHub** (`ghPrStatus`, needs an authenticated `gh`): am fetches the PR for every worktree branch with one batched `gh api graphql` call per repository, every `ghPollingIntervalMs` (default 3 minutes), right away when a new branch appears, and when you press `r`. You get the PR number, draft/merged/closed state, review decision, mergeability (conflicts) and CI checks.
+**GitHub** (`ghPrStatus`, needs an authenticated `gh`): am fetches the PR for every worktree branch with batched `gh api graphql` calls (8 branches per call, a few calls in parallel, so a repo with hundreds of checks per PR stays under GitHub's 10 s request limit), every `ghPollingIntervalMs` (default 3 minutes), right away when a new branch appears, and when you press `r`. You get the PR number, draft/merged/closed state, review decision, mergeability (conflicts) and CI checks.
 
 **Linear** (`linearEnabled` + `linearApiKey`): am looks up the Linear issue linked to each branch name (Linear's git-branch search, so branches named the way Linear suggests, e.g. `eng-123-fix-login`, match). You get the identifier, title, state, assignee and project. With `linearAutoNickname` on, worktrees without a nickname are named after their ticket's title. If GitHub has no PR for the branch, the PR attached to the Linear issue is shown instead (without checks).
 

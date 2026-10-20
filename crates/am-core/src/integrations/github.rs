@@ -1,13 +1,21 @@
 //! GitHub PR status via the `gh` CLI (port of `src/lib/github.ts`).
 //!
-//! The TS app ran one `gh pr view <branch>` per branch. Here every branch of a
-//! repo is fetched with **one** `gh api graphql` call (chunked at
-//! [`GRAPHQL_CHUNK`] branches), one aliased `pullRequests(headRefName:)`
-//! connection per branch. `{owner}`/`{repo}` are filled in by gh from the
-//! repo's remote, so this works wherever `gh pr view` did.
+//! The TS app ran one `gh pr view <branch>` per branch. Here the branches of a
+//! repo are fetched in `gh api graphql` calls of [`GRAPHQL_CHUNK`] branches
+//! each, one aliased `pullRequests(headRefName:)` connection per branch, up to
+//! [`MAX_PARALLEL_CHUNKS`] calls at a time. `{owner}`/`{repo}` are filled in by
+//! gh from the repo's remote, so this works wherever `gh pr view` did.
+//!
+//! GitHub terminates any API request that takes longer than 10 s with a 502 or
+//! 504 (and charges extra rate-limit points for it). A chunk's cost scales with
+//! its PRs' check counts, so a repo with hundreds of checks per PR can push a
+//! large chunk over that limit. The chunk size keeps a typical call at a few
+//! seconds, and a chunk that still hits a timeout-class error is split in half
+//! and retried; only a *single* branch failing that way counts as the network
+//! being down.
 //!
 //! If the GraphQL call fails with a *non-network* error (a gh too old for
-//! `api graphql`, a GraphQL error, unparseable output, …) the batch falls back
+//! `api graphql`, a GraphQL error, unparseable output, …) the chunk falls back
 //! to the TS behaviour of one `gh pr view` per branch. A network-class failure
 //! never falls back — it aborts the batch so the caller's breaker can back off.
 //!
@@ -24,13 +32,16 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::FetchResult;
-use super::breaker::{is_network_error, summarize_error};
+use super::breaker::{is_network_error, is_timeout_error, summarize_error};
 use crate::debug;
 use crate::model::{ChecksStatus, PrInfo};
 
-/// Max branches per GraphQL request (5 PRs × 100 checks each stays far below
-/// GitHub's node limit).
-pub const GRAPHQL_CHUNK: usize = 40;
+/// Max branches per GraphQL request. Measured against a repo with 300–600
+/// checks per PR: 26 branches in one call took 9–11 s (GitHub's limit is 10 s,
+/// so it 504'd regularly), 13 took 5–7 s, 7–8 took ~3 s. 8 leaves a 3× margin.
+pub const GRAPHQL_CHUNK: usize = 8;
+/// How many chunk requests run at once (one `gh` process each).
+pub const MAX_PARALLEL_CHUNKS: usize = 4;
 pub const GRAPHQL_TIMEOUT: Duration = Duration::from_secs(15);
 pub const PR_VIEW_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -59,8 +70,9 @@ impl GhOutput {
     }
 }
 
-/// Runs `gh <args>` in `cwd`. Swapped for a fixture runner in tests.
-pub trait GhRunner: Send {
+/// Runs `gh <args>` in `cwd`. Swapped for a fixture runner in tests. `Sync`
+/// because [`fetch_prs`] runs chunks on scoped threads sharing one runner.
+pub trait GhRunner: Send + Sync {
     fn run(&self, cwd: &Path, args: &[String], timeout: Duration) -> GhOutput;
 }
 
@@ -597,73 +609,150 @@ fn fill_active_check(gh: &dyn GhRunner, repo_path: &Path, pr: &mut ParsedPr, gh_
 }
 
 /// Fetch PR info for every branch of one repo: one `gh api graphql` per
-/// [`GRAPHQL_CHUNK`] branches, falling back to per-branch `gh pr view` on a
-/// non-network GraphQL failure. Stops at the first network-class failure.
+/// [`GRAPHQL_CHUNK`] branches, up to [`MAX_PARALLEL_CHUNKS`] at a time, each
+/// chunk splitting itself on a timeout-class error and falling back to
+/// per-branch `gh pr view` on a non-network GraphQL failure. Stops scheduling
+/// chunks at the first network-class failure.
 pub fn fetch_prs(gh: &dyn GhRunner, repo_path: &Path, branches: &[String]) -> PrBatch {
     let mut seen = HashSet::new();
     let branches: Vec<String> = branches.iter().filter(|b| seen.insert(b.as_str())).cloned().collect();
     let mut batch = PrBatch { results: Vec::with_capacity(branches.len()), network_error: None, gh_calls: 0 };
 
-    for chunk in branches.chunks(GRAPHQL_CHUNK) {
+    let chunks: Vec<&[String]> = branches.chunks(GRAPHQL_CHUNK).collect();
+    for wave in chunks.chunks(MAX_PARALLEL_CHUNKS) {
         if batch.network_error.is_some() {
-            for b in chunk {
-                batch.results.push((b.clone(), FetchResult::Err("aborted: network unavailable".into())));
+            for chunk in wave {
+                batch.results.extend(aborted(chunk));
             }
             continue;
         }
-        batch.gh_calls += 1;
-        let out = gh.run(repo_path, &graphql_args(chunk), GRAPHQL_TIMEOUT);
-        // gh exits 1 on GraphQL errors but still prints the body; try stdout first.
-        let parsed = if out.stdout.trim().is_empty() {
-            Err(if out.ok { "empty gh graphql output".to_string() } else { out.stderr.clone() })
+        let outcomes: Vec<ChunkOutcome> = if wave.len() == 1 {
+            vec![fetch_chunk(gh, repo_path, wave[0])]
         } else {
-            parse_graphql(&out.stdout, chunk)
+            std::thread::scope(|scope| {
+                let handles: Vec<_> =
+                    wave.iter().map(|chunk| scope.spawn(move || fetch_chunk(gh, repo_path, chunk))).collect();
+                handles
+                    .into_iter()
+                    .zip(wave)
+                    .map(|(h, chunk)| {
+                        h.join().unwrap_or_else(|_| ChunkOutcome {
+                            results: chunk
+                                .iter()
+                                .map(|b| (b.clone(), FetchResult::Err("gh graphql fetch thread panicked".into())))
+                                .collect(),
+                            network_error: None,
+                            gh_calls: 0,
+                        })
+                    })
+                    .collect()
+            })
         };
-        match parsed {
-            Ok(results) => {
-                for (branch, result) in results {
-                    let result = match result {
-                        FetchResult::Ok(Some(mut pr)) => {
-                            fill_active_check(gh, repo_path, &mut pr, &mut batch.gh_calls);
-                            FetchResult::Ok(Some(to_pr_info(pr.fields)))
-                        }
-                        FetchResult::Ok(None) => FetchResult::Ok(None),
-                        FetchResult::Err(e) => FetchResult::Err(e),
-                    };
-                    batch.results.push((branch, result));
-                }
-            }
-            Err(_) if !out.ok && is_network_error(&out.stderr) => {
-                let err = summarize_error(&out.stderr);
-                debug!("github", "gh graphql for {} failed (network): {err}", repo_path.display());
-                batch.network_error = Some(err.clone());
-                for b in chunk {
-                    batch.results.push((b.clone(), FetchResult::Err(err.clone())));
-                }
-            }
-            Err(e) => {
-                debug!(
-                    "github",
-                    "gh graphql unusable for {} ({}), falling back to gh pr view per branch",
-                    repo_path.display(),
-                    summarize_error(&e)
-                );
-                for b in chunk {
-                    if batch.network_error.is_some() {
-                        batch.results.push((b.clone(), FetchResult::Err("aborted: network unavailable".into())));
-                        continue;
-                    }
-                    batch.gh_calls += 1;
-                    let (res, network) = fetch_pr_view(gh, repo_path, b);
-                    if network && let FetchResult::Err(e) = &res {
-                        batch.network_error = Some(e.clone());
-                    }
-                    batch.results.push((b.clone(), res));
-                }
+        for outcome in outcomes {
+            batch.results.extend(outcome.results);
+            batch.gh_calls += outcome.gh_calls;
+            if batch.network_error.is_none() {
+                batch.network_error = outcome.network_error;
             }
         }
     }
     batch
+}
+
+/// What one chunk (and its splits / fallbacks) produced.
+#[derive(Debug, Default)]
+struct ChunkOutcome {
+    results: Vec<(String, FetchResult<PrInfo>)>,
+    network_error: Option<String>,
+    gh_calls: usize,
+}
+
+impl ChunkOutcome {
+    fn absorb(&mut self, other: ChunkOutcome) {
+        self.results.extend(other.results);
+        self.gh_calls += other.gh_calls;
+        if self.network_error.is_none() {
+            self.network_error = other.network_error;
+        }
+    }
+}
+
+fn aborted(chunk: &[String]) -> impl Iterator<Item = (String, FetchResult<PrInfo>)> + '_ {
+    chunk.iter().map(|b| (b.clone(), FetchResult::Err("aborted: network unavailable".into())))
+}
+
+/// One `gh api graphql` call for `chunk`. On a timeout-class failure (GitHub's
+/// 10 s limit: HTTP 502/504, a truncated body, gh's own timeout) the chunk is
+/// halved and both halves retried; a single branch that still fails is a real
+/// network failure. Other network errors fail the chunk at once, and non-network
+/// errors fall back to `gh pr view` per branch.
+fn fetch_chunk(gh: &dyn GhRunner, repo_path: &Path, chunk: &[String]) -> ChunkOutcome {
+    let mut out = ChunkOutcome { gh_calls: 1, ..Default::default() };
+    let gh_out = gh.run(repo_path, &graphql_args(chunk), GRAPHQL_TIMEOUT);
+    // gh exits 1 on GraphQL errors but still prints the body; try stdout first.
+    let parsed = if gh_out.stdout.trim().is_empty() {
+        Err(if gh_out.ok { "empty gh graphql output".to_string() } else { gh_out.stderr.clone() })
+    } else {
+        parse_graphql(&gh_out.stdout, chunk)
+    };
+    match parsed {
+        Ok(results) => {
+            for (branch, result) in results {
+                let result = match result {
+                    FetchResult::Ok(Some(mut pr)) => {
+                        fill_active_check(gh, repo_path, &mut pr, &mut out.gh_calls);
+                        FetchResult::Ok(Some(to_pr_info(pr.fields)))
+                    }
+                    FetchResult::Ok(None) => FetchResult::Ok(None),
+                    FetchResult::Err(e) => FetchResult::Err(e),
+                };
+                out.results.push((branch, result));
+            }
+        }
+        Err(_) if !gh_out.ok && is_network_error(&gh_out.stderr) => {
+            let err = summarize_error(&gh_out.stderr);
+            if chunk.len() > 1 && is_timeout_error(&gh_out.stderr) {
+                debug!(
+                    "github",
+                    "gh graphql for {} timed out with {} branches ({err}); retrying as two halves",
+                    repo_path.display(),
+                    chunk.len()
+                );
+                let (left, right) = chunk.split_at(chunk.len() / 2);
+                out.absorb(fetch_chunk(gh, repo_path, left));
+                if out.network_error.is_some() {
+                    out.results.extend(aborted(right));
+                } else {
+                    out.absorb(fetch_chunk(gh, repo_path, right));
+                }
+            } else {
+                debug!("github", "gh graphql for {} failed (network): {err}", repo_path.display());
+                out.network_error = Some(err.clone());
+                out.results.extend(chunk.iter().map(|b| (b.clone(), FetchResult::Err(err.clone()))));
+            }
+        }
+        Err(e) => {
+            debug!(
+                "github",
+                "gh graphql unusable for {} ({}), falling back to gh pr view per branch",
+                repo_path.display(),
+                summarize_error(&e)
+            );
+            for b in chunk {
+                if out.network_error.is_some() {
+                    out.results.push((b.clone(), FetchResult::Err("aborted: network unavailable".into())));
+                    continue;
+                }
+                out.gh_calls += 1;
+                let (res, network) = fetch_pr_view(gh, repo_path, b);
+                if network && let FetchResult::Err(e) = &res {
+                    out.network_error = Some(e.clone());
+                }
+                out.results.push((b.clone(), res));
+            }
+        }
+    }
+    out
 }
 
 /// The gh `pr view --json` shape (fallback path).
@@ -1107,14 +1196,97 @@ pub(crate) mod tests {
     fn chunks_large_branch_lists() {
         let n = GRAPHQL_CHUNK + 3;
         let names: Vec<String> = (0..n).map(|i| format!("br{i}")).collect();
+        // Chunks run in parallel, so the scripted responses can arrive in either
+        // order: give both every alias (extra aliases are ignored).
         let gh = FakeGh::new(vec![
             GhOutput::success(gql_response(vec![vec![]; GRAPHQL_CHUNK])),
-            GhOutput::success(gql_response(vec![vec![]; 3])),
+            GhOutput::success(gql_response(vec![vec![]; GRAPHQL_CHUNK])),
         ]);
         let batch = fetch_prs(&gh, Path::new("/r"), &names);
         assert_eq!(gh.call_count(), 2);
         assert_eq!(batch.results.len(), n);
+        let got: Vec<&String> = batch.results.iter().map(|(b, _)| b).collect();
+        assert_eq!(got, names.iter().collect::<Vec<_>>(), "results keep request order");
         assert!(batch.results.iter().all(|(_, r)| matches!(r, FetchResult::Ok(None))));
+    }
+
+    #[test]
+    fn more_chunks_than_parallel_slots_run_in_waves() {
+        let n = GRAPHQL_CHUNK * (MAX_PARALLEL_CHUNKS + 1);
+        let names: Vec<String> = (0..n).map(|i| format!("br{i}")).collect();
+        let gh = FakeGh::new(
+            (0..MAX_PARALLEL_CHUNKS + 1).map(|_| GhOutput::success(gql_response(vec![vec![]; GRAPHQL_CHUNK]))).collect(),
+        );
+        let batch = fetch_prs(&gh, Path::new("/r"), &names);
+        assert_eq!(gh.call_count(), MAX_PARALLEL_CHUNKS + 1);
+        assert_eq!(batch.results.len(), n);
+        assert!(batch.network_error.is_none());
+    }
+
+    /// The real case: a repo with hundreds of checks per PR makes one chunk
+    /// heavier than GitHub's 10 s limit. The chunk is halved instead of the
+    /// whole source being declared offline.
+    #[test]
+    fn gateway_timeout_splits_the_chunk_instead_of_going_offline() {
+        let gh = FakeGh::new(vec![
+            GhOutput::failure("gh: HTTP 504: We couldn't respond to your request in time. Sorry about that."),
+            GhOutput::success(gql_response(vec![vec![gql_node(1, "a", "OPEN", serde_json::json!([]))], vec![]])),
+            GhOutput::success(gql_response(vec![vec![], vec![gql_node(4, "d", "MERGED", serde_json::json!([]))]])),
+        ]);
+        let batch = fetch_prs(&gh, Path::new("/r"), &branches(&["a", "b", "c", "d"]));
+        assert_eq!(gh.call_count(), 3);
+        assert!(batch.network_error.is_none(), "{:?}", batch.network_error);
+        let calls = gh.calls.lock().unwrap();
+        assert!(calls[0].contains(&"b3=d".to_string()), "first call carried all four");
+        assert!(calls[1].contains(&"b0=a".to_string()) && calls[1].contains(&"b1=b".to_string()));
+        assert!(calls[2].contains(&"b0=c".to_string()) && calls[2].contains(&"b1=d".to_string()));
+        drop(calls);
+        let names: Vec<&str> = batch.results.iter().map(|(b, _)| b.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c", "d"]);
+        let FetchResult::Ok(Some(a)) = &batch.results[0].1 else { panic!("{:?}", batch.results) };
+        assert_eq!(a.number, 1);
+        assert!(matches!(batch.results[1].1, FetchResult::Ok(None)));
+        let FetchResult::Ok(Some(d)) = &batch.results[3].1 else { panic!("{:?}", batch.results) };
+        assert_eq!(d.state, "MERGED");
+    }
+
+    #[test]
+    fn truncated_body_is_retried_as_halves_not_per_branch_pr_view() {
+        // gh prints this when GitHub cuts the response off; it used to fall back
+        // to one `gh pr view` per branch (26 slow calls) and then time out.
+        let gh = FakeGh::new(vec![
+            GhOutput::failure("unexpected end of JSON input"),
+            GhOutput::success(gql_response(vec![vec![]])),
+            GhOutput::success(gql_response(vec![vec![]])),
+        ]);
+        let batch = fetch_prs(&gh, Path::new("/r"), &branches(&["a", "b"]));
+        assert_eq!(gh.call_count(), 3);
+        assert!(gh.calls.lock().unwrap().iter().all(|c| c[..2] == ["api", "graphql"]));
+        assert!(batch.network_error.is_none());
+    }
+
+    #[test]
+    fn single_branch_gateway_timeout_is_a_network_failure() {
+        let gh = FakeGh::new(vec![
+            GhOutput::failure("HTTP 504"),
+            GhOutput::failure("HTTP 504"),
+            GhOutput::failure("HTTP 504"),
+        ]);
+        let batch = fetch_prs(&gh, Path::new("/r"), &branches(&["a", "b", "c"]));
+        // all three → [a] fails for real → [b, c] never tried
+        assert_eq!(gh.call_count(), 2);
+        assert_eq!(batch.network_error.as_deref(), Some("HTTP 504"));
+        assert_eq!(batch.results.len(), 3);
+        assert!(matches!(&batch.results[0].1, FetchResult::Err(e) if e == "HTTP 504"));
+        assert!(matches!(&batch.results[1].1, FetchResult::Err(e) if e.starts_with("aborted")));
+    }
+
+    #[test]
+    fn connection_failure_on_a_chunk_is_not_split() {
+        let gh = FakeGh::new(vec![GhOutput::failure("dial tcp: lookup api.github.com: no such host")]);
+        let batch = fetch_prs(&gh, Path::new("/r"), &branches(&["a", "b", "c", "d"]));
+        assert_eq!(gh.call_count(), 1, "DNS failure is not a heavy query; no retry");
+        assert!(batch.network_error.is_some());
     }
 
     // --- fetchPrResult (pr view fallback) ---
