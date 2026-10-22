@@ -28,7 +28,7 @@ pub fn create(a: &CreateArgs) {
     } else {
         CreateMode::Fresh
     };
-    let req = CreateRequest { branch: a.branch.clone(), base_branch: a.base.clone(), custom_name: a.name.clone(), mode };
+    let req = CreateRequest { branch: a.branch.clone(), base_branch: a.base.clone(), custom_name: a.name.clone(), mode, tmp_space: a.tmp };
     let w = match worktrees::create_worktree(&conn, &settings, &repo, &req) {
         Ok(w) => w,
         Err(CreateError::BranchExists { local, remote, .. }) => {
@@ -62,7 +62,7 @@ pub fn create(a: &CreateArgs) {
         _ => "fresh",
     };
     if a.json.json {
-        output::json(&json!({ "branch": w.branch, "path": w.path, "repo": repo.name, "mode": mode_name }));
+        output::json(&json!({ "branch": w.branch, "path": w.path, "repo": repo.name, "mode": mode_name, "tmpSpace": w.tmp_space }));
     } else {
         println!("Created worktree: {}", w.path);
         let desc = match mode {
@@ -72,6 +72,9 @@ pub fn create(a: &CreateArgs) {
             _ => format!("{} (based on {base})", w.branch),
         };
         println!("Branch: {desc}");
+        if w.tmp_space {
+            println!("Space: tmp");
+        }
     }
 }
 

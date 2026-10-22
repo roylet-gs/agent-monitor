@@ -625,7 +625,9 @@ pub fn check_worktree_limit(settings: &Settings, conn: &Connection, repo_id: &st
         return None;
     }
     let dedicated = match db::worktrees_for_repo(conn, repo_id) {
-        Ok(wts) => wts.iter().filter(|w| !w.is_main).count(),
+        // Tmp-space worktrees (someone else's branch pulled down to look at)
+        // don't count.
+        Ok(wts) => wts.iter().filter(|w| !w.is_main && !w.tmp_space).count(),
         Err(e) => {
             warn!("worktree-limit", "Could not count worktrees for {repo_name}: {e}");
             return None;
@@ -677,6 +679,9 @@ pub struct CreateRequest {
     /// Optional nickname stored as the row's `custom_name`.
     pub custom_name: Option<String>,
     pub mode: CreateMode,
+    /// Label the worktree "tmp space": shown in the shared `Tmp space` group
+    /// and exempt from the worktree limit.
+    pub tmp_space: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -773,7 +778,9 @@ fn create_worktree_inner(
     if branch.is_empty() {
         return Err(CreateError::Invalid("Branch name is required".into()));
     }
-    if let Some(msg) = check_worktree_limit(settings, conn, &repo.id, &repo.name) {
+    if !req.tmp_space
+        && let Some(msg) = check_worktree_limit(settings, conn, &repo.id, &repo.name)
+    {
         return Err(CreateError::LimitReached(msg));
     }
     let repo_path = Path::new(&repo.path);
@@ -859,14 +866,25 @@ fn create_worktree_inner(
     let wt = db::worktree_by_branch(conn, &repo.id, branch)
         .map_err(db_err)?
         .ok_or_else(|| CreateError::Db(format!("Worktree {branch} missing from DB after sync")))?;
-    if let Some(name) = req.custom_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+    let name = req.custom_name.as_deref().map(str::trim).filter(|n| !n.is_empty());
+    if name.is_none() && wt.tmp_space == req.tmp_space {
+        return Ok(wt);
+    }
+    if let Some(name) = name {
         stage("Setting nickname…".into());
         db::update_worktree_custom_name(conn, &wt.id, Some(name), None).map_err(db_err)?;
-        return db::worktree_by_branch(conn, &repo.id, branch)
-            .map_err(db_err)?
-            .ok_or_else(|| CreateError::Db(format!("Worktree {branch} vanished")));
     }
-    Ok(wt)
+    // Set either way: a row kept from an earlier worktree of this branch may
+    // still carry the old label.
+    if wt.tmp_space != req.tmp_space {
+        if req.tmp_space {
+            stage("Moving to tmp space…".into());
+        }
+        db::set_worktree_tmp_space(conn, &wt.id, req.tmp_space).map_err(db_err)?;
+    }
+    db::worktree_by_branch(conn, &repo.id, branch)
+        .map_err(db_err)?
+        .ok_or_else(|| CreateError::Db(format!("Worktree {branch} vanished")))
 }
 
 // ---------------------------------------------------------------------------
@@ -1554,6 +1572,22 @@ mod tests {
             Err(CreateError::LimitReached(m)) => assert!(m.contains("1/1") && m.contains("repo")),
             other => panic!("expected limit, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tmp_space_create_is_labelled_and_skips_the_limit() {
+        let fx = Fx::new();
+        let settings = Settings { worktree_limit_enabled: true, max_worktrees: 1, ..Settings::default() };
+        fx.create_with(&settings, "one", CreateMode::Fresh).unwrap();
+        let req = CreateRequest { branch: "theirs/fix".into(), tmp_space: true, ..Default::default() };
+        let wt = create_worktree_with(&fx.conn, &settings, &fx.repo, &req, &RemoteProbe::git_only()).unwrap();
+        assert!(wt.tmp_space);
+        // Re-syncing keeps the label, and a tmp worktree doesn't count.
+        sync_repo(&fx.conn, &fx.repo).unwrap();
+        assert!(fx.rows().iter().any(|w| w.branch == "theirs/fix" && w.tmp_space));
+        db::set_worktree_tmp_space(&fx.conn, &fx.rows().iter().find(|w| w.branch == "one").unwrap().id, true).unwrap();
+        fx.create_with(&settings, "two", CreateMode::Fresh).unwrap();
+        assert!(!fx.rows().iter().find(|w| w.branch == "two").unwrap().tmp_space);
     }
 
     // --- delete ---

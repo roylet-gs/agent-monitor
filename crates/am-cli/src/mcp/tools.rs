@@ -162,11 +162,12 @@ pub static TOOLS: &[Tool] = &[
             opt("name", Kind::Str, "Display name (nickname) for the worktree"),
             opt("base", Kind::Str, "Base branch for a new branch (default: the repo's main branch)"),
             opt("mode", Kind::Enum(MODES), "How to handle an existing branch (default: fresh)"),
+            opt("tmp", Kind::Bool, "Put it in the tmp space: for looking at someone else's branch; grouped apart on the dashboard and outside the worktree limit"),
         ],
         hints: WRITE,
         timeout: LONG,
         build: |a| {
-            let mut argv = with(with(repo(pos(cmd(&["worktree", "create", "--json"]), a, "branch"), a), a, "name", "--name"), a, "base", "--base");
+            let mut argv = switch(with(with(repo(pos(cmd(&["worktree", "create", "--json"]), a, "branch"), a), a, "name", "--name"), a, "base", "--base"), a, "tmp", "--tmp");
             match a.str("mode").as_deref() {
                 Some("reuse") => argv.push("--reuse".into()),
                 Some("track") => argv.push("--track".into()),
@@ -192,6 +193,14 @@ pub static TOOLS: &[Tool] = &[
             let argv = repo(pos(cmd(&["worktree", "delete"]), a, "target"), a);
             switch(switch(switch(argv, a, "force", "--force"), a, "delete_branch", "--delete-branch"), a, "delete_remote", "--delete-remote")
         },
+    },
+    Tool {
+        name: "worktree_tmp",
+        description: "Put a worktree in the tmp space (a review checkout of someone else's branch: grouped apart on the dashboard and outside the worktree limit), or take it out with off.",
+        params: &[TARGET, REPO, opt("off", Kind::Bool, "Take it out of the tmp space")],
+        hints: WRITE_SAME,
+        timeout: SHORT,
+        build: |a| switch(repo(pos(cmd(&["worktree", "tmp", "--json"]), a, "target"), a), a, "off", "--off"),
     },
     Tool {
         name: "worktree_sync",
@@ -505,6 +514,14 @@ mod tests {
         assert_eq!(
             argv("worktree_create", json!({"branch": "feat/x", "repo": "/r", "base": "dev", "mode": "track"})).unwrap(),
             ["worktree", "create", "--json", "feat/x", "--repo", "/r", "--base", "dev", "--track"]
+        );
+        assert_eq!(
+            argv("worktree_create", json!({"branch": "x", "tmp": true})).unwrap(),
+            ["worktree", "create", "--json", "x", "--tmp"]
+        );
+        assert_eq!(
+            argv("worktree_tmp", json!({"target": "x", "off": true})).unwrap(),
+            ["worktree", "tmp", "--json", "x", "--off"]
         );
         assert_eq!(
             argv("worktree_delete", json!({"target": "feat/x", "force": true, "delete_branch": false})).unwrap(),

@@ -69,6 +69,8 @@ pub enum Action {
     RunScript { job: u64, repo_id: String, worktree_path: String },
     /// `d` on an "Other sessions" row: stop tracking it.
     RemoveStandalone(String),
+    /// `T`: put a worktree in the tmp space (or take it out): id, new value.
+    SetTmpSpace(String, bool),
     AddRepo(String),
     /// Settings → Repositories… `s`: open the repo's startup script.
     EditScript(String),
@@ -252,22 +254,27 @@ impl App {
         self.flat.clear();
         self.rows.clear();
         self.tree.clear();
-        // Creates whose worktree isn't in the snapshot yet: (job, repo id, repo name).
+        // Creates whose worktree isn't in the snapshot yet: (job, group id, group name).
+        // Tmp-space creates wait at the end of the tmp space.
         let listed = |id: &str| self.snapshot.groups.iter().any(|g| g.worktrees.iter().any(|v| v.worktree.id == id));
         let mut pending: Vec<(u64, String, String)> = self
             .jobs
             .list
             .iter()
             .filter_map(|j| {
-                let (repo, _, wt) = j.pending_create()?;
-                (!wt.is_some_and(listed)).then(|| (j.id, repo.id.clone(), repo.name.clone()))
+                let (repo, req, wt) = j.pending_create()?;
+                let (id, name) = match req.tmp_space {
+                    true => (am_core::model::TMP_SPACE_GROUP_ID.to_string(), "Tmp space".to_string()),
+                    false => (repo.id.clone(), repo.name.clone()),
+                };
+                (!wt.is_some_and(listed)).then_some((j.id, id, name))
             })
             .collect();
         for group in &self.snapshot.groups {
             if group.worktrees.is_empty() {
                 continue;
             }
-            if multi_repo || group.repo.id == am_core::model::STANDALONE_REPO_ID {
+            if multi_repo || group.repo.id == am_core::model::STANDALONE_REPO_ID || group.repo.id == am_core::model::TMP_SPACE_GROUP_ID {
                 if !self.rows.is_empty() {
                     self.rows.push(Row::Spacer);
                 }
@@ -380,6 +387,7 @@ impl App {
             C::OpenLinear => v.linear.is_some(),
             C::OpenProject => v.linear.as_ref().and_then(|l| l.project.as_ref()).is_some_and(|p| p.url.is_some()),
             C::Delete => w.is_standalone() || !(w.is_main && (w.branch == "main" || w.branch == "master")),
+            C::ToggleTmpSpace => !w.is_standalone() && !w.is_main,
             _ => true,
         }
     }
@@ -600,6 +608,15 @@ impl App {
                     }
                 }
             }
+            C::ToggleTmpSpace => {
+                if let Some(w) = self.selected_view().map(|v| v.worktree.clone()) {
+                    if w.is_standalone() || w.is_main {
+                        self.notice = Some("Only linked worktrees can go in the tmp space".into());
+                    } else {
+                        return Action::SetTmpSpace(w.id, !w.tmp_space);
+                    }
+                }
+            }
             C::Feedback => {
                 self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
@@ -726,9 +743,10 @@ impl App {
             },
             L::NewForm => match &mut self.modal {
                 Some(Modal::New(f)) => {
-                    let which = [FormField::Repo, FormField::Branch, FormField::Name, FormField::Base][i.min(3)];
-                    // The repo row cycles on a second click.
-                    (std::mem::replace(&mut f.field, which) == which && which == FormField::Repo).then_some(Key::Right)
+                    let which = [FormField::Repo, FormField::Branch, FormField::Name, FormField::Base, FormField::TmpSpace][i.min(4)];
+                    // The repo row cycles on a second click; the tmp space switch flips on the first.
+                    let again = std::mem::replace(&mut f.field, which) == which;
+                    ((again && which == FormField::Repo) || which == FormField::TmpSpace).then_some(Key::Right)
                 }
                 _ => None,
             },

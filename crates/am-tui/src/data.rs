@@ -490,6 +490,7 @@ impl Worker {
                         custom_name: None,
                         is_main: false,
                         created_at: agent.updated_at.clone(),
+                        tmp_space: false,
                     },
                     agent: Some(agent),
                     git: None,
@@ -785,6 +786,7 @@ mod tests {
                 custom_name: None,
                 is_main: false,
                 created_at: "2026-10-01 00:00:00".into(),
+                tmp_space: false,
             },
             agent: Some(AgentState {
                 status,

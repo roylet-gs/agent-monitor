@@ -25,11 +25,18 @@ pub struct Worktree {
     pub is_main: bool,
     /// SQLite `datetime('now')` text, e.g. `2026-10-11 09:12:57`.
     pub created_at: String,
+    /// Labelled "tmp space": shown in the shared `Tmp space` group and left
+    /// out of the worktree limit.
+    pub tmp_space: bool,
 }
 
 /// Synthetic repo id for the "Other sessions" group (agent sessions running
 /// outside any tracked worktree).
 pub const STANDALONE_REPO_ID: &str = "__standalone__";
+
+/// Synthetic repo id for the shared "Tmp space" group (worktrees of every repo
+/// labelled `tmp_space`).
+pub const TMP_SPACE_GROUP_ID: &str = "__tmp_space__";
 
 impl Worktree {
     pub fn is_standalone(&self) -> bool {

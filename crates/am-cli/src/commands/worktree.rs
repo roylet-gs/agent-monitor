@@ -149,6 +149,8 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
     for g in &groups {
         for v in &g.worktrees {
             let w = &v.worktree;
+            // The tmp space group mixes repos: name each row's own.
+            let repo = repos.iter().find(|r| r.id == w.repo_id).unwrap_or(&g.repo);
             let agent = v.agent.as_ref().map(|a| a.status.as_str());
             let git = v.git.unwrap_or_default();
             let pr_label = v.pr.as_ref().map(|p| pr_status_label(p).0.to_string()).unwrap_or_default();
@@ -156,8 +158,8 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
                 v.linear.as_ref().map(|l| format!("{} {}", l.identifier, l.state.name)).unwrap_or_default();
             if as_json {
                 json_rows.push(json!({
-                    "repo": g.repo.name,
-                    "repoPath": g.repo.path,
+                    "repo": repo.name,
+                    "repoPath": repo.path,
                     "branch": w.branch,
                     "path": w.path,
                     "agent": agent.unwrap_or("unknown"),
@@ -167,6 +169,7 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
                     "pr": (!pr_label.is_empty()).then_some(&pr_label),
                     "prUrl": v.pr.as_ref().map(|p| &p.url),
                     "linear": (!linear_label.is_empty()).then_some(&linear_label),
+                    "tmpSpace": w.tmp_space,
                 }));
                 continue;
             }
@@ -185,13 +188,14 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
                 .map(|c| format!("{} {}", c.hash, git_relative(timefmt::now_unix() - c.timestamp)))
                 .unwrap_or_default();
             rows.push(vec![
-                ("repo", if multi { g.repo.name.clone() } else { String::new() }),
+                ("repo", if multi { repo.name.clone() } else { String::new() }),
                 ("branch", w.branch.clone()),
                 ("agent", agent.unwrap_or("—").to_string()),
                 ("git", if git_info.is_empty() { "clean".into() } else { git_info }),
                 ("commit", commit),
                 ("pr", pr_label),
                 ("linear", linear_label),
+                ("tmp", if w.tmp_space { "tmp".into() } else { String::new() }),
             ]);
         }
     }
@@ -211,6 +215,9 @@ pub fn list(repo_path: Option<&str>, as_json: bool) {
     }
     if has("linear") {
         columns.push(col("linear", "Linear"));
+    }
+    if has("tmp") {
+        columns.push(col("tmp", "Space"));
     }
     output::table(&rows, &columns);
 }
@@ -368,6 +375,26 @@ pub fn open(target: &str, repo_path: Option<&str>) {
         fail(&e);
     }
     println!("Opened {} in {}", wt.branch, s.ide);
+}
+
+/// `worktree tmp`: put a worktree in the tmp space, or take it out (`--off`).
+pub fn tmp(target: &str, repo_path: Option<&str>, off: bool, as_json: bool) {
+    let conn = store::open();
+    let repo = resolve_repo(&conn, repo_path);
+    let wt = resolve_worktree(&conn, target, Some(&repo.id));
+    if wt.is_main {
+        fail("The main checkout can't go in the tmp space.");
+    }
+    if let Err(e) = am_core::db::set_worktree_tmp_space(&conn, &wt.id, !off) {
+        fail(&format!("Could not update {}: {e}", wt.branch));
+    }
+    if as_json {
+        output::json(&json!({ "branch": wt.branch, "path": wt.path, "repo": repo.name, "tmpSpace": !off }));
+    } else if off {
+        println!("Moved {} out of the tmp space", wt.branch);
+    } else {
+        println!("Moved {} to the tmp space", wt.branch);
+    }
 }
 
 #[cfg(test)]
