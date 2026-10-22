@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use time::OffsetDateTime;
 use time::macros::format_description;
 
-use crate::model::{AgentState, ChecksStatus, Repository, WorktreeGroup, WorktreeView};
+use crate::model::{AgentState, ChecksStatus, Repository, TMP_SPACE_GROUP_ID, WorktreeGroup, WorktreeView};
 use crate::settings::{Direction, Settings, SortCriterion, SortKey};
 use crate::status::Status;
 
@@ -252,6 +252,8 @@ pub fn apply_filters(views: Vec<WorktreeView>, settings: &Settings) -> Vec<Workt
 /// its direction). Views whose `repo_id` matches no repo are dropped. With a
 /// single repo its group is kept even when empty; with several, empty repos
 /// are omitted. Filtering is not applied here — call `apply_filters` first.
+/// Worktrees labelled `tmp_space` leave their repo's group for one shared
+/// `Tmp space` group (id `TMP_SPACE_GROUP_ID`) after all the repo groups.
 ///
 /// Invariant: the concatenation of `groups[].worktrees` is the visual row order.
 pub fn build_groups(repos: &[Repository], views: Vec<WorktreeView>, settings: &Settings) -> Vec<WorktreeGroup> {
@@ -259,8 +261,14 @@ pub fn build_groups(repos: &[Repository], views: Vec<WorktreeView>, settings: &S
     let repo_names: HashMap<String, String> = repos.iter().map(|r| (r.id.clone(), r.name.clone())).collect();
 
     let mut by_repo: HashMap<&str, Vec<WorktreeView>> = repos.iter().map(|r| (r.id.as_str(), Vec::new())).collect();
+    let mut tmp = Vec::new();
     for v in views {
-        if let Some(bucket) = by_repo.get_mut(v.worktree.repo_id.as_str()) {
+        if !by_repo.contains_key(v.worktree.repo_id.as_str()) {
+            continue;
+        }
+        if v.worktree.tmp_space {
+            tmp.push(v);
+        } else if let Some(bucket) = by_repo.get_mut(v.worktree.repo_id.as_str()) {
             bucket.push(v);
         }
     }
@@ -285,6 +293,11 @@ pub fn build_groups(repos: &[Repository], views: Vec<WorktreeView>, settings: &S
         if !worktrees.is_empty() || single {
             groups.push(WorktreeGroup { repo: repo.clone(), worktrees });
         }
+    }
+    if !tmp.is_empty() {
+        tmp.sort_by(|a, b| compare(a, b, criteria, &repo_names));
+        let repo = Repository { id: TMP_SPACE_GROUP_ID.into(), path: String::new(), name: "Tmp space".into() };
+        groups.push(WorktreeGroup { repo, worktrees: tmp });
     }
     groups
 }
@@ -317,6 +330,7 @@ pub(crate) mod tests {
                 custom_name: None,
                 is_main: false,
                 created_at: "2024-01-01".into(),
+                tmp_space: false,
             },
             agent: None,
             git: None,
@@ -336,6 +350,7 @@ pub(crate) mod tests {
         fn repo_id(self, r: &str) -> Self;
         fn branch(self, b: &str) -> Self;
         fn main(self) -> Self;
+        fn tmp(self) -> Self;
         fn created(self, at: &str) -> Self;
         fn agent(self, s: Status, updated_at: &str, is_open: bool) -> Self;
         fn linear(self, ident: &str, project: Option<&str>) -> Self;
@@ -350,6 +365,10 @@ pub(crate) mod tests {
         }
         fn branch(mut self, b: &str) -> Self {
             self.worktree.branch = b.into();
+            self
+        }
+        fn tmp(mut self) -> Self {
+            self.worktree.tmp_space = true;
             self
         }
         fn main(mut self) -> Self {
@@ -799,6 +818,29 @@ pub(crate) mod tests {
         let v = vec![wt("w1").repo_id("r1"), wt("ghost").repo_id("gone")];
         let groups = build_groups(&repos, v, &Settings::default());
         assert_eq!(ids(&flat(&groups)), ["w1"]);
+    }
+
+    #[test]
+    fn tmp_space_rows_share_one_trailing_group() {
+        let repos = [repo("r1", "a"), repo("r2", "b")];
+        let v = vec![
+            wt("t1").repo_id("r1").tmp(),
+            wt("w1").repo_id("r1"),
+            wt("t2").repo_id("r2").tmp(),
+            wt("ghost").repo_id("gone").tmp(),
+        ];
+        let groups = build_groups(&repos, v, &Settings::default());
+        let names: Vec<_> = groups.iter().map(|g| g.repo.id.as_str()).collect();
+        // r2 has only a tmp row, so its own group is empty and dropped.
+        assert_eq!(names, ["r1", TMP_SPACE_GROUP_ID]);
+        assert_eq!(groups[1].repo.name, "Tmp space");
+        assert_eq!(ids(&flat(&groups)), ["w1", "t1", "t2"]);
+    }
+
+    #[test]
+    fn no_tmp_space_group_without_tmp_rows() {
+        let groups = build_groups(&[repo("r1", "a")], vec![wt("w1").repo_id("r1")], &Settings::default());
+        assert_eq!(groups.len(), 1);
     }
 
     #[test]

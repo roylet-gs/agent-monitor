@@ -417,6 +417,18 @@ fn dispatch(
             app.notice = Some("Stopped tracking session".into());
             collector.refresh(false);
         }
+        Action::SetTmpSpace(id, tmp_space) => {
+            let saved = am_core::db::open().and_then(|conn| am_core::db::set_worktree_tmp_space(&conn, &id, tmp_space));
+            app.notice = Some(match (saved, tmp_space) {
+                (Err(e), _) => {
+                    am_core::warn!("tui", "Could not set tmp space on {id}: {e}");
+                    format!("Couldn't move the worktree: {e}")
+                }
+                (Ok(()), true) => "Moved to tmp space".into(),
+                (Ok(()), false) => "Moved out of tmp space".into(),
+            });
+            collector.refresh(false);
+        }
         Action::RunScript { job, repo_id, worktree_path } => {
             ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
         }

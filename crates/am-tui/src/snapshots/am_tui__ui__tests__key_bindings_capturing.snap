@@ -12,12 +12,13 @@ expression: "render(&app, 100, 34)"
 │       │   Open Linear project     p                                                      │       │
 │       │   New worktree            N       (default n)                                    │       │
 │       │   Delete worktree         d                                                      │       │
+│       │   Move to/from tmp space  T                                                      │       │
 │       │   Add repository          A                                                      │       │
 │       │   Toggle log pane         w                                                      │       │
 │       │   View logs               L                                                      │       │
 │       │   Settings                s                                                      │       │
-│       │   Suggest a feature       f                                                      │       │
-│       │▌  Refresh now             press a key…                                           │       │
+│       │▌  Suggest a feature       press a key…                                           │       │
+│       │   Refresh now             r                                                      │       │
 │       │   Help                    ?                                                      │       │
 │       │   Quit                    q                                                      │       │
 │       │   Move down               j                                                      │       │
@@ -32,7 +33,6 @@ expression: "render(&app, 100, 34)"
 │       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │
-│       │                                                                                  │       │
-│       │ Press the new key for Refresh now · esc cancels                                  │       │
+│       │ Press the new key for Suggest a feature · esc cancels                            │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
  ⏎ open  │ g PR  l linear  p project  │ N new  d delete  │ s settings  r refresh  ? help  q quit

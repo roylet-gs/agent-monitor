@@ -11,7 +11,7 @@ use crate::harness::HarnessKind;
 use crate::paths;
 use crate::status::Status;
 
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// A subagent counts as running only if it reported something recently;
 /// protects the count from a missed SubagentStop (crash, killed session).
@@ -125,6 +125,13 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
         // v2.1.37 DBs are already at version 6 and migrations are additive.
         if !has_column(&tx, "worktrees", "pr_hint_at")? {
             tx.execute_batch("ALTER TABLE worktrees ADD COLUMN pr_hint_at TEXT")?;
+        }
+    }
+    if v < 7 {
+        // Worktrees labelled "tmp space" (someone else's branch pulled down to
+        // look at): grouped apart and left out of the worktree limit.
+        if !has_column(&tx, "worktrees", "tmp_space")? {
+            tx.execute_batch("ALTER TABLE worktrees ADD COLUMN tmp_space INTEGER NOT NULL DEFAULT 0")?;
         }
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -660,20 +667,9 @@ pub fn repositories(conn: &Connection) -> rusqlite::Result<Vec<crate::model::Rep
 
 pub fn worktrees(conn: &Connection) -> rusqlite::Result<Vec<crate::model::Worktree>> {
     let mut stmt = conn.prepare(
-        "SELECT id, repo_id, path, branch, name, custom_name, is_main, created_at FROM worktrees ORDER BY created_at DESC",
+        &format!("SELECT {WORKTREE_COLS} FROM worktrees ORDER BY created_at DESC"),
     )?;
-    let rows = stmt.query_map([], |r| {
-        Ok(crate::model::Worktree {
-            id: r.get(0)?,
-            repo_id: r.get(1)?,
-            path: r.get(2)?,
-            branch: r.get(3)?,
-            name: r.get(4)?,
-            custom_name: r.get(5)?,
-            is_main: r.get::<_, Option<i64>>(6)?.unwrap_or(0) != 0,
-            created_at: r.get(7)?,
-        })
-    })?;
+    let rows = stmt.query_map([], row_to_worktree)?;
     rows.collect()
 }
 
@@ -746,7 +742,7 @@ pub fn subagents(
 // Same SQL as the TS `src/lib/db.ts` functions named in each doc comment:
 // both apps write these rows, so conflict handling must stay identical.
 
-const WORKTREE_COLS: &str = "id, repo_id, path, branch, name, custom_name, is_main, created_at";
+const WORKTREE_COLS: &str = "id, repo_id, path, branch, name, custom_name, is_main, created_at, tmp_space";
 
 fn row_to_worktree(r: &rusqlite::Row) -> rusqlite::Result<crate::model::Worktree> {
     Ok(crate::model::Worktree {
@@ -758,6 +754,7 @@ fn row_to_worktree(r: &rusqlite::Row) -> rusqlite::Result<crate::model::Worktree
         custom_name: r.get(5)?,
         is_main: r.get::<_, Option<i64>>(6)?.unwrap_or(0) != 0,
         created_at: r.get(7)?,
+        tmp_space: r.get::<_, Option<i64>>(8)?.unwrap_or(0) != 0,
     })
 }
 
@@ -899,6 +896,13 @@ pub fn update_worktree_custom_name(
         "UPDATE worktrees SET custom_name = ?1, nickname_source = ?2 WHERE id = ?3",
         params![custom_name, source, id],
     )?;
+    Ok(())
+}
+
+/// Put a worktree in the tmp space (or take it out).
+pub fn set_worktree_tmp_space(conn: &Connection, id: &str, tmp_space: bool) -> rusqlite::Result<()> {
+    conn.execute("UPDATE worktrees SET tmp_space = ?1 WHERE id = ?2", params![tmp_space as i64, id])?;
+    crate::info!("db", "Worktree {id} tmp space = {tmp_space}");
     Ok(())
 }
 

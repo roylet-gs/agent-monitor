@@ -141,7 +141,7 @@ Everything can be changed later: `s` for settings (**Repositories…** manages t
 
 ## The Dashboard
 
-One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for agent sessions running in directories am doesn't track. Sessions from other harnesses carry a blue badge with their id (`✦ gemini`, `✦ codex`, `✦ cursor`…); Claude Code sessions have none. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
+One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for agent sessions running in directories am doesn't track. Worktrees you put in the **tmp space** (for pulling down someone else's branch to look at it) sit together in one `Tmp space` group after your repos, tagged with their repo when you track several, and don't count against the worktree limit. Sessions from other harnesses carry a blue badge with their id (`✦ gemini`, `✦ codex`, `✦ cursor`…); Claude Code sessions have none. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
 
 Agent status changes show up within about 200 ms of the hook firing.
 
@@ -156,8 +156,9 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
 | `l` | Open the Linear ticket |
 | `p` | Open the Linear project |
-| `n` | New worktree (adds a repository first if none is tracked) |
+| `n` | New worktree (adds a repository first if none is tracked); its last field, **Tmp space**, puts it in the tmp space |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
+| `T` | Move the worktree into the tmp space, or back to its repo |
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
@@ -436,7 +437,8 @@ am --version
 | Command | Description | Options |
 | ------- | ----------- | ------- |
 | `am worktree list` / `am ls` | List worktrees with agent status, PR and Linear info | `--repo`, `--json` |
-| `am worktree create <branch>` / `am new <branch>` | Create a worktree | `--repo`, `--name <name>`, `--base <branch>`, `--reuse` (use the existing local branch), `--track` (pull `origin/<branch>`), `--no-track` (new branch from base, no upstream), `--json` |
+| `am worktree create <branch>` / `am new <branch>` | Create a worktree | `--repo`, `--name <name>`, `--base <branch>`, `--reuse` (use the existing local branch), `--track` (pull `origin/<branch>`), `--no-track` (new branch from base, no upstream), `--tmp` (put it in the tmp space), `--json` |
+| `am worktree tmp <target>` | Put a worktree in the tmp space (grouped apart, outside the worktree limit) | `--off` (take it out), `--repo`, `--json` |
 | `am worktree delete <target>` | Delete a worktree | `--repo`, `--force` (even with uncommitted changes), `--delete-branch`, `--delete-remote` |
 | `am worktree open <target>` / `am open <target>` | Open in your configured editor | `--repo` |
 | `am worktree info <target>` | Detailed info for one worktree | `--repo`, `--json` |
@@ -510,7 +512,7 @@ Each tool runs the matching `am` command (with `--json` where it has one) in the
 | Tools | Command |
 | ----- | ------- |
 | `worktree_list`, `worktree_info` | `am worktree list` / `info` |
-| `worktree_create`, `worktree_delete`, `worktree_sync`, `worktree_open` | `am worktree create` / `delete` / `sync` / `open` |
+| `worktree_create`, `worktree_delete`, `worktree_sync`, `worktree_open`, `worktree_tmp` | `am worktree create` / `delete` / `sync` / `open` / `tmp` |
 | `repo_list`, `repo_add`, `repo_remove` | `am repo …` |
 | `pr_show`, `pr_open`, `linear_show`, `linear_open` | `am pr …`, `am linear …` |
 | `agent_status` | `am status` (get, or `set`) |

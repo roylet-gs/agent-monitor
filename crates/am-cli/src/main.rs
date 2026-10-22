@@ -164,6 +164,9 @@ struct CreateArgs {
     /// Create new local branch from base, do not track remote
     #[arg(long)]
     no_track: bool,
+    /// Put the worktree in the tmp space (grouped apart, outside the worktree limit)
+    #[arg(long)]
+    tmp: bool,
     #[command(flatten)]
     json: JsonOpt,
 }
@@ -194,6 +197,17 @@ enum WorktreeCmd {
         target: String,
         #[command(flatten)]
         repo: RepoOpt,
+    },
+    /// Put a worktree in the tmp space (grouped apart, outside the worktree limit), or take it out
+    Tmp {
+        target: String,
+        #[command(flatten)]
+        repo: RepoOpt,
+        /// Take it out of the tmp space
+        #[arg(long)]
+        off: bool,
+        #[command(flatten)]
+        json: JsonOpt,
     },
     /// Sync git worktree state with database
     Sync(RepoOpt),
@@ -418,6 +432,7 @@ fn main() {
                 lifecycle::delete(&target, repo.repo.as_deref(), force, delete_branch, delete_remote)
             }
             WorktreeCmd::Sync(r) => lifecycle::sync(r.repo.as_deref()),
+            WorktreeCmd::Tmp { target, repo, off, json } => worktree::tmp(&target, repo.repo.as_deref(), off, json.json),
             WorktreeCmd::Open { target, repo } => worktree::open(&target, repo.repo.as_deref()),
             WorktreeCmd::Info { target, repo, json } => worktree::info(&target, repo.repo.as_deref(), json.json),
         },

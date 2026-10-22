@@ -20,6 +20,8 @@ pub enum FormField {
     Branch,
     Name,
     Base,
+    /// On/off: put the new worktree in the tmp space.
+    TmpSpace,
 }
 
 #[derive(Debug, Clone)]
@@ -29,6 +31,7 @@ pub struct NewForm {
     pub branch: String,
     pub name: String,
     pub base: String,
+    pub tmp_space: bool,
     pub field: FormField,
     /// Last answer from the live check, for the branch it was asked about.
     pub check: Option<(String, BranchCheck)>,
@@ -53,6 +56,7 @@ impl NewForm {
         if !self.remote_exists() {
             f.push(FormField::Base);
         }
+        f.push(FormField::TmpSpace);
         f
     }
 
@@ -69,7 +73,7 @@ impl NewForm {
             FormField::Branch => Some(&mut self.branch),
             FormField::Name => Some(&mut self.name),
             FormField::Base => Some(&mut self.base),
-            FormField::Repo => None,
+            FormField::Repo | FormField::TmpSpace => None,
         }
     }
 
@@ -82,7 +86,13 @@ impl NewForm {
 
     fn request(&self) -> CreateRequest {
         let opt = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
-        CreateRequest { branch: self.branch.trim().to_string(), base_branch: opt(&self.base), custom_name: opt(&self.name), mode: CreateMode::Fresh }
+        CreateRequest {
+            branch: self.branch.trim().to_string(),
+            base_branch: opt(&self.base),
+            custom_name: opt(&self.name),
+            mode: CreateMode::Fresh,
+            tmp_space: self.tmp_space,
+        }
     }
 }
 
@@ -168,6 +178,7 @@ impl Modal {
             branch: prefix.to_string(),
             name: String::new(),
             base: base.to_string(),
+            tmp_space: false,
             field: FormField::Branch,
             check: None,
             pending_check: None,
@@ -207,6 +218,9 @@ impl Modal {
                         f.repo = if key == Key::Right { (f.repo + 1) % n } else { (f.repo + n - 1) % n };
                         f.check = None;
                         f.typed();
+                    }
+                    Key::Left | Key::Right | Key::Char(' ') if f.field == FormField::TmpSpace => {
+                        f.tmp_space = !f.tmp_space;
                     }
                     Key::Backspace => {
                         if let Some(b) = f.buffer() {
@@ -341,6 +355,22 @@ mod tests {
         assert_eq!(req.custom_name.as_deref(), Some("Nick"));
         assert_eq!(req.base_branch.as_deref(), Some("main"));
         assert_eq!(req.mode, CreateMode::Fresh);
+    }
+
+    #[test]
+    fn tmp_space_switch_is_off_until_toggled() {
+        let mut m = Modal::new_worktree(repos(), None, "feature/", "main");
+        typed(&mut m, "x");
+        while !matches!(&m, Modal::New(f) if f.field == FormField::TmpSpace) {
+            m.on_key(Key::Tab);
+        }
+        m.on_key(Key::Char(' '));
+        let Effect::Create(_, req) = m.on_key(Key::Enter) else { panic!() };
+        assert!(req.tmp_space);
+        let mut m = Modal::new_worktree(repos(), None, "feature/", "main");
+        typed(&mut m, "x");
+        let Effect::Create(_, req) = m.on_key(Key::Enter) else { panic!() };
+        assert!(!req.tmp_space, "off by default");
     }
 
     #[test]

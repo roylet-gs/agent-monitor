@@ -12,6 +12,7 @@ expression: "render(&app, 100, 34)"
 │       │   Open Linear project     p                                                      │       │
 │       │▌  New worktree            N       (default n)                                    │       │
 │       │   Delete worktree         d                                                      │       │
+│       │   Move to/from tmp space  T                                                      │       │
 │       │   Add repository          A                                                      │       │
 │       │   Toggle log pane         w                                                      │       │
 │       │   View logs               L                                                      │       │
@@ -28,7 +29,6 @@ expression: "render(&app, 100, 34)"
 │       │   Jump to bottom          G                                                      │       │
 │       │                                                                                  │       │
 │       │ Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit      │       │
-│       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │

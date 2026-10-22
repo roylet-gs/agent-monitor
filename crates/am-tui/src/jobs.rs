@@ -326,7 +326,7 @@ mod tests {
     }
 
     fn req() -> CreateRequest {
-        CreateRequest { branch: "feat".into(), base_branch: None, custom_name: None, mode: CreateMode::Fresh }
+        CreateRequest { branch: "feat".into(), base_branch: None, custom_name: None, mode: CreateMode::Fresh, tmp_space: false }
     }
 
     #[test]

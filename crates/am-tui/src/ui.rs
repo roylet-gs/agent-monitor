@@ -792,6 +792,7 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                 FormField::Branch => 1,
                 FormField::Name => 2,
                 FormField::Base => 3,
+                FormField::TmpSpace => 4,
             };
             let mut lines = Vec::new();
             let mut field = |lines: &mut Vec<Line<'static>>, label: &str, value: String, which: FormField, note: Option<Line<'static>>| {
@@ -801,7 +802,7 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                     Span::styled(if active { "▌" } else { " " }, theme.bold(theme.border_focus)),
                     Span::styled(format!("{label:<10}"), if active { theme.bold(theme.text) } else { theme.faint() }),
                     Span::styled(
-                        if active && which != FormField::Repo { format!("{value}▏") } else { value },
+                        if active && !matches!(which, FormField::Repo | FormField::TmpSpace) { format!("{value}▏") } else { value },
                         theme.fg(theme.text),
                     ),
                 ])];
@@ -829,6 +830,9 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             } else {
                 field(&mut lines, "Base", form.base.clone(), FormField::Base, None);
             }
+            let tmp_note = (form.field == FormField::TmpSpace)
+                .then(|| Line::styled("           grouped apart, outside the worktree limit", theme.faint()));
+            field(&mut lines, "Tmp space", format!("‹ {} ›", if form.tmp_space { "on" } else { "off" }), FormField::TmpSpace, tmp_note);
             if let Some(e) = &form.error {
                 lines.push(Line::raw(""));
                 lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
@@ -1412,7 +1416,12 @@ fn worktree_line<'a>(
             badge.push_str(&format!(" ◆{subagents}"));
         }
     }
-    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + tree.width());
+    // The tmp space mixes repos: name the row's own when several are tracked.
+    let repo_tag = match app.snapshot.repos.iter().find(|r| r.id == v.worktree.repo_id) {
+        Some(r) if v.worktree.tmp_space && app.snapshot.repos.len() > 1 => format!(" ({})", r.name),
+        _ => String::new(),
+    };
+    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + repo_tag.width() + tree.width());
     // Nickname (e.g. from the Linear ticket) first, then the branch, dimmed.
     // When space is short they share it so the branch never disappears.
     let w = &v.worktree;
@@ -1446,6 +1455,9 @@ fn worktree_line<'a>(
     left.push(Span::styled(name, name_style));
     if !branch.is_empty() {
         left.push(Span::styled(format!("  {branch}"), theme.faint()));
+    }
+    if !repo_tag.is_empty() {
+        left.push(Span::styled(repo_tag, theme.faint()));
     }
     let mut rest = badge.as_str();
     if let Some(r) = rest.strip_prefix(" •") {
@@ -1996,6 +2008,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (None, 0),
     (Some(Command::NewWorktree), 1),
     (Some(Command::Delete), 1),
+    (Some(Command::ToggleTmpSpace), 3),
     (Some(Command::AddRepo), 3),
     (None, 0),
     (Some(Command::ToggleLog), 3),
@@ -2165,6 +2178,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog, C::ViewLogs], "", "toggle log pane / open the log file (or folder)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
+        (&[C::ToggleTmpSpace], "", "move to / from the tmp space"),
         (&[C::AddRepo], "", "add repository"),
         (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
         (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
@@ -2300,6 +2314,7 @@ mod tests {
                 custom_name: None,
                 is_main: false,
                 created_at: "2025-10-01 00:00:00".into(),
+                tmp_space: false,
             },
             agent: status.map(|s| AgentState {
                 status: s,
@@ -3428,6 +3443,45 @@ mod tests {
             "children follow the parent, depth-first, with tree lines"
         );
         insta::assert_snapshot!(render(&app, 100, 14));
+    }
+
+    #[test]
+    fn tmp_space_group_names_each_rows_repo_and_t_moves_rows_out() {
+        use crate::keymap::Command;
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.repos = snap.groups.iter().map(|g| g.repo.clone()).collect();
+        let mut theirs = view("w7", "r2", "alice/fix-ci", None);
+        theirs.worktree.tmp_space = true;
+        snap.groups.push(WorktreeGroup {
+            repo: Repository { id: TMP_SPACE_GROUP_ID.into(), path: String::new(), name: "Tmp space".into() },
+            worktrees: vec![theirs],
+        });
+        app.apply(snap);
+        insta::assert_snapshot!(render(&app, 120, 18));
+        assert!(app.rows.contains(&crate::app::Row::Repo("Tmp space".into())));
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "w7").unwrap();
+        assert_eq!(app.on_key(Key::Char('T')), crate::app::Action::SetTmpSpace("w7".into(), false));
+        app.selected = 0;
+        assert_eq!(app.on_key(Key::Char('T')), crate::app::Action::SetTmpSpace("w1".into(), true));
+        // The main checkout stays with its repo.
+        let mut snap = app.snapshot.clone();
+        snap.groups[1].worktrees[0].worktree.is_main = true;
+        app.apply(snap);
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "w3").unwrap();
+        assert!(!app.key_available(Command::ToggleTmpSpace));
+        assert_eq!(app.on_key(Key::Char('T')), crate::app::Action::None);
+    }
+
+    #[test]
+    fn a_tmp_space_create_waits_in_the_tmp_space() {
+        let mut app = fixture();
+        let repo = app.snapshot.groups[0].repo.clone();
+        let req = am_core::worktrees::CreateRequest { branch: "bob/x".into(), tmp_space: true, ..Default::default() };
+        let job = app.jobs.start_create(repo, req);
+        app.rebuild_rows();
+        let n = app.rows.len();
+        assert_eq!(app.rows[n - 2..], [crate::app::Row::Repo("Tmp space".into()), crate::app::Row::Pending(job)]);
     }
 
     fn session(harness: HarnessKind, id: &str, status: Status, updated: &str, tokens: Option<u64>) -> SessionView {
