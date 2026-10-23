@@ -792,7 +792,6 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                 FormField::Branch => 1,
                 FormField::Name => 2,
                 FormField::Base => 3,
-                FormField::TmpSpace => 4,
             };
             let mut lines = Vec::new();
             let mut field = |lines: &mut Vec<Line<'static>>, label: &str, value: String, which: FormField, note: Option<Line<'static>>| {
@@ -802,7 +801,7 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                     Span::styled(if active { "▌" } else { " " }, theme.bold(theme.border_focus)),
                     Span::styled(format!("{label:<10}"), if active { theme.bold(theme.text) } else { theme.faint() }),
                     Span::styled(
-                        if active && !matches!(which, FormField::Repo | FormField::TmpSpace) { format!("{value}▏") } else { value },
+                        if active && which != FormField::Repo { format!("{value}▏") } else { value },
                         theme.fg(theme.text),
                     ),
                 ])];
@@ -814,30 +813,43 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             if form.repos.len() > 1 {
                 field(&mut lines, "Repo", format!("‹ {} ›", form.repo().name), FormField::Repo, None);
             }
-            let note = if form.remote_exists() {
-                Some(Line::styled("           ✓ exists on origin — Enter will offer to pull it", theme.fg(theme.green)))
+            // Which of these Enter takes without asking: NewForm::request.
+            let note = if form.origin_only() {
+                Some(Line::styled("           ✓ exists on origin — Enter will pull it", theme.fg(theme.green)))
+            } else if form.remote_exists() {
+                Some(Line::styled("           ✓ on origin and locally — Enter will ask first", theme.fg(theme.green)))
             } else if form.local_only() {
-                Some(Line::styled("           ! exists locally only — Enter will offer to reuse it", theme.fg(theme.yellow)))
+                let offer = if form.tmp_space { "" } else { "offer to " };
+                Some(Line::styled(format!("           ! exists locally only — Enter will {offer}reuse it"), theme.fg(theme.yellow)))
+            } else if form.tmp_space && form.missing() {
+                Some(Line::styled("           ✗ not found locally or on origin", theme.fg(theme.red)))
             } else if form.pending_check.is_some() {
                 Some(Line::styled("           checking…", theme.faint()))
             } else {
                 None
             };
             field(&mut lines, "Branch", form.branch.clone(), FormField::Branch, note);
+            if form.tmp_space {
+                lines.push(Line::styled(" Checks out an existing branch to look at, in the Tmp space group", theme.faint()));
+                if let Some(e) = &form.error {
+                    lines.push(Line::raw(""));
+                    lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
+                }
+                let hint = if form.repos.len() > 1 { "tab next  ⏎ pull  esc cancel" } else { "⏎ pull  esc cancel" };
+                ("Pull into tmp space".into(), theme.border_focus, hint, lines)
+            } else {
             field(&mut lines, "Name", if form.name.is_empty() && form.field != FormField::Name { "(optional)".into() } else { form.name.clone() }, FormField::Name, None);
             if form.remote_exists() {
                 lines.push(Line::styled(format!(" Base      tracks origin/{}", form.branch), theme.faint()));
             } else {
                 field(&mut lines, "Base", form.base.clone(), FormField::Base, None);
             }
-            let tmp_note = (form.field == FormField::TmpSpace)
-                .then(|| Line::styled("           grouped apart, outside the worktree limit", theme.faint()));
-            field(&mut lines, "Tmp space", format!("‹ {} ›", if form.tmp_space { "on" } else { "off" }), FormField::TmpSpace, tmp_note);
             if let Some(e) = &form.error {
                 lines.push(Line::raw(""));
                 lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
             }
             ("New worktree".into(), theme.border_focus, "tab next  ⏎ create  esc cancel", lines)
+            }
         }
         Modal::Delete(d) => {
             let w = &d.view.worktree;
@@ -1745,14 +1757,19 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits
                     let pull = if *local { "Pull remote (reset local to origin)".to_string() } else { format!("Pull remote (track origin/{b})") };
                     let r = push(choice("⏎ / p", false), &pull, theme.fg(theme.text));
                     marks.push((r, Target::JobKey(i, Key::Enter), false));
-                    let disc = if *local { "Create disconnected (deletes local, no tracking)" } else { "Create disconnected (new branch from base, no tracking)" };
-                    let r = push(choice("c", *local), disc, theme.fg(theme.text));
-                    marks.push((r, Target::JobKey(i, Key::Char('c')), false));
+                    // The tmp space only checks out existing branches: no new-branch choices.
+                    if !req.tmp_space {
+                        let disc = if *local { "Create disconnected (deletes local, no tracking)" } else { "Create disconnected (new branch from base, no tracking)" };
+                        let r = push(choice("c", *local), disc, theme.fg(theme.text));
+                        marks.push((r, Target::JobKey(i, Key::Char('c')), false));
+                    }
                 } else {
                     let r = push(choice("⏎ / r", false), "Reuse existing local branch", theme.fg(theme.text));
                     marks.push((r, Target::JobKey(i, Key::Enter), false));
-                    let r = push(choice("d", true), "Delete local branch and re-create from base", theme.fg(theme.text));
-                    marks.push((r, Target::JobKey(i, Key::Char('d')), false));
+                    if !req.tmp_space {
+                        let r = push(choice("d", true), "Delete local branch and re-create from base", theme.fg(theme.text));
+                        marks.push((r, Target::JobKey(i, Key::Char('d')), false));
+                    }
                 }
                 let r = push(choice("n", false), "Cancel", theme.fg(theme.text));
                     marks.push((r, Target::JobKey(i, Key::Char('n')), false));
@@ -2008,7 +2025,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (None, 0),
     (Some(Command::NewWorktree), 1),
     (Some(Command::Delete), 1),
-    (Some(Command::ToggleTmpSpace), 3),
+    (Some(Command::PullToTmpSpace), 3),
     (Some(Command::AddRepo), 3),
     (None, 0),
     (Some(Command::ToggleLog), 3),
@@ -2178,7 +2195,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog, C::ViewLogs], "", "toggle log pane / open the log file (or folder)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
-        (&[C::ToggleTmpSpace], "", "move to / from the tmp space"),
+        (&[C::PullToTmpSpace], "", "pull an existing branch into the tmp space"),
         (&[C::AddRepo], "", "add repository"),
         (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
         (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
@@ -3208,7 +3225,6 @@ mod tests {
     #[test]
     fn terminal_and_agent_keys_are_gone() {
         let mut app = fixture();
-        assert_eq!(app.on_key(Key::Char('t')), crate::app::Action::None);
         assert_eq!(app.on_key(Key::Char('c')), crate::app::Action::None);
         let screen = render(&app, 120, 16);
         assert!(!screen.contains("t terminal") && !screen.contains("c agent"), "{screen}");
@@ -3229,6 +3245,26 @@ mod tests {
             m.on_check_result("feature/x".into(), am_core::worktrees::BranchCheck { local: false, remote: Some(true) });
         }
         insta::assert_snapshot!(render(&app, 100, 16));
+    }
+
+    #[test]
+    fn tmp_space_pull_modal_renders_and_refuses_a_missing_branch() {
+        let mut app = fixture();
+        app.snapshot.repos = vec![Repository { id: "r1".into(), path: "/r1".into(), name: "agent-monitor".into() }];
+        app.on_key(Key::Char('t'));
+        for c in "bob/pr".chars() {
+            app.on_key(Key::Char(c));
+        }
+        if let Some(m) = &mut app.modal {
+            m.on_check_result("bob/pr".into(), am_core::worktrees::BranchCheck { local: false, remote: Some(true) });
+        }
+        insta::assert_snapshot!(render(&app, 100, 14));
+        if let Some(m) = &mut app.modal {
+            m.on_check_result("bob/pr".into(), am_core::worktrees::BranchCheck { local: false, remote: Some(false) });
+        }
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::None);
+        let screen = render(&app, 100, 14);
+        assert!(screen.contains("✗ not found locally or on origin") && screen.contains("No such branch"), "{screen}");
     }
 
     #[test]
@@ -3446,8 +3482,7 @@ mod tests {
     }
 
     #[test]
-    fn tmp_space_group_names_each_rows_repo_and_t_moves_rows_out() {
-        use crate::keymap::Command;
+    fn tmp_space_group_names_each_rows_repo() {
         let mut app = fixture();
         let mut snap = app.snapshot.clone();
         snap.repos = snap.groups.iter().map(|g| g.repo.clone()).collect();
@@ -3460,17 +3495,6 @@ mod tests {
         app.apply(snap);
         insta::assert_snapshot!(render(&app, 120, 18));
         assert!(app.rows.contains(&crate::app::Row::Repo("Tmp space".into())));
-        app.selected = app.flat.iter().position(|v| v.worktree.id == "w7").unwrap();
-        assert_eq!(app.on_key(Key::Char('T')), crate::app::Action::SetTmpSpace("w7".into(), false));
-        app.selected = 0;
-        assert_eq!(app.on_key(Key::Char('T')), crate::app::Action::SetTmpSpace("w1".into(), true));
-        // The main checkout stays with its repo.
-        let mut snap = app.snapshot.clone();
-        snap.groups[1].worktrees[0].worktree.is_main = true;
-        app.apply(snap);
-        app.selected = app.flat.iter().position(|v| v.worktree.id == "w3").unwrap();
-        assert!(!app.key_available(Command::ToggleTmpSpace));
-        assert_eq!(app.on_key(Key::Char('T')), crate::app::Action::None);
     }
 
     #[test]

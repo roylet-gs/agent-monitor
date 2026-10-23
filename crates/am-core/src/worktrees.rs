@@ -791,11 +791,21 @@ fn create_worktree_inner(
         path_exists: wt_path.exists(),
     };
 
+    // The tmp space checks out someone else's branch: never a new one.
+    if req.tmp_space && matches!(req.mode, CreateMode::Disconnected | CreateMode::DeleteAndRecreate) {
+        return Err(CreateError::Invalid("The tmp space only takes an existing branch as it is".into()));
+    }
     if req.mode == CreateMode::Fresh {
         stage("Checking branch…".into());
         let check = check_branch_with(repo_path, branch, probe);
         if check.exists() || wt_path.exists() {
             return Err(branch_exists_err(check));
+        }
+        if req.tmp_space {
+            debug!("git", "Tmp-space create of {branch} refused: no such branch (remote={:?})", check.remote);
+            return Err(CreateError::Invalid(format!(
+                "No branch \"{branch}\" locally or on origin: the tmp space only takes existing branches"
+            )));
         }
     }
 
@@ -1580,7 +1590,21 @@ mod tests {
         let settings = Settings { worktree_limit_enabled: true, max_worktrees: 1, ..Settings::default() };
         fx.create_with(&settings, "one", CreateMode::Fresh).unwrap();
         let req = CreateRequest { branch: "theirs/fix".into(), tmp_space: true, ..Default::default() };
-        let wt = create_worktree_with(&fx.conn, &settings, &fx.repo, &req, &RemoteProbe::git_only()).unwrap();
+        let probe = RemoteProbe::git_only();
+        // Only existing branches: a new one is refused, in any mode that makes one.
+        match create_worktree_with(&fx.conn, &settings, &fx.repo, &req, &probe) {
+            Err(CreateError::Invalid(m)) => assert!(m.contains("only takes existing branches"), "{m}"),
+            other => panic!("expected refusal, got {other:?}"),
+        }
+        let disconnected = CreateRequest { mode: CreateMode::Disconnected, ..req.clone() };
+        assert!(matches!(create_worktree_with(&fx.conn, &settings, &fx.repo, &disconnected, &probe), Err(CreateError::Invalid(_))));
+        sh(&fx.repo_path, &["branch", "theirs/fix"]);
+        assert!(matches!(
+            create_worktree_with(&fx.conn, &settings, &fx.repo, &req, &probe),
+            Err(CreateError::BranchExists { local: true, remote: false, .. })
+        ));
+        let req = CreateRequest { mode: CreateMode::ReuseLocal, ..req };
+        let wt = create_worktree_with(&fx.conn, &settings, &fx.repo, &req, &probe).unwrap();
         assert!(wt.tmp_space);
         // Re-syncing keeps the label, and a tmp worktree doesn't count.
         sync_repo(&fx.conn, &fx.repo).unwrap();

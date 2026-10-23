@@ -177,19 +177,36 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                 }
                 launcher::Msg::JobLog(job, line) => app.jobs.log(job, line),
                 launcher::Msg::Created(job, result) => {
-                    use am_core::worktrees::CreateError;
+                    use am_core::worktrees::{CreateError, CreateMode};
                     match result {
                         Ok(w) => {
                             app.notice = Some(format!("Created {}", w.branch));
                             app.pending_select = Some(w.id.clone());
                             app.jobs.set_worktree(job, w.id.clone());
                             let repo_id = w.repo_id.clone();
-                            if am_core::worktrees::has_script(&repo_id) {
+                            // A tmp-space worktree is only there to look at:
+                            // no startup script.
+                            if !w.tmp_space && am_core::worktrees::has_script(&repo_id) {
                                 app.jobs.ask(job, jobs::Question::RunScript { repo_id, worktree_path: w.path.clone() });
                             } else {
                                 app.jobs.finish(job, Ok(()), Instant::now());
                             }
                             collector.refresh(false);
+                        }
+                        // Same choices as NewForm::request, for an Enter
+                        // pressed before the live check answered: pull a
+                        // branch that is only on origin; in the tmp space
+                        // reuse one that is only local.
+                        Err(CreateError::BranchExists { local, remote, path_exists: false })
+                            if remote != local
+                                && (remote
+                                    || app.jobs.get(job).is_some_and(|j| j.pending_create().is_some_and(|(_, req, _)| req.tmp_space))) =>
+                        {
+                            let mode = if remote { CreateMode::TrackRemote } else { CreateMode::ReuseLocal };
+                            if let jobs::JobEffect::Create(job, repo, req) = app.jobs.rerun_create(job, mode) {
+                                info!("tui", "Create of {}: branch exists (local={local}, remote={remote}), using {mode:?}", req.branch);
+                                ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone());
+                            }
                         }
                         Err(CreateError::BranchExists { local, remote, .. }) if local || remote => {
                             app.jobs.ask(job, jobs::Question::BranchExists { local, remote });
@@ -415,18 +432,6 @@ fn dispatch(
                 let _ = am_core::db::remove_standalone_session(&conn, &path);
             }
             app.notice = Some("Stopped tracking session".into());
-            collector.refresh(false);
-        }
-        Action::SetTmpSpace(id, tmp_space) => {
-            let saved = am_core::db::open().and_then(|conn| am_core::db::set_worktree_tmp_space(&conn, &id, tmp_space));
-            app.notice = Some(match (saved, tmp_space) {
-                (Err(e), _) => {
-                    am_core::warn!("tui", "Could not set tmp space on {id}: {e}");
-                    format!("Couldn't move the worktree: {e}")
-                }
-                (Ok(()), true) => "Moved to tmp space".into(),
-                (Ok(()), false) => "Moved out of tmp space".into(),
-            });
             collector.refresh(false);
         }
         Action::RunScript { job, repo_id, worktree_path } => {

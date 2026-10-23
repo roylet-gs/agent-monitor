@@ -10,9 +10,20 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-test("live check flags a branch that exists on origin; the jobs pane offers to pull it", async ({ page }) => {
+test("a branch only on origin is pulled without asking; with a local copy too the jobs pane asks", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
+  const branch = "feature/on-origin";
+  const row = /│[▌ ][│├└─ ]*\S feature\/on-origin\s/;
+  const deleteRow = async (alsoBranch: boolean) => {
+    await tui.selectRow(branch);
+    await tui.sendKey("d");
+    await tui.waitForText(`Delete worktree "${branch}"`);
+    await tui.sendKey("y");
+    await tui.waitForText(`Also delete local branch ${branch}?`);
+    await tui.sendKey(alsoBranch ? "y" : "n");
+    await tui.waitForGone(branch, 20_000);
+  };
 
   await tui.sendKey("n");
   await tui.waitForText("New worktree");
@@ -20,27 +31,43 @@ test("live check flags a branch that exists on origin; the jobs pane offers to p
   // Branch is prefilled with the default prefix.
   await tui.waitForMatch(/Branch\s+feature\/▏/);
 
+  // Only on origin (someone else's PR): Enter pulls it, no branch question.
   await tui.type("on-origin");
-  await tui.waitForText("✓ exists on origin — Enter will offer to pull it", 10_000);
+  await tui.waitForText("✓ exists on origin — Enter will pull it", 10_000);
   await tui.waitForText("Base      tracks origin/feature/on-origin");
   await tui.screenshot("new-worktree-on-origin");
+  await tui.sendKey("Enter");
+  await tui.waitForGone("New worktree", 5_000);
+  await tui.skipStartupScript(); // a normal create still offers the script
+  expect(await tui.getScreenText()).not.toContain('Branch "feature/on-origin" exists');
+  await tui.waitForMatch(row, 15_000);
+  await tui.screenshot("on-origin-pulled");
 
+  // Keep the local branch: now pulling would reset it, so the pane asks.
+  await deleteRow(false);
+  await tui.sendKey("n");
+  await tui.waitForText("New worktree");
+  await tui.type("on-origin");
+  await tui.waitForText("✓ on origin and locally — Enter will ask first", 10_000);
   await tui.sendKey("Enter");
   // No blocking box: the question shows in the jobs pane, with a
   // placeholder row in the list, and the list keeps its keys.
   await tui.waitForGone("New worktree", 5_000);
   await tui.waitForText("─Jobs", 10_000);
   await tui.waitForText('Branch "feature/on-origin" exists', 15_000);
-  await tui.waitForText("Pull remote (track");
+  await tui.waitForText("Pull remote (reset local to origin)");
   await tui.waitForText("feature/on-origin waiting — ⇥ to answer");
   expect(await tui.keyBar()).toContain("⇥ answer");
   await tui.screenshot("branch-exists-jobs-pane");
 
   await tui.sendKey("Tab");
   await tui.waitForText("⇥ back  x dismiss");
-  await tui.sendKey("n"); // cancel the create
-  await tui.waitForGone("─Jobs", 5_000);
-  await tui.waitForGone("waiting — ⇥ to answer");
+  await tui.sendKey("p"); // pull
+  await tui.skipStartupScript();
+  await tui.waitForMatch(row, 15_000);
+
+  // Clean up, local branch too, so the branch is origin-only again.
+  await deleteRow(true);
 });
 
 test("creating a fresh worktree adds and selects its row", async ({ page }) => {

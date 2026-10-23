@@ -156,9 +156,9 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
 | `l` | Open the Linear ticket |
 | `p` | Open the Linear project |
-| `n` | New worktree (adds a repository first if none is tracked); its last field, **Tmp space**, puts it in the tmp space |
+| `n` | New worktree (adds a repository first if none is tracked) |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
-| `T` | Move the worktree into the tmp space, or back to its repo |
+| `t` | Pull into the tmp space: paste an existing branch (say, a PR you're reviewing) and it is checked out in the `Tmp space` group, tracking origin (or reusing a local-only branch), with no questions and no startup script. A branch that exists neither locally nor on origin is refused; `t` never makes a new branch |
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
@@ -269,12 +269,13 @@ The parent comes from the open PR's base branch when it targets another worktree
 
 Press `n` for the New Worktree form: repository (when you track several), branch name (prefilled with `defaultBranchPrefix`), an optional nickname, and the base branch. While you type the branch name, am checks in the background whether it already exists:
 
-- `✓ exists on origin — Enter will offer to pull it`: the base field is skipped, since the worktree will track `origin/<branch>`
+- `✓ exists on origin — Enter will pull it`: someone else's branch (say, a PR you're reviewing). Enter checks it out tracking `origin/<branch>` without asking, and the base field is skipped
+- `✓ on origin and locally — Enter will ask first`: pulling resets your local copy to origin, so you're asked first
 - `! exists locally only — Enter will offer to reuse it`
 
 Creating and deleting run in the background: a **Jobs** pane opens on the right showing each step (fetch, `git worktree add`, sync…), the new worktree appears in the list straight away as a `creating…` placeholder, and the dashboard stays usable. Any follow-up question is asked in that pane; press `Tab` to focus it and answer (`Tab` again goes back to the list, `x` dismisses a finished or failed job). The pane closes by itself once nothing is running or waiting. If the repo has a startup script, the pane offers to run it; its output streams into the pane (set `startupScriptMode` to `window` to open it in a new terminal window instead).
 
-If the branch exists, the Jobs pane offers the choices: pull the remote (track `origin/<branch>`, or reset the local branch to it), create disconnected (a new branch from the base with no tracking), reuse the existing local branch, or delete the local branch and re-create it from the base. Worktrees are created at `<repo>/.claude/worktrees/<branch>` (with `/` replaced by `-`), branching from `origin/<base>` when it exists.
+Otherwise, if the branch exists, the Jobs pane offers the choices: pull the remote (track `origin/<branch>`, or reset the local branch to it), create disconnected (a new branch from the base with no tracking), reuse the existing local branch, or delete the local branch and re-create it from the base. Worktrees are created at `<repo>/.claude/worktrees/<branch>` (with `/` replaced by `-`), branching from `origin/<base>` when it exists.
 
 Press `d` to delete. The dialog warns about uncommitted changes and unpushed commits, then asks whether to delete the local branch too. The `main`/`master` checkout can't be deleted. A main checkout on a non-default branch offers to delete just that branch, and a row whose directory has disappeared is cleaned up as a stale entry.
 
@@ -437,8 +438,7 @@ am --version
 | Command | Description | Options |
 | ------- | ----------- | ------- |
 | `am worktree list` / `am ls` | List worktrees with agent status, PR and Linear info | `--repo`, `--json` |
-| `am worktree create <branch>` / `am new <branch>` | Create a worktree | `--repo`, `--name <name>`, `--base <branch>`, `--reuse` (use the existing local branch), `--track` (pull `origin/<branch>`), `--no-track` (new branch from base, no upstream), `--tmp` (put it in the tmp space), `--json` |
-| `am worktree tmp <target>` | Put a worktree in the tmp space (grouped apart, outside the worktree limit) | `--off` (take it out), `--repo`, `--json` |
+| `am worktree create <branch>` / `am new <branch>` | Create a worktree | `--repo`, `--name <name>`, `--base <branch>`, `--reuse` (use the existing local branch), `--track` (pull `origin/<branch>`), `--no-track` (new branch from base, no upstream), `--tmp` (check out an existing branch in the tmp space: one only on origin is tracked, one only local reused, without `--track`/`--reuse`; refused for a branch that doesn't exist), `--json` |
 | `am worktree delete <target>` | Delete a worktree | `--repo`, `--force` (even with uncommitted changes), `--delete-branch`, `--delete-remote` |
 | `am worktree open <target>` / `am open <target>` | Open in your configured editor | `--repo` |
 | `am worktree info <target>` | Detailed info for one worktree | `--repo`, `--json` |
@@ -512,7 +512,7 @@ Each tool runs the matching `am` command (with `--json` where it has one) in the
 | Tools | Command |
 | ----- | ------- |
 | `worktree_list`, `worktree_info` | `am worktree list` / `info` |
-| `worktree_create`, `worktree_delete`, `worktree_sync`, `worktree_open`, `worktree_tmp` | `am worktree create` / `delete` / `sync` / `open` / `tmp` |
+| `worktree_create`, `worktree_delete`, `worktree_sync`, `worktree_open` | `am worktree create` / `delete` / `sync` / `open` |
 | `repo_list`, `repo_add`, `repo_remove` | `am repo …` |
 | `pr_show`, `pr_open`, `linear_show`, `linear_open` | `am pr …`, `am linear …` |
 | `agent_status` | `am status` (get, or `set`) |

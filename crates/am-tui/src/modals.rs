@@ -1,5 +1,6 @@
 //! Worktree lifecycle dialogs: new worktree form (with the advisory live
-//! "does this branch exist?" check), delete confirmation, and a busy
+//! "does this branch exist?" check; the same form, cut down to the branch,
+//! pulls an existing branch into the tmp space), delete confirmation, and a busy
 //! indicator. Pure state + key handling; the work itself runs in ops.rs.
 //! Follow-up questions (branch exists, startup script) are asked in the
 //! jobs pane (jobs.rs).
@@ -20,8 +21,6 @@ pub enum FormField {
     Branch,
     Name,
     Base,
-    /// On/off: put the new worktree in the tmp space.
-    TmpSpace,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +30,8 @@ pub struct NewForm {
     pub branch: String,
     pub name: String,
     pub base: String,
+    /// `t`: pull an existing branch into the tmp space. Only the repo and
+    /// branch fields; a branch that exists nowhere is refused.
     pub tmp_space: bool,
     pub field: FormField,
     /// Last answer from the live check, for the branch it was asked about.
@@ -51,12 +52,14 @@ impl NewForm {
             f.push(FormField::Repo);
         }
         f.push(FormField::Branch);
+        if self.tmp_space {
+            return f;
+        }
         f.push(FormField::Name);
         // Tracking origin/<branch>: the base doesn't apply.
         if !self.remote_exists() {
             f.push(FormField::Base);
         }
-        f.push(FormField::TmpSpace);
         f
     }
 
@@ -64,8 +67,20 @@ impl NewForm {
         self.check.as_ref().is_some_and(|(b, c)| *b == self.branch && c.remote == Some(true))
     }
 
+    /// On origin with no local copy: someone else's branch, so Enter pulls
+    /// it without asking. With a local copy too, pulling resets that copy to
+    /// origin, so the jobs pane still asks.
+    pub fn origin_only(&self) -> bool {
+        self.check.as_ref().is_some_and(|(b, c)| *b == self.branch && !c.local && c.remote == Some(true))
+    }
+
     pub fn local_only(&self) -> bool {
         self.check.as_ref().is_some_and(|(b, c)| *b == self.branch && c.local && c.remote != Some(true))
+    }
+
+    /// The live check says the branch is neither local nor on origin.
+    pub fn missing(&self) -> bool {
+        self.check.as_ref().is_some_and(|(b, c)| *b == self.branch && !c.local && c.remote == Some(false))
     }
 
     fn buffer(&mut self) -> Option<&mut String> {
@@ -73,7 +88,7 @@ impl NewForm {
             FormField::Branch => Some(&mut self.branch),
             FormField::Name => Some(&mut self.name),
             FormField::Base => Some(&mut self.base),
-            FormField::Repo | FormField::TmpSpace => None,
+            FormField::Repo => None,
         }
     }
 
@@ -86,11 +101,23 @@ impl NewForm {
 
     fn request(&self) -> CreateRequest {
         let opt = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
+        // A branch only on origin is pulled without asking; the tmp space (a
+        // review checkout) also reuses a local-only branch as it is. The jobs
+        // pane does the same when the live check hadn't answered yet
+        // (main.rs), and am_core refuses a tmp-space branch that doesn't
+        // exist.
+        let mode = if self.origin_only() {
+            CreateMode::TrackRemote
+        } else if self.tmp_space && self.local_only() {
+            CreateMode::ReuseLocal
+        } else {
+            CreateMode::Fresh
+        };
         CreateRequest {
             branch: self.branch.trim().to_string(),
             base_branch: opt(&self.base),
             custom_name: opt(&self.name),
-            mode: CreateMode::Fresh,
+            mode,
             tmp_space: self.tmp_space,
         }
     }
@@ -186,6 +213,12 @@ impl Modal {
         })
     }
 
+    /// `t`: paste an existing branch to check it out in the tmp space.
+    pub fn tmp_branch(repos: Vec<Repository>, default_repo: Option<&str>) -> Modal {
+        let Modal::New(f) = Modal::new_worktree(repos, default_repo, "", "") else { unreachable!() };
+        Modal::New(NewForm { tmp_space: true, ..f })
+    }
+
     pub fn busy(text: String) -> Modal {
         Modal::Busy { text }
     }
@@ -219,9 +252,6 @@ impl Modal {
                         f.check = None;
                         f.typed();
                     }
-                    Key::Left | Key::Right | Key::Char(' ') if f.field == FormField::TmpSpace => {
-                        f.tmp_space = !f.tmp_space;
-                    }
                     Key::Backspace => {
                         if let Some(b) = f.buffer() {
                             b.pop();
@@ -241,6 +271,10 @@ impl Modal {
                         if f.branch.trim().is_empty() || f.branch.ends_with('/') {
                             f.error = Some("Enter a branch name".into());
                             f.field = FormField::Branch;
+                            return Effect::None;
+                        }
+                        if f.tmp_space && f.missing() {
+                            f.error = Some("No such branch locally or on origin".into());
                             return Effect::None;
                         }
                         return Effect::Create(f.repo().clone(), f.request());
@@ -358,19 +392,54 @@ mod tests {
     }
 
     #[test]
-    fn tmp_space_switch_is_off_until_toggled() {
+    fn tmp_branch_form_is_repo_and_branch_only() {
+        let mut m = Modal::tmp_branch(repos(), Some("r2"));
+        let Modal::New(f) = &m else { panic!() };
+        assert_eq!(f.fields(), [FormField::Repo, FormField::Branch]);
+        assert_eq!(f.branch, "", "no prefix: the branch is pasted");
+        typed(&mut m, "bob/pr");
+        let Effect::Create(repo, req) = m.on_key(Key::Enter) else { panic!() };
+        assert_eq!((repo.id.as_str(), req.branch.as_str(), req.tmp_space), ("r2", "bob/pr", true));
+        assert_eq!((req.custom_name, req.base_branch), (None, None));
         let mut m = Modal::new_worktree(repos(), None, "feature/", "main");
         typed(&mut m, "x");
-        while !matches!(&m, Modal::New(f) if f.field == FormField::TmpSpace) {
-            m.on_key(Key::Tab);
+        let Effect::Create(_, req) = m.on_key(Key::Enter) else { panic!() };
+        assert!(!req.tmp_space, "n never makes a tmp-space worktree");
+    }
+
+    #[test]
+    fn tmp_branch_refuses_a_branch_that_exists_nowhere() {
+        let mut m = Modal::tmp_branch(repos(), None);
+        typed(&mut m, "nope");
+        m.on_check_result("nope".into(), BranchCheck { local: false, remote: Some(false) });
+        assert!(matches!(m.on_key(Key::Enter), Effect::None));
+        let Modal::New(f) = &m else { panic!() };
+        assert_eq!(f.error.as_deref(), Some("No such branch locally or on origin"));
+        // An undetermined remote is left to the create (am_core checks again).
+        m.on_check_result("nope".into(), BranchCheck { local: false, remote: None });
+        assert!(matches!(m.on_key(Key::Enter), Effect::Create(..)));
+    }
+
+    #[test]
+    fn existing_branches_are_taken_without_asking_when_safe() {
+        let create = |tmp: bool, check: BranchCheck| {
+            let mut m = if tmp { Modal::tmp_branch(repos(), None) } else { Modal::new_worktree(repos(), None, "", "main") };
+            typed(&mut m, "pr");
+            m.on_check_result("pr".into(), check);
+            let Effect::Create(_, req) = m.on_key(Key::Enter) else { panic!() };
+            req.mode
+        };
+        let remote = BranchCheck { local: false, remote: Some(true) };
+        let both = BranchCheck { local: true, remote: Some(true) };
+        let local = BranchCheck { local: true, remote: Some(false) };
+        let none = BranchCheck { local: false, remote: Some(false) };
+        for tmp in [true, false] {
+            assert_eq!(create(tmp, remote), CreateMode::TrackRemote, "an origin-only branch is pulled");
+            assert_eq!(create(tmp, both), CreateMode::Fresh, "pulling would reset the local copy: asks");
         }
-        m.on_key(Key::Char(' '));
-        let Effect::Create(_, req) = m.on_key(Key::Enter) else { panic!() };
-        assert!(req.tmp_space);
-        let mut m = Modal::new_worktree(repos(), None, "feature/", "main");
-        typed(&mut m, "x");
-        let Effect::Create(_, req) = m.on_key(Key::Enter) else { panic!() };
-        assert!(!req.tmp_space, "off by default");
+        assert_eq!(create(false, none), CreateMode::Fresh);
+        assert_eq!(create(true, local), CreateMode::ReuseLocal);
+        assert_eq!(create(false, local), CreateMode::Fresh, "a normal create asks about a local branch");
     }
 
     #[test]

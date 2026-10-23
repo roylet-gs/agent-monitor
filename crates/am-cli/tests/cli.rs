@@ -884,6 +884,7 @@ fn worktree_create_delete_sync_end_to_end() {
     git(&repo, &["remote", "add", "origin", "../origin.git"]);
     git(&repo, &["push", "-q", "-u", "origin", "main"]);
     git(&repo, &["push", "-q", "origin", "main:refs/heads/feature/remote"]);
+    git(&repo, &["push", "-q", "origin", "main:refs/heads/bob/pr"]);
     let r = repo.to_str().unwrap();
     env.ok(&["repo", "add", r]);
 
@@ -899,17 +900,25 @@ fn worktree_create_delete_sync_end_to_end() {
     assert_eq!(o.json()["mode"], "track");
     assert_eq!(o.json()["tmpSpace"], false);
 
-    // Tmp space: set at create, listed last with `tmpSpace`, toggled with `worktree tmp`.
+    // Tmp space: existing branches only, set at create, listed last with `tmpSpace`.
+    let o = env.run(&["worktree", "create", "alice/review", "--repo", r, "--tmp"]);
+    assert!(o.code == 1 && o.stderr.contains("only takes existing branches"), "{}", o.stderr);
+    git(&repo, &["branch", "alice/review"]);
     let o = env.ok(&["worktree", "create", "alice/review", "--repo", r, "--tmp", "--json"]);
-    assert_eq!(o.json()["tmpSpace"], true);
+    assert_eq!((o.json()["mode"].as_str(), o.json()["tmpSpace"].as_bool()), (Some("reuse"), Some(true)));
     let rows = env.ok(&["ls", "--repo", r, "--json"]).json();
     let last = rows.as_array().unwrap().last().unwrap().clone();
     assert_eq!((last["branch"].as_str(), last["tmpSpace"].as_bool(), last["repo"].as_str()), (Some("alice/review"), Some(true), Some("repo")));
     assert!(env.ok(&["ls", "--repo", r]).stdout.lines().next().unwrap().contains("Space"));
-    assert_eq!(env.ok(&["worktree", "tmp", "alice/review", "--repo", r, "--off", "--json"]).json()["tmpSpace"], false);
-    assert!(env.ok(&["worktree", "tmp", "alice/review", "--repo", r]).stdout.contains("Moved alice/review to the tmp space"));
-    assert_eq!(env.run(&["worktree", "tmp", "main", "--repo", r]).code, 1, "the main checkout can't go in the tmp space");
+    assert_eq!(env.run(&["worktree", "tmp", "alice/review", "--repo", r]).code, 1, "moving in/out is gone");
     env.ok(&["worktree", "delete", "alice/review", "--repo", r, "--delete-branch", "--force"]);
+    // --tmp pulls a branch that exists on origin without asking for --track.
+    let o = env.ok(&["worktree", "create", "bob/pr", "--repo", r, "--tmp", "--json"]);
+    assert_eq!((o.json()["mode"].as_str(), o.json()["tmpSpace"].as_bool()), (Some("track"), Some(true)));
+    assert!(env.ok(&["worktree", "delete", "bob/pr", "--repo", r, "--delete-branch", "--force"]).stdout.contains("Deleted worktree: "));
+    let o = env.ok(&["worktree", "create", "bob/pr", "--repo", r, "--tmp"]);
+    assert!(o.stdout.contains("Branch: bob/pr (tracking origin/bob/pr)"), "{}", o.stdout);
+    env.ok(&["worktree", "delete", "bob/pr", "--repo", r, "--delete-branch", "--force"]);
 
     let o = env.ok(&["worktree", "delete", "feature/x", "--repo", r, "--delete-branch", "--force"]);
     assert!(o.stdout.contains("Deleted worktree: ") && o.stdout.contains("Deleted local branch: feature/x"), "{}", o.stdout);
