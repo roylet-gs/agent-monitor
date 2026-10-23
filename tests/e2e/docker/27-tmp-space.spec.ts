@@ -1,57 +1,77 @@
 import { test, expect } from "@playwright/test";
 import { RustTui, resetMock } from "./helpers/rust-tui";
 
+// `t` pulls an existing branch (someone else's PR) into the tmp space: a
+// window with just the branch, no new branches, no questions. The seeded repo
+// has an origin-only `feature/on-origin` and a startup script
+// (e2e/entrypoint.sh).
+
 test.beforeEach(async () => {
   await resetMock();
 });
 
-test("a worktree created in the tmp space is grouped apart, and T moves it in and out", async ({ page }) => {
+test("t refuses a branch that exists nowhere", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
-  const suffix = `e2e-tmp-${Date.now() % 1_000_000}`;
-  const branch = `feature/${suffix}`;
-  const row = new RegExp(`│[▌ ][│├└─ ]*\\S ${branch.replace(/[/.]/g, "\\$&")}\\s`);
-  const lineOf = async (re: RegExp) => (await tui.lines()).findIndex((l) => re.test(l));
+  const branch = `nobody/e2e-${Date.now() % 1_000_000}`;
 
-  // New worktree form: Branch → Name → Base → Tmp space (one repo, so no Repo row).
+  await tui.sendKey("t");
+  await tui.waitForText("Pull into tmp space");
+  await tui.waitForText("⏎ pull  esc cancel");
+  expect(await tui.getScreenText()).not.toContain("Name");
+  await tui.type(branch);
+  await tui.waitForText("✗ not found locally or on origin", 10_000);
+  await tui.sendKey("Enter");
+  await tui.waitForText("No such branch locally or on origin");
+  await tui.screenshot("tmp-space-not-found");
+  expect(await tui.getScreenText()).not.toContain("─Jobs");
+
+  await tui.sendKey("Escape");
+  await tui.waitForGone("Pull into tmp space", 5_000);
+  expect(await tui.getScreenText()).not.toContain("Tmp space ───");
+});
+
+test("t pulls a branch on origin into the tmp space without any questions", async ({ page }) => {
+  const tui = new RustTui(page);
+  await tui.open();
+  const branch = "feature/on-origin";
+  const row = /│[▌ ][│├└─ ]*\S feature\/on-origin\s/;
+  const lineOf = async (re: RegExp) => (await tui.lines()).findIndex((l) => re.test(l));
+  expect(await tui.keyBar()).toContain("t tmp");
+
+  // The New Worktree form no longer has a tmp space switch.
   await tui.sendKey("n");
   await tui.waitForText("New worktree");
-  await tui.waitForText("Tmp space ‹ off ›");
-  await tui.type(suffix);
-  await tui.waitForGone("checking…", 10_000);
-  for (let i = 0; i < 3; i++) await tui.sendKey("Tab");
-  await tui.sendKey(" ");
-  await tui.waitForText("Tmp space ‹ on ›");
-  await tui.waitForText("grouped apart, outside the worktree limit");
-  await tui.screenshot("tmp-space-form");
-  await tui.sendKey("Enter");
-  await tui.waitForGone("New worktree", 10_000);
-  await tui.skipStartupScript();
+  expect(await tui.getScreenText()).not.toContain("Tmp space ‹");
+  await tui.sendKey("Escape");
+  await tui.waitForGone("New worktree", 5_000);
 
-  await tui.waitForMatch(row, 15_000);
+  await tui.sendKey("t");
+  await tui.waitForText("Pull into tmp space");
+  await tui.type(branch); // no branch prefix: the name is pasted whole
+  await tui.waitForText("✓ exists on origin — Enter will pull it", 10_000);
+  await tui.screenshot("tmp-space-pull-form");
+  await tui.sendKey("Enter");
+  await tui.waitForGone("Pull into tmp space", 10_000);
+
+  // Neither "branch exists" nor the startup script is asked.
+  await tui.waitForMatch(row, 20_000);
+  await tui.waitForGone("─Jobs", 10_000);
+  const screen = await tui.getScreenText();
+  expect(screen).not.toContain("⇥ answer");
+  expect(screen).not.toContain("Run the repo's startup script?");
   await tui.waitForText("Tmp space ───");
   expect(await lineOf(row)).toBeGreaterThan(await lineOf(/Tmp space ───/));
   expect(await lineOf(/Tmp space ───/)).toBeGreaterThan(await lineOf(/work ───/));
   await tui.screenshot("tmp-space-group");
 
-  // T takes it out (back under work ───, the tmp section goes) and puts it back.
+  // T no longer moves worktrees in or out.
   await tui.selectRow(branch);
   await tui.sendKey("T");
-  await tui.waitForText("Moved out of tmp space", 5_000);
-  await tui.waitForGone("Tmp space ───", 5_000);
-  await tui.waitForMatch(row);
-  await tui.sendKey("T");
-  await tui.waitForText("Moved to tmp space", 5_000);
-  await tui.waitForText("Tmp space ───", 5_000);
-  expect(await lineOf(row)).toBeGreaterThan(await lineOf(/Tmp space ───/));
+  await tui.waitForText("─Worktrees");
+  expect(await tui.getScreenText()).not.toMatch(/Moved (to|out of) tmp space/);
 
-  // The main checkout stays with its repo.
-  await tui.selectRow("main");
-  await tui.sendKey("T");
-  await tui.waitForText("Only linked worktrees can go in the tmp space", 3_000);
-
-  // Clean up.
-  await tui.selectRow(branch);
+  // Clean up (the local branch too, so other specs still see it as origin-only).
   await tui.sendKey("d");
   await tui.waitForText(`Delete worktree "${branch}"`);
   await tui.sendKey("y");

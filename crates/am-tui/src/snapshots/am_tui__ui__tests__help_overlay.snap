@@ -10,7 +10,7 @@ expression: "render(&app, 100, 20)"
 │gridsight│       g / l / p  open PR / Linear ticket / Linear project                    │─────────│
 │ · main  │           w / L  toggle log pane / open the log file (or folder)             │         │
 │         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
-│         │               T  move to / from the tmp space                                │         │
+│         │               t  pull an existing branch into the tmp space                  │         │
 │         │               A  add repository                                              │         │
 │         │               f  suggest a feature (files a GitHub issue)                    │         │
 │         │               s  settings (Key bindings… changes these keys)                 │         │

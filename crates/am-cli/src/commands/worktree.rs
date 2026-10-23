@@ -377,26 +377,6 @@ pub fn open(target: &str, repo_path: Option<&str>) {
     println!("Opened {} in {}", wt.branch, s.ide);
 }
 
-/// `worktree tmp`: put a worktree in the tmp space, or take it out (`--off`).
-pub fn tmp(target: &str, repo_path: Option<&str>, off: bool, as_json: bool) {
-    let conn = store::open();
-    let repo = resolve_repo(&conn, repo_path);
-    let wt = resolve_worktree(&conn, target, Some(&repo.id));
-    if wt.is_main {
-        fail("The main checkout can't go in the tmp space.");
-    }
-    if let Err(e) = am_core::db::set_worktree_tmp_space(&conn, &wt.id, !off) {
-        fail(&format!("Could not update {}: {e}", wt.branch));
-    }
-    if as_json {
-        output::json(&json!({ "branch": wt.branch, "path": wt.path, "repo": repo.name, "tmpSpace": !off }));
-    } else if off {
-        println!("Moved {} out of the tmp space", wt.branch);
-    } else {
-        println!("Moved {} to the tmp space", wt.branch);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::git_relative;

@@ -1,0 +1,18 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 14)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
+│ ◐ fix/offline-cache                                                                4m ▓░░░░ 185k │
+│             ╭─Pull into tmp space ─────────────────────────────────────────────────╮             │
+│gridsight ───│ ▌Branch    bob/pr▏                                                   │─────────────│
+│ · main      │            ✓ exists on origin — Enter will pull it                   │m            │
+│             │  Checks out an existing branch to look at, in the Tmp space group    │             │
+│             ╰────────────────────────────────────────────────── ⏎ pull  esc cancel ╯             │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit

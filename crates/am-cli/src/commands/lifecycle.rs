@@ -19,7 +19,7 @@ pub fn create(a: &CreateArgs) {
     let conn = store::open();
     let repo = resolve_repo(&conn, a.repo.repo.as_deref()).repository();
     let settings = am_core::settings::load();
-    let mode = if a.reuse {
+    let mut mode = if a.reuse {
         CreateMode::ReuseLocal
     } else if a.track {
         CreateMode::TrackRemote
@@ -29,7 +29,20 @@ pub fn create(a: &CreateArgs) {
         CreateMode::Fresh
     };
     let req = CreateRequest { branch: a.branch.clone(), base_branch: a.base.clone(), custom_name: a.name.clone(), mode, tmp_space: a.tmp };
-    let w = match worktrees::create_worktree(&conn, &settings, &repo, &req) {
+    let mut result = worktrees::create_worktree(&conn, &settings, &repo, &req);
+    // --tmp is a review checkout: take an existing branch as it is (track
+    // origin, or reuse a local-only one) instead of asking for a flag. With
+    // both, tracking would reset the local copy, so that still needs one.
+    if a.tmp
+        && mode == CreateMode::Fresh
+        && let Err(CreateError::BranchExists { local, remote, path_exists: false }) = result
+        && local != remote
+    {
+        mode = if remote { CreateMode::TrackRemote } else { CreateMode::ReuseLocal };
+        am_core::info!("cli", "Tmp-space create of {}: branch exists (local={local}, remote={remote}), using {mode:?}", a.branch);
+        result = worktrees::create_worktree(&conn, &settings, &repo, &CreateRequest { mode, ..req });
+    }
+    let w = match result {
         Ok(w) => w,
         Err(CreateError::BranchExists { local, remote, .. }) => {
             let where_ = match (local, remote) {
@@ -37,7 +50,9 @@ pub fn create(a: &CreateArgs) {
                 (_, true) => "on origin",
                 _ => "locally",
             };
-            let hint = if remote {
+            let hint = if a.tmp {
+                "Use --track to reset the local branch to origin, or --reuse to keep it."
+            } else if remote {
                 "Use --track to pull remote, --no-track to create disconnected, or --reuse for the existing local branch."
             } else {
                 "Use --reuse to attach to the existing branch."

@@ -69,8 +69,6 @@ pub enum Action {
     RunScript { job: u64, repo_id: String, worktree_path: String },
     /// `d` on an "Other sessions" row: stop tracking it.
     RemoveStandalone(String),
-    /// `T`: put a worktree in the tmp space (or take it out): id, new value.
-    SetTmpSpace(String, bool),
     AddRepo(String),
     /// Settings → Repositories… `s`: open the repo's startup script.
     EditScript(String),
@@ -387,7 +385,6 @@ impl App {
             C::OpenLinear => v.linear.is_some(),
             C::OpenProject => v.linear.as_ref().and_then(|l| l.project.as_ref()).is_some_and(|p| p.url.is_some()),
             C::Delete => w.is_standalone() || !(w.is_main && (w.branch == "main" || w.branch == "master")),
-            C::ToggleTmpSpace => !w.is_standalone() && !w.is_main,
             _ => true,
         }
     }
@@ -608,13 +605,12 @@ impl App {
                     }
                 }
             }
-            C::ToggleTmpSpace => {
-                if let Some(w) = self.selected_view().map(|v| v.worktree.clone()) {
-                    if w.is_standalone() || w.is_main {
-                        self.notice = Some("Only linked worktrees can go in the tmp space".into());
-                    } else {
-                        return Action::SetTmpSpace(w.id, !w.tmp_space);
-                    }
+            C::PullToTmpSpace => {
+                if self.snapshot.repos.is_empty() {
+                    self.modal = Some(self.add_repo_modal());
+                } else {
+                    let repo = self.selected_view().map(|v| v.worktree.repo_id.clone());
+                    self.modal = Some(crate::modals::Modal::tmp_branch(self.snapshot.repos.clone(), repo.as_deref()));
                 }
             }
             C::Feedback => {
@@ -743,10 +739,10 @@ impl App {
             },
             L::NewForm => match &mut self.modal {
                 Some(Modal::New(f)) => {
-                    let which = [FormField::Repo, FormField::Branch, FormField::Name, FormField::Base, FormField::TmpSpace][i.min(4)];
-                    // The repo row cycles on a second click; the tmp space switch flips on the first.
+                    let which = [FormField::Repo, FormField::Branch, FormField::Name, FormField::Base][i.min(3)];
+                    // The repo row cycles on a second click.
                     let again = std::mem::replace(&mut f.field, which) == which;
-                    ((again && which == FormField::Repo) || which == FormField::TmpSpace).then_some(Key::Right)
+                    (again && which == FormField::Repo).then_some(Key::Right)
                 }
                 _ => None,
             },

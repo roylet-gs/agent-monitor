@@ -119,6 +119,19 @@ impl Jobs {
         self.list.iter_mut().find(|j| j.id == id)
     }
 
+    /// Run a create job again with another mode (the answer to "branch
+    /// exists", or the tmp space's automatic one).
+    pub fn rerun_create(&mut self, id: u64, mode: CreateMode) -> JobEffect {
+        let Some(job) = self.get_mut(id) else { return JobEffect::None };
+        let JobKind::Create { repo, req, .. } = &job.kind else { return JobEffect::None };
+        let req = CreateRequest { mode, ..req.clone() };
+        let repo = repo.clone();
+        job.kind = JobKind::Create { repo: repo.clone(), req: req.clone(), worktree_id: None };
+        job.question = None;
+        job.state = JobState::Running;
+        JobEffect::Create(id, Box::new(repo), Box::new(req))
+    }
+
     /// A new stage started; the previous one is done.
     pub fn step(&mut self, id: u64, text: String) {
         if let Some(j) = self.get_mut(id) {
@@ -234,26 +247,22 @@ impl Jobs {
         let Some(job) = self.list.get_mut(self.cursor) else { return JobEffect::None };
         let id = job.id;
         match (&job.question, &job.kind) {
-            (Some(Question::BranchExists { local, remote }), JobKind::Create { repo, req, .. }) => {
+            (Some(Question::BranchExists { local, remote }), JobKind::Create { req, .. }) => {
+                let tmp = req.tmp_space;
                 let mode = match (key, *remote) {
                     (Key::Char('n'), _) => {
                         self.dismiss(id);
                         return JobEffect::None;
                     }
                     (Key::Enter | Key::Char('p'), true) => CreateMode::TrackRemote,
-                    (Key::Char('c'), true) => CreateMode::Disconnected,
+                    (Key::Char('c'), true) if !tmp => CreateMode::Disconnected,
                     (Key::Enter | Key::Char('r'), false) if *local => CreateMode::ReuseLocal,
-                    (Key::Char('d'), false) if *local => CreateMode::DeleteAndRecreate,
+                    (Key::Char('d'), false) if *local && !tmp => CreateMode::DeleteAndRecreate,
                     _ => return JobEffect::None,
                 };
-                let req = CreateRequest { mode, ..req.clone() };
-                let repo = repo.clone();
-                job.kind = JobKind::Create { repo: repo.clone(), req: req.clone(), worktree_id: None };
-                job.question = None;
-                job.state = JobState::Running;
                 // Focus back on the list: the question has been answered.
                 self.focused = false;
-                JobEffect::Create(id, Box::new(repo), Box::new(req))
+                self.rerun_create(id, mode)
             }
             (Some(Question::RunScript { repo_id, worktree_path }), _) => match key {
                 Key::Enter | Key::Char('y') => {
@@ -358,6 +367,38 @@ mod tests {
         jobs.focus();
         assert_eq!(jobs.on_key(Key::Char('n')), JobEffect::None);
         assert!(!jobs.visible(), "going back drops the job");
+    }
+
+    #[test]
+    fn tmp_space_questions_offer_no_new_branch() {
+        let mut jobs = Jobs::default();
+        let id = jobs.start_create(repo(), CreateRequest { tmp_space: true, ..req() });
+        jobs.ask(id, Question::BranchExists { local: true, remote: true });
+        jobs.focus();
+        assert_eq!(jobs.on_key(Key::Char('c')), JobEffect::None);
+        jobs.ask(id, Question::BranchExists { local: true, remote: false });
+        jobs.focus();
+        assert_eq!(jobs.on_key(Key::Char('d')), JobEffect::None);
+        assert!(matches!(jobs.on_key(Key::Enter), JobEffect::Create(_, _, r) if r.mode == CreateMode::ReuseLocal));
+    }
+
+    #[test]
+    fn rerun_create_restarts_the_job_with_the_mode() {
+        let mut jobs = Jobs::default();
+        let id = jobs.start_create(repo(), CreateRequest { tmp_space: true, ..req() });
+        match jobs.rerun_create(id, CreateMode::TrackRemote) {
+            JobEffect::Create(jid, _, r) => {
+                assert_eq!(jid, id);
+                assert_eq!(r.mode, CreateMode::TrackRemote);
+                assert!(r.tmp_space);
+            }
+            e => panic!("{e:?}"),
+        }
+        let j = jobs.get(id).unwrap();
+        assert_eq!((j.state.clone(), j.question.clone()), (JobState::Running, None));
+        assert!(matches!(&j.kind, JobKind::Create { req, .. } if req.mode == CreateMode::TrackRemote));
+        assert_eq!(jobs.list.len(), 1);
+        assert_eq!(jobs.rerun_create(99, CreateMode::TrackRemote), JobEffect::None);
     }
 
     #[test]

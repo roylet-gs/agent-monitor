@@ -32,13 +32,13 @@ test("dashboard renders the worktree pane and key bar with the seeded repo", asy
   await tui.screenshot("dashboard-keybar");
 });
 
-test("t and c are no longer bound: no popup or notice, dashboard stays", async ({ page }) => {
+test("c is no longer bound: no popup or notice, dashboard stays", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
   await tui.selectRow("feature/to-delete");
   const before = await tui.keyBar();
 
-  for (const key of ["t", "c"]) {
+  for (const key of ["c"]) {
     await tui.sendKey(key);
     await tui.waitForText("─Worktrees");
     const text = await tui.getScreenText();

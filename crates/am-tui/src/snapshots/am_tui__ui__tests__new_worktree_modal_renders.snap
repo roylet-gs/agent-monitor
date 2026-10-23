@@ -9,11 +9,11 @@ expression: "render(&app, 100, 16)"
 │             ╭─New worktree ────────────────────────────────────────────────────────╮             │
 │gridsight ───│  Repo      ‹ agent-monitor ›                                         │─────────────│
 │ · main      │ ▌Branch    feature/x▏                                                │m            │
-│             │            ✓ exists on origin — Enter will offer to pull it          │             │
+│             │            ✓ exists on origin — Enter will pull it                   │             │
 │             │  Name      (optional)                                                │             │
 │             │  Base      tracks origin/feature/x                                   │             │
-│             │  Tmp space ‹ off ›                                                   │             │
 │             ╰────────────────────────────────────── tab next  ⏎ create  esc cancel ╯             │
+│                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯

@@ -18,7 +18,7 @@ pub enum Command {
     OpenProject,
     NewWorktree,
     Delete,
-    ToggleTmpSpace,
+    PullToTmpSpace,
     AddRepo,
     ToggleLog,
     ViewLogs,
@@ -44,7 +44,7 @@ impl Command {
         Command::OpenProject,
         Command::NewWorktree,
         Command::Delete,
-        Command::ToggleTmpSpace,
+        Command::PullToTmpSpace,
         Command::AddRepo,
         Command::ToggleLog,
         Command::ViewLogs,
@@ -74,7 +74,7 @@ impl Command {
             Command::OpenProject => "openProject",
             Command::NewWorktree => "newWorktree",
             Command::Delete => "deleteWorktree",
-            Command::ToggleTmpSpace => "toggleTmpSpace",
+            Command::PullToTmpSpace => "pullToTmpSpace",
             Command::AddRepo => "addRepo",
             Command::ToggleLog => "toggleLog",
             Command::ViewLogs => "viewLogs",
@@ -105,7 +105,7 @@ impl Command {
             Command::OpenProject => "Open Linear project",
             Command::NewWorktree => "New worktree",
             Command::Delete => "Delete worktree",
-            Command::ToggleTmpSpace => "Move to/from tmp space",
+            Command::PullToTmpSpace => "Pull into tmp space",
             Command::AddRepo => "Add repository",
             Command::ToggleLog => "Toggle log pane",
             Command::ViewLogs => "View logs",
@@ -132,7 +132,7 @@ impl Command {
             Command::OpenProject => "The ticket's Linear project",
             Command::NewWorktree => "New worktree form",
             Command::Delete => "Delete the selected worktree (asks first)",
-            Command::ToggleTmpSpace => "Move the selected worktree into the Tmp space group, or back to its repo",
+            Command::PullToTmpSpace => "Paste an existing branch (someone else's PR) to check it out in the Tmp space group",
             Command::AddRepo => "Track another repository",
             Command::ToggleLog => "Show or hide the debug.log pane",
             Command::ViewLogs => "Open debug.log in the editor (the log folder once it has rotated)",
@@ -159,7 +159,7 @@ impl Command {
             Command::OpenProject => "project",
             Command::NewWorktree => "new",
             Command::Delete => "delete",
-            Command::ToggleTmpSpace => "tmp",
+            Command::PullToTmpSpace => "tmp",
             Command::AddRepo => "add repo",
             Command::ToggleLog => "log",
             Command::ViewLogs => "logs",
@@ -180,7 +180,7 @@ impl Command {
             Command::OpenProject => Key::Char('p'),
             Command::NewWorktree => Key::Char('n'),
             Command::Delete => Key::Char('d'),
-            Command::ToggleTmpSpace => Key::Char('T'),
+            Command::PullToTmpSpace => Key::Char('t'),
             Command::AddRepo => Key::Char('A'),
             Command::ToggleLog => Key::Char('w'),
             Command::ViewLogs => Key::Char('L'),
@@ -221,7 +221,6 @@ impl Command {
                 | Command::OpenLinear
                 | Command::OpenProject
                 | Command::Delete
-                | Command::ToggleTmpSpace
         )
     }
 }
