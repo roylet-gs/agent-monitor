@@ -296,7 +296,7 @@ pub fn build_groups(repos: &[Repository], views: Vec<WorktreeView>, settings: &S
     }
     if !tmp.is_empty() {
         tmp.sort_by(|a, b| compare(a, b, criteria, &repo_names));
-        let repo = Repository { id: TMP_SPACE_GROUP_ID.into(), path: String::new(), name: "Tmp space".into() };
+        let repo = Repository { id: TMP_SPACE_GROUP_ID.into(), path: String::new(), name: crate::model::TMP_SPACE_GROUP_NAME.into() };
         groups.push(WorktreeGroup { repo, worktrees: tmp });
     }
     groups
@@ -833,7 +833,7 @@ pub(crate) mod tests {
         let names: Vec<_> = groups.iter().map(|g| g.repo.id.as_str()).collect();
         // r2 has only a tmp row, so its own group is empty and dropped.
         assert_eq!(names, ["r1", TMP_SPACE_GROUP_ID]);
-        assert_eq!(groups[1].repo.name, "Tmp space");
+        assert_eq!(groups[1].repo.name, "Reviewing");
         assert_eq!(ids(&flat(&groups)), ["w1", "t1", "t2"]);
     }
 

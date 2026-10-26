@@ -34,9 +34,11 @@ pub struct Worktree {
 /// outside any tracked worktree).
 pub const STANDALONE_REPO_ID: &str = "__standalone__";
 
-/// Synthetic repo id for the shared "Tmp space" group (worktrees of every repo
-/// labelled `tmp_space`).
+/// Synthetic repo id for the shared "Reviewing" group (worktrees of every
+/// repo labelled `tmp_space`, the "tmp space").
 pub const TMP_SPACE_GROUP_ID: &str = "__tmp_space__";
+/// What that group is called on screen.
+pub const TMP_SPACE_GROUP_NAME: &str = "Reviewing";
 
 impl Worktree {
     pub fn is_standalone(&self) -> bool {
@@ -158,6 +160,49 @@ pub struct LinearInfo {
     pub project: Option<LinearProject>,
     #[serde(default)]
     pub pr_attachment: Option<LinearPrAttachment>,
+}
+
+/// An open PR in a tracked repo that is waiting on your (or your team's)
+/// review; see `integrations::reviews`. Cached as one camelCase JSON list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRequest {
+    /// The tracked repository it belongs to.
+    pub repo_id: String,
+    /// `owner/name` on GitHub.
+    pub repo: String,
+    pub pr: PrInfo,
+    #[serde(default)]
+    pub author: String,
+    pub head_ref_name: String,
+    /// Opened from a fork: the head branch isn't on the repo's origin.
+    #[serde(default)]
+    pub is_cross_repository: bool,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    /// Pending reviewers: logins and `org/team` slugs.
+    #[serde(default)]
+    pub requested: Vec<String>,
+    #[serde(default)]
+    pub linear: Option<LinearInfo>,
+    /// The worktree that already has this branch checked out (filled in by
+    /// the TUI collector; never cached).
+    #[serde(skip)]
+    pub worktree_id: Option<String>,
+}
+
+/// Why the last review-request search failed (shown on the review page in
+/// place of "Loading…", or beside a cached list).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewFetchError {
+    /// One line, from gh.
+    pub message: String,
+    /// GitHub rate-limited the request.
+    pub rate_limited: bool,
+    /// When the GraphQL rate limit resets (unix seconds), if known.
+    pub resets_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

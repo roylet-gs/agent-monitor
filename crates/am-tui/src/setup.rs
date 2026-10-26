@@ -1,7 +1,7 @@
 //! First-run setup (shown when settings.json has no `setupCompleted`).
 //! Port of the TS SetupWizard, trimmed to what a first run needs: editor,
 //! agent hooks (Claude Code plus any other agent CLI found), repositories,
-//! integrations, context window. Everything is also reachable
+//! integrations, review requests (when GitHub is on), context window. Everything is also reachable
 //! later via `s` (settings), `A` (add repo) and `am hooks install`.
 //! Settings → Run setup again (or `am setup`) walks it again over the current
 //! settings: it starts from their values, and Esc on the first step cancels.
@@ -17,7 +17,52 @@ pub enum Step {
     Hooks,
     Repos,
     Integrations,
+    /// What counts as a review request (skipped with GitHub off).
+    Reviews,
     Context,
+}
+
+/// The Reviews step's choices (`reviewRequests*` settings).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewSetup {
+    pub enabled: bool,
+    /// Index into `ReviewScope::IDS`.
+    pub scope: usize,
+    pub hide_drafts: bool,
+    pub hide_reviewed: bool,
+    /// Row under the cursor: see [`REVIEW_ROWS`].
+    pub field: usize,
+}
+
+/// Rows of the Reviews step: the switch, the three scopes, two filters.
+pub const REVIEW_ROWS: usize = 6;
+
+impl ReviewSetup {
+    fn from_settings(s: &am_core::settings::Settings) -> ReviewSetup {
+        ReviewSetup {
+            enabled: s.review_requests_enabled,
+            scope: am_core::settings::ReviewScope::IDS.iter().position(|id| *id == s.review_scope().id()).unwrap_or(0),
+            hide_drafts: s.review_hide_drafts,
+            hide_reviewed: s.review_hide_reviewed,
+            field: 0,
+        }
+    }
+
+    /// Space (or a second click) on the row under the cursor.
+    pub fn toggle(&mut self) {
+        match self.field {
+            0 => self.enabled = !self.enabled,
+            1..=3 => self.scope = self.field - 1,
+            4 => self.hide_drafts = !self.hide_drafts,
+            _ => self.hide_reviewed = !self.hide_reviewed,
+        }
+    }
+}
+
+impl Default for ReviewSetup {
+    fn default() -> Self {
+        ReviewSetup::from_settings(&am_core::settings::Settings::default())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +83,7 @@ pub struct Setup {
     pub gh: bool,
     pub linear_key: String,
     pub integration_field: usize,
+    pub review: ReviewSetup,
     /// Index into `CONTEXT_CHOICES`; the last one is a typed custom value.
     pub ctx_choice: usize,
     pub ctx_input: String,
@@ -89,6 +135,7 @@ impl Setup {
             gh: if rerun { settings.gh_pr_status } else { which("gh") },
             linear_key: if rerun { settings.linear_api_key.clone() } else { String::new() },
             integration_field: 0,
+            review: ReviewSetup::from_settings(settings),
             ctx_choice: preset.unwrap_or(CONTEXT_CUSTOM),
             ctx_input: if preset.is_some() { String::new() } else { am_core::context::short_tokens(context_window) },
             ctx_error: None,
@@ -155,14 +202,25 @@ impl Setup {
                     self.linear_key.pop();
                 }
                 Key::Char(c) if self.integration_field == 1 => self.linear_key.push(c),
-                Key::Enter => self.step = Step::Context,
+                Key::Enter => self.step = if self.gh { Step::Reviews } else { Step::Context },
                 _ => {}
             },
+            Step::Reviews => {
+                let r = &mut self.review;
+                match key {
+                    Key::Esc => self.step = Step::Integrations,
+                    Key::Up | Key::BackTab | Key::Char('k') => r.field = (r.field + REVIEW_ROWS - 1) % REVIEW_ROWS,
+                    Key::Down | Key::Tab | Key::Char('j') => r.field = (r.field + 1) % REVIEW_ROWS,
+                    Key::Char(' ') => r.toggle(),
+                    Key::Enter => self.step = Step::Context,
+                    _ => {}
+                }
+            }
             Step::Context => {
                 self.ctx_error = None;
                 let custom = self.ctx_choice == CONTEXT_CUSTOM;
                 match key {
-                    Key::Esc => self.step = Step::Integrations,
+                    Key::Esc => self.step = if self.gh { Step::Reviews } else { Step::Integrations },
                     Key::Up => self.ctx_choice = (self.ctx_choice + CONTEXT_CUSTOM) % (CONTEXT_CUSTOM + 1),
                     Key::Down | Key::Tab => self.ctx_choice = (self.ctx_choice + 1) % (CONTEXT_CUSTOM + 1),
                     // On the custom row letters are input (`128k`, `1m`), so only arrows move.
@@ -190,6 +248,10 @@ impl Setup {
                         }
                         keys.extend([
                             ("ghPrStatus", Value::Bool(self.gh)),
+                            ("reviewRequestsEnabled", Value::Bool(self.review.enabled)),
+                            ("reviewRequestsScope", Value::from(am_core::settings::ReviewScope::IDS[self.review.scope.min(2)])),
+                            ("reviewHideDrafts", Value::Bool(self.review.hide_drafts)),
+                            ("reviewHideReviewed", Value::Bool(self.review.hide_reviewed)),
                             ("linearEnabled", Value::Bool(!key.is_empty())),
                             ("linearApiKey", Value::from(key)),
                             ("contextWindowTokens", Value::from(tokens)),
@@ -260,6 +322,7 @@ mod tests {
             gh: true,
             linear_key: String::new(),
             integration_field: 0,
+            review: ReviewSetup::default(),
             ctx_choice: 0,
             ctx_input: String::new(),
             ctx_error: None,
@@ -293,8 +356,20 @@ mod tests {
             s.on_key(Key::Char(c));
         }
         assert!(matches!(s.on_key(Key::Enter), SetupEffect::None));
+        assert_eq!(s.step, Step::Reviews);
+        s.on_key(Key::Down);
+        s.on_key(Key::Down);
+        s.on_key(Key::Char(' ')); // only me directly
+        s.on_key(Key::Down);
+        s.on_key(Key::Down);
+        s.on_key(Key::Char(' ')); // show drafts
+        s.on_key(Key::Enter);
         assert_eq!(s.step, Step::Context);
         let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        assert!(v.contains(&("reviewRequestsEnabled", Value::Bool(true))));
+        assert!(v.contains(&("reviewRequestsScope", Value::from("direct"))));
+        assert!(v.contains(&("reviewHideDrafts", Value::Bool(false))));
+        assert!(v.contains(&("reviewHideReviewed", Value::Bool(true))));
         assert!(v.contains(&("ide", Value::from("cursor"))));
         assert!(!v.iter().any(|(k, _)| *k == "ideCommand"));
         assert!(v.contains(&("linearEnabled", Value::Bool(true))));
@@ -379,7 +454,26 @@ mod tests {
         assert!(v.contains(&("contextWindowTokens", Value::from(500_000u64))));
         s.step = Step::Context;
         s.on_key(Key::Esc);
+        assert_eq!(s.step, Step::Reviews);
+        s.on_key(Key::Esc);
         assert_eq!(s.step, Step::Integrations);
+    }
+
+    #[test]
+    fn reviews_step_is_skipped_without_github_and_starts_from_saved_values() {
+        let mut s = setup();
+        s.gh = false;
+        s.step = Step::Integrations;
+        s.on_key(Key::Enter);
+        assert_eq!(s.step, Step::Context);
+        s.on_key(Key::Esc);
+        assert_eq!(s.step, Step::Integrations);
+
+        let saved = am_core::settings::Settings::parse(
+            r#"{"setupCompleted":true,"reviewRequestsScope":"teams","reviewHideDrafts":false,"reviewRequestsEnabled":false}"#,
+        );
+        let s = Setup::new(vec![], &saved);
+        assert_eq!((s.review.enabled, s.review.scope, s.review.hide_drafts), (false, 2, false));
     }
 
     #[test]

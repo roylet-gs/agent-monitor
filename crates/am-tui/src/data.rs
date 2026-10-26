@@ -13,9 +13,10 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use am_core::integrations::reviews::ReviewRepo;
 use am_core::integrations::{Integrations, RepoBranches};
 use am_core::harness::HarnessKind;
-use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
+use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, ReviewFetchError, ReviewRequest, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::context::ContextUsage;
@@ -44,6 +45,8 @@ const HANDBACK_TOOL: &str = "SubagentHandback";
 
 enum Cmd {
     Refresh { force: bool },
+    /// Fetch review requests now (the review page opened).
+    RefreshReviews,
     Settings(Box<Settings>),
     Quit,
 }
@@ -54,6 +57,8 @@ type Fields = HashMap<(String, String), (Option<PrInfo>, Option<LinearInfo>)>;
 struct IntegrationUpdate {
     fields: Fields,
     health: Health,
+    reviews: Option<Vec<ReviewRequest>>,
+    review_error: Option<ReviewFetchError>,
 }
 
 pub struct Collector {
@@ -105,6 +110,11 @@ impl Collector {
         let _ = self.int_cmd.send(Cmd::Refresh { force });
     }
 
+    /// Fetch review requests now (the review page opened).
+    pub fn refresh_reviews(&self) {
+        let _ = self.int_cmd.send(Cmd::RefreshReviews);
+    }
+
     pub fn shutdown(mut self) {
         // The integrations thread may be mid-`gh` call; it exits on its next
         // loop and holds nothing that needs flushing, so it is not joined.
@@ -143,6 +153,8 @@ struct Worker {
     integrations: Receiver<IntegrationUpdate>,
     fields: Fields,
     health: Health,
+    reviews: Option<Vec<ReviewRequest>>,
+    review_error: Option<ReviewFetchError>,
     git: HashMap<String, GitData>,
     procs: HashMap<String, ProcData>,
     /// Context usage per worktree id, re-read with the git data.
@@ -175,6 +187,8 @@ impl Worker {
             integrations,
             fields: HashMap::new(),
             health: Health::default(),
+            reviews: None,
+            review_error: None,
             git: HashMap::new(),
             procs: HashMap::new(),
             ctx: HashMap::new(),
@@ -206,6 +220,7 @@ impl Worker {
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(Cmd::Refresh { force: f }) => force = f,
+                Ok(Cmd::RefreshReviews) => {}
                 Ok(Cmd::Settings(s)) => {
                     // Filters/sort/process filter may have changed: rebuild now.
                     self.settings = *s;
@@ -233,6 +248,8 @@ impl Worker {
         while let Ok(u) = self.integrations.try_recv() {
             self.fields = u.fields;
             self.health = u.health;
+            self.reviews = u.reviews;
+            self.review_error = u.review_error;
             ints_changed = true;
         }
         let dv = db::data_version(&self.conn)?;
@@ -372,6 +389,7 @@ impl Worker {
             self.refresh_stack_git(&repos, &worktrees_for_stacks(&views));
         }
         let stack = self.infer_stacks(&views);
+        let reviews = self.reviews_with_worktrees(&views);
         let mut roots: Vec<String> = views.iter().map(|v| v.worktree.path.clone()).collect();
         let mut groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
         if let Some(g) = self.standalone_group()? {
@@ -379,7 +397,9 @@ impl Worker {
             groups.push(g);
         }
         let today_tokens = self.today_tokens(&roots, &groups);
-        let snapshot = Snapshot { repos, groups, subagents, health: self.health.clone(), stack, today_tokens };
+        let review_error = self.review_error.clone();
+        let snapshot =
+            Snapshot { repos, groups, subagents, health: self.health.clone(), stack, today_tokens, reviews, review_error };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());
             self.last_sent = Some(snapshot);
@@ -393,6 +413,19 @@ fn worktrees_for_stacks(views: &[WorktreeView]) -> Vec<Worktree> {
 }
 
 impl Worker {
+    /// The review list with each PR's local worktree (same repo and branch),
+    /// if one is checked out.
+    fn reviews_with_worktrees(&self, views: &[WorktreeView]) -> Option<Vec<ReviewRequest>> {
+        let mut list = self.reviews.clone()?;
+        for r in &mut list {
+            r.worktree_id = views
+                .iter()
+                .find(|v| v.worktree.repo_id == r.repo_id && v.worktree.branch == r.head_ref_name)
+                .map(|v| v.worktree.id.clone());
+        }
+        Some(list)
+    }
+
     /// Today's tokens: everything, or (`dailyTokensScope: "visible"`) only
     /// the usage attributed to a row on screen. Each session's cwd goes to
     /// the most specific of *all* known roots, so a visible main checkout
@@ -570,14 +603,18 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
     let mut ints = Integrations::new();
     ints.hydrate(&conn);
     let (mut last_gh, mut last_linear): (Option<Instant>, Option<Instant>) = (None, None);
+    let mut last_reviews: Option<Instant> = None;
+    let mut known_repos: Vec<String> = Vec::new();
     let mut known_branches: Vec<(String, String)> = Vec::new();
     let mut first = true;
 
     loop {
         let mut force = false;
+        let mut reviews_now = false;
         match cmds.recv_timeout(Duration::from_secs(1)) {
             Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(Cmd::Refresh { force: f }) => force = f,
+            Ok(Cmd::RefreshReviews) => reviews_now = true,
             Ok(Cmd::Settings(s)) => {
                 if settings.linear_auto_nickname
                     && !s.linear_auto_nickname
@@ -589,10 +626,25 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
                 let enabled_now = (s.gh_pr_status && !settings.gh_pr_status)
                     || (s.linear_enabled && !settings.linear_enabled)
                     || s.linear_api_key != settings.linear_api_key;
+                if settings.review_requests_on() && !s.review_requests_on() {
+                    ints.clear_reviews(&conn);
+                    info!("integrations", "Review requests off; cleared the list");
+                }
+                // Any change to what the search asks for re-runs it now.
+                let reviews_changed = s.review_requests_on() != settings.review_requests_on()
+                    || s.review_requests_scope != settings.review_requests_scope
+                    || s.review_hide_drafts != settings.review_hide_drafts
+                    || s.review_hide_reviewed != settings.review_hide_reviewed
+                    || s.review_include_repos != settings.review_include_repos
+                    || s.review_exclude_repos != settings.review_exclude_repos
+                    || s.review_search_qualifiers != settings.review_search_qualifiers;
                 settings = *s;
                 if enabled_now {
                     last_gh = None;
                     last_linear = None;
+                }
+                if enabled_now || reviews_changed {
+                    last_reviews = None;
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -614,17 +666,26 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         // A new worktree should get its PR/ticket now, not in three minutes.
         let new_branches = !first && branches != known_branches;
 
+        let mut repo_ids: Vec<String> = repos.iter().map(|r| r.id.clone()).collect();
+        repo_ids.sort();
+        let reviews_every = Duration::from_millis(settings.review_polling_interval_ms.max(30_000));
+        let reviews_due = settings.review_requests_on()
+            && (reviews_now
+                || (force && settings.gh_refresh_on_manual)
+                || repo_ids != known_repos
+                || last_reviews.is_none_or(|t| t.elapsed() >= reviews_every));
+
         let gh_due = settings.gh_pr_status
             && ((force && settings.gh_refresh_on_manual) || new_branches || last_gh.is_none_or(|t| t.elapsed() >= gh_every));
         let linear_due = linear_on
             && ((force && settings.linear_refresh_on_manual) || new_branches || last_linear.is_none_or(|t| t.elapsed() >= linear_every));
 
-        if !(gh_due || linear_due || first || new_branches) {
+        if !(gh_due || linear_due || reviews_due || first || new_branches) {
             continue;
         }
         if first {
             // Publish what's cached before the (slow) first fetch.
-            let _ = tx.send(update(&ints, &branches));
+            let _ = tx.send(update(&ints, &branches, &settings));
             first = false;
         }
         if gh_due {
@@ -639,11 +700,20 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             info!("integrations", "linear refresh: {outcome:?} in {:?}", started.elapsed());
             last_linear = Some(Instant::now());
         }
+        if reviews_due {
+            let started = Instant::now();
+            let review_repos: Vec<ReviewRepo> =
+                repos.iter().map(|r| ReviewRepo::new(r.id.clone(), r.name.clone(), r.path.clone())).collect();
+            let outcome = ints.refresh_reviews(&conn, &review_repos, &settings, force || reviews_now);
+            info!("integrations", "review requests refresh: {outcome:?} in {:?}", started.elapsed());
+            last_reviews = Some(Instant::now());
+            known_repos = repo_ids;
+        }
         known_branches = branches.clone();
         if settings.linear_enabled && settings.linear_auto_nickname {
             auto_nickname(&conn, &ints, &worktrees);
         }
-        let _ = tx.send(update(&ints, &branches));
+        let _ = tx.send(update(&ints, &branches, &settings));
     }
 }
 
@@ -658,10 +728,20 @@ fn auto_nickname(conn: &Connection, ints: &Integrations, worktrees: &[Worktree])
     }
 }
 
-fn update(ints: &Integrations, branches: &[(String, String)]) -> IntegrationUpdate {
+fn update(ints: &Integrations, branches: &[(String, String)], settings: &Settings) -> IntegrationUpdate {
     let fields = branches.iter().map(|(r, b)| ((r.clone(), b.clone()), ints.fields_for(r, b))).collect();
     let h = ints.health();
-    IntegrationUpdate { fields, health: Health { github_failing: h.github_failing, linear_failing: h.linear_failing } }
+    let on = settings.review_requests_on();
+    let reviews = on.then(|| ints.reviews().map(<[_]>::to_vec)).flatten();
+    let review_error = on.then(|| ints.review_error().cloned()).flatten();
+    let github_rate_limited = h.github_failing
+        && h.last_github_error.as_deref().is_some_and(am_core::integrations::breaker::is_rate_limit_error);
+    IntegrationUpdate {
+        fields,
+        health: Health { github_failing: h.github_failing, linear_failing: h.linear_failing, github_rate_limited },
+        reviews,
+        review_error,
+    }
 }
 
 fn stack_branches(worktrees: &[Worktree], repo_id: &str) -> Vec<stacks::Branch> {

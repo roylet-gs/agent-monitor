@@ -7,7 +7,7 @@ expression: out
 │▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
 │ ◐ fix/o╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮░░ 185k │
 │        │                                                                                │        │
-│gridsigh│  Editor  ›  Agent hooks  ›  Repositories  ›  Integrations  ›  Context          │────────│
+│gridsigh│  Editor  ›  Hooks  ›  Repos  ›  Integrations  ›  Reviews  ›  Context           │────────│
 │ · main │                                                                                │        │
 │        │ Where should Enter open a worktree?                                            │        │
 │        │                                                                                │        │
@@ -23,4 +23,4 @@ expression: out
 │                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  ? help  q quit

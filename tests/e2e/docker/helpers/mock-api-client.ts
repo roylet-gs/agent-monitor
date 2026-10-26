@@ -14,6 +14,13 @@ interface MockSetupConfig {
    * (`null` = no ticket). Unlisted branches get the `linear` fixture's issue.
    */
   linearByBranch?: Record<string, unknown>;
+  /**
+   * Answer the review-request search with `gh-review-requests.json` (three
+   * PRs in acme/work); off (no PRs waiting) after a reset.
+   */
+  reviews?: boolean;
+  /** GitHub rate-limits every gh API call; `gh api rate_limit` still answers. */
+  rateLimited?: boolean;
 }
 
 /** Configure mock-api fixtures for the current test. */

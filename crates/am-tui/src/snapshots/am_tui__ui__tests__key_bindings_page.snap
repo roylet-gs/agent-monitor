@@ -12,7 +12,8 @@ expression: "render(&app, 100, 34)"
 │       │   Open Linear project     p                                                      │       │
 │       │▌  New worktree            N       (default n)                                    │       │
 │       │   Delete worktree         d                                                      │       │
-│       │   Pull into tmp space     t                                                      │       │
+│       │   Pull into Reviewing     t                                                      │       │
+│       │   Review requests         v                                                      │       │
 │       │   Add repository          A                                                      │       │
 │       │   Toggle log pane         w                                                      │       │
 │       │   View logs               L                                                      │       │
@@ -32,7 +33,6 @@ expression: "render(&app, 100, 34)"
 │       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │
-│       │                                                                                  │       │
 │       │ New worktree form                                                                │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
- ⏎ open  │ g PR  l linear  p project  │ N new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  │ N new  d delete  v reviews  │ s settings  r refresh  ? help  q quit

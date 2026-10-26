@@ -32,7 +32,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::FetchResult;
-use super::breaker::{is_network_error, is_timeout_error, summarize_error};
+use super::breaker::{is_network_error, is_rate_limit_error, is_timeout_error, summarize_error};
 use crate::debug;
 use crate::model::{ChecksStatus, PrInfo};
 
@@ -394,11 +394,39 @@ fn build_query(n: usize) -> String {
     // Single line on purpose: the E2E gh shim splits argv on newlines.
     format!(
         "query({vars}) {{ repository(owner: $owner, name: $name) {{{body} }} }} \
-         fragment pr on PullRequestConnection {{ nodes {{ number title url state isDraft reviewDecision mergeable \
-         headRefName baseRefName isCrossRepository commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ \
-         contexts(first: 100) {{ checkRunCountsByState {{ state count }} \
-         statusContextCountsByState {{ state count }} {CHECK_NODES} }} }} }} }} }} }} }}"
+         fragment pr on PullRequestConnection {{ nodes {{ {} }} }}",
+        pr_selection()
     )
+}
+
+/// The `PullRequest` fields a [`PrInfo`] is built from, check rollup
+/// included.
+fn pr_selection() -> String {
+    pr_fields(&format!("first: 100) {{ checkRunCountsByState {{ state count }} statusContextCountsByState {{ state count }} {CHECK_NODES} }}"))
+}
+
+/// [`pr_selection`] with the check *counts* only (CI status, no active check
+/// name/link). The review-request search uses it: resolving up to 100 check
+/// runs for each of dozens of PRs took a real search 11–13 s, past GitHub's
+/// 10 s limit (HTTP 504 three times in four); counts alone answer in 2–5 s.
+pub(crate) fn pr_selection_counts() -> String {
+    pr_fields("first: 1) { checkRunCountsByState { state count } statusContextCountsByState { state count } }")
+}
+
+/// `contexts` arguments + selection → the shared PR field list.
+fn pr_fields(contexts: &str) -> String {
+    format!(
+        "number title url state isDraft reviewDecision mergeable \
+         headRefName baseRefName isCrossRepository commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ \
+         contexts({contexts} }} }} }} }}"
+    )
+}
+
+/// A [`PrInfo`] from one `PullRequest` node selected with [`pr_selection`]
+/// (first page of checks only) or [`pr_selection_counts`].
+pub(crate) fn pr_info_from_node(node: &Value) -> Option<PrInfo> {
+    let pr: GqlPr = serde_json::from_value(node.clone()).ok()?;
+    Some(to_pr_info(pr.into_parsed().fields))
 }
 
 /// `gh api graphql` argv for one chunk. Branch names travel as typed
@@ -709,8 +737,10 @@ fn fetch_chunk(gh: &dyn GhRunner, repo_path: &Path, chunk: &[String]) -> ChunkOu
                 out.results.push((branch, result));
             }
         }
-        Err(_) if !gh_out.ok && is_network_error(&gh_out.stderr) => {
-            let err = summarize_error(&gh_out.stderr);
+        // A rate limit can arrive as a GraphQL error in the body: falling back
+        // to one `gh pr view` per branch would only dig the hole deeper.
+        Err(e) if (!gh_out.ok && is_network_error(&gh_out.stderr)) || is_rate_limit_error(&e) => {
+            let err = summarize_error(if gh_out.stderr.trim().is_empty() { &e } else { &gh_out.stderr });
             if chunk.len() > 1 && is_timeout_error(&gh_out.stderr) {
                 debug!(
                     "github",
@@ -902,6 +932,15 @@ pub(crate) mod tests {
 
     fn branches(bs: &[&str]) -> Vec<String> {
         bs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_rate_limit_in_the_body_aborts_without_falling_back() {
+        let body = r#"{"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded for user ID 1."}]}"#;
+        let gh = FakeGh::new(vec![GhOutput { ok: false, stdout: body.into(), stderr: String::new() }]);
+        let batch = fetch_prs(&gh, Path::new("."), &branches(&["a", "b"]));
+        assert!(batch.network_error.unwrap().contains("rate limit"));
+        assert_eq!(gh.call_count(), 1, "no gh pr view per branch");
     }
 
     // --- deriveChecksStatus ---

@@ -1,0 +1,16 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+╭─Review requests ─────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│                                                                                                  │
+│                           ⚠ GitHub has rate-limited you — resets in 12m                          │
+│                                                                                                  │
+│                          graphql: API rate limit exceeded for user ID 1.                         │
+│                                                                                                  │
+│                    r tries again now · am retries on its own as GitHub allows                    │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ⏎ open PR  l ticket  t pull into Reviewing  │ r refresh  esc back   ⚠ GitHub rate-limited — cached

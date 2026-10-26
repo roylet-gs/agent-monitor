@@ -5,7 +5,8 @@
 //! `gh` stderr dumps. The breaker fixes both:
 //!
 //! - A **network-class** failure (DNS, connection refused, "error connecting",
-//!   timeouts, 5xx/429 "service unavailable") opens the circuit: the caller
+//!   timeouts, 5xx/429 "service unavailable", and GitHub's rate limits, where
+//!   more requests only extend the lock-out) opens the circuit: the caller
 //!   aborts the rest of that source's cycle, and later cycles are skipped until
 //!   an exponential backoff (30 s doubling, capped at 15 min) expires.
 //!   Other failures (auth, bad query, a repo that isn't on GitHub) mark the
@@ -155,7 +156,15 @@ pub fn is_network_error(msg: &str) -> bool {
         "http 503",
         "http 504",
     ];
-    NEEDLES.iter().any(|n| m.contains(n)) || is_timeout_error(msg)
+    NEEDLES.iter().any(|n| m.contains(n)) || is_timeout_error(msg) || is_rate_limit_error(msg)
+}
+
+/// GitHub turned the request down for rate limiting: the primary limit ("API
+/// rate limit exceeded", GraphQL `RATE_LIMITED`), a secondary limit, or HTTP
+/// 429. Backs off like an outage, but is reported as a rate limit.
+pub fn is_rate_limit_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    ["rate limit", "rate_limited", "http 429"].iter().any(|n| m.contains(n))
 }
 
 /// The subset of network-class errors that mean "the request took too long"
@@ -195,6 +204,20 @@ pub fn summarize_error(msg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limits_back_off_and_are_recognised() {
+        for msg in [
+            "gh: API rate limit exceeded for user ID 1234.",
+            "graphql: API rate limit already exceeded for user ID 1234.",
+            "You have exceeded a secondary rate limit. Please wait a few minutes before you try again.",
+            "HTTP 429: Too Many Requests",
+        ] {
+            assert!(is_rate_limit_error(msg), "{msg}");
+            assert!(is_network_error(msg), "{msg}");
+        }
+        assert!(!is_rate_limit_error("error connecting to api.github.com"));
+    }
 
     #[test]
     fn backoff_doubles_and_caps_at_fifteen_minutes() {

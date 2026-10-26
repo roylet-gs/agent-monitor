@@ -108,6 +108,20 @@ pub fn set(key: &str, value: &str) {
         fail(&format!("Invalid value for dailyTokensScope: {value}. Use all or visible."));
     }
 
+    if key == "reviewSort" && am_core::settings::ReviewSort::parse(value).is_none() {
+        fail(&format!(
+            "Invalid value for reviewSort: {value}. Use one of: {}.",
+            am_core::settings::ReviewSort::IDS.join(", ")
+        ));
+    }
+
+    if key == "reviewRequestsScope" && am_core::settings::ReviewScope::parse(value).is_none() {
+        fail(&format!(
+            "Invalid value for reviewRequestsScope: {value}. Use one of: {}.",
+            am_core::settings::ReviewScope::IDS.join(", ")
+        ));
+    }
+
     if key == "dailyTokensMode" && am_core::settings::DailyTokensMode::parse(value).is_none() {
         fail(&format!(
             "Invalid value for dailyTokensMode: {value}. Use one of: {}.",

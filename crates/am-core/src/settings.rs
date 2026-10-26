@@ -116,6 +116,27 @@ pub struct Settings {
     /// key (`N`, `ctrl-d`, `enter`, `none`). Only changed keys are stored;
     /// the TUI's `keymap` resolves and validates them.
     pub key_bindings: std::collections::BTreeMap<String, String>,
+    /// Fetch the open PRs waiting on your review (the `v` page and the
+    /// `N to review` badge). Needs `ghPrStatus`.
+    pub review_requests_enabled: bool,
+    /// Whose review requests count: `all` (you or a team you're on),
+    /// `direct` (you by name) or `teams` (only your teams). Unknown = `all`.
+    pub review_requests_scope: String,
+    /// Leave draft PRs out of the review list.
+    pub review_hide_drafts: bool,
+    /// Leave out PRs you've already reviewed (a team may still be requested).
+    pub review_hide_reviewed: bool,
+    /// Only these tracked repos (names or `owner/name`, comma/space
+    /// separated); empty = every tracked repo.
+    pub review_include_repos: String,
+    /// Never these tracked repos (same format).
+    pub review_exclude_repos: String,
+    /// Extra GitHub search qualifiers appended to the query, as typed
+    /// (`label:needs-review -author:app/dependabot`).
+    pub review_search_qualifiers: String,
+    pub review_polling_interval_ms: u64,
+    /// Order of the review page (see [`ReviewSort`]); unknown = `direct`.
+    pub review_sort: String,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -187,6 +208,15 @@ impl Default for Settings {
             check_for_updates: true,
             startup_script_mode: "pane".into(),
             key_bindings: Default::default(),
+            review_requests_enabled: true,
+            review_requests_scope: "all".into(),
+            review_hide_drafts: true,
+            review_hide_reviewed: true,
+            review_include_repos: String::new(),
+            review_exclude_repos: String::new(),
+            review_search_qualifiers: String::new(),
+            review_polling_interval_ms: 120_000,
+            review_sort: "direct".into(),
             raw: Default::default(),
         }
     }
@@ -209,6 +239,19 @@ impl Settings {
 
     pub fn daily_tokens_mode(&self) -> DailyTokensMode {
         DailyTokensMode::parse(&self.daily_tokens_mode).unwrap_or(DailyTokensMode::Tokens)
+    }
+
+    /// Review requests are fetched at all (they ride on the PR integration).
+    pub fn review_requests_on(&self) -> bool {
+        self.gh_pr_status && self.review_requests_enabled
+    }
+
+    pub fn review_scope(&self) -> ReviewScope {
+        ReviewScope::parse(&self.review_requests_scope).unwrap_or(ReviewScope::All)
+    }
+
+    pub fn review_sort(&self) -> ReviewSort {
+        ReviewSort::parse(&self.review_sort).unwrap_or(ReviewSort::Direct)
     }
 
     pub fn log_level(&self) -> Level {
@@ -260,6 +303,66 @@ impl DailyTokensMode {
             "weighted" => DailyTokensMode::Weighted,
             "cost" => DailyTokensMode::Cost,
             "breakdown" => DailyTokensMode::Breakdown,
+            _ => return None,
+        })
+    }
+}
+
+/// Whose review requests the review list shows (`reviewRequestsScope`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewScope {
+    /// Requested from you or from a team you're on.
+    All,
+    /// Requested from you by name.
+    Direct,
+    /// Requested from one of your teams (not you by name).
+    Teams,
+}
+
+impl ReviewScope {
+    pub const IDS: [&str; 3] = ["all", "direct", "teams"];
+
+    pub fn parse(s: &str) -> Option<ReviewScope> {
+        Some(match s {
+            "all" => ReviewScope::All,
+            "direct" => ReviewScope::Direct,
+            "teams" => ReviewScope::Teams,
+            _ => return None,
+        })
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            ReviewScope::All => "all",
+            ReviewScope::Direct => "direct",
+            ReviewScope::Teams => "teams",
+        }
+    }
+}
+
+/// How the review page orders its PRs (`reviewSort`). Within a section the
+/// most recently updated comes first, except for [`ReviewSort::Oldest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReviewSort {
+    /// PRs that ask you by name first, then those asking one of your teams.
+    Direct,
+    /// Grouped by repository (tracked order).
+    Repo,
+    /// Most recently updated first, one list.
+    Updated,
+    /// Waiting longest (oldest opened) first, one list.
+    Oldest,
+}
+
+impl ReviewSort {
+    pub const IDS: [&str; 4] = ["direct", "repo", "updated", "oldest"];
+
+    pub fn parse(s: &str) -> Option<ReviewSort> {
+        Some(match s {
+            "direct" => ReviewSort::Direct,
+            "repo" => ReviewSort::Repo,
+            "updated" => ReviewSort::Updated,
+            "oldest" => ReviewSort::Oldest,
             _ => return None,
         })
     }
@@ -401,6 +504,20 @@ mod tests {
         assert_eq!(d.daily_tokens_mode(), DailyTokensMode::Tokens);
         assert_eq!(Settings::parse(r#"{"dailyTokensMode":"bogus"}"#).daily_tokens_mode(), DailyTokensMode::Tokens);
         assert_eq!(Settings::parse(r#"{"dailyTokensMode":"cost"}"#).daily_tokens_mode(), DailyTokensMode::Cost);
+    }
+
+    #[test]
+    fn review_requests_default_to_me_and_my_teams() {
+        let d = Settings::parse("{}");
+        assert!(d.review_requests_on() && d.review_hide_drafts && d.review_hide_reviewed);
+        assert_eq!(d.review_scope(), ReviewScope::All);
+        assert_eq!(Settings::parse(r#"{"reviewRequestsScope":"bogus"}"#).review_scope(), ReviewScope::All);
+        assert_eq!(Settings::parse(r#"{"reviewRequestsScope":"teams"}"#).review_scope(), ReviewScope::Teams);
+        assert!(!Settings::parse(r#"{"ghPrStatus":false}"#).review_requests_on());
+        assert!(!Settings::parse(r#"{"reviewRequestsEnabled":false}"#).review_requests_on());
+        assert_eq!(d.review_sort(), ReviewSort::Direct);
+        assert_eq!(Settings::parse(r#"{"reviewSort":"oldest"}"#).review_sort(), ReviewSort::Oldest);
+        assert_eq!(Settings::parse(r#"{"reviewSort":"bogus"}"#).review_sort(), ReviewSort::Direct);
     }
 
     #[test]
