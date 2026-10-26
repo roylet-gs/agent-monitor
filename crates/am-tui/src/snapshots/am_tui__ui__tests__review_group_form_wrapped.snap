@@ -1,0 +1,38 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+╭─Review requests ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
+│ Batch the PR queries  @alice (agent-monitor) ✓ pulled                                 you           #51✓ review   0s │
+│Asked your team ──────────────────────────────────────────────────────────────────────────────────────────────────────│
+│ Typo in README  @outsider (agent-monitor) fork                                        @docs         #48✓ review   0s │
+│                                                                                                                      │
+│                 ╭─Review filters ──────────────────────────────────────────────────────────────────╮                 │
+│                 │ Lots — ⏎ change · ←→ adjust · esc back                                           │                 │
+│                 │                                                                                  │                 │
+│                 │▌  Name                  Lots                                                     │                 │
+│                 │   On                    on                                                       │                 │
+│                 │   Order                 direct                                                   │                 │
+│                 │   Authors               @someone-1, @someone-2, @someone-3, @someone-4,          │                 │
+│                 │                         @someone-5, @someone-6, @someone-7, @someone-8,          │                 │
+│                 │                         @someone-9, @someone-10, @someone-11, @someone-12        │                 │
+│                 │   Asked                 any                                                      │                 │
+│                 │   Teams                 any                                                      │                 │
+│                 │   Only repos            any                                                      │                 │
+│                 │   Not in repos          none                                                     │                 │
+│                 │   Draft                 any                                                      │                 │
+│                 │   CI checks             any                                                      │                 │
+│                 │   Review state          any                                                      │                 │
+│                 │   Reviewed by you       any                                                      │                 │
+│                 │   Older than (days)     any                                                      │                 │
+│                 │   Linear ticket         any                                                      │                 │
+│                 │   Title/branch has      —                                                        │                 │
+│                 │   GitHub search         —                                                        │                 │
+│                 │   Show on dashboard     on                                                       │                 │
+│                 │                                                                                  │                 │
+│                 │ Section header and badge label (empty: Group N)                                  │                 │
+│                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │
+╰ you + your teams · 1 group ────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  ? help  esc back

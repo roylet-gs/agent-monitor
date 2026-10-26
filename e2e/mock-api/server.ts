@@ -174,6 +174,19 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Who can author PRs (priority-authors autocomplete):
+    // `gh api graphql -f o0=<owner> -f n0=<name> … -f query=…assignableUsers…`.
+    if (args[0] === "api" && args[1] === "graphql" && argsStr.includes("assignableUsers")) {
+      if (outage) {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("simulated outage");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(loadFixture("gh-assignable-users.json")));
+      return;
+    }
+
     // The review-request search: `gh api graphql -f q=<search> -f query=…search(…`.
     if (args[0] === "api" && args[1] === "graphql" && argsStr.includes("search(query: $q")) {
       if (outage) {

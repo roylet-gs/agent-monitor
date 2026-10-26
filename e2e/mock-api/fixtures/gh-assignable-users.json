@@ -1,0 +1,14 @@
+{
+  "data": {
+    "r0": {
+      "assignableUsers": {
+        "nodes": [
+          { "login": "bob", "name": "Bob Builder" },
+          { "login": "carol", "name": "Carol Danvers" },
+          { "login": "cassie", "name": null },
+          { "login": "e2e-user", "name": "E2E User" }
+        ]
+      }
+    }
+  }
+}

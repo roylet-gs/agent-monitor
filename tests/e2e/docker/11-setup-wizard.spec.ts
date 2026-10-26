@@ -55,7 +55,7 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
   await tui.waitForText("GitHub PR & CI status (via gh)");
   await tui.sendKey("Enter");
 
-  // 5. Review requests (GitHub is on): defaults are me + my teams, no drafts.
+  // 5. Review requests (GitHub is on): defaults are me + my teams, no filters.
   await tui.waitForText("Which pull requests are waiting on your review?");
   await tui.waitForText("[x] Show PRs waiting for my review");
   await tui.waitForText("● Me and my teams");

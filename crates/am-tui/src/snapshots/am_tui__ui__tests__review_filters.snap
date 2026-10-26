@@ -4,25 +4,25 @@ expression: screen
 ---
 ╭─Review requests ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌Batch the PR queries  @alice ✓ pulled                                          you                  #51✓ review   0s │
-│ Typo in README  @outsider fork                                                 @docs                #48✓ review   0s │
+│▌Batch the PR queries  @alice ✓ pulled                                                 you           #51✓ review   0s │
+│ Typo in README  @outsider fork                                                        @docs         #48✓ review   0s │
 │gridsight ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│ Feeder load forecast v2  @alice                                                you @platform ENG-77 #902✗ review  0s │
+│ Feeder load forecast v2  @alice                                                       you +1 ENG-77 #902✗ review  0s │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
 │                 ╭─Review filters ──────────────────────────────────────────────────────────────────╮                 │
 │                 │▌  Requested from                all                                              │                 │
-│                 │   Order                         repo                                             │                 │
-│                 │   Hide drafts                   on                                               │                 │
-│                 │   Hide already reviewed         on                                               │                 │
-│                 │   Only repos                    —                                                │                 │
-│                 │   Exclude repos                 —                                                │                 │
-│                 │   Extra search filters          —                                                │                 │
+│                 │   Groups…                       no groups · rest: no drafts · not yet reviewed   │                 │
+│                 │   Badge: total on GitHub        off                                              │                 │
+│                 │   Reset filters…                ⏎ reset                                          │                 │
+│                 │   Reset groups…                 no groups                                        │                 │
 │                 │                                                                                  │                 │
 │                 │ all: you or a team you're on; direct: you by name; teams: only your teams        │                 │
 │                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
 ╰ you + your teams · no drafts · not yet reviewed ───────────────────────────────────────────────────────────── 1 of 3 ╯
  ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  ? help  esc back

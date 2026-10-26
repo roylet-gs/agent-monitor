@@ -43,12 +43,31 @@ test("run setup again starts from the current settings and esc cancels", async (
   await tui.waitForText("GitHub PR & CI status (via gh)");
   await tui.sendKey("Enter");
   await tui.waitForText("Which pull requests are waiting on your review?");
+  // Me and my teams: setup makes a group for each kind of request.
+  await tui.waitForText("Groups: Asked you, Asked your team");
   await tui.sendKey("Enter");
   await tui.waitForText("How many tokens of context should the bar measure against?");
   await tui.sendKey("Enter");
   await tui.waitForGone(WELCOME);
   await tui.waitForText("Setup complete");
   await tui.waitForText("ENG-123", 15_000);
+
+  // The groups are on the review page's groups list; remove them again so
+  // the seeded settings stay as other specs expect.
+  await tui.sendKey("v");
+  await tui.waitForText("─Review requests");
+  await tui.sendKey("f");
+  await tui.waitForText("Review filters");
+  await tui.sendKey("ArrowDown");
+  await tui.sendKey("Enter");
+  await tui.waitForText("Asked your team");
+  for (let i = 0; i < 2; i++) {
+    await tui.sendKey("x");
+    await tui.sendKey("y");
+  }
+  await tui.waitForGone("Asked your team");
+  await tui.press("Escape", 3); // groups page, filters, review page
+  await tui.waitForText("─Worktrees");
 });
 
 test("reset settings asks first, then reopens setup", async ({ page }) => {

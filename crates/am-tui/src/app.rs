@@ -33,6 +33,26 @@ pub struct Snapshot {
     /// Why the last review search failed (rate limit, gh logged out…);
     /// shown on the review page instead of "Loading…" or beside a cached list.
     pub review_error: Option<am_core::model::ReviewFetchError>,
+    /// Autocomplete for review-group authors: who can author PRs in the
+    /// tracked repos (looked up on GitHub) plus the review list's authors.
+    pub review_people: Vec<am_core::model::ReviewPerson>,
+    /// Open PRs requesting your or your teams' review on GitHub, ignoring the
+    /// page's filters (only fetched while `reviewBadge` shows `all`).
+    pub review_total: Option<u64>,
+    /// Which PRs match each review group's GitHub search terms.
+    pub review_query_hits: am_core::review_groups::QueryHits,
+}
+
+/// One number in the dashboard's review badge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BadgePart {
+    /// A named group (`Platform 4`).
+    Group(String, usize),
+    /// The unnamed default group (`26 to review`).
+    Rest(usize),
+    /// Every open PR asking you or your teams on GitHub (`60 on GitHub`);
+    /// `None` until a search has counted it.
+    Total(Option<u64>),
 }
 
 /// A visual row of the worktree list. Headers never take a selection index:
@@ -59,8 +79,12 @@ pub enum Action {
     None,
     Quit,
     Refresh,
-    /// Fetch review requests now (the review page opened, or `r` on it).
+    /// Fetch review requests now (the review page opened).
     RefreshReviews,
+    /// `r` on the review page: clear the review caches and fetch again.
+    ReloadReviews,
+    /// Look up who can author PRs (review-group autocomplete).
+    LoadReviewPeople,
     /// Enter: open in the configured IDE (resuming the last session if set).
     Open(Box<WorktreeView>),
     /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
@@ -115,6 +139,9 @@ pub struct App {
     pub setup: Option<crate::setup::Setup>,
     /// `v`: the review-requests page, in place of the worktree list.
     pub reviews: Option<crate::reviews_ui::ReviewPage>,
+    /// The review groups being edited (Review filters → Groups…), which the
+    /// page previews in place of the saved ones.
+    pub group_preview: Option<(Vec<am_core::review_groups::ReviewGroup>, am_core::review_groups::ReviewGroup)>,
     /// Select this worktree as soon as it shows up (after create).
     pub pending_select: Option<String>,
     /// Worktrees whose status changed since the user last had them selected.
@@ -162,6 +189,7 @@ impl App {
             modal: None,
             setup: None,
             reviews: None,
+            group_preview: None,
             pending_select: None,
             unseen: Default::default(),
             seen_status: Default::default(),
@@ -188,9 +216,7 @@ impl App {
         }
         self.selected = self.selected.min(self.flat.len().saturating_sub(1));
         self.track_status_changes();
-        if let Some(e) = &mut self.settings_editor {
-            e.repo_count = self.snapshot.repos.len();
-        }
+        self.sync_editor();
         let n = self.review_list().len();
         if let Some(p) = &mut self.reviews {
             p.clamp(n);
@@ -206,9 +232,58 @@ impl App {
     }
 
     fn open_settings(&mut self) {
-        let mut e = crate::settings_ui::SettingsEditor::new(&self.settings);
-        e.repo_count = self.snapshot.repos.len();
-        self.settings_editor = Some(e);
+        self.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&self.settings));
+        self.sync_editor();
+    }
+
+    /// Keep the settings editor's view of the app current: repo count,
+    /// review-group autocomplete and counts.
+    fn sync_editor(&mut self) {
+        let candidates = self.group_candidates();
+        let (per_group, hidden) = match &self.snapshot.reviews {
+            Some(list) => crate::reviews_ui::counts(list, &self.snapshot.repos, self.grouping()),
+            None => (Vec::new(), 0),
+        };
+        if let Some(e) = &mut self.settings_editor {
+            e.repo_count = self.snapshot.repos.len();
+            e.candidates = candidates;
+            e.group_counts = crate::review_groups_ui::GroupCounts { per_group, hidden };
+        }
+    }
+
+    /// What the review-group lists complete from: people, the teams asked in
+    /// the list, and the tracked repos.
+    fn group_candidates(&self) -> crate::review_groups_ui::Candidates {
+        use am_core::model::ReviewPerson;
+        let mut teams: Vec<ReviewPerson> = Vec::new();
+        for r in self.snapshot.reviews.iter().flatten() {
+            for t in r.requested.iter().filter(|w| w.contains('/')) {
+                if !teams.iter().any(|p| p.login.eq_ignore_ascii_case(t)) {
+                    teams.push(ReviewPerson { login: t.clone(), name: String::new() });
+                }
+            }
+        }
+        teams.sort_by_key(|p| p.login.to_lowercase());
+        let repos = self
+            .snapshot
+            .repos
+            .iter()
+            .map(|r| {
+                let slug = self.snapshot.reviews.iter().flatten().find(|x| x.repo_id == r.id).map(|x| x.repo.clone());
+                ReviewPerson { login: r.name.clone(), name: slug.unwrap_or_default() }
+            })
+            .collect();
+        crate::review_groups_ui::Candidates { people: self.snapshot.review_people.clone(), teams, repos }
+    }
+
+    /// The saved review groups, measured from now.
+    pub fn grouping(&self) -> crate::reviews_ui::Grouping<'_> {
+        let now = am_core::timefmt::now_unix();
+        let hits = &self.snapshot.review_query_hits;
+        match &self.group_preview {
+            Some((groups, default)) => crate::reviews_ui::Grouping { groups, default, now, hits },
+            None => crate::reviews_ui::Grouping::new(&self.settings, now, hits),
+        }
     }
 
     /// Port of the TS "unseen" logic: a status change on a worktree the user
@@ -434,6 +509,22 @@ impl App {
 
 
     pub fn on_key(&mut self, key: Key) -> Action {
+        let action = self.handle_key(key);
+        self.refresh_group_preview();
+        action
+    }
+
+    /// While the review groups page is open, the page beneath shows its
+    /// groups as edited so far (from the cached list, no fetch), counts too.
+    fn refresh_group_preview(&mut self) {
+        let preview = self.settings_editor.as_ref().and_then(|e| e.groups.as_ref()).map(|g| g.preview());
+        if preview != self.group_preview {
+            self.group_preview = preview;
+            self.sync_editor();
+        }
+    }
+
+    fn handle_key(&mut self, key: Key) -> Action {
         if self.popup.take().is_some() {
             return Action::None;
         }
@@ -559,6 +650,7 @@ impl App {
             Outcome::EditScript(id) => Action::EditScript(id),
             Outcome::ReposChanged => Action::ReposChanged,
             Outcome::RunSetup => Action::RunSetup,
+            Outcome::LoadPeople => Action::LoadReviewPeople,
             Outcome::ConfirmReset => {
                 self.modal = Some(crate::modals::Modal::ConfirmReset);
                 Action::None
@@ -660,6 +752,12 @@ impl App {
     /// (`App::hits`): the wheel acts like ↑/↓ in whatever is on top, and a
     /// click does what its spot on screen says.
     pub fn on_mouse(&mut self, m: Mouse) -> Action {
+        let action = self.handle_mouse(m);
+        self.refresh_group_preview();
+        action
+    }
+
+    fn handle_mouse(&mut self, m: Mouse) -> Action {
         use crate::ui::Target;
         let (x, y, double) = match m {
             Mouse::Move { x, y } => {
@@ -725,6 +823,26 @@ impl App {
             L::Settings => {
                 let Some(editor) = &mut self.settings_editor else { return Action::None };
                 let outcome = editor.click(i);
+                return self.editor_outcome(outcome);
+            }
+            L::Authors => {
+                if let Some(e) = &mut self.settings_editor
+                    && let Some(form) = e.groups.as_mut().and_then(|g| g.form.as_mut())
+                {
+                    form.accept(i, &e.candidates);
+                }
+                return Action::None;
+            }
+            L::Groups => {
+                let Some(e) = &mut self.settings_editor else { return Action::None };
+                let Some(g) = &mut e.groups else { return Action::None };
+                let key = match &mut g.form {
+                    Some(form) => (std::mem::replace(&mut form.cursor, i) == i && form.editing.is_none()).then_some(Key::Enter),
+                    None => (std::mem::replace(&mut g.cursor, i) == i).then_some(Key::Enter),
+                };
+                g.confirm_remove = None;
+                let Some(key) = key else { return Action::None };
+                let outcome = e.on_key(key);
                 return self.editor_outcome(outcome);
             }
             L::Sort | L::Plugins | L::Repos | L::Keys | L::ThemeTokens | L::Palette => {
@@ -814,8 +932,10 @@ impl App {
         self.settings = settings;
         if let Some(e) = &mut self.settings_editor {
             let cursor = e.cursor;
-            // The agent-plugins and key-bindings pages report changes while they stay open.
+            // The agent-plugins, key-bindings and review-groups pages report
+            // changes while they stay open.
             let plugins = e.plugins.take();
+            let groups = e.groups.take();
             let keys = e.keys.take();
             let repos = e.repos.take();
             let repo_count = e.repo_count;
@@ -826,6 +946,7 @@ impl App {
             e.plugins = plugins;
             e.keys = keys;
             e.repos = repos;
+            e.groups = groups;
             e.repo_count = repo_count;
         }
         let snap = self.snapshot.clone();
@@ -835,7 +956,10 @@ impl App {
     /// The review requests in page order (empty while off or not loaded).
     pub fn review_list(&self) -> Vec<&ReviewRequest> {
         let Some(list) = &self.snapshot.reviews else { return Vec::new() };
-        crate::reviews_ui::order(list, &self.snapshot.repos, self.settings.review_sort()).into_iter().map(|i| &list[i]).collect()
+        crate::reviews_ui::order(list, &self.snapshot.repos, self.grouping())
+            .into_iter()
+            .map(|i| &list[i])
+            .collect()
     }
 
     pub fn selected_review(&self) -> Option<&ReviewRequest> {
@@ -843,9 +967,29 @@ impl App {
         self.review_list().get(cursor).copied()
     }
 
-    /// The dashboard badge: how many PRs wait on your review.
-    pub fn review_count(&self) -> Option<usize> {
-        self.snapshot.reviews.as_ref().filter(|_| self.settings.review_requests_on()).map(Vec::len)
+    /// The dashboard badge's parts: each group shown on the dashboard with
+    /// its count, then the GitHub total when on. `None` while off or before
+    /// the list loads.
+    pub fn review_badge_parts(&self) -> Option<Vec<BadgePart>> {
+        let list = self.snapshot.reviews.as_ref().filter(|_| self.settings.review_requests_on())?;
+        let g = self.grouping();
+        let (per, _) = crate::reviews_ui::counts(list, &self.snapshot.repos, g);
+        let mut parts = Vec::new();
+        for (i, group) in g.groups.iter().enumerate().filter(|(_, x)| x.badge && x.enabled) {
+            let name = if group.name.trim().is_empty() { format!("Group {}", i + 1) } else { group.name.trim().to_string() };
+            parts.push(BadgePart::Group(name, per[i]));
+        }
+        if g.default.badge && g.default.enabled {
+            let n = per[g.groups.len()];
+            parts.push(match g.default.name.trim() {
+                "" => BadgePart::Rest(n),
+                name => BadgePart::Group(name.to_string(), n),
+            });
+        }
+        if self.settings.review_badge_total {
+            parts.push(BadgePart::Total(self.snapshot.review_total));
+        }
+        Some(parts)
     }
 
     fn open_reviews(&mut self) -> Action {
@@ -915,10 +1059,11 @@ impl App {
             // The feedback key (`f`) filters here.
             Some(C::Feedback) => {
                 self.settings_editor = Some(crate::settings_ui::SettingsEditor::only(&self.settings, crate::settings_ui::REVIEW_FILTERS));
+                self.sync_editor();
             }
             Some(C::Refresh) => {
-                self.notice = Some("Refreshing review requests…".into());
-                return Action::RefreshReviews;
+                self.notice = Some("Refreshing review requests (cache cleared)…".into());
+                return Action::ReloadReviews;
             }
             Some(C::Help) => self.show_help = true,
             Some(C::Settings) => self.open_settings(),

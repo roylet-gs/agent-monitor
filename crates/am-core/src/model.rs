@@ -187,10 +187,24 @@ pub struct ReviewRequest {
     pub requested: Vec<String>,
     #[serde(default)]
     pub linear: Option<LinearInfo>,
+    /// You've already reviewed it (any review state).
+    #[serde(default)]
+    pub reviewed_by_you: bool,
     /// The worktree that already has this branch checked out (filled in by
     /// the TUI collector; never cached).
     #[serde(skip)]
     pub worktree_id: Option<String>,
+}
+
+/// A GitHub user who can author PRs in a tracked repo: an autocomplete
+/// candidate for `reviewPriorityAuthors` (`integrations::reviews::people_args`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewPerson {
+    pub login: String,
+    /// Display name; empty when GitHub has none (or it came from a PR author).
+    #[serde(default)]
+    pub name: String,
 }
 
 /// Why the last review-request search failed (shown on the review page in
