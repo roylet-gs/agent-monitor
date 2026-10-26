@@ -22,7 +22,8 @@ pub enum Step {
     Context,
 }
 
-/// The Reviews step's choices (`reviewRequests*` settings).
+/// The Reviews step's choices (`reviewRequests*` settings; the two filters
+/// are the default review group's `draft` and `reviewed` rules).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewSetup {
     pub enabled: bool,
@@ -30,6 +31,9 @@ pub struct ReviewSetup {
     pub scope: usize,
     pub hide_drafts: bool,
     pub hide_reviewed: bool,
+    /// The default review group the filters are written into (its other
+    /// rules kept).
+    pub default_group: am_core::review_groups::ReviewGroup,
     /// Row under the cursor: see [`REVIEW_ROWS`].
     pub field: usize,
 }
@@ -42,13 +46,22 @@ impl ReviewSetup {
         ReviewSetup {
             enabled: s.review_requests_enabled,
             scope: am_core::settings::ReviewScope::IDS.iter().position(|id| *id == s.review_scope().id()).unwrap_or(0),
-            hide_drafts: s.review_hide_drafts,
-            hide_reviewed: s.review_hide_reviewed,
+            hide_drafts: s.review_default_group.draft == "ready",
+            hide_reviewed: s.review_default_group.reviewed == "no",
+            default_group: s.review_default_group.clone(),
             field: 0,
         }
     }
 
     /// Space (or a second click) on the row under the cursor.
+    /// The default review group with these filters applied.
+    pub fn group(&self) -> am_core::review_groups::ReviewGroup {
+        let mut g = self.default_group.clone();
+        g.draft = if self.hide_drafts { "ready" } else if g.draft == "ready" { "any" } else { g.draft.as_str() }.to_string();
+        g.reviewed = if self.hide_reviewed { "no" } else if g.reviewed == "no" { "any" } else { g.reviewed.as_str() }.to_string();
+        g
+    }
+
     pub fn toggle(&mut self) {
         match self.field {
             0 => self.enabled = !self.enabled,
@@ -250,8 +263,7 @@ impl Setup {
                             ("ghPrStatus", Value::Bool(self.gh)),
                             ("reviewRequestsEnabled", Value::Bool(self.review.enabled)),
                             ("reviewRequestsScope", Value::from(am_core::settings::ReviewScope::IDS[self.review.scope.min(2)])),
-                            ("reviewHideDrafts", Value::Bool(self.review.hide_drafts)),
-                            ("reviewHideReviewed", Value::Bool(self.review.hide_reviewed)),
+                            ("reviewDefaultGroup", serde_json::to_value(self.review.group()).unwrap_or_default()),
                             ("linearEnabled", Value::Bool(!key.is_empty())),
                             ("linearApiKey", Value::from(key)),
                             ("contextWindowTokens", Value::from(tokens)),
@@ -362,14 +374,16 @@ mod tests {
         s.on_key(Key::Char(' ')); // only me directly
         s.on_key(Key::Down);
         s.on_key(Key::Down);
-        s.on_key(Key::Char(' ')); // show drafts
+        s.on_key(Key::Char(' ')); // hide drafts
         s.on_key(Key::Enter);
         assert_eq!(s.step, Step::Context);
         let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
         assert!(v.contains(&("reviewRequestsEnabled", Value::Bool(true))));
         assert!(v.contains(&("reviewRequestsScope", Value::from("direct"))));
-        assert!(v.contains(&("reviewHideDrafts", Value::Bool(false))));
-        assert!(v.contains(&("reviewHideReviewed", Value::Bool(true))));
+        let group = v.iter().find(|(k, _)| *k == "reviewDefaultGroup").map(|(_, g)| g.clone()).unwrap();
+        // A fresh default group has every filter off; the step turned drafts off.
+        assert_eq!((group["draft"].as_str(), group["reviewed"].as_str()), (Some("ready"), Some("any")));
+        assert!(!v.iter().any(|(k, _)| *k == "reviewHideDrafts"), "legacy keys aren't written");
         assert!(v.contains(&("ide", Value::from("cursor"))));
         assert!(!v.iter().any(|(k, _)| *k == "ideCommand"));
         assert!(v.contains(&("linearEnabled", Value::Bool(true))));
@@ -473,7 +487,12 @@ mod tests {
             r#"{"setupCompleted":true,"reviewRequestsScope":"teams","reviewHideDrafts":false,"reviewRequestsEnabled":false}"#,
         );
         let s = Setup::new(vec![], &saved);
-        assert_eq!((s.review.enabled, s.review.scope, s.review.hide_drafts), (false, 2, false));
+        assert_eq!((s.review.enabled, s.review.scope, s.review.hide_drafts, s.review.hide_reviewed), (false, 2, false, true));
+        // A saved default group is what the step starts from, and keeps.
+        let saved = am_core::settings::Settings::parse(r#"{"reviewDefaultGroup":{"draft":"ready","authors":["bob"]}}"#);
+        let s = Setup::new(vec![], &saved);
+        assert!(s.review.hide_drafts && !s.review.hide_reviewed);
+        assert_eq!(s.review.group().authors, ["bob"]);
     }
 
     #[test]

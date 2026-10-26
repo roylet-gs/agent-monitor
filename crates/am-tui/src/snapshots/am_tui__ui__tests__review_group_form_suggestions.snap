@@ -1,0 +1,34 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+╭─Review requests ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│Outside ──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌Typo in README  @outsider (agent-monitor) fork                                        @docs         #48✓ review   0s │
+│Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│ Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
+│ Batch the PR que╭─Review filters ──────────────────────────────────────────────────────────────────╮#51✓ review   0s │
+│                 │ Outside — ⏎ change · ←→ adjust · esc back                                        │                 │
+│                 │                                                                                  │                 │
+│                 │   Name                  Outside                                                  │                 │
+│                 │   On                    on                                                       │                 │
+│                 │   Order                 direct                                                   │                 │
+│                 │▌  Authors               outsider, o▏                                             │                 │
+│                 │   Asked                 any                                                      │                 │
+│                 │   Teams                 any                                                      │                 │
+│                 │   Only repos            any                                                      │                 │
+│                 │   Not in repos          none                                                     │                 │
+│                 │   Draft                 any                                                      │                 │
+│                 │   CI checks             any                                                      │                 │
+│                 │   Review state          any                                                      │                 │
+│                 │   Reviewed by you       any                                                      │                 │
+│                 │   Older than (days)     any                                                      │                 │
+│                 │   Linear ticket         any                                                      │                 │
+│                 │   Title/branch has      —                                                        │                 │
+│                 │   GitHub search         —                                                        │                 │
+│                 │   Show on dashboard     on                                                       │                 │
+│                 │                                                                                  │                 │
+│                 │ ⇥ olga                                                                           │                 │
+│                 ╰───────────────────────────────────────── ⇥ complete  ↑↓ pick  ⏎ save  esc cancel ╯                 │
+╰ you + your teams · 1 group ────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  ? help  esc back

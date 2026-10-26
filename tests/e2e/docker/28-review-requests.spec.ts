@@ -39,8 +39,8 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   expect(await lineOf(/Fix typo in README/)).toBeLessThan(await lineOf(/Asked your team ─/));
   expect(await lineOf(/Asked your team ─/)).toBeLessThan(await lineOf(/Update onboarding copy/));
   expect(await tui.keyBar()).toContain("t pull into Reviewing");
-  // The bottom border sums up the search's filters.
-  expect(screen).toContain("you + your teams · no drafts · not yet reviewed");
+  // The bottom border sums up who's asked and the groups' filters.
+  expect(screen).toMatch(/╰ you \+ your teams ─/);
   await tui.screenshot("review-page");
 
   // f opens just the review filters over the page; esc goes back to it.
@@ -48,7 +48,8 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.waitForText("Review filters");
   const filters = await tui.getScreenText();
   expect(filters).toContain("Requested from");
-  expect(filters).toContain("Extra search filters");
+  expect(filters).toContain("Groups…");
+  expect(filters).not.toContain("Hide drafts");
   expect(filters).not.toContain("Theme");
   await tui.screenshot("review-filters");
   await tui.sendKey("Escape");
@@ -118,6 +119,72 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.waitForText("Nothing waiting on your review", 20_000);
   await tui.sendKey("Escape");
   await tui.waitForGone("to review", 5_000);
+});
+
+test("review groups: a group takes its PRs first, with autocomplete and a badge", async ({ page }) => {
+  await setupMock({ reviews: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.sendKey("v");
+  await tui.waitForText("Update onboarding copy", 20_000);
+
+  // f → Groups… (second row) → a adds a group and opens its form.
+  await tui.sendKey("f");
+  await tui.waitForText("Review filters");
+  await tui.sendKey("ArrowDown");
+  await tui.sendKey("Enter");
+  await tui.waitForText("Review groups — a add");
+  await tui.sendKey("a");
+  await tui.waitForText("Older than (days)");
+  await tui.sendKey("Enter"); // Name
+  await tui.type("Carol");
+  await tui.sendKey("Enter");
+  // Authors (under Order): suggestions come from the repo's assignable
+  // users (gh-assignable-users.json) plus the PRs' authors.
+  await tui.press("ArrowDown", 3); // Name → On → Order → Authors
+  await tui.sendKey("Enter");
+  await tui.waitForText("⇥ complete");
+  await tui.type("ca");
+  await tui.waitForText("carol (Carol Danvers) · cassie", 10_000);
+  await tui.screenshot("review-group-suggest");
+  await tui.sendKey("Tab");
+  await tui.waitForText("carol, ▏");
+  await tui.sendKey("Enter");
+  await tui.waitForText("@carol");
+  await tui.sendKey("Escape"); // the form
+  await tui.waitForText("by @carol");
+  await tui.screenshot("review-groups");
+  await tui.sendKey("Escape"); // the groups page
+  await tui.sendKey("Escape"); // the filters
+  await tui.waitForGone("Review filters");
+
+  // #62 (carol, only asks your team) now opens the page in its own group.
+  await tui.waitForText("Carol ─");
+  const lineOf = async (re: RegExp) => (await tui.lines()).findIndex((l) => re.test(l));
+  expect(await lineOf(/Carol ─/)).toBeLessThan(await lineOf(/Update onboarding copy/));
+  expect(await lineOf(/Update onboarding copy/)).toBeLessThan(await lineOf(/Asked you ─/));
+  expect(await tui.getScreenText()).toContain("· 1 group");
+  await tui.screenshot("review-page-groups");
+
+  // The dashboard badge counts each group shown on it.
+  await tui.sendKey("Escape");
+  await tui.waitForText("Carol 1 · 2 to review");
+
+  // Restore: remove the group.
+  await tui.sendKey("v");
+  await tui.sendKey("f");
+  await tui.waitForText("Review filters");
+  await tui.sendKey("ArrowDown");
+  await tui.sendKey("Enter");
+  await tui.waitForText("by @carol");
+  await tui.sendKey("x");
+  await tui.sendKey("y");
+  await tui.waitForGone("by @carol");
+  await tui.press("Escape", 2); // the groups page, the filters
+  await tui.waitForGone("Carol ─");
+  await setupMock({ reviews: false });
+  await tui.sendKey("r");
+  await tui.waitForText("Nothing waiting on your review", 20_000);
 });
 
 test("a GitHub rate limit is explained, not left loading", async ({ page }) => {

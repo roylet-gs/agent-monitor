@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use am_core::integrations::reviews::ReviewRepo;
 use am_core::integrations::{Integrations, RepoBranches};
 use am_core::harness::HarnessKind;
-use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, ReviewFetchError, ReviewRequest, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
+use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, ReviewFetchError, ReviewPerson, ReviewRequest, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::context::ContextUsage;
@@ -47,6 +47,8 @@ enum Cmd {
     Refresh { force: bool },
     /// Fetch review requests now (the review page opened).
     RefreshReviews,
+    /// Look up who can author PRs (autocomplete for review groups).
+    RefreshPeople,
     Settings(Box<Settings>),
     Quit,
 }
@@ -59,6 +61,9 @@ struct IntegrationUpdate {
     health: Health,
     reviews: Option<Vec<ReviewRequest>>,
     review_error: Option<ReviewFetchError>,
+    people: Vec<ReviewPerson>,
+    review_total: Option<u64>,
+    review_hits: am_core::review_groups::QueryHits,
 }
 
 pub struct Collector {
@@ -115,6 +120,11 @@ impl Collector {
         let _ = self.int_cmd.send(Cmd::RefreshReviews);
     }
 
+    /// Look up who can author PRs in the tracked repos (at most hourly).
+    pub fn refresh_people(&self) {
+        let _ = self.int_cmd.send(Cmd::RefreshPeople);
+    }
+
     pub fn shutdown(mut self) {
         // The integrations thread may be mid-`gh` call; it exits on its next
         // loop and holds nothing that needs flushing, so it is not joined.
@@ -155,6 +165,9 @@ struct Worker {
     health: Health,
     reviews: Option<Vec<ReviewRequest>>,
     review_error: Option<ReviewFetchError>,
+    people: Vec<ReviewPerson>,
+    review_total: Option<u64>,
+    review_hits: am_core::review_groups::QueryHits,
     git: HashMap<String, GitData>,
     procs: HashMap<String, ProcData>,
     /// Context usage per worktree id, re-read with the git data.
@@ -189,6 +202,9 @@ impl Worker {
             health: Health::default(),
             reviews: None,
             review_error: None,
+            people: Vec::new(),
+            review_total: None,
+            review_hits: Default::default(),
             git: HashMap::new(),
             procs: HashMap::new(),
             ctx: HashMap::new(),
@@ -220,7 +236,7 @@ impl Worker {
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(Cmd::Refresh { force: f }) => force = f,
-                Ok(Cmd::RefreshReviews) => {}
+                Ok(Cmd::RefreshReviews | Cmd::RefreshPeople) => {}
                 Ok(Cmd::Settings(s)) => {
                     // Filters/sort/process filter may have changed: rebuild now.
                     self.settings = *s;
@@ -250,6 +266,9 @@ impl Worker {
             self.health = u.health;
             self.reviews = u.reviews;
             self.review_error = u.review_error;
+            self.people = u.people;
+            self.review_total = u.review_total;
+            self.review_hits = u.review_hits;
             ints_changed = true;
         }
         let dv = db::data_version(&self.conn)?;
@@ -398,14 +417,38 @@ impl Worker {
         }
         let today_tokens = self.today_tokens(&roots, &groups);
         let review_error = self.review_error.clone();
-        let snapshot =
-            Snapshot { repos, groups, subagents, health: self.health.clone(), stack, today_tokens, reviews, review_error };
+        let review_people = people_with_authors(&self.people, reviews.as_deref().unwrap_or_default());
+        let snapshot = Snapshot {
+            repos,
+            groups,
+            subagents,
+            health: self.health.clone(),
+            stack,
+            today_tokens,
+            reviews,
+            review_error,
+            review_people,
+            review_total: self.review_total,
+            review_query_hits: self.review_hits.clone(),
+        };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());
             self.last_sent = Some(snapshot);
         }
         Ok(())
     }
+}
+
+/// `people` plus any review author not among them (no name), by login.
+fn people_with_authors(people: &[ReviewPerson], reviews: &[ReviewRequest]) -> Vec<ReviewPerson> {
+    let mut out = people.to_vec();
+    for r in reviews {
+        if !r.author.is_empty() && !out.iter().any(|p| p.login.eq_ignore_ascii_case(&r.author)) {
+            out.push(ReviewPerson { login: r.author.clone(), name: String::new() });
+        }
+    }
+    out.sort_by_key(|p| p.login.to_lowercase());
+    out
 }
 
 fn worktrees_for_stacks(views: &[WorktreeView]) -> Vec<Worktree> {
@@ -611,10 +654,12 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
     loop {
         let mut force = false;
         let mut reviews_now = false;
+        let mut people_now = false;
         match cmds.recv_timeout(Duration::from_secs(1)) {
             Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(Cmd::Refresh { force: f }) => force = f,
             Ok(Cmd::RefreshReviews) => reviews_now = true,
+            Ok(Cmd::RefreshPeople) => people_now = true,
             Ok(Cmd::Settings(s)) => {
                 if settings.linear_auto_nickname
                     && !s.linear_auto_nickname
@@ -633,11 +678,8 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
                 // Any change to what the search asks for re-runs it now.
                 let reviews_changed = s.review_requests_on() != settings.review_requests_on()
                     || s.review_requests_scope != settings.review_requests_scope
-                    || s.review_hide_drafts != settings.review_hide_drafts
-                    || s.review_hide_reviewed != settings.review_hide_reviewed
-                    || s.review_include_repos != settings.review_include_repos
-                    || s.review_exclude_repos != settings.review_exclude_repos
-                    || s.review_search_qualifiers != settings.review_search_qualifiers;
+                    || group_queries(&s) != group_queries(&settings)
+                    || (wants_total(&s) && !wants_total(&settings));
                 settings = *s;
                 if enabled_now {
                     last_gh = None;
@@ -680,7 +722,8 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         let linear_due = linear_on
             && ((force && settings.linear_refresh_on_manual) || new_branches || last_linear.is_none_or(|t| t.elapsed() >= linear_every));
 
-        if !(gh_due || linear_due || reviews_due || first || new_branches) {
+        let people_due = people_now && settings.gh_pr_status;
+        if !(gh_due || linear_due || reviews_due || people_due || first || new_branches) {
             continue;
         }
         if first {
@@ -708,6 +751,11 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             info!("integrations", "review requests refresh: {outcome:?} in {:?}", started.elapsed());
             last_reviews = Some(Instant::now());
             known_repos = repo_ids;
+        }
+        if people_due {
+            let review_repos: Vec<ReviewRepo> =
+                repos.iter().map(|r| ReviewRepo::new(r.id.clone(), r.name.clone(), r.path.clone())).collect();
+            ints.refresh_people(&conn, &review_repos);
         }
         known_branches = branches.clone();
         if settings.linear_enabled && settings.linear_auto_nickname {
@@ -741,7 +789,20 @@ fn update(ints: &Integrations, branches: &[(String, String)], settings: &Setting
         health: Health { github_failing: h.github_failing, linear_failing: h.linear_failing, github_rate_limited },
         reviews,
         review_error,
+        people: if settings.gh_pr_status { ints.people().to_vec() } else { Vec::new() },
+        review_total: (on && wants_total(settings)).then(|| ints.review_total()).flatten(),
+        review_hits: if on { ints.review_hits().clone() } else { Default::default() },
     }
+}
+
+/// The review groups' GitHub search terms, which the search runs.
+fn group_queries(settings: &Settings) -> Vec<String> {
+    am_core::review_groups::queries(&settings.review_groups, &settings.review_default_group)
+}
+
+/// The review badge shows the unfiltered count, which the search then fetches.
+fn wants_total(settings: &Settings) -> bool {
+    settings.review_badge_total
 }
 
 fn stack_branches(worktrees: &[Worktree], repo_id: &str) -> Vec<stacks::Branch> {

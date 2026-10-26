@@ -28,6 +28,8 @@ pub enum CacheKind {
     Linear,
     /// The review-request list (`integrations::reviews`), one row.
     Review,
+    /// Who can author PRs in the tracked repos (review autocomplete), one row.
+    People,
 }
 
 impl CacheKind {
@@ -36,6 +38,7 @@ impl CacheKind {
             CacheKind::Pr => "pr",
             CacheKind::Linear => "linear",
             CacheKind::Review => "review",
+            CacheKind::People => "people",
         }
     }
 }

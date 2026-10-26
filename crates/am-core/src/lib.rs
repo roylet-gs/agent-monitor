@@ -15,6 +15,7 @@ pub mod mcp_installer;
 pub mod model;
 pub mod paths;
 pub mod procscan;
+pub mod review_groups;
 pub mod settings;
 pub mod stacks;
 pub mod status;

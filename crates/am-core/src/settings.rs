@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::log::Level;
+pub use crate::review_groups::ReviewGroup;
 use crate::paths;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,21 +123,30 @@ pub struct Settings {
     /// Whose review requests count: `all` (you or a team you're on),
     /// `direct` (you by name) or `teams` (only your teams). Unknown = `all`.
     pub review_requests_scope: String,
-    /// Leave draft PRs out of the review list.
+    /// Legacy (2.1.x): leave drafts out. Kept for 1.x/2.x round-trips; only
+    /// read to seed `reviewDefaultGroup` when the file has none.
     pub review_hide_drafts: bool,
-    /// Leave out PRs you've already reviewed (a team may still be requested).
+    /// Legacy: leave out PRs you've reviewed (seeds the default group).
     pub review_hide_reviewed: bool,
-    /// Only these tracked repos (names or `owner/name`, comma/space
-    /// separated); empty = every tracked repo.
+    /// Legacy: only these tracked repos (seeds the default group).
     pub review_include_repos: String,
-    /// Never these tracked repos (same format).
+    /// Legacy: never these tracked repos (seeds the default group).
     pub review_exclude_repos: String,
-    /// Extra GitHub search qualifiers appended to the query, as typed
-    /// (`label:needs-review -author:app/dependabot`).
+    /// Legacy: extra GitHub search qualifiers (seeds the default group).
     pub review_search_qualifiers: String,
     pub review_polling_interval_ms: u64,
-    /// Order of the review page (see [`ReviewSort`]); unknown = `direct`.
+    /// Legacy: the review page's order (seeds the default group's `sort`).
     pub review_sort: String,
+    /// The review page's groups, top to bottom: each PR lands in the first
+    /// one whose rules it matches (see [`crate::review_groups`]).
+    pub review_groups: Vec<ReviewGroup>,
+    /// Catches what no group did; what it doesn't match is hidden. Without a
+    /// name it keeps its `sort`'s sections. A file without one gets it from
+    /// the legacy `review*` filter keys ([`Settings::parse`]).
+    pub review_default_group: ReviewGroup,
+    /// The review badge also shows every open PR requesting you or your
+    /// teams on GitHub, ignoring the filters (`· 60 on GitHub`).
+    pub review_badge_total: bool,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -217,6 +227,9 @@ impl Default for Settings {
             review_search_qualifiers: String::new(),
             review_polling_interval_ms: 120_000,
             review_sort: "direct".into(),
+            review_groups: Vec::new(),
+            review_default_group: ReviewGroup::default(),
+            review_badge_total: false,
             raw: Default::default(),
         }
     }
@@ -276,9 +289,46 @@ impl Settings {
             }
         }
         let mut s: Settings = serde_json::from_value(serde_json::Value::Object(merged)).unwrap_or_default();
+        const LEGACY: [&str; 6] = [
+            "reviewHideDrafts",
+            "reviewHideReviewed",
+            "reviewIncludeRepos",
+            "reviewExcludeRepos",
+            "reviewSearchQualifiers",
+            "reviewSort",
+        ];
+        if !map.contains_key("reviewDefaultGroup") && LEGACY.iter().any(|k| map.contains_key(*k)) {
+            s.review_default_group = s.legacy_default_group();
+        }
         s.raw = map;
         s
     }
+
+    /// The default review group the 2.1.x filter settings describe, so an
+    /// upgrade shows the same page.
+    fn legacy_default_group(&self) -> ReviewGroup {
+        ReviewGroup {
+            sort: self.review_sort().id().into(),
+            repos: split_logins(&self.review_include_repos),
+            exclude_repos: split_logins(&self.review_exclude_repos),
+            draft: if self.review_hide_drafts { "ready" } else { "any" }.into(),
+            reviewed: if self.review_hide_reviewed { "no" } else { "any" }.into(),
+            query: self.review_search_qualifiers.split_whitespace().collect::<Vec<_>>().join(" "),
+            ..ReviewGroup::default()
+        }
+    }
+}
+
+/// A comma/space separated list of GitHub logins, lower-cased, `@` dropped,
+/// duplicates removed (first one kept).
+pub fn split_logins(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for login in raw.split([',', ' ', '\t', '\n']).map(|s| s.trim().trim_start_matches('@').to_lowercase()) {
+        if !login.is_empty() && !out.contains(&login) {
+            out.push(login);
+        }
+    }
+    out
 }
 
 /// What today's token total shows (`dailyTokensMode`).
@@ -365,6 +415,15 @@ impl ReviewSort {
             "oldest" => ReviewSort::Oldest,
             _ => return None,
         })
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            ReviewSort::Direct => "direct",
+            ReviewSort::Repo => "repo",
+            ReviewSort::Updated => "updated",
+            ReviewSort::Oldest => "oldest",
+        }
     }
 }
 
@@ -518,6 +577,25 @@ mod tests {
         assert_eq!(d.review_sort(), ReviewSort::Direct);
         assert_eq!(Settings::parse(r#"{"reviewSort":"oldest"}"#).review_sort(), ReviewSort::Oldest);
         assert_eq!(Settings::parse(r#"{"reviewSort":"bogus"}"#).review_sort(), ReviewSort::Direct);
+        assert!(d.review_groups.is_empty() && d.review_default_group == ReviewGroup::default() && !d.review_badge_total);
+        let g = Settings::parse(r#"{"reviewGroups":[{"name":"Mine","asked":"you"},{"authors":["bob"]}],"reviewDefaultGroup":{"badge":false}}"#);
+        assert_eq!(g.review_groups.len(), 2);
+        assert_eq!((g.review_groups[0].name.as_str(), g.review_groups[0].asked.as_str()), ("Mine", "you"));
+        assert_eq!(g.review_groups[1].draft, "any", "missing rules default to any");
+        assert!(!g.review_default_group.badge && g.review_default_group.checks == "any");
+        // 2.1.x filters become the default group's rules; a new file's is all off.
+        let old = Settings::parse(
+            r#"{"reviewHideDrafts":true,"reviewHideReviewed":false,"reviewExcludeRepos":"docs, api","reviewSearchQualifiers":" label:x ","reviewSort":"oldest"}"#,
+        );
+        let dg = &old.review_default_group;
+        assert_eq!((dg.draft.as_str(), dg.reviewed.as_str(), dg.sort.as_str()), ("ready", "any", "oldest"));
+        assert_eq!((dg.exclude_repos.clone(), dg.query.as_str()), (vec!["docs".to_string(), "api".to_string()], "label:x"));
+        assert_eq!(Settings::parse("{}").review_default_group, ReviewGroup::default());
+        let set = Settings::parse(r#"{"reviewHideDrafts":true,"reviewDefaultGroup":{}}"#);
+        assert_eq!(set.review_default_group.draft, "any", "a saved default group wins");
+        // A malformed list is ignored, not the whole file.
+        let bad = Settings::parse(r#"{"reviewGroups":"nope","reviewSort":"repo"}"#);
+        assert!(bad.review_groups.is_empty() && bad.review_sort() == ReviewSort::Repo);
     }
 
     #[test]

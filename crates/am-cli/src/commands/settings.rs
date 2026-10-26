@@ -122,6 +122,13 @@ pub fn set(key: &str, value: &str) {
         ));
     }
 
+    if key == "reviewGroups" || key == "reviewDefaultGroup" {
+        fail(&format!(
+            "{key} holds review groups and can't be set from the CLI.\n\
+             Edit them on the review page (v, then f → Groups…) or in settings.json."
+        ));
+    }
+
     if key == "dailyTokensMode" && am_core::settings::DailyTokensMode::parse(value).is_none() {
         fail(&format!(
             "Invalid value for dailyTokensMode: {value}. Use one of: {}.",

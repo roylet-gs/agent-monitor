@@ -15,6 +15,7 @@ mod modals;
 mod ops;
 mod plugins_ui;
 mod repos_ui;
+mod review_groups_ui;
 mod reviews_ui;
 mod settings_ui;
 mod setup;
@@ -143,7 +144,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     let mut log_lines: Vec<String> = Vec::new();
     let mut dirty = true;
     let mut last_second = am_core::timefmt::now_unix();
-    let mut notice_since: Option<Instant> = None;
+    // When the notice on screen appeared, and its text: a new notice (from a
+    // key or the launcher) gets its own 2 s, not what's left of the last one's.
+    let mut notice_since: Option<(Instant, String)> = None;
     let mut last_click: Option<(u16, Instant)> = None;
     let mut settings_mtime = settings_file_mtime();
     loop {
@@ -313,10 +316,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             }
             dirty = true;
         }
-        if app.notice.is_some() && notice_since.get_or_insert_with(Instant::now).elapsed() > Duration::from_secs(2) {
-            app.notice = None;
-            notice_since = None;
-            dirty = true;
+        match &app.notice {
+            Some(n) if notice_since.as_ref().is_none_or(|(_, shown)| shown != n) => {
+                notice_since = Some((Instant::now(), n.clone()));
+            }
+            Some(_) if notice_since.as_ref().is_some_and(|(at, _)| at.elapsed() > Duration::from_secs(2)) => {
+                app.notice = None;
+                notice_since = None;
+                dirty = true;
+            }
+            _ => {}
         }
         if dirty {
             execute!(io::stdout(), BeginSynchronizedUpdate)?;
@@ -391,6 +400,7 @@ fn dispatch(
         Action::Quit => return Ok(true),
         Action::Refresh => collector.refresh(true),
         Action::RefreshReviews => collector.refresh_reviews(),
+        Action::LoadReviewPeople => collector.refresh_people(),
         Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
         Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
         Action::SettingsChanged => {

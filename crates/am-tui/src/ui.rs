@@ -122,6 +122,10 @@ pub enum List {
     SetupContext,
     NewForm,
     Suggest,
+    /// Autocomplete under a review group's list field.
+    Authors,
+    /// The review groups page: its list, or a group's form.
+    Groups,
     Jobs,
     Reviews,
 }
@@ -286,6 +290,8 @@ fn contains(r: Rect, x: u16, y: u16) -> bool {
 
 const SETTINGS_HINT: &str = " ⏎/space change  ←→ adjust  e edit file  esc close ";
 const FILTERS_HINT: &str = " ⏎/space change  ←→ adjust  esc close ";
+/// While typing a review group's list (authors, teams, repos).
+const AUTHORS_HINT: &str = " ⇥ complete  ↑↓ pick  ⏎ save  esc cancel ";
 
 fn draw_settings(
     f: &mut Frame,
@@ -299,8 +305,27 @@ fn draw_settings(
     // The review page's filter box (`f`) is the same editor, cut down.
     let filters = ed.only.is_some();
     let (name, hint, update) = if filters { ("Review filters ", FILTERS_HINT, None) } else { ("Settings ", SETTINGS_HINT, update) };
+    let form = ed.groups.as_ref().and_then(|g| g.form.as_ref());
+    let typing_list =
+        form.is_some_and(|f| f.editing.is_some() && matches!(f.field().kind, crate::review_groups_ui::FormKind::List(_)));
+    let hint = if typing_list { AUTHORS_HINT } else { hint };
     let (rect, [banner, list, help]) = if filters {
-        settings_areas(area, None, ed.fields().len() as u16, 4)
+        // The groups page needs room for a group's whole form, wrapped.
+        let rows = match ed.groups.as_ref() {
+            Some(g) => match &g.form {
+                Some(form) => {
+                    let inner_w = (84.min(area.width.saturating_sub(2)) as usize).saturating_sub(2);
+                    group_form_lines(g.group(form.which), form, inner_w).len() + 2
+                }
+                None => g.groups.len() + 4,
+            },
+            None => ed.fields().len(),
+        };
+        // At the bottom of the page, so the groups above show the edits.
+        let (rect, parts) = settings_areas(area, None, rows as u16, 4);
+        let y = (area.y + area.height).saturating_sub(rect.height + 2).max(area.y);
+        let shift = |r: Rect| Rect { y: r.y + (y - rect.y), ..r };
+        (shift(rect), parts.map(shift))
     } else {
         settings_areas(area, update, FIELDS.len() as u16, 16)
     };
@@ -327,6 +352,14 @@ fn draw_settings(
     if let Some(rp) = &ed.repos {
         hits.clear();
         draw_repos(f, theme, list, help, rp, hits);
+        return;
+    }
+    if let Some(g) = &ed.groups {
+        hits.clear();
+        match &g.form {
+            Some(form) => draw_group_form(f, theme, list, help, ed, g, form, hits),
+            None => draw_groups(f, theme, list, help, ed, g, hits),
+        }
         return;
     }
     if let Some(pl) = &ed.plugins {
@@ -419,6 +452,231 @@ fn draw_settings(
         None => Line::styled(format!(" {}", field.help), theme.faint()),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// Review filters → Groups…: the groups in cascade order, then the
+/// default group, each with its rules, badge toggle and current count.
+fn draw_groups(
+    f: &mut Frame,
+    theme: &Theme,
+    list: Rect,
+    help: Rect,
+    ed: &crate::settings_ui::SettingsEditor,
+    g: &crate::review_groups_ui::GroupsEditor,
+    hits: &mut Vec<Hit>,
+) {
+    let header = " Review groups — a add · x remove · J/K move · ⏎ edit · space on/off · b badge · esc back";
+    hint_hits(hits, header, list.x, list.y);
+    let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
+    let counts = &ed.group_counts;
+    let name_w = (0..=g.groups.len()).map(|i| g.label(i).width() + 2).max().unwrap_or(0).clamp(14, 24);
+    let rules_w = (list.width as usize).saturating_sub(1 + 5 + name_w + 10 + 6).max(8);
+    for i in 0..=g.groups.len() {
+        let sel = i == g.cursor;
+        let group = g.group((i < g.groups.len()).then_some(i));
+        let mark = if i < g.groups.len() { format!("  {:<3}", i + 1) } else { "  ⤓  ".to_string() };
+        let rules = match group.summary() {
+            r if !r.is_empty() => r,
+            _ if i < g.groups.len() => "everything that reaches it".into(),
+            _ => "everything left".into(),
+        };
+        let warn = group_warning(group, &ed.candidates).is_some();
+        let rules = match (group.enabled, warn) {
+            (false, _) => format!("off · {rules}"),
+            (true, true) => format!("⚠ {rules}"),
+            (true, false) => rules,
+        };
+        let on = group.enabled;
+        let count = counts.per_group.get(i).map_or(String::new(), |n| format!("{n:>4}"));
+        let line = Line::from(vec![
+            Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(mark, theme.faint()),
+            Span::styled(
+                format!("{:<name_w$}", truncate(&g.label(i), name_w - 1)),
+                if on { theme.bold(theme.text) } else { theme.faint() },
+            ),
+            Span::styled(
+                format!("{:<rules_w$}", truncate(&rules, rules_w - 1)),
+                if warn { theme.fg(theme.yellow) } else { theme.faint() },
+            ),
+            match (on, group.badge) {
+                (true, true) => Span::styled("▣ badge   ", theme.fg(theme.green)),
+                (false, true) => Span::styled("▣ badge   ", theme.faint()),
+                _ => Span::styled("□         ", theme.faint()),
+            },
+            Span::styled(count, if on { theme.fg(theme.text) } else { theme.faint() }),
+        ]);
+        push_row(hits, list, lines.len(), Target::Item(List::Groups, i), sel);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+    }
+    if counts.hidden > 0 {
+        lines.push(Line::styled(format!("        {} hidden: the default group's rules don't match them", counts.hidden), theme.faint()));
+    }
+    f.render_widget(Paragraph::new(lines), list);
+    let selected = g.group((g.cursor < g.groups.len()).then_some(g.cursor));
+    let help_line = match g.confirm_remove {
+        Some(i) => Line::styled(format!(" Remove {}? y confirm, any other key cancels", g.label(i)), theme.bold(theme.yellow)),
+        None if group_warning(selected, &ed.candidates).is_some() => Line::styled(
+            format!(" ⚠ {} — ⏎ to fix", group_warning(selected, &ed.candidates).unwrap_or_default()),
+            theme.fg(theme.yellow),
+        ),
+        None if !selected.enabled && g.cursor < g.groups.len() => {
+            Line::styled(" Off: takes nothing, its PRs fall to the group below (space turns it on)", theme.faint())
+        }
+        None if !selected.enabled => Line::styled(" Off: everything no group took is hidden (space turns it on)", theme.faint()),
+        None if g.cursor < g.groups.len() => {
+            Line::styled(" Takes the PRs it matches; the rest fall to the group below", theme.faint())
+        }
+        None => Line::styled(" Catches what no group took; what its rules don't match is hidden", theme.faint()),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// One review group's form: name, rules and badge toggle, with
+/// autocomplete under a list being typed.
+#[allow(clippy::too_many_arguments)]
+fn draw_group_form(
+    f: &mut Frame,
+    theme: &Theme,
+    list: Rect,
+    help: Rect,
+    ed: &crate::settings_ui::SettingsEditor,
+    g: &crate::review_groups_ui::GroupsEditor,
+    form: &crate::review_groups_ui::GroupForm,
+    hits: &mut Vec<Hit>,
+) {
+    use crate::review_groups_ui::{FORM, FormKind};
+    let label = match form.which {
+        Some(i) => g.label(i),
+        None => format!("{} (default)", g.label(g.groups.len())),
+    };
+    let header = format!(" {label} — ⏎ change · ←→ adjust · esc back");
+    hint_hits(hits, &header, list.x, list.y);
+    f.render_widget(Paragraph::new(Line::styled(header, theme.faint())), Rect { height: 1, ..list });
+    let body = Rect { y: list.y + 2, height: list.height.saturating_sub(2), ..list };
+    let group = g.group(form.which);
+    let rows = group_form_lines(group, form, list.width as usize);
+    // Keep the selected field (all its lines) in view.
+    let height = body.height as usize;
+    let last = rows.iter().rposition(|r| r.0 == form.cursor).unwrap_or(0);
+    let first = rows.iter().position(|r| r.0 == form.cursor).unwrap_or(0);
+    let start = (last + 1).saturating_sub(height).min(first);
+    let mut lines = Vec::new();
+    for (n, (i, head, value)) in rows.iter().enumerate().skip(start).take(height) {
+        let field = &FORM[*i];
+        let sel = *i == form.cursor;
+        let vstyle = match field.kind {
+            FormKind::Bool if value == "on" => theme.fg(theme.green),
+            _ if value == "any" || value == "—" || value == "off" || value == "none" => theme.faint(),
+            _ => theme.fg(theme.text),
+        };
+        let line = Line::from(vec![
+            Span::styled(if sel && *head { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(format!("  {:<w$}", if *head { field.label } else { "" }, w = FORM_LABEL_W), theme.fg(theme.text)),
+            Span::styled(value.clone(), vstyle),
+        ]);
+        push_row(hits, body, n - start, Target::Item(List::Groups, *i), sel);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+    }
+    f.render_widget(Paragraph::new(lines), body);
+    let unknown = crate::review_groups_ui::unknown(group, form.field().key, &ed.candidates);
+    let help_line = if form.editing.is_some() && matches!(form.field().kind, FormKind::List(_)) {
+        suggestions_line(form, &ed.candidates, theme, help, hits)
+    } else if !unknown.is_empty() {
+        Line::styled(format!(" ⚠ {} — ⏎ then ⇥ picks a real one", unknown_text(form.field().key, &unknown)), theme.fg(theme.yellow))
+    } else {
+        Line::styled(format!(" {}", form.field().help), theme.faint())
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// `team @con matches nothing in the review list` for a group's list
+/// entries that match no candidate.
+fn unknown_text(key: &str, unknown: &[String]) -> String {
+    let (what, at) = match key {
+        "teams" => ("team", true),
+        "authors" => ("author", true),
+        _ => ("repo", false),
+    };
+    let names = unknown.iter().map(|u| if at { format!("@{u}") } else { u.clone() }).collect::<Vec<_>>().join(", ");
+    let verb = if unknown.len() == 1 { "matches" } else { "match" };
+    format!("{what} {names} {verb} nothing in the review list")
+}
+
+/// The first list entries of `g` that match nothing, as a warning.
+fn group_warning(g: &am_core::review_groups::ReviewGroup, cands: &crate::review_groups_ui::Candidates) -> Option<String> {
+    ["authors", "teams", "repos", "excludeRepos"].into_iter().find_map(|key| {
+        let unknown = crate::review_groups_ui::unknown(g, key, cands);
+        (!unknown.is_empty()).then(|| unknown_text(key, &unknown))
+    })
+}
+
+/// Label column of a review group's form.
+const FORM_LABEL_W: usize = 22;
+
+/// A review group's form as screen lines `(field, first line of it, text)`:
+/// each value wrapped (at spaces, so lists break between entries) to what
+/// fits beside the labels in `width`; the field being edited shows its
+/// buffer and cursor.
+fn group_form_lines(
+    group: &am_core::review_groups::ReviewGroup,
+    form: &crate::review_groups_ui::GroupForm,
+    width: usize,
+) -> Vec<(usize, bool, String)> {
+    use crate::review_groups_ui::{FORM, display};
+    let avail = width.saturating_sub(FORM_LABEL_W + 4).max(8);
+    let mut out = Vec::new();
+    for (i, field) in FORM.iter().enumerate() {
+        let value = match (&form.editing, i == form.cursor) {
+            (Some(buf), true) => format!("{buf}▏"),
+            _ => display(group, field),
+        };
+        for (k, part) in wrap_words(&value, avail).into_iter().enumerate() {
+            out.push((i, k == 0, part));
+        }
+    }
+    out
+}
+
+/// The autocomplete line under a group's list being typed:
+/// ` ⇥ alice (Alice Liddell) · bob`, the highlighted one selected; each is
+/// clickable.
+fn suggestions_line<'a>(
+    form: &crate::review_groups_ui::GroupForm,
+    cands: &crate::review_groups_ui::Candidates,
+    theme: &Theme,
+    help: Rect,
+    hits: &mut Vec<Hit>,
+) -> Line<'a> {
+    let found = form.completions(cands);
+    if found.is_empty() {
+        let msg = match form.field().kind {
+            crate::review_groups_ui::FormKind::List(crate::review_groups_ui::Source::People) if cands.people.is_empty() => {
+                " no one to suggest yet (looked up on GitHub) · ⏎ saves as typed"
+            }
+            _ => " no match · ⏎ saves as typed",
+        };
+        return Line::styled(msg, theme.faint());
+    }
+    let mut spans = vec![Span::styled(" ⇥ ", theme.faint())];
+    let mut x = help.x + 3;
+    let max_x = help.x + help.width;
+    for (i, p) in found.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ", theme.faint()));
+            x += 3;
+        }
+        let text = if p.name.is_empty() { p.login.clone() } else { format!("{} ({})", p.login, p.name) };
+        let w = text.width() as u16;
+        if x + w > max_x {
+            break;
+        }
+        let selected = i == form.suggest;
+        hits.push(Hit { rect: Rect::new(x, help.y + 1, w, 1), target: Target::Item(List::Authors, i), selected });
+        spans.push(Span::styled(text, if selected { theme.selected() } else { theme.fg(theme.text) }));
+        x += w;
+    }
+    Line::from(spans)
 }
 
 /// Settings → Harness plugins.
@@ -1240,10 +1498,33 @@ fn update_label(app: &App, width: u16) -> Option<String> {
 }
 
 /// Top-right ` 3 to review ` in the `─Worktrees` border's corner (`⚑3` on
-/// narrow panes); none while nothing waits or the feature is off.
+/// narrow panes), or per review group shown on the dashboard
+/// (` Platform 4 · 26 to review · 60 on GitHub `, ` ⚑4·26·60 `); zero
+/// counts are left out, and there's no badge while all are 0 or the feature
+/// is off.
 fn review_badge(app: &App, width: u16) -> Option<String> {
-    let n = app.review_count().filter(|&n| n > 0)?;
-    Some(if width >= 60 { format!(" {n} to review ") } else { format!(" ⚑{n} ") })
+    use crate::app::BadgePart;
+    let parts: Vec<BadgePart> = app
+        .review_badge_parts()?
+        .into_iter()
+        .filter(|p| !matches!(p, BadgePart::Group(_, 0) | BadgePart::Rest(0) | BadgePart::Total(Some(0))))
+        .collect();
+    if !parts.iter().any(|p| !matches!(p, BadgePart::Total(None))) {
+        return None;
+    }
+    let wide = parts.iter().map(|p| match p {
+        BadgePart::Group(name, n) => format!("{name} {n}"),
+        BadgePart::Rest(n) => format!("{n} to review"),
+        BadgePart::Total(n) => format!("{} on GitHub", n.map_or("?".into(), |n| n.to_string())),
+    });
+    let wide = format!(" {} ", wide.collect::<Vec<_>>().join(" · "));
+    let narrow = parts.iter().map(|p| match p {
+        BadgePart::Group(_, n) | BadgePart::Rest(n) => n.to_string(),
+        BadgePart::Total(n) => n.map_or("?".into(), |n| n.to_string()),
+    });
+    let narrow = format!(" ⚑{} ", narrow.collect::<Vec<_>>().join("·"));
+    // The wide form needs room beside the pane title.
+    Some(if width >= 60 && wide.width() + 14 <= width as usize { wide } else { narrow })
 }
 
 /// Bottom-right ` today 4.1M ` (` today (visible) 4.1M ` for the visible
@@ -1390,8 +1671,8 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
 fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
     use crate::reviews_ui::{ReviewRow, order, rows};
     let list = app.snapshot.reviews.as_deref().unwrap_or(&[]);
-    let sort = app.settings.review_sort();
-    let ordered = order(list, &app.snapshot.repos, sort);
+    let grouping = app.grouping();
+    let ordered = order(list, &app.snapshot.repos, grouping);
     let cursor = app.reviews.as_ref().map_or(0, |p| p.cursor);
     let mut block = pane_block(theme, title("Review requests", theme), true);
     if !ordered.is_empty() {
@@ -1400,7 +1681,8 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
         );
     }
     // Bottom left: what the search is filtered by; a click opens the filters.
-    let summary = format!(" {} ", review_filter_summary(&app.settings));
+    let hidden = crate::reviews_ui::counts(list, &app.snapshot.repos, grouping).1;
+    let summary = format!(" {} ", review_filter_summary(&app.settings, hidden));
     let room = (area.width as usize).saturating_sub(16);
     if room > 10 {
         let summary = truncate(&summary, room);
@@ -1456,12 +1738,12 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let words = inner.width >= 100;
     let ticket_w = ordered.iter().map(|&i| list[i].linear.as_ref().map_or(0, |l| l.identifier.width())).max().unwrap_or(0);
     let pr_w = ordered.iter().map(|&i| pr_text(Some(&list[i].pr), words).width()).max().unwrap_or(0);
-    let who_w = ordered.iter().map(|&i| reviewers_text(&list[i]).width()).max().unwrap_or(0).min(if words { 24 } else { 12 });
+    let who_w = ordered.iter().map(|&i| reviewers_text(&list[i]).width()).max().unwrap_or(0).min(if words { 16 } else { 10 });
 
-    let rows = rows(list, &ordered, &app.snapshot.repos, sort);
+    let rows = rows(list, &ordered, &app.snapshot.repos, grouping);
     let tree = crate::reviews_ui::prefixes(list, &ordered);
     // Outside the repo order, name each row's repo when there are several.
-    let tag_repos = sort != am_core::settings::ReviewSort::Repo
+    let tag_repos = !grouping.by_repo()
         && ordered.windows(2).any(|w| list[w[0]].repo_id != list[w[1]].repo_id);
     let height = inner.height as usize;
     let sel_row = rows.iter().position(|r| *r == ReviewRow::Pr(cursor)).unwrap_or(0);
@@ -1499,42 +1781,42 @@ fn reset_text(e: &am_core::model::ReviewFetchError, now: i64) -> Option<String> 
     Some(if at > now { format!("resets in {}", timefmt::short_age(at - now)) } else { "resets now".into() })
 }
 
-/// Who the review is pending from: `you`, then teams as `@team`.
+/// Who the review is pending from, kept short (the column matters less
+/// than the title and author): `you` when you're asked by name, else the
+/// first reviewer (`@team` for a team), then `+N` for the rest.
 fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
-    r.requested
-        .iter()
-        .map(|w| match w.split_once('/') {
-            Some((_, team)) => format!("@{team}"),
-            None => w.clone(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let short = |w: &String| match w.split_once('/') {
+        Some((_, team)) => format!("@{team}"),
+        None => w.clone(),
+    };
+    let first = r.requested.iter().find(|w| *w == "you").or(r.requested.first());
+    match (first, r.requested.len()) {
+        (None, _) => String::new(),
+        (Some(w), 1) => short(w),
+        (Some(w), n) => format!("{} +{}", short(w), n - 1),
+    }
 }
 
-/// The review search's filters in a few words, e.g. `you + your teams ·
-/// no drafts · not yet reviewed · label:urgent`.
-fn review_filter_summary(s: &am_core::settings::Settings) -> String {
+/// What the page shows in a few words, e.g. `you + your teams · 2 groups ·
+/// 3 hidden`: who's asked, then the groups and what the default group hides.
+fn review_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> String {
     use am_core::settings::ReviewScope;
     let mut parts = vec![match s.review_scope() {
         ReviewScope::All => "you + your teams".to_string(),
         ReviewScope::Direct => "you only".to_string(),
         ReviewScope::Teams => "your teams only".to_string(),
     }];
-    if s.review_hide_drafts {
-        parts.push("no drafts".into());
+    match s.review_groups.len() {
+        0 => {}
+        1 => parts.push("1 group".into()),
+        n => parts.push(format!("{n} groups")),
     }
-    if s.review_hide_reviewed {
-        parts.push("not yet reviewed".into());
+    let rules = s.review_default_group.summary();
+    if !rules.is_empty() {
+        parts.push(rules);
     }
-    let list = |v: &str| v.split([',', ' ']).filter(|x| !x.is_empty()).collect::<Vec<_>>().join(", ");
-    if !s.review_include_repos.trim().is_empty() {
-        parts.push(format!("only {}", list(&s.review_include_repos)));
-    }
-    if !s.review_exclude_repos.trim().is_empty() {
-        parts.push(format!("not {}", list(&s.review_exclude_repos)));
-    }
-    if !s.review_search_qualifiers.trim().is_empty() {
-        parts.push(s.review_search_qualifiers.trim().to_string());
+    if hidden > 0 {
+        parts.push(format!("{hidden} hidden"));
     }
     parts.join(" · ")
 }
@@ -1595,9 +1877,11 @@ fn review_line<'a>(
     let author = if r.author.is_empty() { String::new() } else { format!("  @{}", r.author) };
     let tags_w: usize = tags.iter().map(|(t, _)| t.width()).sum();
     let room = (width as usize).saturating_sub(1 + prefix.width() + right_w + tags_w);
-    let title_w = r.pr.title.width().min(room);
-    let title = truncate(&r.pr.title, title_w);
-    let author = truncate(&author, room.saturating_sub(title.width()));
+    // The author always fits: the title gives way first, down to a few
+    // cells (only a very narrow row cuts the author too).
+    let author_w = author.width().min(room.saturating_sub(r.pr.title.width().min(10)));
+    let title = truncate(&r.pr.title, r.pr.title.width().min(room.saturating_sub(author_w)));
+    let author = truncate(&author, author_w);
     let fill = room.saturating_sub(title.width() + author.width());
 
     let mut spans = vec![
@@ -2756,6 +3040,9 @@ mod tests {
             today_tokens: None,
             reviews: None,
             review_error: None,
+            review_people: vec![],
+            review_total: None,
+            review_query_hits: Default::default(),
         };
         let settings = Settings { worktree_sort: vec![], ..Settings::default() };
         let mut app = App::new(settings);
@@ -3238,7 +3525,7 @@ mod tests {
     /// [`with_reviews`] with the page in repo order.
     fn by_repo() -> App {
         let mut app = with_reviews();
-        app.settings.review_sort = "repo".into();
+        app.settings.review_default_group.sort = "repo".into();
         app
     }
 
@@ -3268,6 +3555,209 @@ mod tests {
         snap.reviews = Some(vec![]);
         empty.apply(snap);
         assert!(!render(&empty, 120, 6).contains("to review"));
+    }
+
+    fn groups(json: &str) -> Vec<am_core::review_groups::ReviewGroup> {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn review_badge_lists_the_groups_shown_on_the_dashboard() {
+        let top = |app: &App, w: u16| render(app, w, 6).lines().next().unwrap().to_string();
+        let mut app = with_reviews();
+        // The fixture: 3 PRs, 2 asking you by name, 1 by @outsider.
+        app.settings.review_groups = groups(r#"[{"name": "Outside", "authors": ["outsider"]}, {"name": "Quiet", "badge": false}]"#);
+        // Quiet (no badge) takes the other two; the default, left with none,
+        // drops out of the badge.
+        assert!(top(&app, 120).ends_with(" Outside 1 ╮"), "{}", top(&app, 120));
+        app.settings.review_groups[1].badge = true;
+        app.settings.review_default_group.name = "Rest".into();
+        assert!(top(&app, 120).ends_with(" Outside 1 · Quiet 2 ╮"), "{}", top(&app, 120));
+        // The GitHub total reads ? until a search has counted it.
+        app.settings.review_groups.truncate(1);
+        app.settings.review_default_group.name.clear();
+        app.settings.review_badge_total = true;
+        assert!(top(&app, 120).ends_with(" Outside 1 · 2 to review · ? on GitHub ╮"), "{}", top(&app, 120));
+        let mut snap = app.snapshot.clone();
+        snap.review_total = Some(40);
+        app.apply(snap);
+        assert!(top(&app, 120).ends_with(" Outside 1 · 2 to review · 40 on GitHub ╮"), "{}", top(&app, 120));
+        assert!(top(&app, 50).contains(" ⚑1·2·40 "), "{}", top(&app, 50));
+        let at = find(&app, 120, 6, "Outside 1");
+        assert_eq!(target_at(&app, 120, 6, at), Some(Target::Command(Command::ReviewRequests)));
+        // Nothing to count: no badge.
+        app.settings.review_badge_total = false;
+        app.settings.review_groups[0].badge = false;
+        app.settings.review_default_group.authors = vec!["nobody".into()];
+        assert!(!top(&app, 120).contains("review"), "{}", top(&app, 120));
+    }
+
+    #[test]
+    fn review_page_splits_into_groups_and_hides_the_rest() {
+        let mut app = with_reviews();
+        app.settings.review_groups = groups(r#"[{"name": "Outside", "authors": ["@Outsider"]}, {"name": "CI broken", "checks": "failing"}]"#);
+        app.on_key(Key::Char('v'));
+        assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), [48, 902, 51]);
+        let screen = render(&app, 120, 12);
+        assert!(screen.contains("Outside ─") && screen.contains("CI broken ─") && screen.contains("Asked you ─"), "{screen}");
+        assert!(screen.contains("· 2 groups ─"), "{screen}");
+        insta::assert_snapshot!("review_page_groups", screen);
+        // A default that only takes PRs asking you by name hides the rest.
+        app.settings.review_groups.truncate(1);
+        app.settings.review_groups[0].authors = vec!["alice".into()];
+        app.settings.review_default_group.asked = "you".into();
+        assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), [902, 51]);
+        assert!(render(&app, 120, 12).contains("· 1 group · asks you · 1 hidden"));
+    }
+
+    #[test]
+    fn a_long_group_value_wraps_under_its_field() {
+        let mut app = with_reviews();
+        let many: Vec<String> = (1..=12).map(|i| format!("someone-{i}")).collect();
+        app.settings.review_groups = groups(&format!(r#"[{{"name": "Lots", "authors": {}}}]"#, serde_json::json!(many)));
+        app.on_key(Key::Char('v'));
+        app.on_key(Key::Char('f'));
+        app.on_key(Key::Down);
+        app.on_key(Key::Enter); // Groups…
+        app.on_key(Key::Enter); // the group's form
+        let screen = render(&app, 120, 34);
+        assert!(screen.contains("@someone-12"), "every author is shown:\n{screen}");
+        assert!(!screen.contains('…'), "nothing truncated:\n{screen}");
+        let authors = screen.lines().position(|l| l.contains("Authors")).unwrap();
+        assert!(screen.lines().nth(authors + 1).unwrap().contains("@someone-"), "continues on the next line:\n{screen}");
+        insta::assert_snapshot!("review_group_form_wrapped", screen);
+    }
+
+    #[test]
+    fn a_group_switched_off_passes_its_prs_on() {
+        let mut app = with_reviews();
+        app.settings.review_groups = groups(r#"[{"name": "Outside", "authors": ["outsider"], "enabled": false}]"#);
+        app.on_key(Key::Char('v'));
+        let screen = render(&app, 120, 12);
+        assert!(!screen.contains("Outside ─") && screen.contains("Typo in README"), "{screen}");
+        assert!(!render(&app, 120, 6).lines().next().unwrap().contains("Outside"), "nor on the badge");
+        // On the groups page it reads off; space switches it back on.
+        app.on_key(Key::Char('f'));
+        app.on_key(Key::Down);
+        app.on_key(Key::Enter);
+        let screen = render(&app, 120, 30);
+        assert!(screen.contains("off · by @outsider"), "{screen}");
+        let g = app.settings_editor.as_mut().unwrap().groups.as_mut().unwrap();
+        g.groups[0].enabled = true;
+        g.cursor = 1;
+        g.default.enabled = false;
+        app.on_key(Key::Char('j')); // refreshes the preview
+        // Only Outside left: the rest (default off) is hidden.
+        assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), [48]);
+        assert!(render(&app, 120, 30).contains("Off: everything no group took is hidden"));
+    }
+
+    #[test]
+    fn the_page_previews_a_group_while_it_is_typed() {
+        let mut app = with_reviews();
+        let mut snap = app.snapshot.clone();
+        snap.review_people = vec![am_core::model::ReviewPerson { login: "outsider".into(), name: String::new() }];
+        app.apply(snap);
+        app.settings.review_groups = groups(r#"[{"name": "Outside"}]"#);
+        app.on_key(Key::Char('v'));
+        app.on_key(Key::Char('f'));
+        app.on_key(Key::Down);
+        app.on_key(Key::Enter); // Groups…
+        app.on_key(Key::Enter); // Outside's form
+        app.settings_editor.as_mut().unwrap().groups.as_mut().unwrap().form.as_mut().unwrap().cursor = 3; // Authors
+        app.on_key(Key::Enter);
+        // Before anything is typed the group takes everything; then only what's typed.
+        assert_eq!(app.review_list().len(), 3);
+        for c in "outsider".chars() {
+            app.on_key(Key::Char(c));
+        }
+        assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), [48, 902, 51], "previewed, not saved");
+        assert!(app.settings.review_groups[0].authors.is_empty());
+        let screen = render(&app, 120, 40);
+        assert!(screen.lines().nth(1).unwrap().contains("Outside ─"), "the box sits low, the groups show above:\n{screen}");
+        let counts = &app.settings_editor.as_ref().unwrap().group_counts;
+        assert_eq!(counts.per_group, [1, 2], "the groups page counts the preview too");
+        // A name that matches nobody is flagged once it's left.
+        for _ in 0..8 {
+            app.on_key(Key::Backspace);
+        }
+        for c in "con".chars() {
+            app.on_key(Key::Char(c));
+        }
+        app.on_key(Key::Esc);
+        app.settings_editor.as_mut().unwrap().groups.as_mut().unwrap().groups[0].authors = vec!["con".into()];
+        let screen = render(&app, 120, 40);
+        assert!(screen.contains("⚠ author @con matches nothing in the review list"), "{screen}");
+        // Leaving the page drops the preview.
+        app.on_key(Key::Esc);
+        app.on_key(Key::Esc);
+        assert!(app.group_preview.is_none());
+    }
+
+    #[test]
+    fn review_groups_page_adds_a_group_with_autocomplete() {
+        use am_core::model::ReviewPerson;
+        let mut app = with_reviews();
+        let mut snap = app.snapshot.clone();
+        snap.review_people = vec![
+            ReviewPerson { login: "alice".into(), name: "Alice Liddell".into() },
+            ReviewPerson { login: "olga".into(), name: String::new() },
+            ReviewPerson { login: "outsider".into(), name: String::new() },
+        ];
+        app.apply(snap);
+        app.settings.review_groups = groups(r#"[{"name": "Outside", "authors": ["outsider"]}]"#);
+        app.on_key(Key::Char('v'));
+        app.on_key(Key::Char('f'));
+        let field = |app: &App| app.settings_editor.as_ref().unwrap().field().key;
+        while field(&app) != "reviewGroups" {
+            app.on_key(Key::Down);
+        }
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::LoadReviewPeople);
+        let screen = render(&app, 120, 30);
+        assert!(screen.contains("Review groups — a add") && screen.contains("by @outsider") && screen.contains("everything left"), "{screen}");
+        insta::assert_snapshot!("review_groups_page", screen);
+        // ⏎ opens the group's form; Authors suggests people, a click takes one.
+        let ed = app.settings_editor.as_mut().unwrap();
+        let g = ed.groups.as_mut().unwrap();
+        g.open_for_test(0);
+        g.form.as_mut().unwrap().cursor = 3; // Authors
+        g.form.as_mut().unwrap().editing = Some("outsider, o".into());
+        let screen = render(&app, 120, 30);
+        assert!(screen.contains("⇥ olga"), "{screen}");
+        assert!(screen.contains("⇥ complete"), "{screen}");
+        insta::assert_snapshot!("review_group_form_suggestions", screen);
+        let at = find(&app, 120, 30, "olga");
+        assert_eq!(click(&mut app, 120, 30, at, false), crate::app::Action::None);
+        let form = app.settings_editor.as_ref().unwrap().groups.as_ref().unwrap().form.clone().unwrap();
+        assert_eq!(form.editing.as_deref(), Some("outsider, olga, "));
+    }
+
+    #[test]
+    fn reviewers_read_as_the_first_one_and_a_count() {
+        use crate::reviews_ui::tests::review_asking;
+        let mut r = review_asking("a", 1, "x", "acme/grid-vis-squad");
+        assert_eq!(reviewers_text(&r), "@grid-vis-squad");
+        r.requested = vec!["acme/platform".into(), "you".into(), "bob".into()];
+        assert_eq!(reviewers_text(&r), "you +2", "you first, whatever the order");
+        r.requested = vec!["acme/data".into(), "bob".into()];
+        assert_eq!(reviewers_text(&r), "@data +1");
+        r.requested.clear();
+        assert_eq!(reviewers_text(&r), "");
+    }
+
+    #[test]
+    fn review_rows_keep_the_author_whole_and_cut_the_title() {
+        let mut app = with_reviews();
+        let mut snap = app.snapshot.clone();
+        let r = &mut snap.reviews.as_mut().unwrap()[1];
+        r.pr.title = "Feeder load forecast v2 with a very long title that keeps going and going on and on".into();
+        r.author = "aiden-sobey-gridsight".into();
+        app.apply(snap);
+        app.on_key(Key::Char('v'));
+        let screen = render(&app, 100, 10);
+        let row = screen.lines().find(|l| l.contains("Feeder load")).unwrap();
+        assert!(row.contains("@aiden-sobey-gridsight"), "{row}");
+        assert!(row.contains("…  @aiden-sobey-gridsight"), "the title gives way: {row}");
     }
 
     #[test]
@@ -3371,7 +3861,7 @@ mod tests {
         insta::assert_snapshot!("review_page_direct_first", screen);
         // Other orders: one list, no headers.
         for (sort, want) in [("updated", [902, 51, 48]), ("oldest", [902, 51, 48])] {
-            app.settings.review_sort = sort.into();
+            app.settings.review_default_group.sort = sort.into();
             assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), want, "{sort}");
             assert!(!render(&app, 120, 10).contains("Asked you"), "{sort}");
         }
@@ -3380,6 +3870,8 @@ mod tests {
     #[test]
     fn review_page_f_opens_the_filters() {
         let mut app = by_repo();
+        app.settings.review_default_group.draft = "ready".into();
+        app.settings.review_default_group.reviewed = "no".into();
         app.on_key(Key::Char('v'));
         let screen = render(&app, 120, 12);
         assert!(screen.contains("you + your teams · no drafts · not yet reviewed"), "{screen}");
@@ -3392,7 +3884,9 @@ mod tests {
         let field = |app: &App| app.settings_editor.as_ref().unwrap().field().key;
         assert_eq!(field(&app), "reviewRequestsScope");
         let screen = render(&app, 120, 24);
-        assert!(screen.contains("Review filters") && screen.contains("Extra search filters"), "{screen}");
+        assert!(screen.contains("Review filters") && screen.contains("Groups…"), "{screen}");
+        // Order and the filters are each group's now.
+        assert!(!screen.contains("Order") && !screen.contains("Hide drafts") && !screen.contains("Extra search"), "{screen}");
         assert!(!screen.contains("Theme") && !screen.contains("Review refresh"), "only the filters: {screen}");
         insta::assert_snapshot!("review_filters", screen);
         // Up stops at the first filter, down at the last.
@@ -3401,7 +3895,7 @@ mod tests {
         for _ in 0..10 {
             app.on_key(Key::Char('j'));
         }
-        assert_eq!(field(&app), "reviewSearchQualifiers");
+        assert_eq!(field(&app), "reviewBadgeTotal");
         // f (or esc) closes it, back on the page.
         app.on_key(Key::Char('f'));
         assert!(app.settings_editor.is_none() && app.reviews.is_some());

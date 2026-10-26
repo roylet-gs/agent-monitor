@@ -29,12 +29,12 @@ pub mod reviews;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
 
 use crate::{debug, info};
-use crate::model::{LinearInfo, PrInfo, ReviewFetchError, ReviewRequest};
+use crate::model::{LinearInfo, PrInfo, ReviewFetchError, ReviewPerson, ReviewRequest};
 use crate::settings::Settings;
 use breaker::Breaker;
 use cache::{IntegrationCache, cache_key};
@@ -114,10 +114,22 @@ pub struct Integrations {
     /// Why the last review search failed; cleared by a success.
     review_error: Option<ReviewFetchError>,
     reviews_hydrated: bool,
+    /// Open PRs requesting your or your teams' review on GitHub, ignoring the
+    /// filters (only fetched while the badge shows it; cached).
+    review_total: Option<u64>,
+    /// Which PRs match each review group's GitHub search terms (cached).
+    review_hits: crate::review_groups::QueryHits,
     /// `owner/name` per repo path (only successes are kept: a failure may be
     /// a missing `gh auth login` that the next refresh gets past).
     slugs: HashMap<PathBuf, String>,
+    /// Who can author PRs in the tracked repos (autocomplete; cached).
+    people: Vec<ReviewPerson>,
+    /// When `people` was last fetched by this process.
+    people_at: Option<Instant>,
 }
+
+/// How long a people lookup is reused before asking GitHub again.
+pub const PEOPLE_TTL: Duration = Duration::from_secs(3600);
 
 impl Default for Integrations {
     fn default() -> Self {
@@ -143,7 +155,11 @@ impl Integrations {
             reviews: None,
             review_error: None,
             reviews_hydrated: false,
+            review_total: None,
+            review_hits: Default::default(),
             slugs: HashMap::new(),
+            people: Vec::new(),
+            people_at: None,
         }
     }
 
@@ -155,12 +171,70 @@ impl Integrations {
         if !self.reviews_hydrated {
             self.reviews_hydrated = true;
             self.reviews = reviews::load_cached(conn);
+            self.review_total = reviews::load_cached_total(conn);
+            self.review_hits = reviews::load_cached_hits(conn).unwrap_or_default();
+            self.people = reviews::load_cached_people(conn).unwrap_or_default();
+        }
+    }
+
+    /// People who can author PRs in the tracked repos (from the last lookup
+    /// or the cache), for `reviewPriorityAuthors` autocomplete.
+    pub fn people(&self) -> &[ReviewPerson] {
+        &self.people
+    }
+
+    /// Look up `assignableUsers` for every tracked repo on GitHub, at most
+    /// once per [`PEOPLE_TTL`]. Autocomplete is optional, so a failure is
+    /// only logged: the breaker isn't tripped and the cached list stays.
+    pub fn refresh_people(&mut self, conn: &Connection, repos: &[reviews::ReviewRepo]) {
+        self.hydrate(conn);
+        let now = Instant::now();
+        if self.people_at.is_some_and(|t| now.duration_since(t) < PEOPLE_TTL) || !self.github_breaker.allow(now, false) {
+            return;
+        }
+        let mut slugs = Vec::new();
+        let mut cwd = None;
+        for repo in repos {
+            if !self.slugs.contains_key(&repo.path) {
+                match reviews::repo_slug(self.gh.as_ref(), &repo.path) {
+                    Ok(slug) => {
+                        self.slugs.insert(repo.path.clone(), slug);
+                    }
+                    Err((e, _)) => debug!("reviews", "No people lookup for {}: {e}", repo.path.display()),
+                }
+            }
+            if let Some(slug) = self.slugs.get(&repo.path) {
+                slugs.push(slug.clone());
+                cwd.get_or_insert_with(|| repo.path.clone());
+            }
+        }
+        let Some(cwd) = cwd else { return };
+        self.people_at = Some(now);
+        let started = Instant::now();
+        match reviews::fetch_people(self.gh.as_ref(), &cwd, &slugs) {
+            Ok(people) => {
+                debug!("reviews", "{} people in {} repo(s) in {:?}", people.len(), slugs.len(), started.elapsed());
+                reviews::store_people(conn, &people);
+                self.people = people;
+            }
+            Err(e) => debug!("reviews", "People lookup failed (autocomplete keeps {} cached): {e}", self.people.len()),
         }
     }
 
     /// The review requests from the last successful fetch (or the cache).
     pub fn reviews(&self) -> Option<&[ReviewRequest]> {
         self.reviews.as_deref()
+    }
+
+    /// The unfiltered review count (badge `all`), from the last search that
+    /// asked for it or the cache.
+    pub fn review_total(&self) -> Option<u64> {
+        self.review_total
+    }
+
+    /// Which PRs match each review group's GitHub search terms.
+    pub fn review_hits(&self) -> &crate::review_groups::QueryHits {
+        &self.review_hits
     }
 
     /// Why the last review search failed (rate limit included), if it did.
@@ -172,6 +246,7 @@ impl Integrations {
     pub fn clear_reviews(&mut self, conn: &Connection) {
         self.reviews = None;
         self.review_error = None;
+        self.review_total = None;
         self.reviews_hydrated = true;
         let _ = cache::prune_rows(conn, cache::CacheKind::Review, &[]);
     }
@@ -231,9 +306,6 @@ impl Integrations {
                 }
             }
             let Some(slug) = self.slugs.get(&repo.path) else { continue };
-            if !reviews::repo_selected(settings, &repo.name, slug) {
-                continue;
-            }
             repo_ids.insert(slug.to_lowercase(), repo.repo_id.clone());
             slugs.push(slug.clone());
             cwd.get_or_insert_with(|| repo.path.clone());
@@ -252,8 +324,22 @@ impl Integrations {
         };
         let search = reviews::build_search(settings, &slugs);
         debug!("reviews", "Searching review requests: {search}");
-        match reviews::fetch(self.gh.as_ref(), &cwd, &search, &repo_ids) {
-            Ok(mut list) => {
+        let queries = crate::review_groups::queries(&settings.review_groups, &settings.review_default_group);
+        let extras = reviews::Extras { total: settings.review_badge_total, queries: &queries };
+        match reviews::fetch(self.gh.as_ref(), &cwd, &search, &repo_ids, extras) {
+            Ok(found) => {
+                if !queries.is_empty() || !self.review_hits.is_empty() {
+                    reviews::store_hits(conn, &found.hits);
+                }
+                self.review_hits = found.hits;
+                if let Some(total) = found.total {
+                    if self.review_total != Some(total) {
+                        debug!("reviews", "{total} PR(s) request your or your teams' review on GitHub (unfiltered)");
+                        reviews::store_total(conn, total);
+                    }
+                    self.review_total = Some(total);
+                }
+                let mut list = found.prs;
                 self.fill_tickets(settings, &mut list, force);
                 let n = list.len();
                 if self.reviews.as_ref().map(Vec::len) != Some(n) {
@@ -653,11 +739,14 @@ mod tests {
     fn reviews_skip_excluded_and_non_github_repos() {
         let mut e = env();
         let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a"), reviews::ReviewRepo::new("r2", "local", "/b")];
+        // Excluding repos is a review group's job now: the search covers them.
         let s = Settings::parse(r#"{"reviewExcludeRepos":"web"}"#);
         e.gh.push(GhOutput::success("acme/web"));
         e.gh.push(GhOutput::failure("none of the git remotes configured for this repository point to a known GitHub host"));
+        e.gh.push(GhOutput::success(review_body(&[])));
         e.ints.refresh_reviews(&e.conn, &repos, &s, false);
-        assert_eq!(e.gh.call_count(), 2, "no search when nothing is left");
+        assert_eq!(e.gh.call_count(), 3);
+        assert!(e.gh.calls.lock().unwrap()[2][3].contains("repo:acme/web"));
         assert_eq!(e.ints.reviews(), Some(&[][..]));
         assert!(e.ints.review_error().is_none());
 
@@ -673,6 +762,27 @@ mod tests {
         e.ints.refresh_reviews(&e.conn, &repos, &Settings::default(), false);
         assert!(e.ints.review_error().is_none());
         assert_eq!(e.ints.reviews(), Some(&[][..]));
+    }
+
+    #[test]
+    fn people_are_looked_up_once_an_hour_and_cached() {
+        let mut e = env();
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a")];
+        e.gh.push(GhOutput::success("acme/web"));
+        let body = json!({"data": {"r0": {"assignableUsers": {"nodes": [{"login": "alice", "name": "Alice"}]}}}});
+        e.gh.push(GhOutput::success(body.to_string()));
+        e.ints.refresh_people(&e.conn, &repos);
+        assert_eq!(e.ints.people().len(), 1);
+        e.ints.refresh_people(&e.conn, &repos);
+        assert_eq!(e.gh.call_count(), 2, "memoised");
+
+        // A fresh process starts from the cache; a failed lookup keeps it.
+        e.restart();
+        e.gh.push(GhOutput::success("acme/web"));
+        e.gh.push(gh_offline());
+        e.ints.refresh_people(&e.conn, &repos);
+        assert_eq!(e.ints.people()[0].login, "alice");
+        assert!(!e.ints.health().github_failing, "autocomplete never trips the breaker");
     }
 
     #[test]

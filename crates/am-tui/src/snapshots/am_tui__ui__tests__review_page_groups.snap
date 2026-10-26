@@ -1,0 +1,16 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+╭─Review requests ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│Outside ──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌Typo in README  @outsider (agent-monitor) fork                                        @docs         #48✓ review   0s │
+│CI broken ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│ Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
+│Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│ Batch the PR queries  @alice (agent-monitor) ✓ pulled                                 you           #51✓ review   0s │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰ you + your teams · 2 groups ───────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  ? help  esc back
