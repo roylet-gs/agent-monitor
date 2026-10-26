@@ -815,7 +815,9 @@ impl App {
             let keys = e.keys.take();
             let repos = e.repos.take();
             let repo_count = e.repo_count;
+            let only = e.only;
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
+            e.only = only;
             e.cursor = cursor;
             e.plugins = plugins;
             e.keys = keys;
@@ -864,7 +866,11 @@ impl App {
         match self.keymap.command(key) {
             _ if key == Key::Enter => r.is_some(),
             Some(C::OpenLinear) => r.is_some_and(|r| r.linear.is_some()),
-            Some(C::PullToTmpSpace) => r.is_some_and(|r| !r.is_cross_repository),
+            Some(C::Delete) => r.and_then(|r| r.worktree_id.as_deref()).is_some_and(|id| !self.is_deleting(id)),
+            Some(C::PullToTmpSpace) => r.is_some_and(|r| {
+                !r.is_cross_repository
+                    && self.review_pull(r).is_none_or(|j| matches!(j.state, crate::jobs::JobState::Failed(_)))
+            }),
             _ => true,
         }
     }
@@ -878,7 +884,7 @@ impl App {
             return Action::Quit;
         }
         if key == Key::Enter {
-            return self.review_open_pr();
+            return self.review_open();
         }
         let len = self.review_list().len();
         let cmd = self.keymap.command(key);
@@ -891,7 +897,8 @@ impl App {
             Some(C::PageUp) => page.move_by(-10, len),
             Some(C::Top) => page.move_by(isize::MIN / 2, len),
             Some(C::Bottom) => page.move_by(isize::MAX / 2, len),
-            Some(C::Open | C::OpenPr) => return self.review_open_pr(),
+            Some(C::Open) => return self.review_open(),
+            Some(C::OpenPr) => return self.review_open_pr(),
             Some(C::OpenLinear) => {
                 let url = self.selected_review().and_then(|r| r.linear.as_ref()).map(|l| linear_url(&l.url, &self.settings));
                 match url {
@@ -900,6 +907,11 @@ impl App {
                 }
             }
             Some(C::PullToTmpSpace) => return self.pull_review(),
+            Some(C::Delete) => self.remove_review_worktree(),
+            // The feedback key (`f`) filters here.
+            Some(C::Feedback) => {
+                self.settings_editor = Some(crate::settings_ui::SettingsEditor::only(&self.settings, crate::settings_ui::REVIEW_FILTERS));
+            }
             Some(C::Refresh) => {
                 self.notice = Some("Refreshing review requests…".into());
                 return Action::RefreshReviews;
@@ -909,6 +921,24 @@ impl App {
             _ => {}
         }
         Action::None
+    }
+
+    /// The pulled worktree for the selected PR, unless it's being removed.
+    pub fn review_worktree(&self) -> Option<&WorktreeView> {
+        let id = self.selected_review()?.worktree_id.as_deref()?;
+        if self.is_deleting(id) {
+            return None;
+        }
+        self.snapshot.groups.iter().flat_map(|g| &g.worktrees).find(|v| v.worktree.id == id)
+    }
+
+    /// ⏎ on the review page: a pulled PR opens its worktree in the IDE, like
+    /// ⏎ on the dashboard; one that isn't pulled opens the PR.
+    fn review_open(&mut self) -> Action {
+        match self.review_worktree() {
+            Some(v) => Action::Open(Box::new(v.clone())),
+            None => self.review_open_pr(),
+        }
     }
 
     fn review_open_pr(&mut self) -> Action {
@@ -942,16 +972,57 @@ impl App {
             self.notice = Some(format!("{} isn't tracked any more", r.repo));
             return Action::None;
         };
+        // Stay on the page so several can be pulled in a row; the row shows
+        // the job. A failed pull can be retried.
+        match self.review_pull(&r).map(|j| (j.id, matches!(j.state, crate::jobs::JobState::Failed(_)))) {
+            Some((id, true)) => self.jobs.dismiss(id),
+            Some(_) => {
+                self.notice = Some(format!("{} is already being pulled", r.head_ref_name));
+                return Action::None;
+            }
+            None => {}
+        }
         let req = am_core::worktrees::CreateRequest {
             branch: r.head_ref_name.clone(),
             mode: am_core::worktrees::CreateMode::TrackRemote,
             tmp_space: true,
             ..Default::default()
         };
-        self.reviews = None;
         let job = self.jobs.start_create(repo.clone(), req.clone());
         self.rebuild_rows();
+        self.notice = Some(format!("Pulling {} into Reviewing…", r.head_ref_name));
         Action::Create(job, Box::new(repo), Box::new(req))
+    }
+
+    /// `d` on a pulled PR: the usual delete dialog for its worktree, over
+    /// the page; the row reads "removing…" until it's gone.
+    fn remove_review_worktree(&mut self) {
+        let Some(r) = self.selected_review().cloned() else { return };
+        let Some(id) = r.worktree_id else {
+            self.notice = Some(format!("#{} isn't pulled", r.pr.number));
+            return;
+        };
+        if self.is_deleting(&id) {
+            self.notice = Some(format!("{} is already being removed", r.head_ref_name));
+            return;
+        }
+        let view = self.snapshot.groups.iter().flat_map(|g| &g.worktrees).find(|v| v.worktree.id == id).cloned();
+        match view {
+            Some(v) => self.modal = Some(crate::modals::Modal::delete(v)),
+            None => self.notice = Some(format!("{} isn't in the worktree list", r.head_ref_name)),
+        }
+    }
+
+    /// The job pulling `r`'s branch into Reviewing (running, waiting, failed,
+    /// or done but not in the snapshot yet). `None` once it's pulled.
+    pub fn review_pull(&self, r: &ReviewRequest) -> Option<&crate::jobs::Job> {
+        if r.worktree_id.is_some() {
+            return None;
+        }
+        self.jobs.list.iter().rev().find(|j| {
+            matches!(&j.kind, crate::jobs::JobKind::Create { repo, req, .. }
+                if req.tmp_space && repo.id == r.repo_id && req.branch == r.head_ref_name)
+        })
     }
 
     fn url_action(&mut self, pick: impl Fn(&WorktreeView, &Settings) -> Option<String>, missing: &str) -> Action {
@@ -985,17 +1056,25 @@ impl App {
 pub fn stack_order(wts: &[WorktreeView], stack: &std::collections::HashMap<String, String>) -> Vec<(usize, String)> {
     use std::collections::HashMap;
     let index: HashMap<&str, usize> = wts.iter().enumerate().map(|(i, v)| (v.worktree.id.as_str(), i)).collect();
-    let parent_of = |i: usize| stack.get(&wts[i].worktree.id).and_then(|p| index.get(p.as_str()).copied()).filter(|&p| p != i);
+    tree_order(wts.len(), |i| stack.get(&wts[i].worktree.id).and_then(|p| index.get(p.as_str()).copied()))
+}
+
+/// Order `0..len` so each item follows its parent (depth-first, keeping the
+/// given order among siblings), with its tree prefix ("", "├─ ", "│  └─ "…).
+/// An item whose parent is itself or part of a cycle is shown flat.
+pub fn tree_order(len: usize, parent_of: impl Fn(usize) -> Option<usize>) -> Vec<(usize, String)> {
+    use std::collections::HashMap;
+    let parent_of = |i: usize| parent_of(i).filter(|&p| p != i && p < len);
     let mut children: HashMap<usize, Vec<usize>> = HashMap::new();
     let mut roots = Vec::new();
-    for i in 0..wts.len() {
+    for i in 0..len {
         match parent_of(i) {
             Some(p) => children.entry(p).or_default().push(i),
             None => roots.push(i),
         }
     }
-    let mut out = Vec::with_capacity(wts.len());
-    let mut seen = vec![false; wts.len()];
+    let mut out = Vec::with_capacity(len);
+    let mut seen = vec![false; len];
     fn walk(
         i: usize,
         lead: &str,

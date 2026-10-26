@@ -212,7 +212,13 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                         Err(CreateError::BranchExists { local, remote, .. }) if local || remote => {
                             app.jobs.ask(job, jobs::Question::BranchExists { local, remote });
                         }
-                        Err(e) => app.jobs.finish(job, Err(e.to_string()), Instant::now()),
+                        Err(e) => {
+                            // The review page hides the jobs pane: say why here.
+                            if app.reviews.is_some() {
+                                app.notice = Some(format!("Pull failed: {e}"));
+                            }
+                            app.jobs.finish(job, Err(e.to_string()), Instant::now());
+                        }
                     }
                     app.rebuild_rows();
                 }
@@ -258,7 +264,12 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             }
                             app.jobs.finish(job, Ok(()), Instant::now());
                         }
-                        Err(e) => app.jobs.finish(job, Err(e), Instant::now()),
+                        Err(e) => {
+                            if app.reviews.is_some() {
+                                app.notice = Some(format!("Couldn't delete {label}: {e}"));
+                            }
+                            app.jobs.finish(job, Err(e), Instant::now());
+                        }
                     }
                     collector.refresh(false);
                 }

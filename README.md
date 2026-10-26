@@ -297,13 +297,16 @@ Worktrees created outside am (`git worktree add`, other tools) are picked up aut
 
 ### Review Requests
 
-With GitHub on, am also looks for the open PRs in your tracked repos that are waiting on your review (one GitHub search every `reviewPollingIntervalMs`, default 2 minutes, plus on `r` and whenever you open the page). The count sits in the top-right corner of the dashboard's border as ` 3 to review `; click it or press `v` to open the **Review requests** page. It lists each PR, grouped by repo, with its author, who was asked (`you` or `@team`), its Linear ticket (looked up by the PR's branch), CI and review state, and how long ago it changed:
+With GitHub on, am also looks for the open PRs in your tracked repos that are waiting on your review (one GitHub search every `reviewPollingIntervalMs`, default 2 minutes, plus on `r` and whenever you open the page). The count sits in the top-right corner of the dashboard's border as ` 3 to review `; click it or press `v` to open the **Review requests** page. It lists each PR, with stacked PRs (one whose base is another listed PR's branch) indented under the PR they target as a tree, with its author, who was asked (`you` or `@team`), its Linear ticket (looked up by the PR's branch), CI and review state, and how long ago it changed:
 
 | Key | Action |
 | --- | ------ |
-| `Enter` / `g` / `o` | Open the PR in the browser |
+| `Enter` | On a pulled PR, open its worktree in your IDE (just like `Enter` on the dashboard); otherwise open the PR |
+| `g` / `o` | Open the PR in the browser |
 | `l` | Open its Linear ticket |
-| `t` | Pull its branch into **Reviewing** (the same no-questions checkout as `t` on the dashboard). A PR whose branch is already checked out reads `✓ pulled`, and `t` selects that worktree; a PR from a fork can't be pulled |
+| `t` | Pull its branch into **Reviewing** (the same no-questions checkout as `t` on the dashboard). You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard; a PR from a fork can't be pulled |
+| `d` | Remove the pulled worktree (the usual delete dialog), staying on the page |
+| `f` | Filters: who's asked, order, drafts, already reviewed, repos and extra search terms, in a small box over the page (changes save and re-search at once). The page's bottom border sums up the filters in force; clicking it opens the box too |
 | `r` | Search again now |
 | `Esc` / `q` / `v` | Back to the dashboard |
 

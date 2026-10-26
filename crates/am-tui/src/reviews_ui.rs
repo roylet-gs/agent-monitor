@@ -37,8 +37,38 @@ fn section(r: &ReviewRequest, sort: ReviewSort, repos: &[Repository]) -> Option<
     }
 }
 
-/// The list in page order (`reviewSort`). Returns indices into `reviews`.
+/// The PR among `list` (indices into `reviews`) whose head branch `r`'s
+/// PR targets, in the same repo: `r` is stacked on it.
+fn stacked_on(reviews: &[ReviewRequest], list: &[usize], r: &ReviewRequest) -> Option<usize> {
+    let base = r.pr.base_ref_name.as_deref()?;
+    list.iter().position(|&j| {
+        let p = &reviews[j];
+        !p.is_cross_repository && p.repo_id == r.repo_id && p.head_ref_name == base
+    })
+}
+
+/// Tree prefix per entry of `ordered` (from [`order`]): "" for a PR on its
+/// own, "├─ "/"└─ "… for one stacked on another listed PR.
+pub fn prefixes(reviews: &[ReviewRequest], ordered: &[usize]) -> Vec<String> {
+    let tree = crate::app::tree_order(ordered.len(), |k| stacked_on(reviews, ordered, &reviews[ordered[k]]));
+    let mut out = vec![String::new(); ordered.len()];
+    for (k, prefix) in tree {
+        out[k] = prefix;
+    }
+    out
+}
+
+/// The list in page order (`reviewSort`), with stacked PRs right under the
+/// PR they target. Returns indices into `reviews`.
 pub fn order(reviews: &[ReviewRequest], repos: &[Repository], sort: ReviewSort) -> Vec<usize> {
+    let sorted = sorted(reviews, repos, sort);
+    crate::app::tree_order(sorted.len(), |k| stacked_on(reviews, &sorted, &reviews[sorted[k]]))
+        .into_iter()
+        .map(|(k, _)| sorted[k])
+        .collect()
+}
+
+fn sorted(reviews: &[ReviewRequest], repos: &[Repository], sort: ReviewSort) -> Vec<usize> {
     let rank = |id: &str| repos.iter().position(|r| r.id == id).unwrap_or(usize::MAX);
     let newest = |a: &ReviewRequest, b: &ReviewRequest| b.updated_at.cmp(&a.updated_at);
     let mut idx: Vec<usize> = (0..reviews.len()).collect();
@@ -58,7 +88,15 @@ pub fn order(reviews: &[ReviewRequest], repos: &[Repository], sort: ReviewSort) 
 /// Rows for `ordered` (indices from [`order`]): a header before each
 /// section when there's more than one.
 pub fn rows(reviews: &[ReviewRequest], ordered: &[usize], repos: &[Repository], sort: ReviewSort) -> Vec<ReviewRow> {
-    let sections: Vec<Option<String>> = ordered.iter().map(|&i| section(&reviews[i], sort, repos)).collect();
+    // A stacked PR stays in its parent's section.
+    let mut sections: Vec<Option<String>> = Vec::with_capacity(ordered.len());
+    for (k, prefix) in prefixes(reviews, ordered).into_iter().enumerate() {
+        let sec = match sections.last() {
+            Some(prev) if !prefix.is_empty() => prev.clone(),
+            _ => section(&reviews[ordered[k]], sort, repos),
+        };
+        sections.push(sec);
+    }
     let several = sections.windows(2).any(|w| w[0] != w[1]);
     let mut out = Vec::new();
     for (pos, sec) in sections.iter().enumerate() {
@@ -171,6 +209,35 @@ pub(crate) mod tests {
         aged[2].created_at = "2026-09-10".into();
         assert_eq!(order(&aged, &repos, ReviewSort::Oldest), [0, 2, 1]);
         assert!(rows(&list, &[0, 2, 1], &repos, ReviewSort::Oldest).iter().all(|r| matches!(r, ReviewRow::Pr(_))));
+    }
+
+    #[test]
+    fn stacked_prs_sit_under_the_pr_they_target() {
+        // #2 targets #1's head and #3 targets #2's; #4 targets main. #2
+        // asks your team, yet stays under #1 in "Asked you".
+        let mut list = vec![
+            review("a", 1, "2026-10-01"),
+            review_asking("a", 2, "2026-10-09", "acme/platform"),
+            review("a", 3, "2026-10-08"),
+            review("a", 4, "2026-10-05"),
+            review("b", 5, "2026-10-07"),
+        ];
+        list[1].pr.base_ref_name = Some("feature/1".into());
+        list[2].pr.base_ref_name = Some("feature/2".into());
+        // Same branch name in another repo: not a stack.
+        list[4].pr.base_ref_name = Some("feature/1".into());
+        let repos = vec![repo("a"), repo("b")];
+        // #3 is the newest asking you, but it follows its stack: #1 → #2 → #3.
+        let ordered = order(&list, &repos, ReviewSort::Direct);
+        assert_eq!(ordered, [4, 3, 0, 1, 2]);
+        assert_eq!(prefixes(&list, &ordered), ["", "", "", "└─ ", "   └─ "]);
+        let rows = rows(&list, &ordered, &repos, ReviewSort::Direct);
+        assert!(!rows.contains(&ReviewRow::Header("Asked your team".into())), "{rows:?}");
+        // A sibling stack branches.
+        list[3].pr.base_ref_name = Some("feature/1".into());
+        let ordered = order(&list, &repos, ReviewSort::Updated);
+        assert_eq!(ordered, [4, 0, 1, 2, 3]);
+        assert_eq!(prefixes(&list, &ordered), ["", "", "├─ ", "│  └─ ", "└─ "]);
     }
 
     #[test]
