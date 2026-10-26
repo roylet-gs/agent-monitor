@@ -1436,6 +1436,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let who_w = ordered.iter().map(|&i| reviewers_text(&list[i]).width()).max().unwrap_or(0).min(if words { 24 } else { 12 });
 
     let rows = rows(list, &ordered, &app.snapshot.repos, sort);
+    let tree = crate::reviews_ui::prefixes(list, &ordered);
     // Outside the repo order, name each row's repo when there are several.
     let tag_repos = sort != am_core::settings::ReviewSort::Repo
         && ordered.windows(2).any(|w| list[w[0]].repo_id != list[w[1]].repo_id);
@@ -1461,7 +1462,8 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
                 let r = &list[ordered[*pos]];
                 let repo = tag_repos
                     .then(|| app.snapshot.repos.iter().find(|x| x.id == r.repo_id).map_or(r.repo.as_str(), |x| x.name.as_str()));
-                review_line(theme, r, repo, selected, (who_w, ticket_w, pr_w), words, inner.width, now)
+                let pull = app.review_pull(r);
+                review_line(theme, r, &tree[*pos], repo, pull, |id| app.is_deleting(id), selected, (who_w, ticket_w, pr_w), words, inner.width, now)
             }
         });
     }
@@ -1490,7 +1492,10 @@ fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
 fn review_line<'a>(
     theme: &Theme,
     r: &'a am_core::model::ReviewRequest,
+    prefix: &str,
     repo: Option<&str>,
+    pull: Option<&crate::jobs::Job>,
+    deleting: impl Fn(&str) -> bool,
     selected: bool,
     (who_w, ticket_w, pr_w): (usize, usize, usize),
     words: bool,
@@ -1518,15 +1523,27 @@ fn review_line<'a>(
     if let Some(name) = repo {
         tags.push((format!(" ({name})"), theme.faint()));
     }
-    if r.worktree_id.is_some() {
-        tags.push((" ✓ pulled".into(), theme.fg(theme.teal)));
+    match &r.worktree_id {
+        Some(id) if deleting(id) => tags.push((format!(" {} removing…", spinner(now)), theme.fg(theme.red))),
+        Some(_) => tags.push((" ✓ pulled".into(), theme.fg(theme.teal))),
+        None => {}
+    }
+    if let Some(job) = pull {
+        tags.push(match &job.state {
+            crate::jobs::JobState::Failed(_) => (" ✗ pull failed — t retries".into(), theme.fg(theme.red)),
+            _ if job.question.is_some() => (" ? waiting — esc, then ⇥ to answer".into(), theme.fg(theme.yellow)),
+            _ => {
+                let step = job.current_step().map(|s| format!(" {s}")).unwrap_or_default();
+                (format!(" {} pulling…{step}", spinner(now)), theme.fg(theme.green))
+            }
+        });
     }
     if r.is_cross_repository {
         tags.push((" fork".into(), theme.faint()));
     }
     let author = if r.author.is_empty() { String::new() } else { format!("  @{}", r.author) };
     let tags_w: usize = tags.iter().map(|(t, _)| t.width()).sum();
-    let room = (width as usize).saturating_sub(1 + right_w + tags_w);
+    let room = (width as usize).saturating_sub(1 + prefix.width() + right_w + tags_w);
     let title_w = r.pr.title.width().min(room);
     let title = truncate(&r.pr.title, title_w);
     let author = truncate(&author, room.saturating_sub(title.width()));
@@ -1534,6 +1551,7 @@ fn review_line<'a>(
 
     let mut spans = vec![
         Span::styled(if selected { "▌" } else { " " }, theme.bold(theme.border_focus)),
+        Span::styled(prefix.to_string(), theme.faint()),
         Span::styled(title, if selected { theme.bold(theme.text) } else { theme.fg(theme.text) }),
         Span::styled(author, theme.faint()),
     ];
@@ -2312,9 +2330,11 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
         let cmd = |c: Command, label, prio| {
             app.keymap.key(c).map(|k| (crate::keymap::display(k), label, Some(BarHit::Key(k)), prio))
         };
-        keys.push(raw("⏎", "open PR", Some(Key::Enter), 0));
+        keys.push(raw("⏎", if app.review_worktree().is_some() { "open" } else { "open PR" }, Some(Key::Enter), 0));
+        keys.extend(cmd(Command::OpenPr, "PR", 1).filter(|_| app.review_worktree().is_some()));
         keys.extend(cmd(Command::OpenLinear, "ticket", 0));
         keys.extend(cmd(Command::PullToTmpSpace, "pull into Reviewing", 0));
+        keys.extend(cmd(Command::Delete, "remove", 2));
         keys.push(raw("", "", None, 0));
         keys.extend(cmd(Command::Refresh, "refresh", 1));
         keys.extend(cmd(Command::Help, "help", 2));
@@ -3213,7 +3233,12 @@ mod tests {
         app.on_key(Key::Char('v'));
         // Page order: agent-monitor newest first (#51 pulled, #48 fork), then gridsight #902.
         assert_eq!(app.selected_review().unwrap().pr.number, 51);
-        assert_eq!(app.on_key(Key::Enter), Action::OpenUrl("https://github.com/acme/r1/pull/51".into()));
+        // #51 is pulled: ⏎ opens its worktree like on the dashboard, g the PR.
+        let Action::Open(v) = app.on_key(Key::Enter) else { panic!("expected an open") };
+        assert_eq!(v.worktree.id, "w1");
+        assert_eq!(app.on_key(Key::Char('g')), Action::OpenUrl("https://github.com/acme/r1/pull/51".into()));
+        let bar = render(&app, 120, 10).lines().last().unwrap().to_string();
+        assert!(bar.contains("⏎ open  g PR"), "{bar}");
         assert_eq!(app.on_key(Key::Char('l')), Action::None);
         assert_eq!(app.notice.as_deref(), Some("No Linear ticket for this PR"));
         app.on_key(Key::Char('j'));
@@ -3222,14 +3247,27 @@ mod tests {
         assert!(!app.review_key_available(Key::Char('t')));
         app.on_key(Key::Down);
         assert_eq!(app.on_key(Key::Char('l')), Action::OpenUrl("https://linear.app/t/issue/ENG-77".into()));
+        // Not pulled: ⏎ opens the PR.
+        assert_eq!(app.on_key(Key::Enter), Action::OpenUrl("https://github.com/acme/r2/pull/902".into()));
+        assert!(render(&app, 120, 10).lines().last().unwrap().contains("⏎ open PR"));
         assert_eq!(app.on_key(Key::Char('r')), Action::RefreshReviews);
         let Action::Create(_, repo, req) = app.on_key(Key::Char('t')) else { panic!("expected a create") };
         assert_eq!(repo.id, "r2");
         assert_eq!(req.branch, "feature/902");
         assert!(req.tmp_space);
         assert_eq!(req.mode, am_core::worktrees::CreateMode::TrackRemote);
-        assert!(app.reviews.is_none(), "back on the dashboard, where the job shows");
+        assert!(app.reviews.is_some(), "stays on the page to pull more");
         assert!(app.rows.iter().any(|r| matches!(r, crate::app::Row::Pending(_))));
+        assert!(render(&app, 120, 10).contains("pulling…"));
+        assert!(!app.review_key_available(Key::Char('t')));
+        assert_eq!(app.on_key(Key::Char('t')), Action::None, "already pulling");
+        assert!(app.notice.as_deref().unwrap().contains("already being pulled"));
+        // A failed pull says so on the row, and t tries again.
+        let job = app.jobs.list.last().unwrap().id;
+        app.jobs.finish(job, Err("no such ref".into()), std::time::Instant::now());
+        assert!(render(&app, 120, 10).contains("✗ pull failed"));
+        assert!(matches!(app.on_key(Key::Char('t')), Action::Create(..)));
+        assert_eq!(app.jobs.list.len(), 1, "the failed job made way for the retry");
 
         // Already pulled: jump to the worktree instead.
         let mut app = by_repo();
@@ -3238,6 +3276,26 @@ mod tests {
         assert_eq!(app.on_key(Key::Char('t')), Action::None);
         assert!(app.reviews.is_none());
         assert_eq!(app.selected_view().unwrap().worktree.id, "w1");
+
+        // d removes a pulled worktree without leaving the page.
+        let mut app = by_repo();
+        app.on_key(Key::Char('v'));
+        assert!(app.review_key_available(Key::Char('d')));
+        assert_eq!(app.on_key(Key::Char('d')), Action::None);
+        assert!(matches!(app.modal, Some(crate::modals::Modal::Delete(_))));
+        let mut act = app.on_key(Key::Char('y'));
+        if app.modal.is_some() {
+            act = app.on_key(Key::Char('n'));
+        }
+        let Action::Delete(_, view, _) = act else { panic!("expected a delete, got {act:?}") };
+        assert_eq!(view.worktree.id, "w1");
+        assert!(app.reviews.is_some(), "still on the page");
+        assert!(render(&app, 120, 10).contains("removing…"));
+        assert!(!app.review_key_available(Key::Char('d')));
+        app.on_key(Key::Char('j'));
+        assert!(!app.review_key_available(Key::Char('d')), "not pulled");
+        assert_eq!(app.on_key(Key::Char('d')), Action::None);
+        assert!(app.modal.is_none());
 
         // Esc and q go back; v toggles.
         let mut app = by_repo();
@@ -3265,6 +3323,20 @@ mod tests {
             assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), want, "{sort}");
             assert!(!render(&app, 120, 10).contains("Asked you"), "{sort}");
         }
+    }
+
+    #[test]
+    fn review_page_shows_stacked_prs_as_a_tree() {
+        let mut app = by_repo();
+        let mut snap = app.snapshot.clone();
+        // The fork PR targets #51's branch: it sits under #51.
+        snap.reviews.as_mut().unwrap()[0].pr.base_ref_name = Some("feature/refactor".into());
+        app.apply(snap);
+        app.on_key(Key::Char('v'));
+        let screen = render(&app, 120, 10);
+        let lines: Vec<&str> = screen.lines().collect();
+        let parent = lines.iter().position(|l| l.contains("Batch the PR queries")).unwrap();
+        assert!(lines[parent + 1].contains("└─ Typo in README"), "{screen}");
     }
 
     #[test]
