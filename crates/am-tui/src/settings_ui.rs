@@ -40,6 +40,10 @@ pub enum Kind {
     RunSetup,
     /// Asks, then puts every setting back to its default and runs setup.
     Reset,
+    /// Asks (`y`), then puts the review filters back to their defaults.
+    ResetReviewFilters,
+    /// Asks (`y`), then removes every review group.
+    ResetReviewGroups,
 }
 
 pub struct Field {
@@ -97,6 +101,8 @@ pub const FIELDS: &[Field] = &[
     Field { key: "reviewRequestsScope", label: "Requested from", help: "all: you or a team you're on; direct: you by name; teams: only your teams", section: "Review requests", kind: Kind::Choice(&am_core::settings::ReviewScope::IDS) },
     Field { key: "reviewGroups", label: "Groups…", help: "Each group takes the PRs it matches (with its own order and filters), the rest fall to the next", section: "Review requests", kind: Kind::ReviewGroups },
     Field { key: "reviewBadgeTotal", label: "Badge: total on GitHub", help: "Also count every open PR asking you or your teams on GitHub, ignoring filters", section: "Review requests", kind: Kind::Bool },
+    Field { key: "resetReviewFilters", label: "Reset filters…", help: "Requested from: you + your teams; the default group's filters off; no GitHub total (groups kept)", section: "Review requests", kind: Kind::ResetReviewFilters },
+    Field { key: "resetReviewGroups", label: "Reset groups…", help: "Remove every review group (the default group and filters kept)", section: "Review requests", kind: Kind::ResetReviewGroups },
     Field { key: "reviewPollingIntervalMs", label: "Review refresh (ms)", help: "How often to look for new review requests", section: "Review requests", kind: Kind::Number { step: 30000, min: 30000 } },
     Field { key: "linearEnabled", label: "Fetch tickets", help: "Linked Linear tickets for each branch", section: "Linear", kind: Kind::Bool },
     Field { key: "linearApiKey", label: "API key", help: "Personal API key from Linear settings", section: "Linear", kind: Kind::Text { secret: true } },
@@ -114,7 +120,8 @@ pub const FIELDS: &[Field] = &[
 ];
 
 /// The rows of the review page's filter box (`f`), a cut-down editor.
-pub const REVIEW_FILTERS: &[&str] = &["reviewRequestsScope", "reviewGroups", "reviewBadgeTotal"];
+pub const REVIEW_FILTERS: &[&str] =
+    &["reviewRequestsScope", "reviewGroups", "reviewBadgeTotal", "resetReviewFilters", "resetReviewGroups"];
 
 pub enum Outcome {
     None,
@@ -147,6 +154,8 @@ pub struct SettingsEditor {
     pub repo_count: usize,
     pub values: Map<String, Value>,
     pub error: Option<String>,
+    /// A review reset waiting for `y` (the field's key).
+    pub confirm: Option<&'static str>,
     /// Only these keys are shown and reachable (the review filter box).
     pub only: Option<&'static [&'static str]>,
     /// Review filters → Groups….
@@ -163,7 +172,7 @@ impl SettingsEditor {
             Ok(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, only: None, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default() }
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, confirm: None, only: None, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default() }
     }
 
     /// An editor showing only the `keys` fields, starting on the first.
@@ -208,6 +217,7 @@ impl SettingsEditor {
         self.cursor = i;
         self.editing = None;
         self.error = None;
+        self.confirm = None;
         Outcome::None
     }
 
@@ -224,7 +234,11 @@ impl SettingsEditor {
                 _ => "not set".into(),
             },
             Kind::ThemeBuilder | Kind::RunSetup => "⏎ open".into(),
-            Kind::Reset => "⏎ reset".into(),
+            Kind::Reset | Kind::ResetReviewFilters => "⏎ reset".into(),
+            Kind::ResetReviewGroups => match self.settings().review_groups.len() {
+                0 => "no groups".into(),
+                n => format!("⏎ remove {n}"),
+            },
             Kind::Repos => match self.repo_count {
                 1 => "1 tracked".into(),
                 n => format!("{n} tracked"),
@@ -362,6 +376,9 @@ impl SettingsEditor {
             }
             return Outcome::None;
         }
+        if let Some(which) = self.confirm.take() {
+            return if key == Key::Char('y') { self.reset_reviews(which) } else { Outcome::None };
+        }
         self.error = None;
         match key {
             Key::Esc | Key::Char('q') | Key::Char('s') => return Outcome::Close,
@@ -424,6 +441,10 @@ impl SettingsEditor {
             }
             Kind::RunSetup => Outcome::RunSetup,
             Kind::Reset => Outcome::ConfirmReset,
+            Kind::ResetReviewFilters | Kind::ResetReviewGroups => {
+                self.confirm = Some(f.key);
+                Outcome::None
+            }
             Kind::Sort => {
                 let crits = self.values.get(f.key).cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                 self.sort = Some(SortEditor::new(crits));
@@ -484,6 +505,30 @@ impl SettingsEditor {
 }
 
 impl SettingsEditor {
+    /// Run a confirmed review reset: `resetReviewFilters` (scope, the
+    /// default group, the GitHub total back to defaults; groups kept) or
+    /// `resetReviewGroups` (every group removed).
+    fn reset_reviews(&mut self, which: &str) -> Outcome {
+        let d = Settings::default();
+        let keys: Vec<(&str, Value)> = match which {
+            "resetReviewFilters" => vec![
+                ("reviewRequestsScope", Value::from(d.review_requests_scope)),
+                ("reviewBadgeTotal", Value::Bool(d.review_badge_total)),
+                ("reviewDefaultGroup", serde_json::to_value(&d.review_default_group).unwrap_or_default()),
+            ],
+            _ => vec![("reviewGroups", Value::Array(Vec::new()))],
+        };
+        am_core::info!("settings", "Review reset via TUI: {which}");
+        let mut out = Outcome::None;
+        for (key, value) in keys {
+            out = self.set(key, value);
+            if !matches!(out, Outcome::Changed(_)) {
+                break;
+            }
+        }
+        out
+    }
+
     /// Persist the groups page's groups and default group.
     fn save_groups(&mut self) -> Outcome {
         let Some(ed) = &self.groups else { return Outcome::None };
@@ -998,6 +1043,36 @@ mod tests {
         let g = ed.groups.as_ref().expect("the page stays open");
         assert!(g.form.is_some(), "on the new group's form");
         assert_eq!(app.settings.review_groups.len(), 1);
+    }
+
+    #[test]
+    fn review_resets_ask_then_clear_filters_or_groups() {
+        let (_lock, dir) = data_dir();
+        let saved = r#"{"reviewRequestsScope":"teams","reviewBadgeTotal":true,"showIdeStatus":true,
+            "reviewDefaultGroup":{"draft":"ready","sort":"oldest"},"reviewGroups":[{"name":"Mine","asked":"you"}]}"#;
+        std::fs::write(dir.join("settings.json"), saved).unwrap();
+        let mut ed = SettingsEditor::only(&Settings::parse(saved), REVIEW_FILTERS);
+        goto(&mut ed, "resetReviewGroups");
+        assert_eq!(ed.display(ed.field()), "⏎ remove 1");
+        // Anything but y cancels.
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::None));
+        assert_eq!(ed.confirm, Some("resetReviewGroups"));
+        assert!(matches!(ed.on_key(Key::Char('n')), Outcome::None));
+        assert!(ed.confirm.is_none());
+        ed.on_key(Key::Enter);
+        let Outcome::Changed(s) = ed.on_key(Key::Char('y')) else { panic!("expected a change") };
+        assert!(s.review_groups.is_empty());
+        assert_eq!(s.review_default_group.draft, "ready", "filters kept");
+
+        goto(&mut ed, "resetReviewFilters");
+        ed.on_key(Key::Enter);
+        let Outcome::Changed(s) = ed.on_key(Key::Char('y')) else { panic!("expected a change") };
+        assert_eq!(s.review_requests_scope, "all");
+        assert!(!s.review_badge_total);
+        assert_eq!(s.review_default_group, am_core::review_groups::ReviewGroup::default());
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(file["showIdeStatus"], true, "unknown keys survive");
+        assert_eq!(file["reviewGroups"], serde_json::json!([]));
     }
 
     #[test]

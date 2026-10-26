@@ -18,9 +18,9 @@ expression: "render(&app, 100, 22)"
 │        │   [ ] Hide drafts                                                              │        │
 │        │   [ ] Hide PRs I've already reviewed                                           │        │
 │        │                                                                                │        │
-│        │ Repo filters and extra search terms: Settings → Review requests                │        │
+│        │ Groups: Asked you, Asked your team                                             │        │
+│        │ More groups and filters: v, then f → Groups…                                   │        │
 │        │                                                                                │        │
 │        ╰─────────────────────────────────────── ↑↓ move  space toggle  ⏎ next  esc back ╯        │
-│                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
  ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  ? help  q quit

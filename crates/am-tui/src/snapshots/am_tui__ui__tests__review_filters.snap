@@ -15,12 +15,12 @@ expression: screen
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
-│                                                                                                                      │
 │                 ╭─Review filters ──────────────────────────────────────────────────────────────────╮                 │
 │                 │▌  Requested from                all                                              │                 │
 │                 │   Groups…                       no groups · rest: no drafts · not yet reviewed   │                 │
 │                 │   Badge: total on GitHub        off                                              │                 │
+│                 │   Reset filters…                ⏎ reset                                          │                 │
+│                 │   Reset groups…                 no groups                                        │                 │
 │                 │                                                                                  │                 │
 │                 │ all: you or a team you're on; direct: you by name; teams: only your teams        │                 │
 │                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │

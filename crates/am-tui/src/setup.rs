@@ -22,8 +22,10 @@ pub enum Step {
     Context,
 }
 
-/// The Reviews step's choices (`reviewRequests*` settings; the two filters
-/// are the default review group's `draft` and `reviewed` rules).
+/// The Reviews step's choices: `reviewRequests*`, and the review groups
+/// they imply ([`ReviewSetup::groups`]): who's asked becomes an `Asked you`
+/// and/or `Asked your team` group, and the two filters become every such
+/// group's (and the default group's) `draft` and `reviewed` rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewSetup {
     pub enabled: bool,
@@ -34,6 +36,9 @@ pub struct ReviewSetup {
     /// The default review group the filters are written into (its other
     /// rules kept).
     pub default_group: am_core::review_groups::ReviewGroup,
+    /// The review groups already saved; replaced only while they're none or
+    /// exactly what this step makes ([`ReviewSetup::groups`]).
+    pub existing_groups: Vec<am_core::review_groups::ReviewGroup>,
     /// Row under the cursor: see [`REVIEW_ROWS`].
     pub field: usize,
 }
@@ -49,19 +54,30 @@ impl ReviewSetup {
             hide_drafts: s.review_default_group.draft == "ready",
             hide_reviewed: s.review_default_group.reviewed == "no",
             default_group: s.review_default_group.clone(),
+            existing_groups: s.review_groups.clone(),
             field: 0,
         }
     }
 
-    /// Space (or a second click) on the row under the cursor.
     /// The default review group with these filters applied.
     pub fn group(&self) -> am_core::review_groups::ReviewGroup {
         let mut g = self.default_group.clone();
-        g.draft = if self.hide_drafts { "ready" } else if g.draft == "ready" { "any" } else { g.draft.as_str() }.to_string();
-        g.reviewed = if self.hide_reviewed { "no" } else if g.reviewed == "no" { "any" } else { g.reviewed.as_str() }.to_string();
+        apply_filters(&mut g, self.hide_drafts, self.hide_reviewed);
         g
     }
 
+    /// The groups this step writes: one per kind of request the scope
+    /// fetches (`Asked you` by name, `Asked your team`), each with the two
+    /// filters. `None` keeps groups the user has made or changed.
+    pub fn groups(&self) -> Option<Vec<am_core::review_groups::ReviewGroup>> {
+        let mine = |g: &[am_core::review_groups::ReviewGroup]| {
+            (0..3).any(|scope| [false, true].iter().any(|&d| [false, true].iter().any(|&r| made(scope, d, r) == g)))
+        };
+        (self.existing_groups.is_empty() || mine(&self.existing_groups))
+            .then(|| made(self.scope, self.hide_drafts, self.hide_reviewed))
+    }
+
+    /// Space (or a second click) on the row under the cursor.
     pub fn toggle(&mut self) {
         match self.field {
             0 => self.enabled = !self.enabled,
@@ -69,6 +85,30 @@ impl ReviewSetup {
             4 => self.hide_drafts = !self.hide_drafts,
             _ => self.hide_reviewed = !self.hide_reviewed,
         }
+    }
+}
+
+/// Set the two setup filters on `g`, leaving any other choice of the rule.
+fn apply_filters(g: &mut am_core::review_groups::ReviewGroup, hide_drafts: bool, hide_reviewed: bool) {
+    g.draft = if hide_drafts { "ready" } else if g.draft == "ready" { "any" } else { g.draft.as_str() }.to_string();
+    g.reviewed = if hide_reviewed { "no" } else if g.reviewed == "no" { "any" } else { g.reviewed.as_str() }.to_string();
+}
+
+/// The groups the Reviews step makes for `scope` (index into
+/// `ReviewScope::IDS`: all, direct, teams) and the two filters.
+fn made(scope: usize, hide_drafts: bool, hide_reviewed: bool) -> Vec<am_core::review_groups::ReviewGroup> {
+    use am_core::review_groups::ReviewGroup;
+    let group = |name: &str, asked: &str| {
+        let mut g = ReviewGroup { name: name.into(), asked: asked.into(), ..ReviewGroup::default() };
+        apply_filters(&mut g, hide_drafts, hide_reviewed);
+        g
+    };
+    let you = group("Asked you", "you");
+    let team = group("Asked your team", "team");
+    match scope {
+        1 => vec![you],
+        2 => vec![team],
+        _ => vec![you, team],
     }
 }
 
@@ -269,6 +309,12 @@ impl Setup {
                             ("contextWindowTokens", Value::from(tokens)),
                             ("setupCompleted", Value::Bool(true)),
                         ]);
+                        // The review groups follow the step (skipped with GitHub off).
+                        if self.gh
+                            && let Some(groups) = self.review.groups()
+                        {
+                            keys.push(("reviewGroups", serde_json::to_value(groups).unwrap_or_default()));
+                        }
                         return SetupEffect::Finish(keys);
                     }
                     _ => {}
@@ -380,6 +426,10 @@ mod tests {
         let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
         assert!(v.contains(&("reviewRequestsEnabled", Value::Bool(true))));
         assert!(v.contains(&("reviewRequestsScope", Value::from("direct"))));
+        // Only me: one "Asked you" group, with the filters too.
+        let groups = v.iter().find(|(k, _)| *k == "reviewGroups").map(|(_, g)| g.clone()).unwrap();
+        assert_eq!(groups.as_array().unwrap().len(), 1);
+        assert_eq!((groups[0]["name"].as_str(), groups[0]["asked"].as_str(), groups[0]["draft"].as_str()), (Some("Asked you"), Some("you"), Some("ready")));
         let group = v.iter().find(|(k, _)| *k == "reviewDefaultGroup").map(|(_, g)| g.clone()).unwrap();
         // A fresh default group has every filter off; the step turned drafts off.
         assert_eq!((group["draft"].as_str(), group["reviewed"].as_str()), (Some("ready"), Some("any")));
@@ -471,6 +521,30 @@ mod tests {
         assert_eq!(s.step, Step::Reviews);
         s.on_key(Key::Esc);
         assert_eq!(s.step, Step::Integrations);
+    }
+
+    #[test]
+    fn the_reviews_step_makes_groups_but_keeps_the_users_own() {
+        let names = |g: Option<Vec<am_core::review_groups::ReviewGroup>>| {
+            g.map(|g| g.iter().map(|x| (x.name.clone(), x.asked.clone())).collect::<Vec<_>>())
+        };
+        let mut r = ReviewSetup::default();
+        assert_eq!(
+            names(r.groups()),
+            Some(vec![("Asked you".into(), "you".into()), ("Asked your team".into(), "team".into())]),
+            "me and my teams"
+        );
+        r.scope = 2;
+        assert_eq!(names(r.groups()), Some(vec![("Asked your team".into(), "team".into())]));
+        // Groups this step made are replaced when it's run again…
+        let mut again = ReviewSetup { existing_groups: made(0, true, false), ..ReviewSetup::default() };
+        again.scope = 1;
+        assert_eq!(names(again.groups()), Some(vec![("Asked you".into(), "you".into())]));
+        // …but not ones the user made or changed.
+        let mut own = made(0, false, false);
+        own[0].authors = vec!["bob".into()];
+        let kept = ReviewSetup { existing_groups: own, ..ReviewSetup::default() };
+        assert_eq!(kept.groups(), None);
     }
 
     #[test]

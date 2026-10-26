@@ -449,6 +449,17 @@ fn draw_settings(
     let field = ed.field();
     let help_line = match &ed.error {
         Some(e) => Line::styled(format!(" {e}"), theme.fg(theme.red)),
+        None if ed.confirm.is_some() => {
+            let what = if ed.confirm == Some("resetReviewGroups") {
+                "Remove every review group?"
+            } else {
+                "Reset the review filters to their defaults?"
+            };
+            let text = format!(" {what} y confirm, any other key cancels");
+            let at = help.x + format!(" {what}").width() as u16;
+            hint_hits(hits, " y confirm", at, help.y + 1);
+            Line::styled(text, theme.bold(theme.yellow))
+        }
         None => Line::styled(format!(" {}", field.help), theme.faint()),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
@@ -1376,7 +1387,13 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             marks.push((lines.len(), Target::Item(List::SetupReviews, 5), false));
             lines.push(Line::from(vec![cursor(5), Span::raw(format!(" {} Hide PRs I've already reviewed", check(r.hide_reviewed)))]));
             lines.push(Line::raw(""));
-            lines.push(Line::styled("Repo filters and extra search terms: Settings → Review requests", theme.faint()));
+            let groups = match r.groups() {
+                Some(g) => format!("Groups: {}", g.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", ")),
+                None if r.existing_groups.len() == 1 => "Keeps your review group".to_string(),
+                None => format!("Keeps your {} review groups", r.existing_groups.len()),
+            };
+            lines.push(Line::styled(groups, theme.fg(theme.text)));
+            lines.push(Line::styled("More groups and filters: v, then f → Groups…", theme.faint()));
             hint = "↑↓ move  space toggle  ⏎ next  esc back";
         }
         Step::Context => {
@@ -3801,7 +3818,7 @@ mod tests {
         // Not pulled: ⏎ opens the PR.
         assert_eq!(app.on_key(Key::Enter), Action::OpenUrl("https://github.com/acme/r2/pull/902".into()));
         assert!(render(&app, 120, 10).lines().last().unwrap().contains("⏎ open PR"));
-        assert_eq!(app.on_key(Key::Char('r')), Action::RefreshReviews);
+        assert_eq!(app.on_key(Key::Char('r')), Action::ReloadReviews, "r clears the review caches");
         let Action::Create(_, repo, req) = app.on_key(Key::Char('t')) else { panic!("expected a create") };
         assert_eq!(repo.id, "r2");
         assert_eq!(req.branch, "feature/902");
@@ -3904,7 +3921,7 @@ mod tests {
         for _ in 0..10 {
             app.on_key(Key::Char('j'));
         }
-        assert_eq!(field(&app), "reviewBadgeTotal");
+        assert_eq!(field(&app), "resetReviewGroups");
         // f (or esc) closes it, back on the page.
         app.on_key(Key::Char('f'));
         assert!(app.settings_editor.is_none() && app.reviews.is_some());

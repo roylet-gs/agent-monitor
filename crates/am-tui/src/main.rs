@@ -400,6 +400,7 @@ fn dispatch(
         Action::Quit => return Ok(true),
         Action::Refresh => collector.refresh(true),
         Action::RefreshReviews => collector.refresh_reviews(),
+        Action::ReloadReviews => collector.reload_reviews(),
         Action::LoadReviewPeople => collector.refresh_people(),
         Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
         Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),

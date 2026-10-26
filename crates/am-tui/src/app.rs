@@ -79,8 +79,10 @@ pub enum Action {
     None,
     Quit,
     Refresh,
-    /// Fetch review requests now (the review page opened, or `r` on it).
+    /// Fetch review requests now (the review page opened).
     RefreshReviews,
+    /// `r` on the review page: clear the review caches and fetch again.
+    ReloadReviews,
     /// Look up who can author PRs (review-group autocomplete).
     LoadReviewPeople,
     /// Enter: open in the configured IDE (resuming the last session if set).
@@ -1060,8 +1062,8 @@ impl App {
                 self.sync_editor();
             }
             Some(C::Refresh) => {
-                self.notice = Some("Refreshing review requests…".into());
-                return Action::RefreshReviews;
+                self.notice = Some("Refreshing review requests (cache cleared)…".into());
+                return Action::ReloadReviews;
             }
             Some(C::Help) => self.show_help = true,
             Some(C::Settings) => self.open_settings(),

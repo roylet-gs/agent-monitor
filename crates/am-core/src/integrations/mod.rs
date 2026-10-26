@@ -247,8 +247,22 @@ impl Integrations {
         self.reviews = None;
         self.review_error = None;
         self.review_total = None;
+        self.review_hits.clear();
         self.reviews_hydrated = true;
         let _ = cache::prune_rows(conn, cache::CacheKind::Review, &[]);
+    }
+
+    /// Forget everything the review page caches (`r` on it): the list, its
+    /// total and group query hits, the people for autocomplete and the
+    /// memoised repo slugs, in memory and on disk, so the next refresh
+    /// starts from GitHub alone.
+    pub fn forget_reviews(&mut self, conn: &Connection) {
+        self.clear_reviews(conn);
+        self.people.clear();
+        self.people_at = None;
+        self.slugs.clear();
+        let _ = cache::prune_rows(conn, cache::CacheKind::People, &[]);
+        info!("reviews", "Review caches cleared");
     }
 
     /// Refresh the PRs waiting on your review in `repos` (see [`reviews`]):
@@ -783,6 +797,29 @@ mod tests {
         e.ints.refresh_people(&e.conn, &repos);
         assert_eq!(e.ints.people()[0].login, "alice");
         assert!(!e.ints.health().github_failing, "autocomplete never trips the breaker");
+    }
+
+    #[test]
+    fn forgetting_reviews_clears_memory_and_disk() {
+        let mut e = env();
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a")];
+        e.gh.push(GhOutput::success("acme/web"));
+        e.gh.push(GhOutput::success(review_body(&["feature/x"])));
+        e.ints.refresh_reviews(&e.conn, &repos, &Settings::default(), false);
+        let body = json!({"data": {"r0": {"assignableUsers": {"nodes": [{"login": "alice", "name": "Alice"}]}}}});
+        e.gh.push(GhOutput::success(body.to_string()));
+        e.ints.refresh_people(&e.conn, &repos);
+        assert!(e.ints.reviews().is_some() && !e.ints.people().is_empty());
+
+        e.ints.forget_reviews(&e.conn);
+        assert!(e.ints.reviews().is_none() && e.ints.people().is_empty());
+        assert!(e.rows(cache::CacheKind::Review).is_empty() && e.rows(cache::CacheKind::People).is_empty());
+        // The slug is looked up again, and people aren't memoised any more.
+        e.gh.push(GhOutput::success("acme/web"));
+        e.gh.push(GhOutput::success(review_body(&[])));
+        e.ints.refresh_reviews(&e.conn, &repos, &Settings::default(), true);
+        assert_eq!(e.gh.calls.lock().unwrap()[3][..2], ["repo", "view"]);
+        assert_eq!(e.ints.reviews(), Some(&[][..]));
     }
 
     #[test]

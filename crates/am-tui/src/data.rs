@@ -49,6 +49,8 @@ enum Cmd {
     RefreshReviews,
     /// Look up who can author PRs (autocomplete for review groups).
     RefreshPeople,
+    /// Clear the review caches, then fetch again (`r` on the review page).
+    ReloadReviews,
     Settings(Box<Settings>),
     Quit,
 }
@@ -123,6 +125,11 @@ impl Collector {
     /// Look up who can author PRs in the tracked repos (at most hourly).
     pub fn refresh_people(&self) {
         let _ = self.int_cmd.send(Cmd::RefreshPeople);
+    }
+
+    /// Clear the review caches and fetch the list again.
+    pub fn reload_reviews(&self) {
+        let _ = self.int_cmd.send(Cmd::ReloadReviews);
     }
 
     pub fn shutdown(mut self) {
@@ -236,7 +243,7 @@ impl Worker {
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
                 Ok(Cmd::Refresh { force: f }) => force = f,
-                Ok(Cmd::RefreshReviews | Cmd::RefreshPeople) => {}
+                Ok(Cmd::RefreshReviews | Cmd::RefreshPeople | Cmd::ReloadReviews) => {}
                 Ok(Cmd::Settings(s)) => {
                     // Filters/sort/process filter may have changed: rebuild now.
                     self.settings = *s;
@@ -660,6 +667,13 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             Ok(Cmd::Refresh { force: f }) => force = f,
             Ok(Cmd::RefreshReviews) => reviews_now = true,
             Ok(Cmd::RefreshPeople) => people_now = true,
+            Ok(Cmd::ReloadReviews) => {
+                ints.forget_reviews(&conn);
+                // Show "Loading…" now rather than the old list until GitHub answers.
+                let _ = tx.send(update(&ints, &known_branches, &settings));
+                reviews_now = true;
+                people_now = true;
+            }
             Ok(Cmd::Settings(s)) => {
                 if settings.linear_auto_nickname
                     && !s.linear_auto_nickname
