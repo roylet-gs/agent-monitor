@@ -1621,19 +1621,28 @@ fn review_line<'a>(
     line.style(theme.selected())
 }
 
-/// First visible row of the worktree list. Keeps the selected row in view;
-/// headers scroll with their rows.
+/// First visible row of the worktree list. Scrolls only as far as needed
+/// to keep the selected row in view (the offset is kept in
+/// `App::list_scroll`); headers scroll with their rows.
 fn list_start(app: &App, height: usize) -> usize {
     let sel_row = app.rows.iter().position(|r| *r == Row::Worktree(app.selected)).unwrap_or(0);
     // Keep the selection's session rows in view too, but never scroll its
     // own row off the top.
     let sessions = app.rows[sel_row.min(app.rows.len())..].iter().skip(1).take_while(|r| matches!(r, Row::Session(..))).count();
     let sel_end = sel_row + sessions.min(height.saturating_sub(1));
-    let mut start = sel_end.saturating_sub(height.saturating_sub(1));
-    // Show the header above the selection when there's room.
-    if start > 0 && sel_row - start < height.saturating_sub(1) {
-        start = start.saturating_sub(1);
+    let mut start = app.list_scroll.get();
+    if sel_end >= start + height {
+        start = sel_end + 1 - height.max(1);
+    } else if sel_row < start {
+        start = sel_row;
+        // Bring the headers and blank lines just above it into view too.
+        while start > 0 && sel_end + 1 - start < height && !matches!(app.rows[start - 1], Row::Worktree(_) | Row::Session(..)) {
+            start -= 1;
+        }
     }
+    // Never leave blank lines below the list (it shrank, or the pane grew).
+    start = start.min(app.rows.len().saturating_sub(height));
+    app.list_scroll.set(start);
     start
 }
 
@@ -3546,6 +3555,47 @@ mod tests {
         let header = find(&app, 120, 7, "gridsight");
         click(&mut app, 120, 7, header, false);
         assert_eq!(app.selected, 2);
+    }
+
+    #[test]
+    fn scrolling_up_keeps_the_page_until_the_top() {
+        // One repo (no header) with 10 worktrees; 7 rows leave a 4-line list.
+        let mut app = fixture();
+        let worktrees = (0..10).map(|i| view(&format!("w{i}"), "r1", &format!("wt-{i:02}"), None)).collect();
+        let mut snapshot = app.snapshot.clone();
+        snapshot.groups = vec![WorktreeGroup {
+            repo: Repository { id: "r1".into(), path: "/r1".into(), name: "agent-monitor".into() },
+            worktrees,
+        }];
+        snapshot.subagents = vec![];
+        app.apply(snapshot);
+        let visible = |app: &App| -> Vec<String> {
+            let screen = render(app, 120, 7);
+            (0..10).map(|i| format!("wt-{i:02}")).filter(|b| screen.contains(b.as_str())).collect()
+        };
+        let selected = |app: &App| app.selected_view().unwrap().worktree.branch.clone();
+
+        app.on_key(Key::End);
+        assert_eq!(visible(&app), ["wt-06", "wt-07", "wt-08", "wt-09"]);
+        // Moving up inside the page doesn't scroll it.
+        for want in ["wt-08", "wt-07", "wt-06"] {
+            app.on_key(Key::Up);
+            assert_eq!(selected(&app), want);
+            assert_eq!(visible(&app), ["wt-06", "wt-07", "wt-08", "wt-09"]);
+        }
+        // Past the top row, the page follows one row at a time.
+        app.on_key(Key::Up);
+        assert_eq!(selected(&app), "wt-05");
+        assert_eq!(visible(&app), ["wt-05", "wt-06", "wt-07", "wt-08"]);
+        // And going back down stays put until the bottom row.
+        for _ in 0..3 {
+            app.on_key(Key::Down);
+            assert_eq!(visible(&app), ["wt-05", "wt-06", "wt-07", "wt-08"]);
+        }
+        app.on_key(Key::Down);
+        assert_eq!(visible(&app), ["wt-06", "wt-07", "wt-08", "wt-09"]);
+        app.on_key(Key::Home);
+        assert_eq!(visible(&app), ["wt-00", "wt-01", "wt-02", "wt-03"]);
     }
 
     #[test]

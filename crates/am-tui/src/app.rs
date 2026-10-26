@@ -137,6 +137,9 @@ pub struct App {
     /// What a click does where, recorded by the last `ui::draw` for the
     /// layer on top (so clicks always match what's on screen).
     pub hits: std::cell::RefCell<Vec<crate::ui::Hit>>,
+    /// First visible row of the worktree list, kept between draws so the
+    /// list only scrolls when the selection leaves the view.
+    pub list_scroll: std::cell::Cell<usize>,
 }
 
 impl App {
@@ -167,6 +170,7 @@ impl App {
             jobs: Default::default(),
             hover: None,
             hits: Default::default(),
+            list_scroll: Default::default(),
         }
     }
 
