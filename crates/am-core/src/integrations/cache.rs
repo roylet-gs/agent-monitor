@@ -26,6 +26,8 @@ use crate::{debug, info, warn};
 pub enum CacheKind {
     Pr,
     Linear,
+    /// The review-request list (`integrations::reviews`), one row.
+    Review,
 }
 
 impl CacheKind {
@@ -33,6 +35,7 @@ impl CacheKind {
         match self {
             CacheKind::Pr => "pr",
             CacheKind::Linear => "linear",
+            CacheKind::Review => "review",
         }
     }
 }

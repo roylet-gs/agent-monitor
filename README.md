@@ -133,7 +133,8 @@ Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walk
 2. **Agent hooks**: installs am's hooks into `~/.claude/settings.json` and into each other harness in use (see [Supported harnesses](#supported-harnesses)), pointing at the native `am-hook`
 3. **Repositories**: type a path (Tab completes) to start tracking a repo and its worktrees
 4. **Integrations**: GitHub PR status (needs `gh`) and an optional Linear API key
-5. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
+5. **Review requests** (with GitHub on): show the PRs waiting on your review, whose requests count (you and your teams, only you, or only your teams), and whether to hide drafts and PRs you've already reviewed
+6. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
 
 Everything can be changed later: `s` for settings (**Repositories…** manages the tracked repos), `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use **Settings → Run setup again…** or `am setup`. It starts from your current settings and repositories, nothing is saved until you finish it, and `Esc` on the first step closes it. **Settings → Reset settings…** (confirm with `y`) puts every setting back to its default and then opens the wizard. Repositories, worktrees, history, custom themes, startup scripts and agent hooks are kept. Run `am doctor` to check the setup.
 
@@ -141,7 +142,7 @@ Everything can be changed later: `s` for settings (**Repositories…** manages t
 
 ## The Dashboard
 
-One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for agent sessions running in directories am doesn't track. Worktrees you put in the **tmp space** (for pulling down someone else's branch to look at it) sit together in one `Tmp space` group after your repos, tagged with their repo when you track several, and don't count against the worktree limit. Sessions from other harnesses carry a blue badge with their id (`✦ gemini`, `✦ codex`, `✦ cursor`…); Claude Code sessions have none. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
+One pane lists your worktrees, grouped by repository (with a header per repo when you track more than one), plus an **Other sessions** group for agent sessions running in directories am doesn't track. Worktrees you pull down to review (someone else's branch, the **tmp space**) sit together in one `Reviewing` group after your repos, tagged with their repo when you track several, and don't count against the worktree limit. Sessions from other harnesses carry a blue badge with their id (`✦ gemini`, `✦ codex`, `✦ cursor`…); Claude Code sessions have none. The selected row is marked with `▌`, and the pane's bottom border shows `N of M`. The bottom line shows the key hints; a short notice or an offline warning appears on its right.
 
 Agent status changes show up within about 200 ms of the hook firing.
 
@@ -158,7 +159,8 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `p` | Open the Linear project |
 | `n` | New worktree (adds a repository first if none is tracked) |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
-| `t` | Pull into the tmp space: paste an existing branch (say, a PR you're reviewing) and it is checked out in the `Tmp space` group, tracking origin (or reusing a local-only branch), with no questions and no startup script. A branch that exists neither locally nor on origin is refused; `t` never makes a new branch |
+| `v` | Review requests: the PRs waiting on your review (see [Review Requests](#review-requests)) |
+| `t` | Pull into Reviewing: paste an existing branch (say, a PR you're reviewing) and it is checked out in the `Reviewing` group, tracking origin (or reusing a local-only branch), with no questions and no startup script. A branch that exists neither locally nor on origin is refused; `t` never makes a new branch |
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
@@ -291,7 +293,21 @@ Worktrees created outside am (`git worktree add`, other tools) are picked up aut
 
 **Linear** (`linearEnabled` + `linearApiKey`): am looks up the Linear issue linked to each branch name (Linear's git-branch search, so branches named the way Linear suggests, e.g. `eng-123-fix-login`, match). You get the identifier, title, state, assignee and project. With `linearAutoNickname` on, worktrees without a nickname are named after their ticket's title. If GitHub has no PR for the branch, the PR attached to the Linear issue is shown instead (without checks).
 
-**Offline.** Results are cached in the database, and only a successful fetch replaces them. If GitHub or Linear can't be reached, the dashboard keeps showing the last good data, along with `⚠ GitHub offline — cached` (or `Linear`, or both) on the key bar. am backs off from 30 seconds up to 15 minutes while offline. Press `r` once you're back online to retry immediately; the warning clears on the next successful fetch.
+**Offline.** Results are cached in the database, and only a successful fetch replaces them. If GitHub or Linear can't be reached, the dashboard keeps showing the last good data, along with `⚠ GitHub offline — cached` (or `Linear`, or both) on the key bar. am backs off from 30 seconds up to 15 minutes while offline. If GitHub rate-limits you, the hint reads `⚠ GitHub rate-limited — cached` and am backs off the same way; the review page says so too, with when the limit resets, instead of waiting on an empty list. Press `r` once you're back online to retry immediately; the warning clears on the next successful fetch.
+
+### Review Requests
+
+With GitHub on, am also looks for the open PRs in your tracked repos that are waiting on your review (one GitHub search every `reviewPollingIntervalMs`, default 2 minutes, plus on `r` and whenever you open the page). The count sits in the top-right corner of the dashboard's border as ` 3 to review `; click it or press `v` to open the **Review requests** page. It lists each PR, grouped by repo, with its author, who was asked (`you` or `@team`), its Linear ticket (looked up by the PR's branch), CI and review state, and how long ago it changed:
+
+| Key | Action |
+| --- | ------ |
+| `Enter` / `g` / `o` | Open the PR in the browser |
+| `l` | Open its Linear ticket |
+| `t` | Pull its branch into **Reviewing** (the same no-questions checkout as `t` on the dashboard). A PR whose branch is already checked out reads `✓ pulled`, and `t` selects that worktree; a PR from a fork can't be pulled |
+| `r` | Search again now |
+| `Esc` / `q` / `v` | Back to the dashboard |
+
+What counts is set under **Settings → Review requests** (or in the setup wizard): `reviewRequestsScope` (`all`: requested from you or a team you're on, `direct`: you by name, `teams`: only your teams), `reviewHideDrafts`, `reviewHideReviewed` (leaves out PRs you've already reviewed even if a team of yours is still asked), `reviewIncludeRepos` / `reviewExcludeRepos` (tracked repo names or `owner/name`, comma separated) and `reviewSearchQualifiers` (extra GitHub search terms such as `label:urgent -author:app/dependabot`). `reviewSort` orders the page: `direct` (the default: PRs that ask you by name first, then those asking one of your teams), `repo` (grouped by repository), `updated` (most recently updated first) or `oldest` (waiting longest first). GitHub has no push channel a local app can subscribe to, so this is polling: one GraphQL request per refresh.
 
 ---
 
@@ -364,6 +380,15 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
 | `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |
+| `reviewRequestsEnabled` | `true` | Look for PRs waiting on your review (needs `ghPrStatus`) |
+| `reviewRequestsScope` | `"all"` | `all` (you or your teams), `direct` (you by name) or `teams` (only your teams) |
+| `reviewHideDrafts` | `true` | Leave draft PRs out of the review list |
+| `reviewHideReviewed` | `true` | Leave out PRs you've already reviewed |
+| `reviewIncludeRepos` | `""` | Only these tracked repos (names or `owner/name`, comma separated); empty = all |
+| `reviewExcludeRepos` | `""` | Never these tracked repos |
+| `reviewSearchQualifiers` | `""` | Extra GitHub search qualifiers added to the review search |
+| `reviewPollingIntervalMs` | `120000` | How often to search for review requests (min 30 s) |
+| `reviewSort` | `"direct"` | Review page order: `direct` (asked you by name first), `repo`, `updated` or `oldest` |
 | `linearEnabled` | `false` | Fetch Linear tickets |
 | `linearApiKey` | `""` | Linear personal API key |
 | `linearPollingIntervalMs` | `180000` | Linear refresh interval (min 30000) |
@@ -438,7 +463,7 @@ am --version
 | Command | Description | Options |
 | ------- | ----------- | ------- |
 | `am worktree list` / `am ls` | List worktrees with agent status, PR and Linear info | `--repo`, `--json` |
-| `am worktree create <branch>` / `am new <branch>` | Create a worktree | `--repo`, `--name <name>`, `--base <branch>`, `--reuse` (use the existing local branch), `--track` (pull `origin/<branch>`), `--no-track` (new branch from base, no upstream), `--tmp` (check out an existing branch in the tmp space: one only on origin is tracked, one only local reused, without `--track`/`--reuse`; refused for a branch that doesn't exist), `--json` |
+| `am worktree create <branch>` / `am new <branch>` | Create a worktree | `--repo`, `--name <name>`, `--base <branch>`, `--reuse` (use the existing local branch), `--track` (pull `origin/<branch>`), `--no-track` (new branch from base, no upstream), `--tmp` (check out an existing branch in the Reviewing space: one only on origin is tracked, one only local reused, without `--track`/`--reuse`; refused for a branch that doesn't exist), `--json` |
 | `am worktree delete <target>` | Delete a worktree | `--repo`, `--force` (even with uncommitted changes), `--delete-branch`, `--delete-remote` |
 | `am worktree open <target>` / `am open <target>` | Open in your configured editor | `--repo` |
 | `am worktree info <target>` | Detailed info for one worktree | `--repo`, `--json` |

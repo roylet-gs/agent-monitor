@@ -164,7 +164,7 @@ struct CreateArgs {
     /// Create new local branch from base, do not track remote
     #[arg(long)]
     no_track: bool,
-    /// Check out an existing branch in the tmp space (grouped apart, outside the worktree limit); never makes a new branch
+    /// Check out an existing branch in the Reviewing space (grouped apart, outside the worktree limit); never makes a new branch
     #[arg(long)]
     tmp: bool,
     #[command(flatten)]

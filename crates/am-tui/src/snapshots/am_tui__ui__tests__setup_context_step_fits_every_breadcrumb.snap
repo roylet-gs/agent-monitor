@@ -8,7 +8,7 @@ expression: out
 │ ◐ fix/offline-cache                                                                4m ▓░░░░ 185k │
 │        ╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮        │
 │gridsigh│                                                                                │────────│
-│ · main │  ✓ Editor  ›  ✓ Agent hooks  ›  ✓ Repositories  ›  ✓ Integrations  ›  Context  │        │
+│ · main │  ✓ Editor  ›  ✓ Hooks  ›  ✓ Repos  ›  ✓ Integrations  ›  ✓ Reviews  ›  Context │        │
 │        │                                                                                │        │
 │        │ How many tokens of context should the bar measure against?                     │        │
 │        │ A session past it doubles the scale until it fits.                             │        │
@@ -21,4 +21,4 @@ expression: out
 │                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  │ g PR  l linear  p project  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  ? help  q quit

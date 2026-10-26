@@ -42,6 +42,8 @@ test("run setup again starts from the current settings and esc cancels", async (
   await tui.sendKey("Enter");
   await tui.waitForText("GitHub PR & CI status (via gh)");
   await tui.sendKey("Enter");
+  await tui.waitForText("Which pull requests are waiting on your review?");
+  await tui.sendKey("Enter");
   await tui.waitForText("How many tokens of context should the bar measure against?");
   await tui.sendKey("Enter");
   await tui.waitForGone(WELCOME);
@@ -61,6 +63,8 @@ test("reset settings asks first, then reopens setup", async ({ page }) => {
   await tui.waitForText("Add the git repositories whose worktrees you want to watch.");
   await tui.sendKey("Enter"); // no repo
   await tui.waitForText("GitHub PR & CI status (via gh)");
+  await tui.sendKey("Enter");
+  await tui.waitForText("Which pull requests are waiting on your review?");
   await tui.sendKey("Enter");
   await tui.waitForText("How many tokens of context should the bar measure against?");
   await tui.sendKey("Enter");

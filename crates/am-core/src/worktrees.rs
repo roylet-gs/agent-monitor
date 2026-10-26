@@ -793,7 +793,7 @@ fn create_worktree_inner(
 
     // The tmp space checks out someone else's branch: never a new one.
     if req.tmp_space && matches!(req.mode, CreateMode::Disconnected | CreateMode::DeleteAndRecreate) {
-        return Err(CreateError::Invalid("The tmp space only takes an existing branch as it is".into()));
+        return Err(CreateError::Invalid("Reviewing only takes an existing branch as it is".into()));
     }
     if req.mode == CreateMode::Fresh {
         stage("Checking branch…".into());
@@ -804,7 +804,7 @@ fn create_worktree_inner(
         if req.tmp_space {
             debug!("git", "Tmp-space create of {branch} refused: no such branch (remote={:?})", check.remote);
             return Err(CreateError::Invalid(format!(
-                "No branch \"{branch}\" locally or on origin: the tmp space only takes existing branches"
+                "No branch \"{branch}\" locally or on origin: Reviewing only takes existing branches"
             )));
         }
     }
@@ -888,7 +888,7 @@ fn create_worktree_inner(
     // still carry the old label.
     if wt.tmp_space != req.tmp_space {
         if req.tmp_space {
-            stage("Moving to tmp space…".into());
+            stage("Moving to Reviewing…".into());
         }
         db::set_worktree_tmp_space(conn, &wt.id, req.tmp_space).map_err(db_err)?;
     }

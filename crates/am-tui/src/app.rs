@@ -1,7 +1,7 @@
 //! Dashboard state and key handling. Pure: no I/O, so it is driven directly
 //! in tests. Data arrives as a `Snapshot` from the collector (data.rs).
 
-use am_core::model::{Repository, Subagent, WorktreeGroup, WorktreeView};
+use am_core::model::{Repository, ReviewRequest, Subagent, WorktreeGroup, WorktreeView};
 use am_core::settings::{SortKey, Settings};
 use am_core::status::Status;
 
@@ -9,6 +9,8 @@ use am_core::status::Status;
 pub struct Health {
     pub github_failing: bool,
     pub linear_failing: bool,
+    /// GitHub is failing because it rate-limited us (not because it's down).
+    pub github_rate_limited: bool,
 }
 
 /// One consistent view of everything on screen.
@@ -25,6 +27,12 @@ pub struct Snapshot {
     /// Usage today (`showDailyTokens`/`dailyTokensScope`), shown per
     /// `dailyTokensMode`; `None` when the setting is off.
     pub today_tokens: Option<am_core::usage::Tally>,
+    /// Open PRs waiting on your review (`reviewRequests*` settings), newest
+    /// first; `None` while off or before the first fetch/cache read.
+    pub reviews: Option<Vec<ReviewRequest>>,
+    /// Why the last review search failed (rate limit, gh logged out…);
+    /// shown on the review page instead of "Loading…" or beside a cached list.
+    pub review_error: Option<am_core::model::ReviewFetchError>,
 }
 
 /// A visual row of the worktree list. Headers never take a selection index:
@@ -51,6 +59,8 @@ pub enum Action {
     None,
     Quit,
     Refresh,
+    /// Fetch review requests now (the review page opened, or `r` on it).
+    RefreshReviews,
     /// Enter: open in the configured IDE (resuming the last session if set).
     Open(Box<WorktreeView>),
     /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
@@ -103,6 +113,8 @@ pub struct App {
     pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
     pub modal: Option<crate::modals::Modal>,
     pub setup: Option<crate::setup::Setup>,
+    /// `v`: the review-requests page, in place of the worktree list.
+    pub reviews: Option<crate::reviews_ui::ReviewPage>,
     /// Select this worktree as soon as it shows up (after create).
     pub pending_select: Option<String>,
     /// Worktrees whose status changed since the user last had them selected.
@@ -146,6 +158,7 @@ impl App {
             settings_editor: None,
             modal: None,
             setup: None,
+            reviews: None,
             pending_select: None,
             unseen: Default::default(),
             seen_status: Default::default(),
@@ -173,6 +186,10 @@ impl App {
         self.track_status_changes();
         if let Some(e) = &mut self.settings_editor {
             e.repo_count = self.snapshot.repos.len();
+        }
+        let n = self.review_list().len();
+        if let Some(p) = &mut self.reviews {
+            p.clamp(n);
         }
         self.loaded = true;
     }
@@ -262,7 +279,7 @@ impl App {
             .filter_map(|j| {
                 let (repo, req, wt) = j.pending_create()?;
                 let (id, name) = match req.tmp_space {
-                    true => (am_core::model::TMP_SPACE_GROUP_ID.to_string(), "Tmp space".to_string()),
+                    true => (am_core::model::TMP_SPACE_GROUP_ID.to_string(), am_core::model::TMP_SPACE_GROUP_NAME.to_string()),
                     false => (repo.id.clone(), repo.name.clone()),
                 };
                 (!wt.is_some_and(listed)).then_some((j.id, id, name))
@@ -493,6 +510,9 @@ impl App {
             }
             return Action::None;
         }
+        if self.reviews.is_some() {
+            return self.review_key(key);
+        }
         if self.jobs.focused {
             use crate::jobs::JobEffect;
             let effect = self.jobs.on_key(key);
@@ -617,6 +637,7 @@ impl App {
                 self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
             C::AddRepo => self.modal = Some(self.add_repo_modal()),
+            C::ReviewRequests => return self.open_reviews(),
             C::Settings => self.open_settings(),
             C::MoveDown => self.move_by(1),
             C::MoveUp => self.move_by(-1),
@@ -752,6 +773,10 @@ impl App {
                 }
                 None
             }
+            L::SetupReviews => {
+                let Some(s) = &mut self.setup else { return Action::None };
+                (std::mem::replace(&mut s.review.field, i) == i).then_some(Key::Char(' '))
+            }
             L::SetupIde | L::SetupIntegrations | L::SetupContext => {
                 let Some(s) = &mut self.setup else { return Action::None };
                 s.ide_error = None;
@@ -762,6 +787,10 @@ impl App {
                     // The GitHub checkbox toggles on a second click.
                     _ => (std::mem::replace(&mut s.integration_field, i) == i && i == 0).then_some(Key::Char(' ')),
                 }
+            }
+            L::Reviews => {
+                let Some(p) = &mut self.reviews else { return Action::None };
+                (std::mem::replace(&mut p.cursor, i) == i).then_some(Key::Enter)
             }
             L::Jobs => {
                 self.jobs.focus();
@@ -795,6 +824,134 @@ impl App {
         }
         let snap = self.snapshot.clone();
         self.apply(snap);
+    }
+
+    /// The review requests in page order (empty while off or not loaded).
+    pub fn review_list(&self) -> Vec<&ReviewRequest> {
+        let Some(list) = &self.snapshot.reviews else { return Vec::new() };
+        crate::reviews_ui::order(list, &self.snapshot.repos, self.settings.review_sort()).into_iter().map(|i| &list[i]).collect()
+    }
+
+    pub fn selected_review(&self) -> Option<&ReviewRequest> {
+        let cursor = self.reviews.as_ref()?.cursor;
+        self.review_list().get(cursor).copied()
+    }
+
+    /// The dashboard badge: how many PRs wait on your review.
+    pub fn review_count(&self) -> Option<usize> {
+        self.snapshot.reviews.as_ref().filter(|_| self.settings.review_requests_on()).map(Vec::len)
+    }
+
+    fn open_reviews(&mut self) -> Action {
+        if !self.settings.gh_pr_status {
+            self.notice = Some("Review requests need GitHub PR status (Settings → Fetch PRs)".into());
+            return Action::None;
+        }
+        if !self.settings.review_requests_enabled {
+            self.notice = Some("Review requests are off (Settings → Show review requests)".into());
+            return Action::None;
+        }
+        self.jobs.focused = false;
+        self.reviews = Some(crate::reviews_ui::ReviewPage::default());
+        Action::RefreshReviews
+    }
+
+    /// Whether a review-page key applies to the selected PR (the key bar
+    /// dims the ones that don't).
+    pub fn review_key_available(&self, key: Key) -> bool {
+        use crate::keymap::Command as C;
+        let r = self.selected_review();
+        match self.keymap.command(key) {
+            _ if key == Key::Enter => r.is_some(),
+            Some(C::OpenLinear) => r.is_some_and(|r| r.linear.is_some()),
+            Some(C::PullToTmpSpace) => r.is_some_and(|r| !r.is_cross_repository),
+            _ => true,
+        }
+    }
+
+    /// Keys on the review page. Rebound dashboard keys carry over (move,
+    /// open PR/ticket, pull, refresh, help, settings); Esc, `q` and the
+    /// page's own key go back.
+    fn review_key(&mut self, key: Key) -> Action {
+        use crate::keymap::Command as C;
+        if key == Key::CtrlC {
+            return Action::Quit;
+        }
+        if key == Key::Enter {
+            return self.review_open_pr();
+        }
+        let len = self.review_list().len();
+        let cmd = self.keymap.command(key);
+        let Some(page) = &mut self.reviews else { return Action::None };
+        match cmd {
+            Some(C::Quit | C::ReviewRequests) => self.reviews = None,
+            Some(C::MoveDown) => page.move_by(1, len),
+            Some(C::MoveUp) => page.move_by(-1, len),
+            Some(C::PageDown) => page.move_by(10, len),
+            Some(C::PageUp) => page.move_by(-10, len),
+            Some(C::Top) => page.move_by(isize::MIN / 2, len),
+            Some(C::Bottom) => page.move_by(isize::MAX / 2, len),
+            Some(C::Open | C::OpenPr) => return self.review_open_pr(),
+            Some(C::OpenLinear) => {
+                let url = self.selected_review().and_then(|r| r.linear.as_ref()).map(|l| linear_url(&l.url, &self.settings));
+                match url {
+                    Some(url) => return Action::OpenUrl(url),
+                    None => self.notice = Some("No Linear ticket for this PR".into()),
+                }
+            }
+            Some(C::PullToTmpSpace) => return self.pull_review(),
+            Some(C::Refresh) => {
+                self.notice = Some("Refreshing review requests…".into());
+                return Action::RefreshReviews;
+            }
+            Some(C::Help) => self.show_help = true,
+            Some(C::Settings) => self.open_settings(),
+            _ => {}
+        }
+        Action::None
+    }
+
+    fn review_open_pr(&mut self) -> Action {
+        match self.selected_review() {
+            Some(r) => Action::OpenUrl(r.pr.url.clone()),
+            None => Action::None,
+        }
+    }
+
+    /// Check the PR's branch out into Reviewing (the tmp space), or jump to
+    /// the worktree that already has it.
+    fn pull_review(&mut self) -> Action {
+        let Some(r) = self.selected_review().cloned() else { return Action::None };
+        if r.is_cross_repository {
+            self.notice = Some(format!("#{} is from a fork — its branch isn't on origin", r.pr.number));
+            return Action::None;
+        }
+        if let Some(id) = r.worktree_id {
+            self.reviews = None;
+            match self.flat.iter().position(|v| v.worktree.id == id) {
+                Some(i) => {
+                    self.selected = i;
+                    self.mark_selected_seen();
+                }
+                None => self.pending_select = Some(id),
+            }
+            self.notice = Some(format!("{} is already checked out", r.head_ref_name));
+            return Action::None;
+        }
+        let Some(repo) = self.snapshot.repos.iter().find(|x| x.id == r.repo_id).cloned() else {
+            self.notice = Some(format!("{} isn't tracked any more", r.repo));
+            return Action::None;
+        };
+        let req = am_core::worktrees::CreateRequest {
+            branch: r.head_ref_name.clone(),
+            mode: am_core::worktrees::CreateMode::TrackRemote,
+            tmp_space: true,
+            ..Default::default()
+        };
+        self.reviews = None;
+        let job = self.jobs.start_create(repo.clone(), req.clone());
+        self.rebuild_rows();
+        Action::Create(job, Box::new(repo), Box::new(req))
     }
 
     fn url_action(&mut self, pick: impl Fn(&WorktreeView, &Settings) -> Option<String>, missing: &str) -> Action {

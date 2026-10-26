@@ -23,6 +23,17 @@ let outage = false;
  * fixture's issue.
  */
 let linearByBranch: Record<string, unknown> = {};
+/**
+ * The review-request search (`gh api graphql` with a `search(` query): the
+ * `gh-review-requests.json` fixture when on, an empty result otherwise, so
+ * only the specs that turn it on see a `N to review` badge.
+ */
+let reviews = false;
+/**
+ * GitHub rate-limits every gh API call (repo view, GraphQL); `gh api
+ * rate_limit` still answers, with a reset ten minutes out.
+ */
+let rateLimited = false;
 
 interface GhFixture {
   number: number;
@@ -135,6 +146,49 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // `gh api rate_limit` doesn't count against the limit, so it always answers.
+    if (args[0] === "api" && args[1] === "rate_limit") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end(`${Math.floor(Date.now() / 1000) + 600}\n`);
+      return;
+    }
+
+    // Rate-limited: gh exits 1 with GitHub's message on stderr (the shim
+    // turns a 404 into exactly that).
+    if (rateLimited && (args[0] === "api" || (args[0] === "repo" && args[1] === "view"))) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("gh: API rate limit exceeded for user ID 1234. If you reach out to GitHub Support for help, please include the request ID.");
+      return;
+    }
+
+    // `gh repo view --json nameWithOwner`: every tracked repo is acme/<dir name>.
+    if (args[0] === "repo" && args[1] === "view") {
+      if (outage) {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("simulated outage");
+        return;
+      }
+      const name = (parsed.cwd ?? "work").split("/").filter(Boolean).pop() ?? "work";
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end(`acme/${name}\n`);
+      return;
+    }
+
+    // The review-request search: `gh api graphql -f q=<search> -f query=…search(…`.
+    if (args[0] === "api" && args[1] === "graphql" && argsStr.includes("search(query: $q")) {
+      if (outage) {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("simulated outage");
+        return;
+      }
+      const body = reviews
+        ? loadFixture("gh-review-requests.json")
+        : { data: { viewer: { login: "e2e-user" }, search: { nodes: [] } } };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+      return;
+    }
+
     // Handle the Rust app's batched PR lookup:
     //   gh api graphql -F owner={owner} -F name={repo} -f b0=<branch> -f b1=<branch> … -f query=…
     // Answers every aliased branch with the current gh fixture, reshaped into the
@@ -232,6 +286,12 @@ const server = http.createServer(async (req, res) => {
       if (config.linearByBranch !== undefined) {
         linearByBranch = config.linearByBranch ?? {};
       }
+      if (config.reviews !== undefined) {
+        reviews = Boolean(config.reviews);
+      }
+      if (config.rateLimited !== undefined) {
+        rateLimited = Boolean(config.rateLimited);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "configured" }));
     } catch (err) {
@@ -248,6 +308,8 @@ const server = http.createServer(async (req, res) => {
     ghVersionResponse = "gh version 2.62.0 (2024-12-05)";
     outage = false;
     linearByBranch = {};
+    reviews = false;
+    rateLimited = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "reset" }));
     return;

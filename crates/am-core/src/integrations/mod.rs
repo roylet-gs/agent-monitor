@@ -25,15 +25,17 @@ pub mod breaker;
 pub mod cache;
 pub mod github;
 pub mod linear;
+pub mod reviews;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
 use rusqlite::Connection;
 
-use crate::debug;
-use crate::model::{LinearInfo, PrInfo};
+use crate::{debug, info};
+use crate::model::{LinearInfo, PrInfo, ReviewFetchError, ReviewRequest};
+use crate::settings::Settings;
 use breaker::Breaker;
 use cache::{IntegrationCache, cache_key};
 use github::{GhRunner, SystemGh};
@@ -107,6 +109,14 @@ pub struct Integrations {
     cache: IntegrationCache,
     github_breaker: Breaker,
     linear_breaker: Breaker,
+    /// Last successfully fetched review requests (`None` = never fetched).
+    reviews: Option<Vec<ReviewRequest>>,
+    /// Why the last review search failed; cleared by a success.
+    review_error: Option<ReviewFetchError>,
+    reviews_hydrated: bool,
+    /// `owner/name` per repo path (only successes are kept: a failure may be
+    /// a missing `gh auth login` that the next refresh gets past).
+    slugs: HashMap<PathBuf, String>,
 }
 
 impl Default for Integrations {
@@ -130,6 +140,10 @@ impl Integrations {
             cache: IntegrationCache::new(),
             github_breaker: Breaker::new("github"),
             linear_breaker: Breaker::new("linear"),
+            reviews: None,
+            review_error: None,
+            reviews_hydrated: false,
+            slugs: HashMap::new(),
         }
     }
 
@@ -138,6 +152,160 @@ impl Integrations {
     /// methods also call it.
     pub fn hydrate(&mut self, conn: &Connection) {
         self.cache.hydrate(conn);
+        if !self.reviews_hydrated {
+            self.reviews_hydrated = true;
+            self.reviews = reviews::load_cached(conn);
+        }
+    }
+
+    /// The review requests from the last successful fetch (or the cache).
+    pub fn reviews(&self) -> Option<&[ReviewRequest]> {
+        self.reviews.as_deref()
+    }
+
+    /// Why the last review search failed (rate limit included), if it did.
+    pub fn review_error(&self) -> Option<&ReviewFetchError> {
+        self.review_error.as_ref()
+    }
+
+    /// Forget the review list (memory + disk), e.g. the feature was turned off.
+    pub fn clear_reviews(&mut self, conn: &Connection) {
+        self.reviews = None;
+        self.review_error = None;
+        self.reviews_hydrated = true;
+        let _ = cache::prune_rows(conn, cache::CacheKind::Review, &[]);
+    }
+
+    /// Refresh the PRs waiting on your review in `repos` (see [`reviews`]):
+    /// one `gh repo view` per repo the first time, then one search. Shares the
+    /// GitHub breaker; a failure keeps the previous list. Tickets come from
+    /// Linear by head branch when `settings` has a Linear key, and a failed
+    /// ticket lookup keeps each PR's previous ticket.
+    pub fn refresh_reviews(
+        &mut self,
+        conn: &Connection,
+        repos: &[reviews::ReviewRepo],
+        settings: &Settings,
+        force: bool,
+    ) -> RefreshOutcome {
+        self.hydrate(conn);
+        if repos.is_empty() {
+            // Nothing tracked: nothing waits (rather than "loading" forever).
+            self.review_error = None;
+            if self.reviews.is_none() {
+                self.reviews = Some(Vec::new());
+            }
+            return RefreshOutcome::Idle;
+        }
+        let now = Instant::now();
+        if !self.github_breaker.allow(now, force) {
+            // GitHub is backing off (maybe after the PR fetch hit a rate
+            // limit): say why instead of leaving the page on "Loading…".
+            if self.review_error.is_none()
+                && let Some(e) = self.github_breaker.last_error().map(str::to_string)
+            {
+                self.review_error = Some(reviews::fetch_error(self.gh.as_ref(), &repos[0].path, &e));
+            }
+            return RefreshOutcome::SkippedBackoff;
+        }
+        let mut repo_ids: HashMap<String, String> = HashMap::new();
+        let mut slugs: Vec<String> = Vec::new();
+        let mut cwd: Option<PathBuf> = None;
+        let mut slug_error: Option<String> = None;
+        for repo in repos {
+            if !self.slugs.contains_key(&repo.path) {
+                match reviews::repo_slug(self.gh.as_ref(), &repo.path) {
+                    Ok(slug) => {
+                        debug!("reviews", "{} is {slug} on GitHub", repo.path.display());
+                        self.slugs.insert(repo.path.clone(), slug);
+                    }
+                    Err((e, true)) => {
+                        finish(&mut self.github_breaker, now, Some(&e), None);
+                        self.review_error = Some(reviews::fetch_error(self.gh.as_ref(), &repo.path, &e));
+                        return RefreshOutcome::Ran { fetched: 0, failed: 1, aborted: true };
+                    }
+                    Err((e, false)) => {
+                        debug!("reviews", "{} has no GitHub repo ({e}); left out of review requests", repo.path.display());
+                        slug_error.get_or_insert(e);
+                    }
+                }
+            }
+            let Some(slug) = self.slugs.get(&repo.path) else { continue };
+            if !reviews::repo_selected(settings, &repo.name, slug) {
+                continue;
+            }
+            repo_ids.insert(slug.to_lowercase(), repo.repo_id.clone());
+            slugs.push(slug.clone());
+            cwd.get_or_insert_with(|| repo.path.clone());
+        }
+        let Some(cwd) = cwd else {
+            if let Some(e) = slug_error.filter(|_| self.slugs.is_empty()) {
+                // No repo resolved at all (not on GitHub, or gh isn't logged
+                // in): show gh's reason rather than an empty list.
+                self.review_error = Some(reviews::fetch_error(self.gh.as_ref(), &repos[0].path, &e));
+                return RefreshOutcome::Ran { fetched: 0, failed: 1, aborted: false };
+            }
+            // Every repo filtered out: an empty list is the true answer.
+            self.set_reviews(conn, Vec::new());
+            self.review_error = None;
+            return RefreshOutcome::Ran { fetched: 0, failed: 0, aborted: false };
+        };
+        let search = reviews::build_search(settings, &slugs);
+        debug!("reviews", "Searching review requests: {search}");
+        match reviews::fetch(self.gh.as_ref(), &cwd, &search, &repo_ids) {
+            Ok(mut list) => {
+                self.fill_tickets(settings, &mut list, force);
+                let n = list.len();
+                if self.reviews.as_ref().map(Vec::len) != Some(n) {
+                    info!("reviews", "{n} PR(s) waiting on your review");
+                }
+                self.set_reviews(conn, list);
+                self.review_error = None;
+                finish(&mut self.github_breaker, now, None, None);
+                RefreshOutcome::Ran { fetched: n, failed: 0, aborted: false }
+            }
+            Err((e, network)) => {
+                debug!("reviews", "Review request search failed: {e}");
+                finish(&mut self.github_breaker, now, network.then_some(e.as_str()), Some(&e));
+                let err = reviews::fetch_error(self.gh.as_ref(), &cwd, &e);
+                if err.rate_limited {
+                    info!("reviews", "GitHub rate limit hit; resets at {:?} (unix)", err.resets_at);
+                }
+                self.review_error = Some(err);
+                RefreshOutcome::Ran { fetched: 0, failed: 1, aborted: network }
+            }
+        }
+    }
+
+    fn set_reviews(&mut self, conn: &Connection, list: Vec<ReviewRequest>) {
+        reviews::store(conn, &list);
+        self.reviews = Some(list);
+    }
+
+    /// Linear tickets for the review list's head branches (workspace-wide
+    /// search, so another repo's branch works). Keeps the previous ticket of a
+    /// PR whose lookup failed.
+    fn fill_tickets(&mut self, settings: &Settings, list: &mut [ReviewRequest], force: bool) {
+        let previous: HashMap<&str, &LinearInfo> = self
+            .reviews
+            .iter()
+            .flatten()
+            .filter_map(|r| r.linear.as_ref().map(|l| (r.pr.url.as_str(), l)))
+            .collect();
+        let key = settings.linear_api_key.trim();
+        let ask = settings.linear_enabled && !key.is_empty() && self.linear_breaker.allow(Instant::now(), force);
+        let batch = ask.then(|| {
+            let heads = distinct(list.iter().map(|r| &r.head_ref_name));
+            linear::fetch_linear_batch(self.http.as_ref(), &self.linear_url, key, &heads)
+        });
+        for r in list.iter_mut() {
+            let fetched = batch.as_ref().and_then(|b| b.results.iter().find(|(h, _)| *h == r.head_ref_name));
+            r.linear = match fetched {
+                Some((_, FetchResult::Ok(t))) => t.clone(),
+                _ if settings.linear_enabled => previous.get(r.pr.url.as_str()).map(|l| (*l).clone()),
+                _ => None,
+            };
+        }
     }
 
     /// Refresh PR info for every branch of every repo: one `gh api graphql`
@@ -393,6 +561,118 @@ mod tests {
         assert_eq!(v["state"]["type"], "started");
         assert_eq!(v["priorityLabel"], "High");
         assert_eq!(v["prAttachment"]["metadata"]["number"], 42);
+    }
+
+    fn review_body(heads: &[&str]) -> String {
+        let nodes: Vec<Value> = heads
+            .iter()
+            .enumerate()
+            .map(|(i, h)| reviews::tests::search_node(i as u64 + 1, "acme/web", h, vec![json!({"login": "me"})]))
+            .collect();
+        json!({"data": {"search": {"nodes": nodes}}}).to_string()
+    }
+
+    #[test]
+    fn reviews_search_once_keep_the_list_offline_and_fill_tickets() {
+        let mut e = env();
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a")];
+        let s = Settings::parse(r#"{"linearEnabled":true,"linearApiKey":"key"}"#);
+        e.gh.push(GhOutput::success("acme/web\n"));
+        e.gh.push(GhOutput::success(review_body(&["feature/x", "feature/y"])));
+        e.http.push(ok(aliased(vec![issue("ENG-1"), Value::Null])));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, false);
+        let list = e.ints.reviews().unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].linear.as_ref().unwrap().identifier, "ENG-1");
+        assert!(list[1].linear.is_none());
+        let calls = e.gh.calls.lock().unwrap().clone();
+        assert!(calls[1][3].contains("repo:acme/web"), "{:?}", calls[1]);
+
+        // Offline: the slug is remembered, the list and its tickets are kept.
+        e.gh.push(GhOutput::failure("error connecting to api.github.com"));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, false);
+        assert_eq!(e.gh.call_count(), 3);
+        assert_eq!(e.ints.reviews().unwrap().len(), 2);
+        assert!(e.ints.health().github_failing);
+
+        // A fresh process hydrates the cached list.
+        let mut fresh = Integrations::with_transports(Box::new(FakeGh::default()), Box::new(FakeHttp::default()), "x".into());
+        fresh.hydrate(&e.conn);
+        assert_eq!(fresh.reviews().unwrap().len(), 2);
+
+        // Linear down: the previous ticket stays.
+        e.gh.push(GhOutput::success(review_body(&["feature/x"])));
+        e.http.push(offline());
+        e.ints.refresh_reviews(&e.conn, &repos, &s, true);
+        assert_eq!(e.ints.reviews().unwrap()[0].linear.as_ref().unwrap().identifier, "ENG-1");
+    }
+
+    #[test]
+    fn a_rate_limited_review_search_reports_why_and_keeps_the_list() {
+        let mut e = env();
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a")];
+        let s = Settings::default();
+        let limited = r#"{"errors":[{"type":"RATE_LIMITED","message":"API rate limit exceeded for user ID 1."}]}"#;
+        e.gh.push(GhOutput { ok: false, stdout: limited.into(), stderr: String::new() }); // repo view
+        e.gh.push(GhOutput::success("1793016000"));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, false);
+        let err = e.ints.review_error().unwrap().clone();
+        assert!(err.rate_limited && err.resets_at == Some(1_793_016_000));
+        assert!(e.ints.reviews().is_none(), "never fetched: the page shows the error, not a list");
+
+        // Backing off: no new calls, the error stays.
+        e.ints.refresh_reviews(&e.conn, &repos, &s, false);
+        assert_eq!(e.gh.call_count(), 2);
+
+        // `r` gets through; a success clears it.
+        e.gh.push(GhOutput::success("acme/web"));
+        e.gh.push(GhOutput::success(review_body(&["feature/x"])));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, true);
+        assert!(e.ints.review_error().is_none());
+        assert_eq!(e.ints.reviews().unwrap().len(), 1);
+
+        // Limited again with a list: the list stays beside the error.
+        e.gh.push(GhOutput { ok: false, stdout: limited.into(), stderr: String::new() });
+        e.gh.push(GhOutput::failure("rate_limit lookup failed"));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, true);
+        assert_eq!(e.ints.reviews().unwrap().len(), 1);
+        assert_eq!(e.ints.review_error().unwrap().resets_at, None);
+    }
+
+    #[test]
+    fn a_breaker_opened_by_the_pr_fetch_explains_the_empty_review_page() {
+        let mut e = env();
+        e.gh.push(GhOutput::failure("gh: API rate limit exceeded for user ID 1."));
+        e.ints.refresh_github(&e.conn, &[RepoBranches::new("r1", "/a", vec!["main".into()])], false);
+        e.gh.push(GhOutput::success("1793016000"));
+        e.ints.refresh_reviews(&e.conn, &[reviews::ReviewRepo::new("r1", "web", "/a")], &Settings::default(), false);
+        assert!(e.ints.review_error().unwrap().rate_limited);
+    }
+
+    #[test]
+    fn reviews_skip_excluded_and_non_github_repos() {
+        let mut e = env();
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a"), reviews::ReviewRepo::new("r2", "local", "/b")];
+        let s = Settings::parse(r#"{"reviewExcludeRepos":"web"}"#);
+        e.gh.push(GhOutput::success("acme/web"));
+        e.gh.push(GhOutput::failure("none of the git remotes configured for this repository point to a known GitHub host"));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, false);
+        assert_eq!(e.gh.call_count(), 2, "no search when nothing is left");
+        assert_eq!(e.ints.reviews(), Some(&[][..]));
+        assert!(e.ints.review_error().is_none());
+
+        // Nothing resolves (gh logged out): say so, and ask again next time.
+        let mut e = env();
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a")];
+        e.gh.push(GhOutput::failure("To get started with GitHub CLI, please run:  gh auth login"));
+        e.ints.refresh_reviews(&e.conn, &repos, &Settings::default(), false);
+        assert!(e.ints.review_error().unwrap().message.contains("gh auth login"));
+        assert!(e.ints.reviews().is_none());
+        e.gh.push(GhOutput::success("acme/web"));
+        e.gh.push(GhOutput::success(review_body(&[])));
+        e.ints.refresh_reviews(&e.conn, &repos, &Settings::default(), false);
+        assert!(e.ints.review_error().is_none());
+        assert_eq!(e.ints.reviews(), Some(&[][..]));
     }
 
     #[test]

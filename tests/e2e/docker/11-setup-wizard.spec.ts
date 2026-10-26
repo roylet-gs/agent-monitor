@@ -55,7 +55,14 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
   await tui.waitForText("GitHub PR & CI status (via gh)");
   await tui.sendKey("Enter");
 
-  // 5. Context window: 1M is preselected; keep it.
+  // 5. Review requests (GitHub is on): defaults are me + my teams, no drafts.
+  await tui.waitForText("Which pull requests are waiting on your review?");
+  await tui.waitForText("[x] Show PRs waiting for my review");
+  await tui.waitForText("● Me and my teams");
+  await tui.screenshot("setup-reviews");
+  await tui.sendKey("Enter");
+
+  // 6. Context window: 1M is preselected; keep it.
   await tui.waitForText("How many tokens of context should the bar measure against?");
   await tui.waitForText("● 1M (default)");
   await tui.screenshot("setup-context");

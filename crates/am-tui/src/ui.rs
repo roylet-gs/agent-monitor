@@ -44,9 +44,15 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
         draw_log(f, theme, areas.log, log_lines);
     }
 
-    draw_worktrees(f, app, theme, areas.list, now, &mut hits);
-    if let Some(jobs) = areas.jobs {
-        draw_jobs(f, app, theme, jobs, now, &mut hits);
+    if app.reviews.is_some() {
+        // The review page takes the whole body, jobs pane included.
+        let body = areas.jobs.map_or(areas.list, |j| areas.list.union(j));
+        draw_reviews(f, app, theme, body, now, &mut hits);
+    } else {
+        draw_worktrees(f, app, theme, areas.list, now, &mut hits);
+        if let Some(jobs) = areas.jobs {
+            draw_jobs(f, app, theme, jobs, now, &mut hits);
+        }
     }
     if app.show_help {
         hits.clear();
@@ -112,10 +118,12 @@ pub enum List {
     Browser,
     SetupIde,
     SetupIntegrations,
+    SetupReviews,
     SetupContext,
     NewForm,
     Suggest,
     Jobs,
+    Reviews,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -830,13 +838,13 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             };
             field(&mut lines, "Branch", form.branch.clone(), FormField::Branch, note);
             if form.tmp_space {
-                lines.push(Line::styled(" Checks out an existing branch to look at, in the Tmp space group", theme.faint()));
+                lines.push(Line::styled(" Checks out an existing branch to look at, in the Reviewing group", theme.faint()));
                 if let Some(e) = &form.error {
                     lines.push(Line::raw(""));
                     lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
                 }
                 let hint = if form.repos.len() > 1 { "tab next  ⏎ pull  esc cancel" } else { "⏎ pull  esc cancel" };
-                ("Pull into tmp space".into(), theme.border_focus, hint, lines)
+                ("Pull into Reviewing".into(), theme.border_focus, hint, lines)
             } else {
             field(&mut lines, "Name", if form.name.is_empty() && form.field != FormField::Name { "(optional)".into() } else { form.name.clone() }, FormField::Name, None);
             if form.remote_exists() {
@@ -966,9 +974,10 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
     use crate::setup::{CONTEXT_CHOICES, CONTEXT_CUSTOM, IDE_CUSTOM, IDES, Step};
     let steps = [
         (Step::Editor, "Editor"),
-        (Step::Hooks, "Agent hooks"),
-        (Step::Repos, "Repositories"),
+        (Step::Hooks, "Hooks"),
+        (Step::Repos, "Repos"),
         (Step::Integrations, "Integrations"),
+        (Step::Reviews, "Reviews"),
         (Step::Context, "Context"),
     ];
     let mut crumbs = vec![Span::raw(" ")];
@@ -1073,6 +1082,33 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             ]));
             hint = "tab field  space toggle  ⏎ next  esc back";
         }
+        Step::Reviews => {
+            let r = &s.review;
+            lines.push(Line::raw("Which pull requests are waiting on your review? (v opens them;"));
+            lines.push(Line::raw("the dashboard border shows how many)"));
+            lines.push(Line::raw(""));
+            let cursor = |i: usize| Span::styled(if r.field == i { "▌" } else { " " }, theme.bold(theme.border_focus));
+            let check = |on: bool| if on { "[x]" } else { "[ ]" };
+            marks.push((lines.len(), Target::Item(List::SetupReviews, 0), false));
+            lines.push(Line::from(vec![cursor(0), Span::raw(format!(" {} Show PRs waiting for my review", check(r.enabled)))]));
+            let scopes = ["Me and my teams", "Only me, by name", "Only my teams"];
+            for (k, label) in scopes.iter().enumerate() {
+                let sel = r.scope == k;
+                marks.push((lines.len(), Target::Item(List::SetupReviews, k + 1), false));
+                lines.push(Line::from(vec![
+                    cursor(k + 1),
+                    Span::styled(if sel { "     ● " } else { "     ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
+                    Span::styled(*label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
+                ]));
+            }
+            marks.push((lines.len(), Target::Item(List::SetupReviews, 4), false));
+            lines.push(Line::from(vec![cursor(4), Span::raw(format!(" {} Hide drafts", check(r.hide_drafts)))]));
+            marks.push((lines.len(), Target::Item(List::SetupReviews, 5), false));
+            lines.push(Line::from(vec![cursor(5), Span::raw(format!(" {} Hide PRs I've already reviewed", check(r.hide_reviewed)))]));
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Repo filters and extra search terms: Settings → Review requests", theme.faint()));
+            hint = "↑↓ move  space toggle  ⏎ next  esc back";
+        }
         Step::Context => {
             lines.push(Line::raw("How many tokens of context should the bar measure against?"));
             lines.push(Line::styled("A session past it doubles the scale until it fits.", theme.faint()));
@@ -1101,7 +1137,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             hint = "↑↓ choose  ⏎ finish  esc back";
         }
     }
-    // 82 columns fits the five breadcrumbs on one line.
+    // 82 columns fits the six breadcrumbs on one line.
     let rect = modal_rect(area, 82, lines.len() as u16 + 4);
     clear(f, theme, rect);
     bottom_hint_hits(hits, &format!(" {hint} "), rect);
@@ -1184,9 +1220,18 @@ fn shown_update(app: &App) -> Option<&am_core::update_check::Update> {
 /// when it would run into the `─Worktrees` title.
 fn update_label(app: &App, width: u16) -> Option<String> {
     let latest = &shown_update(app)?.latest;
-    // Two corners, `─Worktrees `, and one border cell between the titles.
-    let room = (width as usize).saturating_sub(2 + "─Worktrees ".width() + 1);
+    // Two corners, `─Worktrees `, the review badge beside it, and one border
+    // cell between the titles.
+    let badge = review_badge(app, width).map_or(0, |b| b.width());
+    let room = (width as usize).saturating_sub(2 + "─Worktrees ".width() + badge + 1);
     [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room)
+}
+
+/// Top-right ` 3 to review ` in the `─Worktrees` border's corner (`⚑3` on
+/// narrow panes); none while nothing waits or the feature is off.
+fn review_badge(app: &App, width: u16) -> Option<String> {
+    let n = app.review_count().filter(|&n| n > 0)?;
+    Some(if width >= 60 { format!(" {n} to review ") } else { format!(" ⚑{n} ") })
 }
 
 /// Bottom-right ` today 4.1M ` (` today (visible) 4.1M ` for the visible
@@ -1235,6 +1280,21 @@ struct Columns {
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
     let focused = !app.jobs.focused;
     let mut block = pane_block(theme, title("Worktrees", theme), focused);
+    // Top right: the update notice, then the review badge in the corner.
+    let mut corner: Vec<Span> = Vec::new();
+    if let Some(label) = update_label(app, area.width) {
+        corner.push(Span::styled(label, theme.bold(theme.green)));
+    }
+    if let Some(badge) = review_badge(app, area.width) {
+        // Clickable: opens the review page.
+        let w = badge.width() as u16;
+        let rect = Rect::new((area.x + area.width).saturating_sub(1 + w), area.y, w, 1).intersection(area);
+        hits.push(Hit { rect, target: Target::Command(Command::ReviewRequests), selected: false });
+        corner.push(Span::styled(badge, theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
+    }
+    if !corner.is_empty() {
+        block = block.title(Line::from(corner).alignment(Alignment::Right));
+    }
     if !app.flat.is_empty() {
         block = block.title_bottom(
             Line::styled(format!(" {} of {} ", app.selected + 1, app.flat.len()), theme.faint()).alignment(Alignment::Right),
@@ -1242,9 +1302,6 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     }
     if let Some(label) = tokens_label(app, area.width) {
         block = block.title_bottom(Line::styled(label, theme.faint()).alignment(Alignment::Right));
-    }
-    if let Some(label) = update_label(app, area.width) {
-        block = block.title(Line::styled(label, theme.bold(theme.green)).alignment(Alignment::Right));
     }
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1259,7 +1316,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     let pr_words = inner.width >= 100;
     let cols = Columns {
         ticket: if s.show_linear_ticket { app.flat.iter().map(|v| ticket_text(v).width()).max().unwrap_or(0) } else { 0 },
-        pr: if s.show_pr_status { app.flat.iter().map(|v| pr_text(v, pr_words).width()).max().unwrap_or(0) } else { 0 },
+        pr: if s.show_pr_status { app.flat.iter().map(|v| pr_text(v.pr.as_ref(), pr_words).width()).max().unwrap_or(0) } else { 0 },
         pr_words,
         git: if s.show_git_ahead_behind { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
         age: if s.show_last_commit { 3 } else { 0 },
@@ -1314,6 +1371,187 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+// ---------------------------------------------------------------- reviews
+
+/// The review-requests page: one row per PR waiting on your review, grouped
+/// by repo when there are several.
+fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
+    use crate::reviews_ui::{ReviewRow, order, rows};
+    let list = app.snapshot.reviews.as_deref().unwrap_or(&[]);
+    let sort = app.settings.review_sort();
+    let ordered = order(list, &app.snapshot.repos, sort);
+    let cursor = app.reviews.as_ref().map_or(0, |p| p.cursor);
+    let mut block = pane_block(theme, title("Review requests", theme), true);
+    if !ordered.is_empty() {
+        block = block.title_bottom(
+            Line::styled(format!(" {} of {} ", cursor + 1, ordered.len()), theme.faint()).alignment(Alignment::Right),
+        );
+    }
+    let error = app.snapshot.review_error.as_ref();
+    // A failed refresh beside a list we still have (from before, or the cache).
+    if let Some(e) = error.filter(|_| !ordered.is_empty()) {
+        let what = if e.rate_limited { "rate-limited" } else { "couldn't refresh" };
+        let label = match reset_text(e, now) {
+            Some(r) => format!(" ⚠ GitHub {what} ({r}) — showing cached "),
+            None => format!(" ⚠ GitHub {what} — showing cached "),
+        };
+        block = block.title(Line::styled(label, theme.bold(theme.yellow)).alignment(Alignment::Right));
+    }
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    // Nothing to show and the last search failed: say why, not "Loading…"
+    // (nor "Nothing waiting", which a stale empty list would claim).
+    if let Some(e) = error.filter(|_| ordered.is_empty()) {
+        let headline = if e.rate_limited {
+            match reset_text(e, now) {
+                Some(r) => format!("⚠ GitHub has rate-limited you — {r}"),
+                None => "⚠ GitHub has rate-limited you".to_string(),
+            }
+        } else {
+            "⚠ Couldn't load review requests".to_string()
+        };
+        let width = inner.width.saturating_sub(4) as usize;
+        let mut lines = vec![Line::styled(headline, theme.bold(theme.yellow)), Line::raw("")];
+        lines.extend(wrap_words(&e.message, width).into_iter().map(|l| Line::styled(l, theme.faint())));
+        lines.push(Line::raw(""));
+        lines.push(Line::styled("r tries again now · am retries on its own as GitHub allows", theme.faint()));
+        let h = (lines.len() as u16).min(inner.height);
+        let rect = Rect { y: inner.y + inner.height.saturating_sub(h) / 2, height: h, ..inner };
+        f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), rect);
+        return;
+    }
+    if ordered.is_empty() {
+        let msg = match &app.snapshot.reviews {
+            None if !app.settings.review_requests_on() => "Review requests are off — turn them on in Settings (s)",
+            None => "Loading…",
+            Some(_) => "Nothing waiting on your review",
+        };
+        f.render_widget(Paragraph::new(Line::styled(msg, theme.faint())).alignment(Alignment::Center), centered_line(inner));
+        return;
+    }
+
+    let words = inner.width >= 100;
+    let ticket_w = ordered.iter().map(|&i| list[i].linear.as_ref().map_or(0, |l| l.identifier.width())).max().unwrap_or(0);
+    let pr_w = ordered.iter().map(|&i| pr_text(Some(&list[i].pr), words).width()).max().unwrap_or(0);
+    let who_w = ordered.iter().map(|&i| reviewers_text(&list[i]).width()).max().unwrap_or(0).min(if words { 24 } else { 12 });
+
+    let rows = rows(list, &ordered, &app.snapshot.repos, sort);
+    // Outside the repo order, name each row's repo when there are several.
+    let tag_repos = sort != am_core::settings::ReviewSort::Repo
+        && ordered.windows(2).any(|w| list[w[0]].repo_id != list[w[1]].repo_id);
+    let height = inner.height as usize;
+    let sel_row = rows.iter().position(|r| *r == ReviewRow::Pr(cursor)).unwrap_or(0);
+    let mut start = sel_row.saturating_sub(height.saturating_sub(1));
+    if start > 0 && sel_row - start < height.saturating_sub(1) {
+        start -= 1;
+    }
+    let mut lines = Vec::new();
+    for (n, row) in rows.iter().skip(start).take(height).enumerate() {
+        lines.push(match row {
+            ReviewRow::Header(name) => {
+                let rule = (inner.width as usize).saturating_sub(name.width() + 1);
+                Line::from(vec![
+                    Span::styled(format!("{name} "), theme.bold(theme.accent)),
+                    Span::styled("─".repeat(rule), theme.fg(theme.border)),
+                ])
+            }
+            ReviewRow::Pr(pos) => {
+                let selected = *pos == cursor;
+                push_row(hits, inner, n, Target::Item(List::Reviews, *pos), selected);
+                let r = &list[ordered[*pos]];
+                let repo = tag_repos
+                    .then(|| app.snapshot.repos.iter().find(|x| x.id == r.repo_id).map_or(r.repo.as_str(), |x| x.name.as_str()));
+                review_line(theme, r, repo, selected, (who_w, ticket_w, pr_w), words, inner.width, now)
+            }
+        });
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// `resets in 12m` (or `resets now`) for a rate limit with a known reset time.
+fn reset_text(e: &am_core::model::ReviewFetchError, now: i64) -> Option<String> {
+    let at = e.resets_at?;
+    Some(if at > now { format!("resets in {}", timefmt::short_age(at - now)) } else { "resets now".into() })
+}
+
+/// Who the review is pending from: `you`, then teams as `@team`.
+fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
+    r.requested
+        .iter()
+        .map(|w| match w.split_once('/') {
+            Some((_, team)) => format!("@{team}"),
+            None => w.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn review_line<'a>(
+    theme: &Theme,
+    r: &'a am_core::model::ReviewRequest,
+    repo: Option<&str>,
+    selected: bool,
+    (who_w, ticket_w, pr_w): (usize, usize, usize),
+    words: bool,
+    width: u16,
+    now: i64,
+) -> Line<'a> {
+    let mut right: Vec<Span> = Vec::new();
+    if who_w > 0 {
+        right.push(Span::raw(" "));
+        let style = if crate::reviews_ui::asks_you(r) { theme.bold(theme.magenta) } else { theme.fg(theme.magenta) };
+        right.push(Span::styled(pad(&truncate(&reviewers_text(r), who_w), who_w), style));
+    }
+    if ticket_w > 0 {
+        right.push(Span::raw(" "));
+        let t = r.linear.as_ref().map(|l| l.identifier.clone()).unwrap_or_default();
+        right.push(Span::styled(pad(&t, ticket_w), theme.fg(theme.blue)));
+    }
+    right.push(Span::raw(" "));
+    right.extend(pr_spans(Some(&r.pr), theme, pr_w, words));
+    let age = timefmt::parse_iso(&r.updated_at).map(|t| timefmt::short_age(now - t)).unwrap_or_default();
+    right.push(Span::styled(format!(" {age:>3} "), theme.faint()));
+    let right_w: usize = right.iter().map(|s| s.content.width()).sum();
+
+    let mut tags: Vec<(String, ratatui::style::Style)> = Vec::new();
+    if let Some(name) = repo {
+        tags.push((format!(" ({name})"), theme.faint()));
+    }
+    if r.worktree_id.is_some() {
+        tags.push((" ✓ pulled".into(), theme.fg(theme.teal)));
+    }
+    if r.is_cross_repository {
+        tags.push((" fork".into(), theme.faint()));
+    }
+    let author = if r.author.is_empty() { String::new() } else { format!("  @{}", r.author) };
+    let tags_w: usize = tags.iter().map(|(t, _)| t.width()).sum();
+    let room = (width as usize).saturating_sub(1 + right_w + tags_w);
+    let title_w = r.pr.title.width().min(room);
+    let title = truncate(&r.pr.title, title_w);
+    let author = truncate(&author, room.saturating_sub(title.width()));
+    let fill = room.saturating_sub(title.width() + author.width());
+
+    let mut spans = vec![
+        Span::styled(if selected { "▌" } else { " " }, theme.bold(theme.border_focus)),
+        Span::styled(title, if selected { theme.bold(theme.text) } else { theme.fg(theme.text) }),
+        Span::styled(author, theme.faint()),
+    ];
+    spans.extend(tags.into_iter().map(|(t, st)| Span::styled(t, st)));
+    spans.push(Span::raw(" ".repeat(fill)));
+    spans.extend(right);
+    let line = Line::from(spans);
+    if !selected {
+        return line;
+    }
+    if theme.name == "ansi" {
+        // Reverse video: drop span colours so the row stays legible.
+        let plain: Vec<Span> = line.spans.into_iter().map(|s| Span::raw(s.content)).collect();
+        return Line::from(plain).style(theme.selected().add_modifier(Modifier::BOLD));
+    }
+    line.style(theme.selected())
+}
+
 /// First visible row of the worktree list. Keeps the selected row in view;
 /// headers scroll with their rows.
 fn list_start(app: &App, height: usize) -> usize {
@@ -1357,7 +1595,7 @@ fn worktree_line<'a>(
     }
     if cols.pr > 0 {
         right.push(Span::raw(" "));
-        right.extend(pr_spans(v, theme, cols.pr, cols.pr_words));
+        right.extend(pr_spans(v.pr.as_ref(), theme, cols.pr, cols.pr_words));
     }
     if cols.git > 0 {
         right.push(Span::raw(" "));
@@ -1838,8 +2076,8 @@ fn ticket_text(v: &WorktreeView) -> String {
 
 type ColorPick = fn(&Theme) -> ratatui::style::Color;
 
-fn pr_text(v: &WorktreeView, words: bool) -> String {
-    let Some(pr) = &v.pr else { return String::new() };
+fn pr_text(pr: Option<&am_core::model::PrInfo>, words: bool) -> String {
+    let Some(pr) = pr else { return String::new() };
     let merged = if pr.state == "MERGED" { "⇡" } else { "" };
     let review = review_state(pr).map(|r| format!(" {}", if words { r.word() } else { r.glyph() })).unwrap_or_default();
     format!("#{}{}{merged}{review}", pr.number, checks_glyph(pr.checks_status))
@@ -1947,9 +2185,9 @@ fn pr_color(pr: &am_core::model::PrInfo) -> ColorPick {
 /// PR cell: number in the state colour, checks glyph always in its own
 /// colour (green ✓ / red ✗ / yellow ◌) so CI is readable on drafts too,
 /// then the review state (`approved` / `changes` / `review`…).
-fn pr_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize, words: bool) -> Vec<Span<'a>> {
-    let Some(pr) = &v.pr else { return vec![Span::raw(" ".repeat(width))] };
-    let text = pr_text(v, words);
+fn pr_spans<'a>(pr: Option<&am_core::model::PrInfo>, theme: &Theme, width: usize, words: bool) -> Vec<Span<'a>> {
+    let Some(pr) = pr else { return vec![Span::raw(" ".repeat(width))] };
+    let text = pr_text(Some(pr), words);
     let num = format!("#{}", pr.number);
     let glyph = checks_glyph(pr.checks_status);
     let merged = if pr.state == "MERGED" { "⇡" } else { "" };
@@ -2026,6 +2264,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::NewWorktree), 1),
     (Some(Command::Delete), 1),
     (Some(Command::PullToTmpSpace), 3),
+    (Some(Command::ReviewRequests), 1),
     (Some(Command::AddRepo), 3),
     (None, 0),
     (Some(Command::ToggleLog), 3),
@@ -2068,7 +2307,19 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
     // (key, label, click, priority); an empty key is a separator.
     let mut keys: Vec<(String, &'static str, Option<BarHit>, u8)> = Vec::new();
     let raw = |k: &str, label, hit: Option<Key>, prio| (k.to_string(), label, hit.map(BarHit::Key), prio);
-    if app.jobs.focused {
+    if app.reviews.is_some() {
+        // The review page takes the dashboard's own keys for these.
+        let cmd = |c: Command, label, prio| {
+            app.keymap.key(c).map(|k| (crate::keymap::display(k), label, Some(BarHit::Key(k)), prio))
+        };
+        keys.push(raw("⏎", "open PR", Some(Key::Enter), 0));
+        keys.extend(cmd(Command::OpenLinear, "ticket", 0));
+        keys.extend(cmd(Command::PullToTmpSpace, "pull into Reviewing", 0));
+        keys.push(raw("", "", None, 0));
+        keys.extend(cmd(Command::Refresh, "refresh", 1));
+        keys.extend(cmd(Command::Help, "help", 2));
+        keys.push(raw("esc", "back", Some(Key::Esc), 0));
+    } else if app.jobs.focused {
         // While jobs are showing, Tab moves between the list and the pane.
         keys.extend([
             raw("⇥", "back to list", Some(Key::Tab), 0),
@@ -2108,6 +2359,7 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             }
             let available = match hit {
                 Some(BarHit::Command(c)) => app.key_available(*c),
+                Some(BarHit::Key(k)) if app.reviews.is_some() => app.review_key_available(*k),
                 _ => true,
             };
             items.push(KeyItem::Key { key: k.clone(), label, hit: *hit, available });
@@ -2128,15 +2380,17 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
 /// Right side of the key bar: a transient notice, else the offline warning.
 fn keybar_status(app: &App) -> Option<(String, bool)> {
     let h = &app.snapshot.health;
-    let offline = match (h.github_failing, h.linear_failing) {
-        (true, true) => Some("GitHub + Linear"),
-        (true, false) => Some("GitHub"),
-        (false, true) => Some("Linear"),
+    let offline = match (h.github_failing, h.linear_failing, h.github_rate_limited) {
+        (true, true, true) => Some("GitHub rate-limited, Linear offline"),
+        (true, false, true) => Some("GitHub rate-limited"),
+        (true, true, false) => Some("GitHub + Linear offline"),
+        (true, false, false) => Some("GitHub offline"),
+        (false, true, _) => Some("Linear offline"),
         _ => None,
     };
     match (&app.notice, offline) {
         (Some(n), _) => Some((format!("{n} "), false)),
-        (None, Some(src)) => Some((format!("⚠ {src} offline — cached "), true)),
+        (None, Some(what)) => Some((format!("⚠ {what} — cached "), true)),
         _ => None,
     }
 }
@@ -2195,7 +2449,8 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog, C::ViewLogs], "", "toggle log pane / open the log file (or folder)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
-        (&[C::PullToTmpSpace], "", "pull an existing branch into the tmp space"),
+        (&[C::ReviewRequests], "", "PRs waiting on your review (the N to review badge)"),
+        (&[C::PullToTmpSpace], "", "pull an existing branch into Reviewing"),
         (&[C::AddRepo], "", "add repository"),
         (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
         (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
@@ -2427,6 +2682,8 @@ mod tests {
             health: Default::default(),
             stack: Default::default(),
             today_tokens: None,
+            reviews: None,
+            review_error: None,
         };
         let settings = Settings { worktree_sort: vec![], ..Settings::default() };
         let mut app = App::new(settings);
@@ -2812,7 +3069,7 @@ mod tests {
     #[test]
     fn offline_hint_and_empty_state() {
         let mut app = App::new(Settings::default());
-        app.apply(Snapshot { health: crate::app::Health { github_failing: true, linear_failing: false }, ..Default::default() });
+        app.apply(Snapshot { health: crate::app::Health { github_failing: true, ..Default::default() }, ..Default::default() });
         insta::assert_snapshot!(render(&app, 100, 8));
     }
 
@@ -2865,6 +3122,237 @@ mod tests {
     fn target_at(app: &App, w: u16, h: u16, (x, y): (u16, u16)) -> Option<Target> {
         render(app, w, h);
         hit_at(&app.hits.borrow(), x, y).map(|h| h.target)
+    }
+
+    /// `fixture()` with three PRs waiting on review: one already pulled
+    /// (head `feature/refactor`, worktree w1), one from a fork, one in the
+    /// second repo with a Linear ticket and a team request.
+    fn with_reviews() -> App {
+        use crate::reviews_ui::tests::review;
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.repos = vec![
+            Repository { id: "r1".into(), path: "/r1".into(), name: "agent-monitor".into() },
+            Repository { id: "r2".into(), path: "/r2".into(), name: "gridsight".into() },
+        ];
+        let mut pulled = review("r1", 51, "2026-10-26T10:00:00Z");
+        pulled.pr.title = "Batch the PR queries".into();
+        pulled.head_ref_name = "feature/refactor".into();
+        pulled.worktree_id = Some("w1".into());
+        let mut fork = review("r1", 48, "2026-10-25T09:00:00Z");
+        fork.pr.title = "Typo in README".into();
+        fork.is_cross_repository = true;
+        fork.author = "outsider".into();
+        fork.requested = vec!["acme/docs".into()];
+        let mut ticket = review("r2", 902, "2026-10-26T11:00:00Z");
+        ticket.pr.title = "Feeder load forecast v2".into();
+        ticket.pr.checks_status = ChecksStatus::Failing;
+        ticket.requested = vec!["you".into(), "gridsight/platform".into()];
+        ticket.linear = Some(LinearInfo {
+            identifier: "ENG-77".into(),
+            title: "Forecast".into(),
+            url: "https://linear.app/t/issue/ENG-77".into(),
+            state: LinearState { name: "In Review".into(), color: String::new(), kind: "started".into() },
+            priority_label: String::new(),
+            assignee: None,
+            project: None,
+            pr_attachment: None,
+        });
+        snap.reviews = Some(vec![fork, ticket, pulled]);
+        app.apply(snap);
+        app
+    }
+
+    /// [`with_reviews`] with the page in repo order.
+    fn by_repo() -> App {
+        let mut app = with_reviews();
+        app.settings.review_sort = "repo".into();
+        app
+    }
+
+    #[test]
+    fn review_badge_on_the_worktrees_border_opens_the_page() {
+        let mut app = with_reviews();
+        let screen = render(&app, 120, 10);
+        let top = screen.lines().next().unwrap();
+        assert!(top.starts_with("╭─Worktrees ─") && top.ends_with(" 3 to review ╮"), "{screen}");
+        // Beside an update notice: the notice, then the badge in the corner.
+        let mut both = with_reviews();
+        both.update_available = Some(update("2.2.0"));
+        let top = render(&both, 120, 6).lines().next().unwrap().to_string();
+        assert!(top.ends_with(" ⬆ v2.2.0 available  3 to review ╮"), "{top}");
+        let at = find(&both, 120, 6, "3 to review");
+        assert_eq!(target_at(&both, 120, 6, at), Some(Target::Command(Command::ReviewRequests)));
+        insta::assert_snapshot!(screen);
+        let at = find(&app, 120, 10, "3 to review");
+        assert_eq!(target_at(&app, 120, 10, at), Some(Target::Command(Command::ReviewRequests)));
+        assert_eq!(click(&mut app, 120, 10, at, false), crate::app::Action::RefreshReviews);
+        assert!(app.reviews.is_some());
+        // Narrow: a short badge; none at all when nothing waits.
+        let app = with_reviews();
+        assert!(render(&app, 50, 6).contains(" ⚑3 "));
+        let mut empty = with_reviews();
+        let mut snap = empty.snapshot.clone();
+        snap.reviews = Some(vec![]);
+        empty.apply(snap);
+        assert!(!render(&empty, 120, 6).contains("to review"));
+    }
+
+    #[test]
+    fn review_page_groups_prs_by_repo() {
+        let mut app = by_repo();
+        assert_eq!(app.on_key(Key::Char('v')), crate::app::Action::RefreshReviews);
+        insta::assert_snapshot!("review_page_wide", render(&app, 120, 10));
+        insta::assert_snapshot!("review_page_narrow", render(&app, 80, 10));
+    }
+
+    #[test]
+    fn review_page_keys_open_pull_and_go_back() {
+        use crate::app::Action;
+        let mut app = by_repo();
+        app.on_key(Key::Char('v'));
+        // Page order: agent-monitor newest first (#51 pulled, #48 fork), then gridsight #902.
+        assert_eq!(app.selected_review().unwrap().pr.number, 51);
+        assert_eq!(app.on_key(Key::Enter), Action::OpenUrl("https://github.com/acme/r1/pull/51".into()));
+        assert_eq!(app.on_key(Key::Char('l')), Action::None);
+        assert_eq!(app.notice.as_deref(), Some("No Linear ticket for this PR"));
+        app.on_key(Key::Char('j'));
+        assert_eq!(app.on_key(Key::Char('t')), Action::None, "a fork can't be pulled");
+        assert!(app.notice.as_deref().unwrap().contains("fork"));
+        assert!(!app.review_key_available(Key::Char('t')));
+        app.on_key(Key::Down);
+        assert_eq!(app.on_key(Key::Char('l')), Action::OpenUrl("https://linear.app/t/issue/ENG-77".into()));
+        assert_eq!(app.on_key(Key::Char('r')), Action::RefreshReviews);
+        let Action::Create(_, repo, req) = app.on_key(Key::Char('t')) else { panic!("expected a create") };
+        assert_eq!(repo.id, "r2");
+        assert_eq!(req.branch, "feature/902");
+        assert!(req.tmp_space);
+        assert_eq!(req.mode, am_core::worktrees::CreateMode::TrackRemote);
+        assert!(app.reviews.is_none(), "back on the dashboard, where the job shows");
+        assert!(app.rows.iter().any(|r| matches!(r, crate::app::Row::Pending(_))));
+
+        // Already pulled: jump to the worktree instead.
+        let mut app = by_repo();
+        app.on_key(Key::End);
+        app.on_key(Key::Char('v'));
+        assert_eq!(app.on_key(Key::Char('t')), Action::None);
+        assert!(app.reviews.is_none());
+        assert_eq!(app.selected_view().unwrap().worktree.id, "w1");
+
+        // Esc and q go back; v toggles.
+        let mut app = by_repo();
+        for k in [Key::Esc, Key::Char('q'), Key::Char('v')] {
+            app.on_key(Key::Char('v'));
+            assert!(app.reviews.is_some());
+            assert_eq!(app.on_key(k), Action::None);
+            assert!(app.reviews.is_none(), "{k:?}");
+        }
+    }
+
+    #[test]
+    fn review_page_puts_prs_asking_you_first_by_default() {
+        let mut app = with_reviews();
+        app.on_key(Key::Char('v'));
+        // Newest first among those asking you, then the team-only fork.
+        assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), [902, 51, 48]);
+        let screen = render(&app, 120, 10);
+        assert!(screen.contains("Asked you ─") && screen.contains("Asked your team ─"), "{screen}");
+        assert!(screen.contains("(gridsight)"), "rows name their repo outside repo order:\n{screen}");
+        insta::assert_snapshot!("review_page_direct_first", screen);
+        // Other orders: one list, no headers.
+        for (sort, want) in [("updated", [902, 51, 48]), ("oldest", [902, 51, 48])] {
+            app.settings.review_sort = sort.into();
+            assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), want, "{sort}");
+            assert!(!render(&app, 120, 10).contains("Asked you"), "{sort}");
+        }
+    }
+
+    #[test]
+    fn review_page_rows_are_clickable() {
+        let mut app = by_repo();
+        app.on_key(Key::Char('v'));
+        let at = find(&app, 120, 10, "Feeder load");
+        assert_eq!(click(&mut app, 120, 10, at, false), crate::app::Action::None);
+        assert_eq!(app.selected_review().unwrap().pr.number, 902);
+        assert!(matches!(click(&mut app, 120, 10, at, false), crate::app::Action::OpenUrl(_)));
+    }
+
+    #[test]
+    fn review_page_explains_a_rate_limit_instead_of_loading() {
+        let mut app = with_reviews();
+        app.on_key(Key::Char('v'));
+        let mut snap = app.snapshot.clone();
+        snap.reviews = None;
+        snap.review_error = Some(am_core::model::ReviewFetchError {
+            message: "graphql: API rate limit exceeded for user ID 1.".into(),
+            rate_limited: true,
+            resets_at: Some(NOW + 12 * 60),
+        });
+        snap.health = crate::app::Health { github_failing: true, github_rate_limited: true, ..Default::default() };
+        app.apply(snap.clone());
+        let screen = render(&app, 100, 12);
+        assert!(!screen.contains("Loading…"), "{screen}");
+        assert!(screen.contains("GitHub has rate-limited you — resets in 12m"), "{screen}");
+        assert!(screen.contains("⚠ GitHub rate-limited — cached"), "{screen}");
+        insta::assert_snapshot!("review_page_rate_limited", screen);
+
+        // With a list from before: the list stays, the border says why it's stale.
+        let mut cached = with_reviews();
+        cached.on_key(Key::Char('v'));
+        let mut snap2 = cached.snapshot.clone();
+        snap2.review_error = snap.review_error.clone();
+        cached.apply(snap2);
+        let screen = render(&cached, 120, 10);
+        assert!(screen.contains("Batch the PR queries"), "{screen}");
+        assert!(screen.contains("⚠ GitHub rate-limited (resets in 12m) — showing cached"), "{screen}");
+
+        // A cached empty list doesn't claim "nothing waiting" while GitHub refuses.
+        let mut empty = app.snapshot.clone();
+        empty.reviews = Some(vec![]);
+        app.apply(empty);
+        let screen = render(&app, 100, 12);
+        assert!(screen.contains("GitHub has rate-limited you") && !screen.contains("Nothing waiting"), "{screen}");
+
+        // Any other failure: gh's own words.
+        snap.review_error = Some(am_core::model::ReviewFetchError {
+            message: "To get started with GitHub CLI, please run: gh auth login".into(),
+            rate_limited: false,
+            resets_at: None,
+        });
+        app.apply(snap);
+        let screen = render(&app, 100, 12);
+        assert!(screen.contains("Couldn't load review requests") && screen.contains("gh auth login"), "{screen}");
+    }
+
+    #[test]
+    fn review_page_empty_and_off() {
+        let mut app = with_reviews();
+        app.on_key(Key::Char('v'));
+        let mut snap = app.snapshot.clone();
+        snap.reviews = Some(vec![]);
+        app.apply(snap.clone());
+        assert!(render(&app, 100, 8).contains("Nothing waiting on your review"));
+        snap.reviews = None;
+        app.apply(snap);
+        assert!(render(&app, 100, 8).contains("Loading…"));
+        let mut off = with_reviews();
+        off.settings.review_requests_enabled = false;
+        assert_eq!(off.on_key(Key::Char('v')), crate::app::Action::None);
+        assert!(off.reviews.is_none());
+        assert!(!render(&off, 120, 6).contains("to review"));
+    }
+
+    #[test]
+    fn setup_reviews_step() {
+        let mut app = fixture();
+        let mut s = crate::setup::Setup::new(vec![], &Settings::default());
+        s.step = crate::setup::Step::Reviews;
+        app.setup = Some(s);
+        insta::assert_snapshot!(render(&app, 100, 22));
+        let at = find(&app, 100, 22, "Only my teams");
+        click(&mut app, 100, 22, at, false);
+        click(&mut app, 100, 22, at, false);
+        assert_eq!(app.setup.as_ref().unwrap().review.scope, 2);
     }
 
     #[test]
@@ -3291,13 +3779,14 @@ mod tests {
             gh: true,
             linear_key: String::new(),
             integration_field: 0,
+            review: Default::default(),
             ctx_choice: crate::setup::CONTEXT_CUSTOM,
             ctx_input: "128k".into(),
             ctx_error: None,
             cancellable: false,
         });
         let out = render(&app, 100, 20);
-        assert!(out.contains("✓ Integrations  ›  Context"), "breadcrumbs cut off:\n{out}");
+        assert!(out.contains("✓ Reviews  ›  Context"), "breadcrumbs cut off:\n{out}");
         insta::assert_snapshot!(out);
     }
 
@@ -3318,6 +3807,7 @@ mod tests {
             gh: true,
             linear_key: String::new(),
             integration_field: 0,
+            review: Default::default(),
             ctx_choice: 0,
             ctx_input: String::new(),
             ctx_error: None,
@@ -3403,13 +3893,13 @@ mod tests {
         let pr = v.pr.as_mut().unwrap();
         pr.is_draft = true;
         pr.checks_status = ChecksStatus::Failing;
-        let spans = pr_spans(&v, &theme, 16, true);
+        let spans = pr_spans(v.pr.as_ref(), &theme, 16, true);
         assert_eq!(spans[0].content, "#127");
         assert_eq!(spans[0].style.fg, Some(theme.red));
         assert_eq!(spans[1].content, "✗");
         assert_eq!(spans[1].style.fg, Some(theme.red));
         v.pr.as_mut().unwrap().checks_status = ChecksStatus::Passing;
-        let spans = pr_spans(&v, &theme, 16, true);
+        let spans = pr_spans(v.pr.as_ref(), &theme, 16, true);
         assert_eq!(spans[0].style.fg, Some(theme.faint), "passing draft stays dim");
         assert_eq!(spans[1].style.fg, Some(theme.green));
     }
@@ -3419,7 +3909,7 @@ mod tests {
         let theme = Theme::ansi();
         let mut v = fixture().flat[0].clone();
         let label = |v: &WorktreeView, words: bool| {
-            let spans = pr_spans(v, &theme, 16, words);
+            let spans = pr_spans(v.pr.as_ref(), &theme, 16, words);
             spans.iter().find(|s| s.content.starts_with(' ') && !s.content.trim().is_empty()).map(|s| (s.content.trim().to_string(), s.style.fg))
         };
         let set = |v: &mut WorktreeView, review: &str, checks: ChecksStatus, mergeable: Option<&str>| {
@@ -3430,12 +3920,12 @@ mod tests {
         };
         set(&mut v, "APPROVED", ChecksStatus::Passing, Some("MERGEABLE"));
         assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.green))));
-        assert_eq!(pr_text(&v, true), "#127✓ approved");
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✓ approved");
         set(&mut v, "APPROVED", ChecksStatus::None, None);
         assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.green))), "no CI configured is still green");
         set(&mut v, "APPROVED", ChecksStatus::Failing, Some("MERGEABLE"));
         assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.yellow))));
-        assert_eq!(pr_text(&v, true), "#127✗ approved");
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✗ approved");
         set(&mut v, "APPROVED", ChecksStatus::Pending, None);
         assert_eq!(label(&v, true).unwrap().0, "approved");
         set(&mut v, "APPROVED", ChecksStatus::Passing, Some("CONFLICTING"));
@@ -3445,17 +3935,17 @@ mod tests {
         set(&mut v, "REVIEW_REQUIRED", ChecksStatus::Passing, None);
         assert_eq!(label(&v, true).unwrap().0, "review");
         set(&mut v, "", ChecksStatus::Passing, None);
-        assert_eq!(pr_text(&v, true), "#127✓", "unknown review state shows nothing");
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✓", "unknown review state shows nothing");
         // Narrow terminals get a glyph instead of the word.
         set(&mut v, "APPROVED", ChecksStatus::Passing, None);
-        assert_eq!(pr_text(&v, false), "#127✓ ✔");
+        assert_eq!(pr_text(v.pr.as_ref(), false), "#127✓ ✔");
         // Merged PRs have no review state; closed ones say so in red.
         v.pr.as_mut().unwrap().state = "MERGED".into();
-        assert_eq!(pr_text(&v, true), "#127✓⇡");
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✓⇡");
         v.pr.as_mut().unwrap().state = "CLOSED".into();
-        assert_eq!(pr_text(&v, true), "#127✓ closed");
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✓ closed");
         assert_eq!(label(&v, true), Some(("closed".into(), Some(theme.red))));
-        assert_eq!(pr_text(&v, false), "#127✓ ⊘");
+        assert_eq!(pr_text(v.pr.as_ref(), false), "#127✓ ⊘");
     }
 
     #[test]
@@ -3489,12 +3979,12 @@ mod tests {
         let mut theirs = view("w7", "r2", "alice/fix-ci", None);
         theirs.worktree.tmp_space = true;
         snap.groups.push(WorktreeGroup {
-            repo: Repository { id: TMP_SPACE_GROUP_ID.into(), path: String::new(), name: "Tmp space".into() },
+            repo: Repository { id: TMP_SPACE_GROUP_ID.into(), path: String::new(), name: "Reviewing".into() },
             worktrees: vec![theirs],
         });
         app.apply(snap);
         insta::assert_snapshot!(render(&app, 120, 18));
-        assert!(app.rows.contains(&crate::app::Row::Repo("Tmp space".into())));
+        assert!(app.rows.contains(&crate::app::Row::Repo("Reviewing".into())));
     }
 
     #[test]
@@ -3505,7 +3995,7 @@ mod tests {
         let job = app.jobs.start_create(repo, req);
         app.rebuild_rows();
         let n = app.rows.len();
-        assert_eq!(app.rows[n - 2..], [crate::app::Row::Repo("Tmp space".into()), crate::app::Row::Pending(job)]);
+        assert_eq!(app.rows[n - 2..], [crate::app::Row::Repo("Reviewing".into()), crate::app::Row::Pending(job)]);
     }
 
     fn session(harness: HarnessKind, id: &str, status: Status, updated: &str, tokens: Option<u64>) -> SessionView {

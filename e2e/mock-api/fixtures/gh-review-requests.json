@@ -1,0 +1,170 @@
+{
+  "data": {
+    "viewer": {
+      "login": "e2e-user"
+    },
+    "search": {
+      "nodes": [
+        {
+          "number": 61,
+          "title": "Add retry to the sync job",
+          "url": "https://github.com/acme/work/pull/61",
+          "state": "OPEN",
+          "isDraft": false,
+          "reviewDecision": "REVIEW_REQUIRED",
+          "mergeable": "MERGEABLE",
+          "headRefName": "feature/on-origin",
+          "baseRefName": "main",
+          "isCrossRepository": false,
+          "createdAt": "2026-10-20T09:00:00Z",
+          "updatedAt": "2026-10-26T09:00:00Z",
+          "author": {
+            "login": "bob"
+          },
+          "repository": {
+            "nameWithOwner": "acme/work"
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "login": "e2e-user"
+                }
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "state": "SUCCESS",
+                          "count": 3
+                        }
+                      ],
+                      "statusContextCountsByState": [],
+                      "pageInfo": {
+                        "hasNextPage": false,
+                        "endCursor": null
+                      },
+                      "nodes": []
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 62,
+          "title": "Update onboarding copy",
+          "url": "https://github.com/acme/work/pull/62",
+          "state": "OPEN",
+          "isDraft": false,
+          "reviewDecision": "REVIEW_REQUIRED",
+          "mergeable": "MERGEABLE",
+          "headRefName": "feature/no-ticket",
+          "baseRefName": "main",
+          "isCrossRepository": false,
+          "createdAt": "2026-10-20T09:00:00Z",
+          "updatedAt": "2026-10-25T09:00:00Z",
+          "author": {
+            "login": "carol"
+          },
+          "repository": {
+            "nameWithOwner": "acme/work"
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "combinedSlug": "acme/platform"
+                }
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "state": "FAILURE",
+                          "count": 3
+                        }
+                      ],
+                      "statusContextCountsByState": [],
+                      "pageInfo": {
+                        "hasNextPage": false,
+                        "endCursor": null
+                      },
+                      "nodes": []
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "number": 63,
+          "title": "Fix typo in README",
+          "url": "https://github.com/acme/work/pull/63",
+          "state": "OPEN",
+          "isDraft": false,
+          "reviewDecision": "REVIEW_REQUIRED",
+          "mergeable": "MERGEABLE",
+          "headRefName": "patch-1",
+          "baseRefName": "main",
+          "isCrossRepository": true,
+          "createdAt": "2026-10-20T09:00:00Z",
+          "updatedAt": "2026-10-24T09:00:00Z",
+          "author": {
+            "login": "outsider"
+          },
+          "repository": {
+            "nameWithOwner": "acme/work"
+          },
+          "reviewRequests": {
+            "nodes": [
+              {
+                "requestedReviewer": {
+                  "login": "e2e-user"
+                }
+              }
+            ]
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "statusCheckRollup": {
+                    "contexts": {
+                      "checkRunCountsByState": [
+                        {
+                          "state": "SUCCESS",
+                          "count": 3
+                        }
+                      ],
+                      "statusContextCountsByState": [],
+                      "pageInfo": {
+                        "hasNextPage": false,
+                        "endCursor": null
+                      },
+                      "nodes": []
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -15,6 +15,7 @@ mod modals;
 mod ops;
 mod plugins_ui;
 mod repos_ui;
+mod reviews_ui;
 mod settings_ui;
 mod setup;
 mod theme;
@@ -378,6 +379,7 @@ fn dispatch(
     match action {
         Action::Quit => return Ok(true),
         Action::Refresh => collector.refresh(true),
+        Action::RefreshReviews => collector.refresh_reviews(),
         Action::Open(v) => launcher::open(*v, &app.settings, launch_tx.clone()),
         Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
         Action::SettingsChanged => {

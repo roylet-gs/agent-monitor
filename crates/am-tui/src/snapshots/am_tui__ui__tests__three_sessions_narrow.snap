@@ -12,4 +12,4 @@ expression: "render(&app, 90, 11)"
 │                                                                                        │
 │gridsight ──────────────────────────────────────────────────────────────────────────────│
 ╰──────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  │ ? help  q quit

@@ -277,6 +277,17 @@ fn settings_set_coerces_and_validates() {
     let o = env.run(&["settings", "set", "dailyTokensMode", "dollars"]);
     assert_eq!(o.code, 1);
     assert!(o.stderr.contains("Use one of: tokens, weighted, cost, breakdown"));
+
+    env.ok(&["settings", "set", "reviewRequestsScope", "teams"]);
+    assert_eq!(env.settings()["reviewRequestsScope"], "teams");
+    let o = env.run(&["settings", "set", "reviewRequestsScope", "everyone"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("Use one of: all, direct, teams"));
+    env.ok(&["settings", "set", "reviewSort", "oldest"]);
+    let o = env.run(&["settings", "set", "reviewSort", "random"]);
+    assert!(o.code == 1 && o.stderr.contains("Use one of: direct, repo, updated, oldest"), "{}", o.stderr);
+    env.ok(&["settings", "set", "reviewExcludeRepos", "docs, acme/web"]);
+    assert_eq!(env.settings()["reviewExcludeRepos"], "docs, acme/web");
 }
 
 #[test]

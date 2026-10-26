@@ -162,7 +162,7 @@ pub static TOOLS: &[Tool] = &[
             opt("name", Kind::Str, "Display name (nickname) for the worktree"),
             opt("base", Kind::Str, "Base branch for a new branch (default: the repo's main branch)"),
             opt("mode", Kind::Enum(MODES), "How to handle an existing branch (default: fresh)"),
-            opt("tmp", Kind::Bool, "Check out an existing branch (someone else's, to look at) in the tmp space: tracks origin, or reuses a local-only branch; refused for a branch that doesn't exist; grouped apart on the dashboard and outside the worktree limit"),
+            opt("tmp", Kind::Bool, "Check out an existing branch (someone else's, to look at) in the Reviewing space (the tmp space): tracks origin, or reuses a local-only branch; refused for a branch that doesn't exist; grouped apart on the dashboard and outside the worktree limit"),
         ],
         hints: WRITE,
         timeout: LONG,
