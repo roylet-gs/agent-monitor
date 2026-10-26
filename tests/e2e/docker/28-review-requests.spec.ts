@@ -39,7 +39,21 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   expect(await lineOf(/Fix typo in README/)).toBeLessThan(await lineOf(/Asked your team ─/));
   expect(await lineOf(/Asked your team ─/)).toBeLessThan(await lineOf(/Update onboarding copy/));
   expect(await tui.keyBar()).toContain("t pull into Reviewing");
+  // The bottom border sums up the search's filters.
+  expect(screen).toContain("you + your teams · no drafts · not yet reviewed");
   await tui.screenshot("review-page");
+
+  // f opens just the review filters over the page; esc goes back to it.
+  await tui.sendKey("f");
+  await tui.waitForText("Review filters");
+  const filters = await tui.getScreenText();
+  expect(filters).toContain("Requested from");
+  expect(filters).toContain("Extra search filters");
+  expect(filters).not.toContain("Theme");
+  await tui.screenshot("review-filters");
+  await tui.sendKey("Escape");
+  await tui.waitForGone("Review filters");
+  expect(await tui.getScreenText()).toContain("─Review requests");
 
   // ⏎ opens the PR (no browser in the container: the opener's error pops up).
   await tui.sendKey("Enter");

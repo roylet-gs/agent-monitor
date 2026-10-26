@@ -238,14 +238,15 @@ fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
 }
 
 /// Settings box, then inside it the update banner, field list and help line.
-fn settings_areas(area: Rect, update: Option<&am_core::update_check::Update>) -> (Rect, [Rect; 3]) {
+/// `rows` fields plus `extra` lines (headers, blanks, help) tall.
+fn settings_areas(area: Rect, update: Option<&am_core::update_check::Update>, rows: u16, extra: u16) -> (Rect, [Rect; 3]) {
     let w = 84.min(area.width.saturating_sub(2));
     // Headline, the (possibly wrapped) upgrade hint, then a blank line.
     let banner_h = update.map_or(0, |u| {
         let hint_w = " Update: ".width() + u.hint.width();
         2 + hint_w.div_ceil((w as usize).saturating_sub(2).max(1)) as u16
     });
-    let h = area.height.saturating_sub(2).min(crate::settings_ui::FIELDS.len() as u16 + 16 + banner_h);
+    let h = area.height.saturating_sub(2).min(rows + extra + banner_h);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
     let parts = Layout::vertical([Constraint::Length(banner_h), Constraint::Min(3), Constraint::Length(2)])
         .areas(Block::bordered().inner(rect));
@@ -253,8 +254,11 @@ fn settings_areas(area: Rect, update: Option<&am_core::update_check::Update>) ->
 }
 
 /// The settings list as lines: `Some(field index)` for a field, `None` for a
-/// section header or blank line.
-fn settings_lines() -> Vec<Option<usize>> {
+/// section header or blank line. A cut-down editor (`only`) has no headers.
+fn settings_lines(ed: &crate::settings_ui::SettingsEditor) -> Vec<Option<usize>> {
+    if ed.only.is_some() {
+        return ed.fields().into_iter().map(Some).collect();
+    }
     let mut lines = Vec::new();
     let mut section = "";
     for (i, field) in crate::settings_ui::FIELDS.iter().enumerate() {
@@ -281,6 +285,7 @@ fn contains(r: Rect, x: u16, y: u16) -> bool {
 }
 
 const SETTINGS_HINT: &str = " ⏎/space change  ←→ adjust  e edit file  esc close ";
+const FILTERS_HINT: &str = " ⏎/space change  ←→ adjust  esc close ";
 
 fn draw_settings(
     f: &mut Frame,
@@ -291,16 +296,23 @@ fn draw_settings(
     hits: &mut Vec<Hit>,
 ) {
     use crate::settings_ui::{FIELDS, Kind, sort_label};
-    let (rect, [banner, list, help]) = settings_areas(area, update);
+    // The review page's filter box (`f`) is the same editor, cut down.
+    let filters = ed.only.is_some();
+    let (name, hint, update) = if filters { ("Review filters ", FILTERS_HINT, None) } else { ("Settings ", SETTINGS_HINT, update) };
+    let (rect, [banner, list, help]) = if filters {
+        settings_areas(area, None, ed.fields().len() as u16, 4)
+    } else {
+        settings_areas(area, update, FIELDS.len() as u16, 16)
+    };
     clear(f, theme, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme.bold(theme.border_focus))
-        .title(Line::from(vec![Span::styled("─", theme.bold(theme.border_focus)), Span::styled("Settings ", theme.bold(theme.text))]))
-        .title_bottom(Line::styled(SETTINGS_HINT, theme.faint()).alignment(Alignment::Right));
+        .title(Line::from(vec![Span::styled("─", theme.bold(theme.border_focus)), Span::styled(name, theme.bold(theme.text))]))
+        .title_bottom(Line::styled(hint, theme.faint()).alignment(Alignment::Right));
     f.render_widget(block, rect);
     // The sub-pages take the same keys (⏎, esc…), so the hints work there too.
-    bottom_hint_hits(hits, SETTINGS_HINT, rect);
+    bottom_hint_hits(hits, hint, rect);
     if let Some(u) = update {
         let lines = vec![
             Line::from(vec![
@@ -358,7 +370,7 @@ fn draw_settings(
         return;
     }
 
-    let layout = settings_lines();
+    let layout = settings_lines(ed);
     let mut lines: Vec<Line> = Vec::new();
     let label_w = 30usize;
     for (n, entry) in layout.iter().enumerate() {
@@ -1387,6 +1399,17 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
             Line::styled(format!(" {} of {} ", cursor + 1, ordered.len()), theme.faint()).alignment(Alignment::Right),
         );
     }
+    // Bottom left: what the search is filtered by; a click opens the filters.
+    let summary = format!(" {} ", review_filter_summary(&app.settings));
+    let room = (area.width as usize).saturating_sub(16);
+    if room > 10 {
+        let summary = truncate(&summary, room);
+        if let Some(k) = app.keymap.key(Command::Feedback) {
+            let rect = Rect::new(area.x + 1, area.y + area.height.saturating_sub(1), summary.width() as u16, 1);
+            hits.push(Hit { rect, target: Target::Key(k), selected: false });
+        }
+        block = block.title_bottom(Line::styled(summary, theme.faint()).alignment(Alignment::Left));
+    }
     let error = app.snapshot.review_error.as_ref();
     // A failed refresh beside a list we still have (from before, or the cache).
     if let Some(e) = error.filter(|_| !ordered.is_empty()) {
@@ -1486,6 +1509,34 @@ fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The review search's filters in a few words, e.g. `you + your teams ·
+/// no drafts · not yet reviewed · label:urgent`.
+fn review_filter_summary(s: &am_core::settings::Settings) -> String {
+    use am_core::settings::ReviewScope;
+    let mut parts = vec![match s.review_scope() {
+        ReviewScope::All => "you + your teams".to_string(),
+        ReviewScope::Direct => "you only".to_string(),
+        ReviewScope::Teams => "your teams only".to_string(),
+    }];
+    if s.review_hide_drafts {
+        parts.push("no drafts".into());
+    }
+    if s.review_hide_reviewed {
+        parts.push("not yet reviewed".into());
+    }
+    let list = |v: &str| v.split([',', ' ']).filter(|x| !x.is_empty()).collect::<Vec<_>>().join(", ");
+    if !s.review_include_repos.trim().is_empty() {
+        parts.push(format!("only {}", list(&s.review_include_repos)));
+    }
+    if !s.review_exclude_repos.trim().is_empty() {
+        parts.push(format!("not {}", list(&s.review_exclude_repos)));
+    }
+    if !s.review_search_qualifiers.trim().is_empty() {
+        parts.push(s.review_search_qualifiers.trim().to_string());
+    }
+    parts.join(" · ")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2335,6 +2386,7 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
         keys.extend(cmd(Command::OpenLinear, "ticket", 0));
         keys.extend(cmd(Command::PullToTmpSpace, "pull into Reviewing", 0));
         keys.extend(cmd(Command::Delete, "remove", 2));
+        keys.extend(cmd(Command::Feedback, "filter", 2));
         keys.push(raw("", "", None, 0));
         keys.extend(cmd(Command::Refresh, "refresh", 1));
         keys.extend(cmd(Command::Help, "help", 2));
@@ -3323,6 +3375,36 @@ mod tests {
             assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), want, "{sort}");
             assert!(!render(&app, 120, 10).contains("Asked you"), "{sort}");
         }
+    }
+
+    #[test]
+    fn review_page_f_opens_the_filters() {
+        let mut app = by_repo();
+        app.on_key(Key::Char('v'));
+        let screen = render(&app, 120, 12);
+        assert!(screen.contains("you + your teams · no drafts · not yet reviewed"), "{screen}");
+        assert!(screen.lines().last().unwrap().contains("f filter"), "{screen}");
+        // The summary is clickable too.
+        let at = find(&app, 120, 12, "you + your teams");
+        assert_eq!(target_at(&app, 120, 12, at), Some(Target::Key(Key::Char('f'))));
+
+        assert_eq!(app.on_key(Key::Char('f')), crate::app::Action::None);
+        let field = |app: &App| app.settings_editor.as_ref().unwrap().field().key;
+        assert_eq!(field(&app), "reviewRequestsScope");
+        let screen = render(&app, 120, 24);
+        assert!(screen.contains("Review filters") && screen.contains("Extra search filters"), "{screen}");
+        assert!(!screen.contains("Theme") && !screen.contains("Review refresh"), "only the filters: {screen}");
+        insta::assert_snapshot!("review_filters", screen);
+        // Up stops at the first filter, down at the last.
+        app.on_key(Key::Up);
+        assert_eq!(field(&app), "reviewRequestsScope");
+        for _ in 0..10 {
+            app.on_key(Key::Char('j'));
+        }
+        assert_eq!(field(&app), "reviewSearchQualifiers");
+        // f (or esc) closes it, back on the page.
+        app.on_key(Key::Char('f'));
+        assert!(app.settings_editor.is_none() && app.reviews.is_some());
     }
 
     #[test]

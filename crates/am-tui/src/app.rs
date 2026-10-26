@@ -815,7 +815,9 @@ impl App {
             let keys = e.keys.take();
             let repos = e.repos.take();
             let repo_count = e.repo_count;
+            let only = e.only;
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
+            e.only = only;
             e.cursor = cursor;
             e.plugins = plugins;
             e.keys = keys;
@@ -906,6 +908,10 @@ impl App {
             }
             Some(C::PullToTmpSpace) => return self.pull_review(),
             Some(C::Delete) => self.remove_review_worktree(),
+            // The feedback key (`f`) filters here.
+            Some(C::Feedback) => {
+                self.settings_editor = Some(crate::settings_ui::SettingsEditor::only(&self.settings, crate::settings_ui::REVIEW_FILTERS));
+            }
             Some(C::Refresh) => {
                 self.notice = Some("Refreshing review requests…".into());
                 return Action::RefreshReviews;

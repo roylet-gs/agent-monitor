@@ -114,6 +114,17 @@ pub const FIELDS: &[Field] = &[
     Field { key: "resetSettings", label: "Reset settings…", help: "Defaults for every setting, then setup (repos, themes, scripts, hooks kept)", section: "Setup", kind: Kind::Reset },
 ];
 
+/// The rows of the review page's filter box (`f`), a cut-down editor.
+pub const REVIEW_FILTERS: &[&str] = &[
+    "reviewRequestsScope",
+    "reviewSort",
+    "reviewHideDrafts",
+    "reviewHideReviewed",
+    "reviewIncludeRepos",
+    "reviewExcludeRepos",
+    "reviewSearchQualifiers",
+];
+
 pub enum Outcome {
     None,
     Close,
@@ -143,6 +154,8 @@ pub struct SettingsEditor {
     pub repo_count: usize,
     pub values: Map<String, Value>,
     pub error: Option<String>,
+    /// Only these keys are shown and reachable (the review filter box).
+    pub only: Option<&'static [&'static str]>,
 }
 
 impl SettingsEditor {
@@ -151,14 +164,39 @@ impl SettingsEditor {
             Ok(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None }
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, only: None }
+    }
+
+    /// An editor showing only the `keys` fields, starting on the first.
+    pub fn only(settings: &Settings, keys: &'static [&'static str]) -> SettingsEditor {
+        let mut e = SettingsEditor::new(settings);
+        e.only = Some(keys);
+        e.cursor = e.fields().first().copied().unwrap_or(0);
+        e
+    }
+
+    /// Indices into `FIELDS` this editor shows.
+    pub fn fields(&self) -> Vec<usize> {
+        (0..FIELDS.len()).filter(|&i| self.only.is_none_or(|keys| keys.contains(&FIELDS[i].key))).collect()
+    }
+
+    fn move_cursor(&mut self, dir: isize) {
+        let fields = self.fields();
+        let pos = fields.iter().position(|&i| i == self.cursor).unwrap_or(0) as isize;
+        self.cursor = fields[(pos + dir).clamp(0, fields.len() as isize - 1) as usize];
     }
 
     /// A click on field `i`: selects it, or changes it (like ⏎) when it is
     /// already selected. Ignored while a sub-page (harness plugins, key
     /// bindings, sort editor, theme builder) covers the field list.
     pub fn click(&mut self, i: usize) -> Outcome {
-        if self.plugins.is_some() || self.keys.is_some() || self.repos.is_some() || self.sort.is_some() || self.builder.is_some() || i >= FIELDS.len() {
+        if self.plugins.is_some()
+            || self.keys.is_some()
+            || self.repos.is_some()
+            || self.sort.is_some()
+            || self.builder.is_some()
+            || !self.fields().contains(&i)
+        {
             return Outcome::None;
         }
         if i == self.cursor {
@@ -305,9 +343,10 @@ impl SettingsEditor {
         self.error = None;
         match key {
             Key::Esc | Key::Char('q') | Key::Char('s') => return Outcome::Close,
-            Key::Char('e') => return Outcome::EditFile,
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(FIELDS.len() - 1),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
+            Key::Char('f') if self.only.is_some() => return Outcome::Close,
+            Key::Char('e') if self.only.is_none() => return Outcome::EditFile,
+            Key::Down | Key::Char('j') => self.move_cursor(1),
+            Key::Up | Key::Char('k') => self.move_cursor(-1),
             Key::Enter | Key::Char(' ') => return self.activate(),
             Key::Right | Key::Char('l') => return self.step(1),
             Key::Left | Key::Char('h') => return self.step(-1),

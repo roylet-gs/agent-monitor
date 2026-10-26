@@ -306,6 +306,7 @@ With GitHub on, am also looks for the open PRs in your tracked repos that are wa
 | `l` | Open its Linear ticket |
 | `t` | Pull its branch into **Reviewing** (the same no-questions checkout as `t` on the dashboard). You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard; a PR from a fork can't be pulled |
 | `d` | Remove the pulled worktree (the usual delete dialog), staying on the page |
+| `f` | Filters: who's asked, order, drafts, already reviewed, repos and extra search terms, in a small box over the page (changes save and re-search at once). The page's bottom border sums up the filters in force; clicking it opens the box too |
 | `r` | Search again now |
 | `Esc` / `q` / `v` | Back to the dashboard |
 
