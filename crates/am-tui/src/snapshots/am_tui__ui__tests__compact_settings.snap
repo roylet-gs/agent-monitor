@@ -1,6 +1,6 @@
 ---
 source: crates/am-tui/src/ui.rs
-expression: "render(&app, 60, 20)"
+expression: screen
 ---
 ╭─Settings ────────────────────────────────────────────────╮
 │ General                                                  │
@@ -18,7 +18,7 @@ expression: "render(&app, 60, 20)"
 │ Appearance                                               │
 │   Theme                         ansi                     │
 │   Theme builder…                ⏎ open                   │
-│ Dashboard                                                │
+│   Compact view                  on                       │
 │                                                          │
 │ Which editor/IDE Enter opens worktrees in; custom runs Ed│
 ╰─────── ⏎/space change  ←→ adjust  e edit file  esc close ╯
