@@ -11,4 +11,4 @@ expression: wide
 │ · main                              ↑2 ±3  4m            ││                                                          │
 │                                                          ││                                                          │
 ╰────────────────────────────────────────────────── 1 of 3 ╯╰ you + your teams ──────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  ? help  ⇥ list  esc close
+ ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  ⇥ list  esc close

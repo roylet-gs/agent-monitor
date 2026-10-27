@@ -11,4 +11,4 @@ expression: "render(&app, 120, 10)"
 │                                                                                                                      │
 │                                                                                                                      │
 ╰ you + your teams ──────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  ? help  esc back
+ ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  esc back

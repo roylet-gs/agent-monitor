@@ -22,7 +22,7 @@ test("dashboard renders the worktree pane and key bar with the seeded repo", asy
   const keys = await tui.keyBar();
   expect(keys).toContain("⏎ open");
   expect(keys).toContain("g PR");
-  expect(keys).toContain("? help");
+  expect(keys).toContain("h help");
   expect(keys).toContain("q quit");
   // The `t` terminal and `c` agent actions are gone.
   expect(keys).not.toContain("t terminal");

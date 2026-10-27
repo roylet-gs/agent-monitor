@@ -18,11 +18,10 @@ expression: "render(&app, 100, 34)"
 │       │   Reviews in new window   ctrl-v                                                 │       │
 │       │   Add repository          A                                                      │       │
 │       │   Toggle log pane         w                                                      │       │
-│       │   View logs               L                                                      │       │
 │       │▌  Settings                press a key…                                           │       │
 │       │   Suggest a feature       f                                                      │       │
 │       │   Refresh now             r                                                      │       │
-│       │   Help                    ?                                                      │       │
+│       │   Help                    h                                                      │       │
 │       │   Quit                    q                                                      │       │
 │       │   Move down               j                                                      │       │
 │       │   Move up                 k                                                      │       │
@@ -33,6 +32,7 @@ expression: "render(&app, 100, 34)"
 │       │                                                                                  │       │
 │       │ Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit      │       │
 │       │                                                                                  │       │
+│       │                                                                                  │       │
 │       │ Press the new key for Settings · esc cancels                                     │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ N new  d delete  v reviews  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  │ N new  d delete  v reviews  │ s settings  r refresh  h help  q quit

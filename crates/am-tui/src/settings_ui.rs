@@ -38,6 +38,8 @@ pub enum Kind {
     Repos,
     /// Reopens the setup wizard over the current settings.
     RunSetup,
+    /// Opens debug.log (or the log folder once it has rotated).
+    ViewLogs,
     /// Asks, then puts every setting back to its default and runs setup.
     Reset,
     /// Asks (`y`), then puts the review filters back to their defaults.
@@ -114,6 +116,8 @@ pub const FIELDS: &[Field] = &[
     Field { key: "maxWorktrees", label: "Max per repo", help: "Excludes the main checkout", section: "Limits", kind: Kind::Number { step: 1, min: 1 } },
     Field { key: "logLevel", label: "Log level", help: "debug.log verbosity", section: "Logging", kind: Kind::Choice(&["debug", "info", "warn", "error"]) },
     Field { key: "maxLogSizeMb", label: "Rotate log at (MB)", help: "debug.log is renamed to debug.log.1 past this size", section: "Logging", kind: Kind::Number { step: 1, min: 1 } },
+    // An action, not a setting: its key is never written.
+    Field { key: "viewLogs", label: "View logs…", help: "Open debug.log in the editor (the log folder once it has rotated)", section: "Logging", kind: Kind::ViewLogs },
     // Actions, not settings: their keys are never written.
     Field { key: "rerunSetup", label: "Run setup again…", help: "Walk the setup wizard again; nothing is saved until you finish (esc cancels)", section: "Setup", kind: Kind::RunSetup },
     Field { key: "resetSettings", label: "Reset settings…", help: "Defaults for every setting, then setup (repos, themes, scripts, hooks kept)", section: "Setup", kind: Kind::Reset },
@@ -136,6 +140,8 @@ pub enum Outcome {
     ReposChanged,
     /// Run setup again: close the editor and open the wizard.
     RunSetup,
+    /// View logs: open debug.log (or its folder).
+    ViewLogs,
     /// Ask before resetting every setting.
     ConfirmReset,
     /// The groups page opened: look up who can author PRs on GitHub.
@@ -233,7 +239,7 @@ impl SettingsEditor {
                 Some(s) if !s.is_empty() => format!("••••{}", &s[s.len().saturating_sub(4)..]),
                 _ => "not set".into(),
             },
-            Kind::ThemeBuilder | Kind::RunSetup => "⏎ open".into(),
+            Kind::ThemeBuilder | Kind::RunSetup | Kind::ViewLogs => "⏎ open".into(),
             Kind::Reset | Kind::ResetReviewFilters => "⏎ reset".into(),
             Kind::ResetReviewGroups => match self.settings().review_groups.len() {
                 0 => "no groups".into(),
@@ -440,6 +446,7 @@ impl SettingsEditor {
                 Outcome::LoadPeople
             }
             Kind::RunSetup => Outcome::RunSetup,
+            Kind::ViewLogs => Outcome::ViewLogs,
             Kind::Reset => Outcome::ConfirmReset,
             Kind::ResetReviewFilters | Kind::ResetReviewGroups => {
                 self.confirm = Some(f.key);
@@ -801,6 +808,9 @@ mod tests {
         assert_eq!(ed.display(ed.field()), "⏎ open");
         assert!(matches!(ed.on_key(Key::Enter), Outcome::RunSetup));
         assert!(matches!(ed.on_key(Key::Right), Outcome::None));
+        goto(&mut ed, "viewLogs");
+        assert_eq!(ed.display(ed.field()), "⏎ open");
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::ViewLogs));
         goto(&mut ed, "resetSettings");
         assert!(matches!(ed.on_key(Key::Enter), Outcome::ConfirmReset));
         assert!(!dir.join("settings.json").exists());

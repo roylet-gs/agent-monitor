@@ -2645,7 +2645,7 @@ fn git_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>>
 
 
 /// Every key-bar command, grouped (`None` = a `│` separator). Lower
-/// `priority` survives narrower widths; what doesn't fit is still in `?`.
+/// `priority` survives narrower widths; what doesn't fit is still in the help overlay.
 const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::Open), 0),
     (None, 0),
@@ -2660,7 +2660,6 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::AddRepo), 3),
     (None, 0),
     (Some(Command::ToggleLog), 3),
-    (Some(Command::ViewLogs), 3),
     (Some(Command::Settings), 1),
     (Some(Command::Feedback), 3),
     (Some(Command::Refresh), 1),
@@ -2740,9 +2739,23 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
         } else if app.jobs.visible() {
             keys.extend([raw("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, Some(Key::Tab), 0), raw("", "", None, 0)]);
         }
+        // Holding Shift or Ctrl (kitty keyboard protocol only) names what
+        // `v` does with it, in place of the plain hint.
+        let held_review = if app.held.ctrl {
+            Some((Command::ReviewWindow, "reviews in new window"))
+        } else if app.held.shift {
+            Some((Command::ReviewSplit, "reviews beside list"))
+        } else {
+            None
+        }
+        .and_then(|(c, label)| app.keymap.key(c).map(|k| (c, k, label)));
         for &(cmd, prio) in KEYS {
             match cmd {
                 None => keys.push(raw("", "", None, prio)),
+                Some(Command::ReviewRequests) if let Some((c, k, label)) = held_review => {
+                    keys.push((crate::keymap::display(k), label, Some(BarHit::Command(c)), prio));
+                }
+                Some(Command::ReviewSplit) if held_review.is_some() => {}
                 Some(c) => {
                     if let (Some(k), Some(label)) = (app.keymap.key(c), c.bar_label()) {
                         keys.push((crate::keymap::display(k), label, Some(BarHit::Command(c)), prio));
@@ -2855,7 +2868,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::PageDown, C::PageUp], "", "page down / up"),
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
-        (&[C::ToggleLog, C::ViewLogs], "", "toggle log pane / open the log file (or folder)"),
+        (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
         (&[C::ReviewRequests, C::ReviewSplit, C::ReviewWindow], "", "PRs to review: page / beside the list / new window"),
         (&[C::PullToTmpSpace], "", "on the review page: pull the PR into Reviewing"),
@@ -3377,7 +3390,7 @@ mod tests {
     #[test]
     fn help_overlay() {
         let mut app = fixture();
-        app.on_key(Key::Char('?'));
+        app.on_key(Key::Char('h'));
         insta::assert_snapshot!(render(&app, 100, 20));
     }
 
@@ -3387,15 +3400,6 @@ mod tests {
         settings.worktree_sort = vec![];
         app.set_settings(settings);
         app
-    }
-
-    #[test]
-    fn l_views_the_logs_and_can_be_rebound() {
-        let mut app = fixture();
-        assert_eq!(app.on_key(Key::Char('L')), crate::app::Action::ViewLogs);
-        let mut app = rebound(r#"{"viewLogs":"V"}"#);
-        assert_eq!(app.on_key(Key::Char('L')), crate::app::Action::None);
-        assert_eq!(app.on_key(Key::Char('V')), crate::app::Action::ViewLogs);
     }
 
     #[test]
@@ -3429,7 +3433,7 @@ mod tests {
         click(&mut app, 120, 16, hint, false);
         assert!(app.modal.is_some());
         app.modal = None;
-        app.on_key(Key::Char('?'));
+        app.on_key(Key::Char('h'));
         let help = render(&app, 100, 24);
         assert!(help.contains("N / d / tab"), "{help}");
         assert!(help.contains("—  suggest a feature"), "{help}");
@@ -3445,7 +3449,7 @@ mod tests {
         app.settings_editor = Some(ed);
         insta::assert_snapshot!("key_bindings_page", render(&app, 100, 34));
         let keys = app.settings_editor.as_mut().unwrap().keys.as_mut().unwrap();
-        keys.cursor = 13;
+        keys.cursor = 12;
         keys.on_key(Key::Enter);
         insta::assert_snapshot!("key_bindings_capturing", render(&app, 100, 34));
     }
@@ -4000,6 +4004,34 @@ mod tests {
     }
 
     #[test]
+    fn holding_shift_or_ctrl_renames_the_review_hint() {
+        let mut app = by_repo();
+        let bar = |app: &App| render(app, 200, 10).lines().last().unwrap().to_string();
+        assert!(bar(&app).contains("v reviews"));
+        app.held.shift = true;
+        let shifted = bar(&app);
+        assert!(shifted.contains("V reviews beside list") && !shifted.contains("v reviews"), "{shifted}");
+        app.held.ctrl = true;
+        let ctrl = bar(&app);
+        assert!(ctrl.contains("ctrl-v reviews in new window") && !ctrl.contains("V reviews beside list"), "{ctrl}");
+        app.held = crate::app::Held::default();
+        assert!(bar(&app).contains("v reviews"));
+    }
+
+    #[test]
+    fn logs_open_from_settings_not_l() {
+        use crate::app::Action;
+        let mut app = fixture();
+        assert_eq!(app.on_key(Key::Char('L')), Action::None);
+        app.on_key(Key::Char('s'));
+        let ed = app.settings_editor.as_mut().unwrap();
+        ed.cursor = crate::settings_ui::FIELDS.iter().position(|f| f.key == "viewLogs").unwrap();
+        assert!(render(&app, 120, 40).contains("View logs…"));
+        assert_eq!(app.on_key(Key::Enter), Action::ViewLogs);
+        assert!(app.settings_editor.is_some(), "Settings stays open");
+    }
+
+    #[test]
     fn t_on_the_dashboard_does_nothing() {
         let mut app = by_repo();
         assert_eq!(app.on_key(Key::Char('t')), crate::app::Action::None);
@@ -4280,7 +4312,7 @@ mod tests {
         app.on_mouse(crate::app::Mouse::Move { x: header.0, y: header.1 });
         assert_ne!(bg_at(&app, header), theme.hover_bg());
         // Key-bar hints light up like buttons.
-        let help = find(&app, w, h, "? help");
+        let help = find(&app, w, h, "h help");
         app.on_mouse(crate::app::Mouse::Move { x: help.0, y: help.1 });
         assert_eq!(bg_at(&app, help), theme.hover_bg());
         // An overlay takes the mouse: the row behind help doesn't light up.
@@ -4309,7 +4341,7 @@ mod tests {
     #[test]
     fn key_bar_hints_are_clickable() {
         let mut app = fixture();
-        let help = find(&app, 120, 16, "? help");
+        let help = find(&app, 120, 16, "h help");
         assert_eq!(target_at(&app, 120, 16, (help.0 + 3, help.1)), Some(Target::Command(Command::Help)));
         click(&mut app, 120, 16, help, false);
         assert!(app.show_help);

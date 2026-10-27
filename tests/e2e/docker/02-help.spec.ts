@@ -5,11 +5,11 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-test("? opens the key help overlay and closes it again", async ({ page }) => {
+test("h opens the key help overlay and closes it again", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
 
-  await tui.sendKey("?");
+  await tui.sendKey("h");
   await tui.waitForText(" Keys ");
   const text = await tui.getScreenText();
   expect(text).toContain("toggle help");
@@ -17,8 +17,9 @@ test("? opens the key help overlay and closes it again", async ({ page }) => {
   expect(text).toContain("open PR / Linear ticket / Linear project");
   expect(text).toContain("top / bottom");
   expect(text).toContain("refresh now (bypasses backoff)");
-  // View logs (L) shares a line with the log-pane toggle.
-  expect(text).toMatch(/w \/ L\s+toggle log pane \/ open the log file \(or folder\)/);
+  // Viewing the log file moved to Settings.
+  expect(text).toMatch(/w\s+toggle log pane \(Settings → View logs… opens the file\)/);
+  expect(text).toMatch(/h\s+toggle help/);
   // The review page: full, beside the list, or in a new window.
   expect(text).toMatch(/v \/ V \/ ctrl-v\s+PRs to review: page \/ beside the list \/ new window/);
   // Status legend.
@@ -35,6 +36,6 @@ test("? opens the key help overlay and closes it again", async ({ page }) => {
   await tui.screenshot("help-overlay");
   await tui.screenshot("help-view-logs");
 
-  await tui.sendKey("?");
+  await tui.sendKey("h");
   await tui.waitForGone(" Keys ");
 });

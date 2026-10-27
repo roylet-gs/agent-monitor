@@ -51,8 +51,8 @@ test("three agents in one worktree are listed under its row with their own statu
   await tui.screenshot("multi-session-selected");
 
   // The help overlay explains the session-count badge.
-  await tui.sendKey("?");
+  await tui.sendKey("h");
   await tui.waitForText("⧉ 2 sessions agents in one worktree, each listed below it with its own status");
   await tui.screenshot("multi-session-help");
-  await tui.sendKey("?");
+  await tui.sendKey("h");
 });

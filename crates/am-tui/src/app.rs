@@ -167,6 +167,9 @@ pub struct App {
     /// Last mouse position (cell), for the hover highlight on list rows.
     /// Hit-tested at draw time, so it follows scrolling and refreshes.
     pub hover: Option<(u16, u16)>,
+    /// Modifier keys held down (only terminals with the kitty keyboard
+    /// protocol report them); the key bar names what `v` does with each.
+    pub held: Held,
     /// What a click does where, recorded by the last `ui::draw` for the
     /// layer on top (so clicks always match what's on screen).
     pub hits: std::cell::RefCell<Vec<crate::ui::Hit>>,
@@ -204,6 +207,7 @@ impl App {
             deleting: Default::default(),
             jobs: Default::default(),
             hover: None,
+            held: Held::default(),
             hits: Default::default(),
             list_scroll: Default::default(),
         }
@@ -561,7 +565,8 @@ impl App {
                     match latest {
                         Some(s) => {
                             self.set_settings(s);
-                            self.notice = Some("Setup complete — press ? for keys".into());
+                            let help = self.keymap.key(crate::keymap::Command::Help).map_or("?".into(), crate::keymap::display);
+                            self.notice = Some(format!("Setup complete — press {help} for keys"));
                             Action::SettingsChanged
                         }
                         None => Action::None,
@@ -607,7 +612,7 @@ impl App {
             return self.editor_outcome(outcome);
         }
         if self.show_help {
-            if matches!(key, Key::Char('?') | Key::Esc | Key::Char('q')) {
+            if matches!(key, Key::Esc | Key::Char('q')) || self.keymap.command(key) == Some(crate::keymap::Command::Help) {
                 self.show_help = false;
             }
             return Action::None;
@@ -674,6 +679,7 @@ impl App {
             Outcome::EditScript(id) => Action::EditScript(id),
             Outcome::ReposChanged => Action::ReposChanged,
             Outcome::RunSetup => Action::RunSetup,
+            Outcome::ViewLogs => Action::ViewLogs,
             Outcome::LoadPeople => Action::LoadReviewPeople,
             Outcome::ConfirmReset => {
                 self.modal = Some(crate::modals::Modal::ConfirmReset);
@@ -724,7 +730,6 @@ impl App {
                 "No Linear project",
             ),
             C::ToggleLog => self.show_log = !self.show_log,
-            C::ViewLogs => return Action::ViewLogs,
             C::NewWorktree => {
                 if self.snapshot.repos.is_empty() {
                     self.modal = Some(self.add_repo_modal());
@@ -1370,6 +1375,13 @@ fn linear_url(url: &str, s: &Settings) -> String {
 
 fn ticket_of(v: &WorktreeView) -> Option<&str> {
     v.linear.as_ref().map(|l| l.identifier.as_str())
+}
+
+/// Modifier keys held on their own (mapped from crossterm in main.rs).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Held {
+    pub shift: bool,
+    pub ctrl: bool,
 }
 
 /// Backend-independent mouse events (mapped from crossterm in main.rs).

@@ -160,16 +160,15 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `n` | New worktree (adds a repository first if none is tracked) |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
 | `v` | Review requests: the PRs waiting on your review, in place of the list (see [Review Requests](#review-requests)) |
-| `V` | Review requests beside the list; `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
+| `V` | Review requests beside the list (in terminals with the kitty keyboard protocol — kitty, Ghostty, WezTerm, recent iTerm2 — holding Shift shows this on the key bar, and holding Ctrl shows `Ctrl+V`'s); `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
 | `Ctrl+V` | Review requests in a new terminal window (`am-tui --reviews`; leaving the page there closes it) |
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list. With the review page beside the list, `Tab` goes list → review page → Jobs pane |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
-| `L` | Open `debug.log` in your editor (the `Open in` setting); once the log has rotated into `debug.log.1`, open the log folder in Finder instead |
 | `s` | Settings |
 | `f` | Suggest a feature (files a GitHub issue via `gh`) |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
-| `?` | Help overlay with every key and the status legend |
+| `h` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
 
 These are the defaults. To change them, open **Settings → Key bindings…**: pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `?` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "feedback": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`; `none` unbinds the action.
@@ -629,7 +628,7 @@ am logs -n 500 --level debug    # more history (set logLevel to debug first)
 am logs --open                  # the whole file in your editor
 ```
 
-You can also press `w` in the dashboard to see the log live, or `L` to open it in your editor.
+You can also press `w` in the dashboard to see the log live, or use **Settings → View logs…** to open it in your editor (the `Open in` setting; once the log has rotated into `debug.log.1`, it opens the log folder in Finder instead).
 
 <details>
 <summary><strong>Common issues</strong></summary>

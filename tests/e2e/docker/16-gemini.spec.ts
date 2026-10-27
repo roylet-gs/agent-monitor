@@ -33,10 +33,10 @@ test("a Gemini CLI session shows its status and a ✦ gemini badge", async ({ pa
   await tui.screenshot("gemini-session");
 
   // The help overlay explains the badge.
-  await tui.sendKey("?");
+  await tui.sendKey("h");
   await tui.waitForText("session from another harness plugin, by id (no badge: Claude Code)");
   await tui.screenshot("gemini-help");
-  await tui.sendKey("?");
+  await tui.sendKey("h");
 });
 
 test("a Codex CLI session is found from its payload cwd and shows ✦ codex", async ({ page }) => {

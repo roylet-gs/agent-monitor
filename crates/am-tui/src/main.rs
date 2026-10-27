@@ -27,13 +27,55 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use am_core::{info, settings};
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    self, DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture, Event, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers, KeyboardEnhancementFlags, ModifierKeyCode, MouseButton, MouseEventKind,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 use ratatui::crossterm::execute;
 
-use app::{Action, App, Key, Mouse};
+use app::{Action, App, Held, Key, Mouse};
+
+/// Whether the terminal speaks the kitty keyboard protocol (kitty, Ghostty,
+/// WezTerm, recent iTerm2…), checked once at startup. Only then are
+/// modifier keys reported on their own, so the key bar can follow them.
+static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
+
+/// Turn the kitty keyboard protocol on or off (no-op where unsupported).
+/// Alternate keys keep Shift+v arriving as `V` and Shift+/ as `?`.
+fn set_keyboard(on: bool) {
+    if !KEYBOARD_ENHANCED.load(Ordering::Relaxed) {
+        return;
+    }
+    let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+        | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+        | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES;
+    let r = if on {
+        execute!(io::stdout(), PushKeyboardEnhancementFlags(flags), EnableFocusChange)
+    } else {
+        execute!(io::stdout(), PopKeyboardEnhancementFlags, DisableFocusChange)
+    };
+    if let Err(e) = r {
+        am_core::warn!("tui", "Couldn't {} the kitty keyboard protocol: {e}", if on { "enable" } else { "disable" });
+    }
+}
+
+/// The held modifiers after a key event: a Shift/Ctrl key pressed or
+/// released on its own, or Ctrl reported on another key. (Shift can't be
+/// read off other keys: an alternate key such as `V` arrives without it.)
+fn held_after(held: Held, k: &KeyEvent) -> Held {
+    let down = k.kind != KeyEventKind::Release;
+    match k.code {
+        KeyCode::Modifier(ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift) => Held { shift: down, ..held },
+        KeyCode::Modifier(ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl) => Held { ctrl: down, ..held },
+        KeyCode::Modifier(_) => held,
+        _ => Held { ctrl: k.modifiers.contains(KeyModifiers::CONTROL), ..held },
+    }
+}
 
 fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
     let ctrl = mods.contains(KeyModifiers::CONTROL);
@@ -105,10 +147,16 @@ fn main() -> io::Result<()> {
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(io::stdout(), DisableMouseCapture);
+        set_keyboard(false);
         hook(info);
     }));
     set_mouse(app.settings.mouse_enabled);
+    let enhanced = matches!(ratatui::crossterm::terminal::supports_keyboard_enhancement(), Ok(true));
+    info!("tui", "Kitty keyboard protocol {}", if enhanced { "supported: modifier keys update the key bar" } else { "not supported" });
+    KEYBOARD_ENHANCED.store(enhanced, Ordering::Relaxed);
+    set_keyboard(true);
     let result = run(&mut terminal, &mut app, &collector);
+    set_keyboard(false);
     set_mouse(false);
     ratatui::restore();
     collector.shutdown();
@@ -347,7 +395,26 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
 
         if event::poll(Duration::from_millis(100))? {
             let action = match event::read()? {
-                Event::Key(k) if k.kind != KeyEventKind::Release => map_key(k.code, k.modifiers).map(|key| app.on_key(key)),
+                Event::Key(k) => {
+                    let held = held_after(app.held, &k);
+                    if held != app.held {
+                        app.held = held;
+                        dirty = true;
+                    }
+                    match k.code {
+                        KeyCode::Modifier(_) => None,
+                        _ if k.kind == KeyEventKind::Release => None,
+                        _ => map_key(k.code, k.modifiers).map(|key| app.on_key(key)),
+                    }
+                }
+                // Switching away mid-press would leave a modifier stuck.
+                Event::FocusLost => {
+                    if app.held != Held::default() {
+                        app.held = Held::default();
+                        dirty = true;
+                    }
+                    None
+                }
                 Event::Mouse(m) if app.settings.mouse_enabled => {
                     let mouse = match m.kind {
                         MouseEventKind::ScrollDown => Some(Mouse::Scroll(1)),
@@ -581,14 +648,43 @@ fn settings_file_mtime() -> Option<std::time::SystemTime> {
 fn edit_file(terminal: &mut ratatui::DefaultTerminal, mouse: bool, path: &std::path::Path) -> io::Result<()> {
     let editor = std::env::var("VISUAL").or_else(|_| std::env::var("EDITOR")).unwrap_or_else(|_| "vi".into());
     set_mouse(false);
+    set_keyboard(false);
     ratatui::restore();
     // $EDITOR may carry arguments (e.g. `code --wait`), so run it via the shell.
     let status = std::process::Command::new("sh").arg("-c").arg(format!("{editor} \"$1\"")).arg("sh").arg(path).status();
     *terminal = ratatui::init();
     set_mouse(mouse);
+    set_keyboard(true);
     terminal.clear()?;
     if let Err(e) = status {
         am_core::warn!("tui", "Failed to run editor {editor} on {}: {e}", path.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::crossterm::event::KeyEventState;
+
+    fn ev(code: KeyCode, mods: KeyModifiers, kind: KeyEventKind) -> KeyEvent {
+        KeyEvent::new_with_kind_and_state(code, mods, kind, KeyEventState::NONE)
+    }
+
+    #[test]
+    fn modifier_keys_held_on_their_own_are_tracked() {
+        let shift = KeyCode::Modifier(ModifierKeyCode::LeftShift);
+        let ctrl = KeyCode::Modifier(ModifierKeyCode::RightControl);
+        let h = held_after(Held::default(), &ev(shift, KeyModifiers::SHIFT, KeyEventKind::Press));
+        assert_eq!(h, Held { shift: true, ctrl: false });
+        // `V` (an alternate key) arrives without SHIFT: shift stays held.
+        let h = held_after(h, &ev(KeyCode::Char('V'), KeyModifiers::NONE, KeyEventKind::Press));
+        assert!(h.shift);
+        let h = held_after(h, &ev(shift, KeyModifiers::SHIFT, KeyEventKind::Release));
+        assert_eq!(h, Held::default());
+        let h = held_after(h, &ev(ctrl, KeyModifiers::CONTROL, KeyEventKind::Press));
+        assert!(h.ctrl);
+        // A key without Ctrl means it was let go unseen.
+        assert!(!held_after(h, &ev(KeyCode::Char('j'), KeyModifiers::NONE, KeyEventKind::Press)).ctrl);
+    }
 }

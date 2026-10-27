@@ -9,4 +9,4 @@ expression: "render(&app, 100, 8)"
 │                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- ⏎ open  │ g PR  l linear  │ ? help  q quit                               ⚠ GitHub offline — cached
+ ⏎ open  │ g PR  l linear  │ h help  q quit                               ⚠ GitHub offline — cached

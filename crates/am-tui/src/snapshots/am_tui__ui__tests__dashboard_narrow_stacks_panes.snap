@@ -25,4 +25,4 @@ expression: "render(&fixture(), 80, 24)"
 │                                                                              │
 │                                                                              │
 ╰────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ ? help  q quit
+ ⏎ open  │ g PR  l linear  │ h help  q quit

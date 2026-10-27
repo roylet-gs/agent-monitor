@@ -24,7 +24,6 @@ pub enum Command {
     ReviewWindow,
     AddRepo,
     ToggleLog,
-    ViewLogs,
     Settings,
     Feedback,
     Refresh,
@@ -40,7 +39,7 @@ pub enum Command {
 
 impl Command {
     /// Every command, in the order the Key bindings page lists them.
-    pub const ALL: [Command; 24] = [
+    pub const ALL: [Command; 23] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -53,7 +52,6 @@ impl Command {
         Command::ReviewWindow,
         Command::AddRepo,
         Command::ToggleLog,
-        Command::ViewLogs,
         Command::Settings,
         Command::Feedback,
         Command::Refresh,
@@ -86,7 +84,6 @@ impl Command {
             Command::ReviewWindow => "reviewWindow",
             Command::AddRepo => "addRepo",
             Command::ToggleLog => "toggleLog",
-            Command::ViewLogs => "viewLogs",
             Command::Settings => "settings",
             Command::Feedback => "feedback",
             Command::Refresh => "refresh",
@@ -120,7 +117,6 @@ impl Command {
             Command::ReviewWindow => "Reviews in new window",
             Command::AddRepo => "Add repository",
             Command::ToggleLog => "Toggle log pane",
-            Command::ViewLogs => "View logs",
             Command::Settings => "Settings",
             Command::Feedback => "Suggest a feature",
             Command::Refresh => "Refresh now",
@@ -150,11 +146,10 @@ impl Command {
             Command::ReviewWindow => "The review page in a new terminal window",
             Command::AddRepo => "Track another repository",
             Command::ToggleLog => "Show or hide the debug.log pane",
-            Command::ViewLogs => "Open debug.log in the editor (the log folder once it has rotated)",
             Command::Settings => "Open this editor",
             Command::Feedback => "File a feature request on GitHub",
             Command::Refresh => "Refresh git, PRs and tickets now",
-            Command::Help => "The ? overlay",
+            Command::Help => "The keys overlay",
             Command::Quit => "Leave am (esc and ctrl-c always quit too)",
             Command::MoveDown => "Next worktree (↓ always works)",
             Command::MoveUp => "Previous worktree (↑ always works)",
@@ -180,7 +175,6 @@ impl Command {
             Command::ReviewWindow => "new window",
             Command::AddRepo => "add repo",
             Command::ToggleLog => "log",
-            Command::ViewLogs => "logs",
             Command::Settings => "settings",
             Command::Feedback => "feedback",
             Command::Refresh => "refresh",
@@ -204,11 +198,10 @@ impl Command {
             Command::ReviewWindow => Key::CtrlV,
             Command::AddRepo => Key::Char('A'),
             Command::ToggleLog => Key::Char('w'),
-            Command::ViewLogs => Key::Char('L'),
             Command::Settings => Key::Char('s'),
             Command::Feedback => Key::Char('f'),
             Command::Refresh => Key::Char('r'),
-            Command::Help => Key::Char('?'),
+            Command::Help => Key::Char('h'),
             Command::Quit => Key::Char('q'),
             Command::MoveDown => Key::Char('j'),
             Command::MoveUp => Key::Char('k'),
@@ -295,7 +288,7 @@ pub fn key_name(key: Key) -> Option<String> {
     })
 }
 
-/// How a key is shown on the key bar, in `?` and on the Key bindings page.
+/// How a key is shown on the key bar, in the help overlay and on the Key bindings page.
 pub fn display(key: Key) -> String {
     match key {
         Key::Char(' ') => "space".into(),
@@ -451,8 +444,6 @@ mod tests {
         assert_eq!(m.command(Key::Down), Some(Command::MoveDown));
         assert_eq!(m.command(Key::CtrlC), Some(Command::Quit));
         assert_eq!(m.command(Key::Home), Some(Command::Top));
-        assert_eq!(m.command(Key::Char('L')), Some(Command::ViewLogs));
-        assert_eq!(Command::from_id("viewLogs"), Some(Command::ViewLogs));
         assert!(m.overrides().is_empty());
         // Every default is storable and not reserved.
         for c in Command::ALL {
