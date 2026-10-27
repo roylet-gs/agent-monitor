@@ -821,6 +821,18 @@ pub fn upsert_worktree(
     Ok(wt)
 }
 
+/// Every path some standalone row points at (headline, session or
+/// subagent): the ones [`upsert_worktree`] would promote.
+pub fn standalone_paths(conn: &Connection) -> rusqlite::Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT path FROM standalone_sessions
+         UNION SELECT standalone_path FROM sessions WHERE standalone_path IS NOT NULL
+         UNION SELECT standalone_path FROM subagents WHERE standalone_path IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    rows.collect()
+}
+
 /// Move a standalone session's rows (headline, sessions, subagents) onto the
 /// worktree now tracked at `path`, so an agent already running there keeps
 /// showing once its repo is added. A no-op when nothing is standalone there.

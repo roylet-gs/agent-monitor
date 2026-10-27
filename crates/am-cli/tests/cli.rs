@@ -3,6 +3,9 @@
 //! ~/.claude), with fake `gh`/editor binaries first on `PATH`. Ported from
 //! the applicable `tests/commands/*.test.ts`.
 
+// Seeding DBs in this process must not write the real debug.log (the `am` children log to their temp dir).
+am_core::silence_unit_tests!();
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;
@@ -844,6 +847,29 @@ fn logs_filter_tail_and_clear() {
     assert_eq!(env.ok(&["logs", "--module", "github", "--lines", "1"]).stdout, "[t3] [WARN] [github] three\n");
     assert_eq!(env.ok(&["logs", "--clear"]).stdout, "Log file cleared.\n");
     assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+}
+
+#[test]
+fn perf_reports_stages_against_budgets() {
+    let env = Env::new();
+    std::fs::write(
+        env.data().join("debug.log"),
+        "[2000-01-01T00:00:00.000Z] [INFO] [perf] ui.frame n=40 p50=1.00ms p95=3.00ms max=9.00ms budget=16.00ms\n\
+         [2000-01-01T00:00:01.000Z] [DEBUG] [tui] git refresh for 56 worktree(s) in 8.1s\n\
+         [2000-01-01T00:00:02.000Z] [WARN] [perf] collector.git slow: p95 8.10s > budget 3.00s (n=20, max 8.10s)\n",
+    )
+    .unwrap();
+    // Everything is older than the default 24 h window.
+    assert!(env.ok(&["perf"]).stdout.starts_with("No timings in "));
+    let table = env.ok(&["perf", "--since", "all"]).stdout;
+    assert!(table.contains("Over budget: collector.git"), "{table}");
+    let rows = env.ok(&["perf", "--since", "all", "--json"]).json();
+    let row = |stage: &str| rows.as_array().unwrap().iter().find(|r| r["stage"] == stage).cloned().unwrap();
+    assert_eq!(row("ui.frame")["status"], "ok");
+    assert_eq!(row("ui.frame")["samples"], 40);
+    assert_eq!(row("collector.git")["status"], "SLOW");
+    assert_eq!(row("collector.git")["slowWarnings"], 1);
+    assert_eq!(env.run(&["perf", "--since", "1w"]).code, 1);
 }
 
 #[test]
