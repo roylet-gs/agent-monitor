@@ -17,4 +17,4 @@ expression: screen
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 ╰────────────────────────────────────────────────────────────────────── 3 of 3 ╯╰──────────────────────────────────────╯
- ⇥ jobs  │ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  ? help  q quit
+ ⇥ jobs  │ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit

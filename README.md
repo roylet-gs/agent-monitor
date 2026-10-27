@@ -159,16 +159,16 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `p` | Open the Linear project |
 | `n` | New worktree (adds a repository first if none is tracked) |
 | `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
-| `v` | Review requests: the PRs waiting on your review (see [Review Requests](#review-requests)) |
-| `t` | Pull into Reviewing: paste an existing branch (say, a PR you're reviewing) and it is checked out in the `Reviewing` group, tracking origin (or reusing a local-only branch), with no questions and no startup script. A branch that exists neither locally nor on origin is refused; `t` never makes a new branch |
-| `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list |
+| `v` | Review requests: the PRs waiting on your review, in place of the list (see [Review Requests](#review-requests)) |
+| `V` | Review requests beside the list (in terminals with the kitty keyboard protocol — kitty, Ghostty, WezTerm, recent iTerm2 — holding Shift shows this on the key bar, and holding Ctrl shows `Ctrl+V`'s); `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
+| `Ctrl+V` | Review requests in a new terminal window (`am-tui --reviews`; leaving the page there closes it) |
+| `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list. With the review page beside the list, `Tab` goes list → review page → Jobs pane |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
-| `L` | Open `debug.log` in your editor (the `Open in` setting); once the log has rotated into `debug.log.1`, open the log folder in Finder instead |
 | `s` | Settings |
 | `f` | Suggest a feature (files a GitHub issue via `gh`) |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
-| `?` | Help overlay with every key and the status legend |
+| `h` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
 
 These are the defaults. To change them, open **Settings → Key bindings…**: pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `?` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "feedback": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`; `none` unbinds the action.
@@ -297,18 +297,20 @@ Worktrees created outside am (`git worktree add`, other tools) are picked up aut
 
 ### Review Requests
 
-With GitHub on, am also looks for the open PRs in your tracked repos that are waiting on your review (one GitHub search every `reviewPollingIntervalMs`, default 2 minutes, plus on `r` and whenever you open the page). The count sits in the top-right corner of the dashboard's border as ` 3 to review ` (with groups, it counts each group shown on the dashboard by name, e.g. ` Platform 4 · 26 to review `, where `to review` is the unnamed default group; `reviewBadgeTotal` adds every open PR asking you or your teams on GitHub regardless of filters, ` · 60 on GitHub `, counted in the same search request); click it or press `v` to open the **Review requests** page, whose border carries the same badge. It lists each PR, with stacked PRs (one whose base is another listed PR's branch) indented under the PR they target as a tree, with its author, who was asked (`you` or `@team`), its Linear ticket (looked up by the PR's branch), CI and review state, and how long ago it changed:
+With GitHub on, am also looks for the open PRs in your tracked repos that are waiting on your review (one GitHub search every `reviewPollingIntervalMs`, default 2 minutes, plus on `r` and whenever you open the page). The count sits in the top-right corner of the dashboard's border as ` 3 to review ` (with groups, it counts each group shown on the dashboard by name, e.g. ` Platform 4 · 26 to review `, where `to review` is the unnamed default group; `reviewBadgeTotal` adds every open PR asking you or your teams on GitHub regardless of filters, ` · 60 on GitHub `, counted in the same search request); click it or press `v` to open the **Review requests** page, whose border carries the same badge (`V` opens it beside the worktree list, `Ctrl+V` in a new terminal window).
+Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking origin, with no questions and no startup script) happens from this page; `am worktree create --tmp` does the same from the CLI. It lists each PR, with stacked PRs (one whose base is another listed PR's branch) indented under the PR they target as a tree, with its author, who was asked (`you` or `@team`), its Linear ticket (looked up by the PR's branch), CI and review state, and how long ago it changed:
 
 | Key | Action |
 | --- | ------ |
 | `Enter` | On a pulled PR, open its worktree in your IDE (just like `Enter` on the dashboard); otherwise pull it into Reviewing, like `t` (a PR from a fork, which can't be pulled, opens in the browser). Clicking the selected row (or double-clicking one) does the same |
 | `g` / `o` | Open the PR in the browser |
 | `l` | Open its Linear ticket |
-| `t` | Pull its branch into **Reviewing** (the same no-questions checkout as `t` on the dashboard). You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard; a PR from a fork can't be pulled |
+| `t` | Pull its branch into **Reviewing**. You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard (beside the list, the list takes the keys); a PR from a fork can't be pulled |
 | `d` | Remove the pulled worktree (the usual delete dialog), staying on the page |
 | `f` | Filters: who's asked, the groups (each with its own order and filters), the badge's GitHub total, **Reset filters…** (who's asked, the default group's filters and the GitHub total back to defaults; groups kept) and **Reset groups…** (removes every group), both asking `y` first, in a small box over the page (changes save at once). The page's bottom border sums up what's in force; clicking it opens the box too |
 | `r` | Clear the review caches (the list, group matches, GitHub total, autocomplete people) and search again now |
-| `Esc` / `q` / `v` | Back to the dashboard |
+| `Esc` / `q` / `v` | Back to the dashboard (beside the list: `Esc`/`q`/`V` close the page and `v` gives it the whole screen) |
+| `Tab` | Beside the list: hand the keys to the list (or the Jobs pane) |
 
 What counts is set under **Settings → Review requests** (or in the setup wizard): `reviewRequestsScope` (`all`: requested from you or a team you're on, `direct`: you by name, `teams`: only your teams) decides what's fetched, across every tracked repo. **Groups** (`f` → **Groups…**) split the page: each group takes the PRs its rules match and passes the rest down to the next, top to bottom; what no group takes falls to the **default group** at the bottom, which can have rules too: what it doesn't match is hidden (the bottom border then says `N hidden`). With no groups, everything is in the default group and the page looks as it always has. Each group (the default one too) has its own order, `direct` (PRs asking you by name first), `repo`, `updated` (newest first) or `oldest` (waiting longest), and its own filters: authors, who's asked (you by name, or one of your teams), specific teams, only / not in repos, draft or ready, CI checks, review state, whether you've already reviewed it, age (older than N days), whether it has a Linear ticket, text in the title or branch, and GitHub search terms (`label:urgent -author:app/dependabot`, checked by GitHub in the same request). A new default group has every filter off; settings from before groups (`reviewHideDrafts`, `reviewHideReviewed`, `reviewIncludeRepos`, `reviewExcludeRepos`, `reviewSearchQualifiers`, `reviewSort`) become the default group's filters and order. Rows always show the PR's `@author` in full; a long title is cut instead. All of a group's rules must match; a list (authors, teams, repos) matches any of its entries. On the groups page `a` adds a group under the selected one, `x` removes it, `J`/`K` move it, `⏎` edits it, `space` switches it off or on (a group that's off takes nothing, so its PRs fall to the next group; the default group off hides everything no group took) and `b` toggles whether it's counted on the dashboard. In a group's form, the authors, teams and repos lists autocomplete: people who can author PRs in your tracked repos (each repo's assignable users on GitHub, looked up at most once an hour and cached, plus the authors already on the page), the teams asked in the list, and your tracked repos; `⇥` (or `⏎` partway through a name) takes the highlighted suggestion, `↑`/`↓` pick, and a click takes one; an entry that matches no known person, team or repo is flagged with ⚠ (a group that never matches anything gets no section on the page). While the groups page is open it sits at the bottom of the page, and the page above previews the groups as you edit them, keystroke by keystroke, from the PRs already loaded: no GitHub calls until a group's GitHub search terms change. GitHub has no push channel a local app can subscribe to, so this is polling: one GraphQL request per refresh.
 
@@ -627,7 +629,7 @@ am logs -n 500 --level debug    # more history (set logLevel to debug first)
 am logs --open                  # the whole file in your editor
 ```
 
-You can also press `w` in the dashboard to see the log live, or `L` to open it in your editor.
+You can also press `w` in the dashboard to see the log live, or use **Settings → View logs…** to open it in your editor (the `Open in` setting; once the log has rotated into `debug.log.1`, it opens the log folder in Finder instead).
 
 **The dashboard feels slow.** `am perf` shows how long each part has been taking against its budget, and `am doctor` warns when one was over budget in the last hour:
 

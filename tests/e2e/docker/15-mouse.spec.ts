@@ -34,7 +34,7 @@ test("key-bar hints are clickable and a click closes help", async ({ page }) => 
   const tui = new RustTui(page);
   await tui.open();
 
-  await tui.clickText("? help");
+  await tui.clickText("h help");
   await tui.waitForText("toggle help");
   await tui.screenshot("mouse-keybar-help");
   await tui.clickText("─Worktrees");
@@ -50,7 +50,7 @@ test("hovering highlights rows and key-bar hints", async ({ page }) => {
   await expect.poll(() => tui.bgIsDefault(row.col, row.row)).toBe(false);
   await tui.screenshot("mouse-hover-row");
   // Hovering a hint lights it up and the row goes back to normal.
-  const hint = await tui.hoverText("? help");
+  const hint = await tui.hoverText("h help");
   await expect.poll(() => tui.bgIsDefault(hint.col, hint.row)).toBe(false);
   expect(await tui.bgIsDefault(row.col, row.row)).toBe(true);
   // Hover never moves the selection.
@@ -116,7 +116,7 @@ test("Mouse can be turned off in settings by clicking it", async ({ page }) => {
 
   // Clicks no longer reach the app.
   await tui.selectRow("main");
-  await tui.clickText("? help");
+  await tui.clickText("h help");
   await page.waitForTimeout(500);
   expect(await tui.getScreenText()).not.toContain("toggle help");
   expect(await tui.selectedName()).toBe("main");

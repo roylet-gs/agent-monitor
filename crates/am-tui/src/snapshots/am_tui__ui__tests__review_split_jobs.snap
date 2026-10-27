@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 120, 16)"
+---
+╭─Worktrees ────────────────────────────────── 3 to review ╮╭─Review requests ─────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────││agent-monitor ────────────────────────────────────────────│
+│▏◑ feature/refac… ◆2 ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││ Batch the PR…  @alice ✓ pulled you           #51✓ …   0s │
+│ ◐ fix/offline-cache                        4m ▓░░░░ 185k ││ Typo in README  @outsider fork @docs         #48✓ …   0s │
+│                                                          ││gridsight ────────────────────────────────────────────────│
+│gridsight ────────────────────────────────────────────────││▌Feeder loa…  @alice ◐ pulling… you +1 ENG-77 #902✗ …  0s │
+│ · main                              ↑2 ±3  4m            ││                                                          │
+│                                                          ││                                                          │
+│Reviewing ────────────────────────────────────────────────│╰ you + your teams ──────────────────────────────── 3 of 3 ╯
+│ ◐ feature/902 creating…                                  │╭─Jobs ────────────────────────────────────────────────────╮
+│                                                          ││ ◐ Create feature/902                                     │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+│                                                          ││                                                          │
+╰────────────────────────────────────────────────── 1 of 3 ╯╰──────────────────────────────────────────────────────────╯
+ ⏎ pull  g PR  l ticket  t pull into Reviewing  │ r refresh  ⇥ jobs  esc close      Pulling feature/902 into Reviewing…

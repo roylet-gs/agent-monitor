@@ -19,4 +19,4 @@ expression: screen
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 ╰────────────────────────────────────────────────────────────────────── 1 of 3 ╯╰──────────────────────────── ⇥ answer ╯
- ⇥ answer  │ ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  ? help  q quit
+ ⇥ answer  │ ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit

@@ -29,10 +29,10 @@ test("a worktree running an agent's shell command is highlighted", async ({ page
   await tui.screenshot("shell-command-badge-selected");
 
   // The help overlay explains the badge.
-  await tui.sendKey("?");
+  await tui.sendKey("h");
   await tui.waitForText("$ 1 command an agent's shell command");
   await tui.screenshot("shell-command-help");
-  await tui.sendKey("?");
+  await tui.sendKey("h");
 });
 
 const FILTER_HELP = "processes and agent commands whose command line";

@@ -19,4 +19,4 @@ expression: "render(&app, 120, 18)"
 │                                                                                                                      │
 │                                                                                                                      │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1 of 4 ╯
- ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit

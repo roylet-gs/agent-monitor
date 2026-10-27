@@ -2,7 +2,8 @@ import { test, expect } from "@playwright/test";
 import { RustTui, resetMock, setupMock } from "./helpers/rust-tui";
 
 // PRs waiting on your review: the `N to review` badge on the ─Worktrees
-// border, the `v` page, and `t` pulling one into Reviewing. The mock answers
+// border, the `v` page (`V` beside the list, `ctrl-v` in a new window), and
+// `t` pulling one into Reviewing. The mock answers
 // the review search with gh-review-requests.json: three acme/work PRs. In the
 // default order (`reviewSort: direct`) the ones asking you by name come first,
 // newest first — #61 (head feature/on-origin, ticket ENG-123), #63 (from a
@@ -190,6 +191,55 @@ test("review groups: a group takes its PRs first, with autocomplete and a badge"
   await setupMock({ reviews: false });
   await tui.sendKey("r");
   await tui.waitForText("Nothing waiting on your review", 20_000);
+});
+
+test("V puts the review page beside the list; ctrl-v opens it in a new window", async ({ page }) => {
+  await setupMock({ reviews: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.waitForText("3 to review", 20_000);
+  // t no longer pulls from the dashboard.
+  expect(await tui.keyBar()).not.toContain("pull");
+
+  await tui.sendKey("V");
+  await tui.waitForText("─Review requests");
+  await tui.waitForText("Add retry to the sync job");
+  // Both panes side by side on the same rows.
+  const top = (await tui.lines())[0];
+  expect(top).toMatch(/─Worktrees .*─Review requests/);
+  expect(await tui.keyBar()).toContain("⇥ list");
+  expect(await tui.keyBar()).toContain("t pull into Reviewing");
+  await tui.screenshot("review-split");
+
+  // ⇥ hands the keys to the list: j moves the worktree selection.
+  await tui.sendKey("Tab");
+  await tui.waitForMatch(/⇥ reviews/);
+  const before = await tui.selectedName();
+  await tui.sendKey("j");
+  expect(await tui.selectedName()).not.toBe(before);
+  expect(await tui.getScreenText()).toContain("─Review requests");
+
+  // Back to the review page; esc closes the split.
+  await tui.sendKey("Tab");
+  await tui.waitForMatch(/⇥ list/);
+  await tui.sendKey("Escape");
+  await tui.waitForGone("─Review requests", 5_000);
+  expect(await tui.getScreenText()).toContain("─Worktrees");
+
+  // ctrl-v: no terminal emulator in the container, so the launch error pops up.
+  await tui.sendKey("Control+v");
+  await tui.waitForText("Couldn't open a terminal window", 10_000);
+  await tui.screenshot("review-window-error");
+  await tui.sendKey("Escape");
+  await tui.waitForGone("Couldn't open a terminal window", 5_000);
+
+  // Empty the cached list for the specs that follow.
+  await setupMock({ reviews: false });
+  await tui.sendKey("v");
+  await tui.sendKey("r");
+  await tui.waitForText("Nothing waiting on your review", 20_000);
+  await tui.sendKey("Escape");
+  await tui.waitForGone("to review", 5_000);
 });
 
 test("a GitHub rate limit is explained, not left loading", async ({ page }) => {

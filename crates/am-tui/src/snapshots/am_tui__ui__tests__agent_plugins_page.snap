@@ -25,4 +25,4 @@ expression: "render(&app, 100, 24)"
 │       │                                                                                  │       │
 │       │ gemini · hooks in ~/.gemini/settings.json                                        │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  ? help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit

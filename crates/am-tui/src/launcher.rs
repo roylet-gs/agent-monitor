@@ -102,6 +102,30 @@ pub fn reveal(path: std::path::PathBuf, tx: Sender<Msg>) {
     std::thread::spawn(move || report(&tx, launch::reveal_in_file_manager(&path), "Opened the log folder".into()));
 }
 
+/// `ctrl-v`: this binary's review page (`am-tui --reviews`) in a new
+/// terminal window. A terminal opened through osascript doesn't inherit our
+/// environment, so `AM_DATA_DIR` is passed on in the command.
+pub fn open_review_window(tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let r = std::env::current_exe().map_err(|e| e.to_string()).and_then(|exe| {
+            let data_dir = std::env::var("AM_DATA_DIR").ok().filter(|d| !d.is_empty());
+            let command = review_window_command(&exe.to_string_lossy(), data_dir.as_deref());
+            am_core::info!("launcher", "Opening the review page in a new terminal: {command}");
+            launch::open_terminal(&am_core::paths::home_dir(), Some(&command))
+        });
+        report(&tx, r.map_err(|e| format!("Couldn't open a terminal window: {e}")), "Opened review requests in a new window".into());
+    });
+}
+
+/// The shell command the review window runs.
+fn review_window_command(exe: &str, data_dir: Option<&str>) -> String {
+    let run = format!("{} --reviews", launch::sh_quote(exe));
+    match data_dir {
+        Some(d) => format!("AM_DATA_DIR={} {run}", launch::sh_quote(d)),
+        None => run,
+    }
+}
+
 pub fn open_url(url: String, tx: Sender<Msg>) {
     std::thread::spawn(move || {
         let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
@@ -136,5 +160,19 @@ pub fn spawn_update_check(tx: Sender<Msg>) {
     });
     if let Err(e) = spawned {
         am_core::debug!("update", "could not spawn update-check thread: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::review_window_command;
+
+    #[test]
+    fn the_review_window_runs_this_binary_on_the_same_data_dir() {
+        assert_eq!(review_window_command("/opt/am/am-tui", None), "/opt/am/am-tui --reviews");
+        assert_eq!(
+            review_window_command("/My Apps/am-tui", Some("/tmp/am data")),
+            "AM_DATA_DIR='/tmp/am data' '/My Apps/am-tui' --reviews"
+        );
     }
 }

@@ -25,6 +25,11 @@ pub enum ReviewRow {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReviewPage {
     pub cursor: usize,
+    /// `V`: beside the worktree list instead of in its place.
+    pub split: bool,
+    /// In a split, whether the page (not the list) takes the keys; a full
+    /// page always does.
+    pub focused: bool,
 }
 
 /// The review groups the page is split by, and the time their age rules
