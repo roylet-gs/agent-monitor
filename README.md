@@ -514,6 +514,7 @@ am --version
 | `am theme import <file>` | Validate a theme file and copy it into `~/.agent-monitor/themes/` | `--name <name>`, `--force` |
 | `am theme remove <name>` | Delete a custom theme (switches back to `ansi` if it was active) | |
 | `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
+| `am perf` | How long each part of am has been taking (UI frames, the collector, git, GitHub/Linear, hooks), from the log, against per-stage budgets | `--since <window>` (`30m`, `1h`, `2d`, `all`; default `24h`), `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear`, `--open` (in your editor, or the folder once rotated) |
 | `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run; also Settings → Run setup again…) | |
 | `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
@@ -547,7 +548,7 @@ Each tool runs the matching `am` command (with `--json` where it has one) in the
 | `theme_list`, `theme_show`, `theme_use` | `am theme …` |
 | `hooks_status`, `hooks_install`, `hooks_uninstall` | `am hooks …` |
 | `script_show`, `script_remove` | `am script …` |
-| `doctor`, `logs` | `am doctor`, `am logs` |
+| `doctor`, `logs`, `perf` | `am doctor`, `am logs`, `am perf` |
 
 Each tool is marked read-only, destructive or open-world (it talks to GitHub/Linear or opens an app), so your agent CLI can ask before running the risky ones. Commands that need the terminal (the dashboard, `agent attach`, `script edit`, `logs --follow`) have no tool. Calls are logged under the `mcp` module (`am logs --module mcp`).
 
@@ -563,7 +564,7 @@ Agent CLI hook ──▶ am-hook ─▶ SQLite (WAL) ◀── am-tui collector 
 
 1. **The agent CLI runs `am-hook`** on every hook event (Claude Code: 11 events covering tool use, prompts, stops, notifications, permission requests, session and subagent lifecycle; other harnesses run it with `--agent <id>`, e.g. Gemini CLI's 7 events with `--agent gemini`). It takes about 3 ms, translates the agent's native event into am's canonical one, maps it to a status and writes it to SQLite. It never blocks or fails the agent. See `docs/agent-providers.md`.
 2. **Subagents are tracked individually** by their agent id, so a background subagent's tool calls don't overwrite the parent's status, and the worktree shows **delegating** until the last one finishes.
-3. **The dashboard** watches SQLite's change counter, so a hook write shows up within about 200 ms. Git status is refreshed for worktrees whose agent just acted, plus a full sweep every `pollingIntervalMs`. Terminals, editor windows and dev servers are detected with a native process scan every 2 seconds.
+3. **The dashboard** watches SQLite's change counter, so a hook write shows up within about 200 ms. Git status runs on its own thread, for worktrees whose agent just acted, plus a sweep every `pollingIntervalMs` that only re-checks worktrees whose git files changed (and all of them every fourth sweep, or on `r`). Terminals, editor windows and dev servers are detected with a native process scan every 2 seconds.
 4. **GitHub and Linear** are fetched on a background thread, batched per repository, and cached in the database so the data survives restarts and outages.
 
 Everything is local: the database, settings and logs live in `~/.agent-monitor/` (or `$AM_DATA_DIR`).
@@ -629,6 +630,17 @@ am logs --open                  # the whole file in your editor
 ```
 
 You can also press `w` in the dashboard to see the log live, or use **Settings → View logs…** to open it in your editor (the `Open in` setting; once the log has rotated into `debug.log.1`, it opens the log folder in Finder instead).
+
+**The dashboard feels slow.** `am perf` shows how long each part has been taking against its budget, and `am doctor` warns when one was over budget in the last hour:
+
+```
+Stage               Samples      p50      p95       Max  Budget (p95)  Status
+collector.cycle          91  17.38ms  77.11ms  735.16ms      500.00ms  was slow
+collector.procscan       74  15.28ms  22.75ms   39.55ms       50.00ms  ok
+ui.frame                155   0.23ms   0.54ms    1.67ms       16.00ms  ok
+```
+
+am logs a summary every 5 minutes (and when it quits), plus a `[perf]` warning when a stage's p95 goes over budget. In a large repo, `git status` is the usual cost; `git config core.fsmonitor true && git config core.untrackedCache true` in that repo makes it much cheaper.
 
 <details>
 <summary><strong>Common issues</strong></summary>

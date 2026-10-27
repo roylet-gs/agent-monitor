@@ -4,9 +4,12 @@
 //! clock-second changes. Every frame is wrapped in synchronized-output
 //! escapes (DEC mode 2026) so terminals that support it present it atomically.
 
+am_core::silence_unit_tests!();
+
 mod app;
 mod data;
 mod folder_browser;
+mod gitwork;
 mod jobs;
 mod keymap;
 mod keys_ui;
@@ -194,14 +197,21 @@ fn set_mouse(on: bool) {
 /// Two left clicks on the same row within this window are a double-click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
+/// Input events handled between two draws at most.
+const MAX_EVENTS_PER_FRAME: usize = 64;
+
 fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data::Collector) -> io::Result<()> {
     let mut theme = theme::Theme::load(&app.settings.theme);
     let (launch_tx, launch_rx) = std::sync::mpsc::channel();
     launcher::spawn_update_check(launch_tx.clone());
     let mut popup_since: Option<Instant> = None;
     let mut log_lines: Vec<String> = Vec::new();
+    let mut log_len: Option<u64> = None;
     let mut dirty = true;
     let mut last_second = am_core::timefmt::now_unix();
+    // Stage timings (`am perf`); `input_at` is when the oldest undrawn input arrived.
+    let mut perf = am_core::perf::Perf::new();
+    let mut input_at: Option<Instant> = None;
     // When the notice on screen appeared, and its text: a new notice (from a
     // key or the launcher) gets its own 2 s, not what's left of the last one's.
     let mut notice_since: Option<(Instant, String)> = None;
@@ -370,7 +380,12 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                 app.rebuild_rows();
             }
             if app.show_log {
-                log_lines = tail_log(200);
+                // Only re-read once something was appended (or it rotated).
+                let len = std::fs::metadata(am_core::paths::log_path()).map(|m| m.len()).ok();
+                if len != log_len || log_lines.is_empty() {
+                    log_len = len;
+                    log_lines = tail_log(200);
+                }
             }
             dirty = true;
         }
@@ -386,15 +401,29 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             _ => {}
         }
         if dirty {
+            let started = Instant::now();
             execute!(io::stdout(), BeginSynchronizedUpdate)?;
             terminal.draw(|f| ui::draw(f, app, &theme, now, &log_lines))?;
             execute!(io::stdout(), EndSynchronizedUpdate)?;
             io::stdout().flush()?;
+            perf.record("ui.frame", started.elapsed());
+            if let Some(at) = input_at.take() {
+                perf.record("ui.input", at.elapsed());
+            }
             dirty = false;
         }
 
-        if event::poll(Duration::from_millis(100))? {
-            let action = match event::read()? {
+        // Wait up to 100 ms for input, then take everything already queued
+        // before drawing again: a held key or a wheel burst costs one frame,
+        // not one per event (capped so a flood can't starve the draw).
+        let mut wait = Duration::from_millis(100);
+        let mut batch = 0;
+        while batch < MAX_EVENTS_PER_FRAME && event::poll(wait)? {
+            wait = Duration::ZERO;
+            batch += 1;
+            let event = event::read()?;
+            input_at.get_or_insert_with(Instant::now);
+            let action = match event {
                 Event::Key(k) => {
                     let held = held_after(app.held, &k);
                     if held != app.held {
@@ -449,6 +478,8 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             };
             if let Some(action) = action {
                 if dispatch(action, terminal, app, collector, &mut theme, &launch_tx)? {
+                    // What this session's timings were, even if it was short.
+                    perf.report(Instant::now());
                     return Ok(());
                 }
                 for sound in app.sounds.drain(..) {
@@ -459,6 +490,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                 }
                 dirty = true;
             }
+        }
+        if !dirty {
+            // Nothing to show for it (a drag, a move over the same target).
+            input_at = None;
         }
     }
 }

@@ -1,6 +1,9 @@
 //! End-to-end: run the real binary against an isolated AM_DATA_DIR and replay
 //! the event sequence that broke the TS counter (taken from debug.log).
 
+// Seeding DBs in this process must not write the real debug.log (the `am` children log to their temp dir).
+am_core::silence_unit_tests!();
+
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};

@@ -177,6 +177,22 @@ pub fn run(as_json: bool) {
         });
     }
 
+    // Stages over budget in the last hour of debug.log (`am perf` has the details).
+    let stages = super::perf::report(Some(Duration::from_secs(3_600)));
+    let slow: Vec<String> =
+        stages.iter().filter(|r| r.over_budget()).map(|r| format!("{} p95 {}", r.stage, am_core::perf::ms(r.p95))).collect();
+    checks.push(Check {
+        name: "Performance".into(),
+        status: if slow.is_empty() { "ok" } else { "warn" },
+        message: if !slow.is_empty() {
+            format!("Over budget in the last hour: {}. Run: am perf", slow.join(", "))
+        } else if stages.is_empty() {
+            "No timings logged in the last hour".into()
+        } else {
+            format!("{} stage(s) within budget in the last hour", stages.len())
+        },
+    });
+
     if as_json {
         let rows: Vec<Value> =
             checks.iter().map(|c| json!({ "name": c.name, "status": c.status, "message": c.message })).collect();

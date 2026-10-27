@@ -25,3 +25,25 @@ jobs:
           out=$(AM_BINARY_DIR=target/debug node npm/agent-monitor/bin/am.js --version)
           echo "$out"
           echo "$out" | grep -q '^am '
+
+  # Performance gates. PR-only: publish.yml reuses this workflow, and a noisy
+  # timing check shouldn't hold up a release of already-merged code.
+  perf:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Work grows linearly with worktrees and reviews (release)
+        run: cargo test --release -p am-tui work_grows -- --nocapture
+      - name: UI timing budgets (release)
+        # Shared runners are slower and noisier than a laptop: budgets ×3.
+        env:
+          AM_PERF_BUDGET_SCALE: "3"
+          AM_PERF_REPORT: ${{ github.step_summary }}
+        run: cargo test --release -p am-tui perf_budget -- --ignored --nocapture
+      - name: Work-count checks (no rewrites, no rereads, no idle git)
+        run: |
+          cargo test --release -p am-core -- sync_writes_nothing_when_git_matches_the_db cached_reads_only_reread_a_changed_transcript
+          cargo test --release -p am-tui gitwork::

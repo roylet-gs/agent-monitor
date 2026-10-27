@@ -34,7 +34,8 @@ specs_for() {
     # --- not covered by E2E (docs, CI, packaging, Rust-only tests) ---------
     *.md | docs/* | .github/* | npm/* | Formula/* | .claude/* | prompt.md | \
     .gitignore | .mcp.json | .npmrc | \
-    crates/*/tests/* | crates/*/examples/* | crates/am-tui/src/snapshots/*)
+    crates/*/tests/* | crates/*/examples/* | crates/am-tui/src/snapshots/* | \
+    crates/am-tui/src/perf_tests.rs)
       echo - ;;
 
     # --- the harness itself: everything -----------------------------------
@@ -57,7 +58,7 @@ specs_for() {
     crates/am-tui/src/modals.rs) echo 09 10 22 23 27 ;;
     crates/am-tui/src/jobs.rs) echo 09 10 22 27 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 ;;
-    crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 ;;
+    crates/am-tui/src/data.rs | crates/am-tui/src/gitwork.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 ;;
     crates/am-tui/src/launcher.rs) echo 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window
 
     # --- am-core ----------------------------------------------------------
@@ -66,7 +67,7 @@ specs_for() {
     crates/am-core/src/grouping.rs) echo 01 05 08 18 24 27 28 ;;
     crates/am-core/src/gitinfo.rs) echo 01 ;;
     crates/am-core/src/timefmt.rs) echo 01 17 ;;
-    crates/am-core/src/log.rs) echo 01 ;; # `w` log pane
+    crates/am-core/src/log.rs | crates/am-core/src/perf.rs) echo 01 ;; # `w` log pane; perf writes `[perf]` log lines
     crates/am-core/src/status.rs) echo 07 08 16 18 24 ;;
     # Harness plugins: hook normalisation seeds every agent row; the installer
     # runs in the wizard; the plugin page and Gemini row are spec 16.
