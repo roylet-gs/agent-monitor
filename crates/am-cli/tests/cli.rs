@@ -3,6 +3,9 @@
 //! ~/.claude), with fake `gh`/editor binaries first on `PATH`. Ported from
 //! the applicable `tests/commands/*.test.ts`.
 
+// Seeding DBs in this process must not write the real debug.log (the `am` children log to their temp dir).
+am_core::silence_unit_tests!();
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::os::unix::fs::PermissionsExt;

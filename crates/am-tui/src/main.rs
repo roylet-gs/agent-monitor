@@ -4,6 +4,8 @@
 //! clock-second changes. Every frame is wrapped in synchronized-output
 //! escapes (DEC mode 2026) so terminals that support it present it atomically.
 
+am_core::silence_unit_tests!();
+
 mod app;
 mod data;
 mod folder_browser;
@@ -144,6 +146,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     let mut log_lines: Vec<String> = Vec::new();
     let mut dirty = true;
     let mut last_second = am_core::timefmt::now_unix();
+    // Stage timings (`am perf`); `input_at` is when the oldest undrawn input arrived.
+    let mut perf = am_core::perf::Perf::new();
+    let mut input_at: Option<Instant> = None;
     // When the notice on screen appeared, and its text: a new notice (from a
     // key or the launcher) gets its own 2 s, not what's left of the last one's.
     let mut notice_since: Option<(Instant, String)> = None;
@@ -328,15 +333,22 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             _ => {}
         }
         if dirty {
+            let started = Instant::now();
             execute!(io::stdout(), BeginSynchronizedUpdate)?;
             terminal.draw(|f| ui::draw(f, app, &theme, now, &log_lines))?;
             execute!(io::stdout(), EndSynchronizedUpdate)?;
             io::stdout().flush()?;
+            perf.record("ui.frame", started.elapsed());
+            if let Some(at) = input_at.take() {
+                perf.record("ui.input", at.elapsed());
+            }
             dirty = false;
         }
 
         if event::poll(Duration::from_millis(100))? {
-            let action = match event::read()? {
+            let event = event::read()?;
+            input_at.get_or_insert_with(Instant::now);
+            let action = match event {
                 Event::Key(k) if k.kind != KeyEventKind::Release => map_key(k.code, k.modifiers).map(|key| app.on_key(key)),
                 Event::Mouse(m) if app.settings.mouse_enabled => {
                     let mouse = match m.kind {
@@ -381,6 +393,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     log_lines = tail_log(200);
                 }
                 dirty = true;
+            }
+            if !dirty {
+                // Nothing to show for it (a drag, a move over the same target).
+                input_at = None;
             }
         }
     }

@@ -20,6 +20,7 @@ use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, ReviewFetch
 use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::context::ContextUsage;
+use am_core::perf::Perf;
 use am_core::usage::DailyUsage;
 use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktrees};
 use rusqlite::Connection;
@@ -196,6 +197,8 @@ struct Worker {
     /// Newest change in the plugin dir; a new value reloads the registry (a
     /// manifest was added, edited or removed while the TUI runs).
     plugins_stamp: Option<std::time::SystemTime>,
+    /// Stage timings (`am perf`).
+    perf: Perf,
 }
 
 impl Worker {
@@ -226,6 +229,7 @@ impl Worker {
             last_full: None,
             data_version: -1,
             last_sent: None,
+            perf: Perf::new(),
         }
     }
 
@@ -256,13 +260,17 @@ impl Worker {
                 }
                 Err(RecvTimeoutError::Timeout) => {}
             }
-            if let Err(e) = self.cycle(force) {
-                warn!("tui", "Refresh failed: {e}");
+            let started = Instant::now();
+            match self.cycle(force) {
+                Ok(true) => self.perf.record("collector.cycle", started.elapsed()),
+                Ok(false) => {}
+                Err(e) => warn!("tui", "Refresh failed: {e}"),
             }
         }
     }
 
-    fn cycle(&mut self, force: bool) -> rusqlite::Result<()> {
+    /// One collector pass; `false` when there was nothing to do.
+    fn cycle(&mut self, force: bool) -> rusqlite::Result<bool> {
         let full_due = force || self.last_full.is_none_or(|t| t.elapsed() >= self.poll_interval());
         let procs_due = self.last_procs.is_none_or(|t| t.elapsed() >= PROCESS_INTERVAL);
         let usage_due = self.settings.show_daily_tokens
@@ -280,13 +288,16 @@ impl Worker {
         }
         let dv = db::data_version(&self.conn)?;
         if !full_due && !procs_due && !usage_due && !ints_changed && dv == self.data_version {
-            return Ok(());
+            return Ok(false);
         }
         self.data_version = dv;
 
         if force || self.last_sync.is_none_or(|t| t.elapsed() >= SYNC_INTERVAL) {
             self.last_sync = Some(Instant::now());
-            if let Ok(results) = worktrees::sync_all(&self.conn) {
+            let started = Instant::now();
+            let synced = worktrees::sync_all(&self.conn);
+            self.perf.record("collector.sync", started.elapsed());
+            if let Ok(results) = synced {
                 for (repo, r) in results {
                     match r {
                         Ok(rep) if !rep.added.is_empty() || !rep.removed.is_empty() => {
@@ -299,7 +310,9 @@ impl Worker {
             }
         }
         if usage_due {
+            let started = Instant::now();
             self.usage.refresh(&am_core::harness::enabled(&self.settings));
+            self.perf.record("collector.usage", started.elapsed());
             self.last_usage = Some(Instant::now());
         }
         let worktrees = db::worktrees(&self.conn)?;
@@ -310,7 +323,9 @@ impl Worker {
                 am_core::harness::reload();
                 info!("tui", "Harness plugins changed on disk; reloaded ({} registered)", am_core::harness::all().len());
             }
+            let started = Instant::now();
             self.procs = self.collect_procs(&worktrees);
+            self.perf.record("collector.procscan", started.elapsed());
             self.last_procs = Some(Instant::now());
         }
         let agents = db::agent_states(&self.conn)?;
@@ -341,7 +356,9 @@ impl Worker {
             let started = Instant::now();
             let fresh = collect_git(&stale);
             debug!("tui", "git refresh for {} worktree(s) in {:?}", fresh.len(), started.elapsed());
+            self.perf.record("collector.git", started.elapsed());
             self.git.extend(fresh);
+            let started = Instant::now();
             for w in &stale {
                 let root = Path::new(&w.path);
                 let usage = agents.get(&w.id).and_then(|a| session_context(a.agent, a.session_id.as_deref(), root));
@@ -351,6 +368,7 @@ impl Worker {
                     self.ctx.insert(session_key(&w.id, &s.session_id), usage);
                 }
             }
+            self.perf.record("collector.context", started.elapsed());
         }
         if full_due {
             self.last_full = Some(Instant::now());
@@ -412,7 +430,9 @@ impl Worker {
 
         let repos = db::repositories(&self.conn)?;
         if full_due || self.stack_git.len() != repos.len() {
+            let started = Instant::now();
             self.refresh_stack_git(&repos, &worktrees_for_stacks(&views));
+            self.perf.record("collector.stacks", started.elapsed());
         }
         let stack = self.infer_stacks(&views);
         let reviews = self.reviews_with_worktrees(&views);
@@ -442,7 +462,7 @@ impl Worker {
             let _ = self.tx.send(snapshot.clone());
             self.last_sent = Some(snapshot);
         }
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -651,6 +671,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         }
     };
     let mut ints = Integrations::new();
+    let mut perf = Perf::new();
     ints.hydrate(&conn);
     let (mut last_gh, mut last_linear): (Option<Instant>, Option<Instant>) = (None, None);
     let mut last_reviews: Option<Instant> = None;
@@ -749,12 +770,14 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             let started = Instant::now();
             let outcome = ints.refresh_github(&conn, &groups, force);
             info!("integrations", "github refresh: {outcome:?} in {:?}", started.elapsed());
+            perf.record("integrations.github", started.elapsed());
             last_gh = Some(Instant::now());
         }
         if linear_due {
             let started = Instant::now();
             let outcome = ints.refresh_linear(&conn, &settings.linear_api_key, &groups, force);
             info!("integrations", "linear refresh: {outcome:?} in {:?}", started.elapsed());
+            perf.record("integrations.linear", started.elapsed());
             last_linear = Some(Instant::now());
         }
         if reviews_due {
@@ -763,6 +786,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
                 repos.iter().map(|r| ReviewRepo::new(r.id.clone(), r.name.clone(), r.path.clone())).collect();
             let outcome = ints.refresh_reviews(&conn, &review_repos, &settings, force || reviews_now);
             info!("integrations", "review requests refresh: {outcome:?} in {:?}", started.elapsed());
+            perf.record("integrations.reviews", started.elapsed());
             last_reviews = Some(Instant::now());
             known_repos = repo_ids;
         }

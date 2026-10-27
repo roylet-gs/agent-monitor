@@ -11,6 +11,7 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::paths;
 
@@ -49,6 +50,14 @@ struct Config {
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
+static SILENT: AtomicBool = AtomicBool::new(false);
+
+/// Stop writing log lines for the rest of the process. The other crates'
+/// unit tests link am-core without its `cfg(test)`, so they call this (see
+/// [`silence_unit_tests!`]) to stay out of the real debug.log too.
+pub fn silence() {
+    SILENT.store(true, Ordering::Relaxed);
+}
 
 pub fn init(level: Level, max_log_size_mb: u64) {
     let _ = CONFIG.set(Config { level, max_bytes: max_log_size_mb.max(1) * 1024 * 1024 });
@@ -66,7 +75,7 @@ pub fn enabled(level: Level) -> bool {
 pub fn log(level: Level, module: &str, message: &str) {
     // Unit tests exercise warn/info paths; never let them write to the real
     // ~/.agent-monitor/debug.log.
-    if cfg!(test) || !enabled(level) {
+    if cfg!(test) || SILENT.load(Ordering::Relaxed) || !enabled(level) {
         return;
     }
     let ts = time::OffsetDateTime::now_utc()
@@ -106,6 +115,25 @@ fn rotate_if_needed() {
     // rename is atomic; a racing writer either lands in the old file (now .1)
     // or creates a fresh debug.log — no lines are lost either way.
     let _ = std::fs::rename(&path, paths::rotated_log_path());
+}
+
+/// In a crate root: silence the log before any unit test runs (a static
+/// initializer, so no test can log first). Only in that crate's `cfg(test)`
+/// build; its binaries (and their integration tests) keep logging.
+#[macro_export]
+macro_rules! silence_unit_tests {
+    () => {
+        #[cfg(test)]
+        #[used]
+        #[cfg_attr(target_os = "macos", unsafe(link_section = "__DATA,__mod_init_func"))]
+        #[cfg_attr(not(target_os = "macos"), unsafe(link_section = ".init_array"))]
+        static SILENCE_LOG_FOR_UNIT_TESTS: extern "C" fn() = {
+            extern "C" fn silence() {
+                $crate::log::silence();
+            }
+            silence
+        };
+    };
 }
 
 #[macro_export]

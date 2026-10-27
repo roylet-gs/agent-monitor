@@ -5,6 +5,8 @@
 //! `hook-event` runs on every agent hook, so it is dispatched before
 //! clap or any other initialisation and shares its code with `am-hook`.
 
+am_core::silence_unit_tests!();
+
 mod commands;
 pub use am_core::hooks_installer;
 mod mcp;
@@ -98,6 +100,8 @@ enum Cmd {
     Doctor(JsonOpt),
     /// Show recent logs
     Logs(LogsArgs),
+    /// How long each part of the app has been taking (from the log), against its budget
+    Perf(PerfArgs),
     /// Run the setup wizard
     Setup,
     /// Get/set agent status for a worktree
@@ -366,6 +370,16 @@ enum ThemeCmd {
 }
 
 #[derive(Args)]
+struct PerfArgs {
+    /// Window to report: 30m, 1h, 2d, or all
+    #[arg(long, value_name = "window", default_value = "24h")]
+    since: String,
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 struct LogsArgs {
     /// Number of log lines to show
     #[arg(short = 'n', long, value_name = "number", default_value = "50")]
@@ -486,6 +500,7 @@ fn main() {
             clear: a.clear,
             open: a.open,
         }),
+        Some(Cmd::Perf(a)) => perf::run(&a.since, a.json),
         Some(Cmd::Status { worktree, set }) => status::run(&worktree, set.as_deref()),
         // Normally caught by the fast path above (e.g. reached via `am --watch hook-event`).
         Some(Cmd::HookEvent { worktree, event, managed: _, agent }) => {
