@@ -1081,13 +1081,26 @@ impl App {
         self.snapshot.groups.iter().flat_map(|g| &g.worktrees).find(|v| v.worktree.id == id)
     }
 
-    /// ⏎ on the review page: a pulled PR opens its worktree in the IDE, like
-    /// ⏎ on the dashboard; one that isn't pulled opens the PR.
+    /// ⏎ (or a click on the selected row) on the review page: a pulled PR
+    /// opens its worktree in the IDE, like ⏎ on the dashboard; one that isn't
+    /// pulled is pulled into Reviewing like `t`, and a fork's opens the PR.
     fn review_open(&mut self) -> Action {
-        match self.review_worktree() {
-            Some(v) => Action::Open(Box::new(v.clone())),
-            None => self.review_open_pr(),
+        if let Some(v) = self.review_worktree() {
+            return Action::Open(Box::new(v.clone()));
         }
+        let Some(r) = self.selected_review().cloned() else { return Action::None };
+        if r.is_cross_repository {
+            return self.review_open_pr();
+        }
+        if r.worktree_id.is_some() {
+            self.notice = Some(format!("{} is being removed", r.head_ref_name));
+            return Action::None;
+        }
+        if self.review_pull(&r).is_some_and(|j| !matches!(j.state, crate::jobs::JobState::Failed(_))) {
+            self.notice = Some(format!("{} is already being pulled", r.head_ref_name));
+            return Action::None;
+        }
+        self.pull_review()
     }
 
     fn review_open_pr(&mut self) -> Action {

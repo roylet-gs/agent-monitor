@@ -56,8 +56,9 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.waitForGone("Review filters");
   expect(await tui.getScreenText()).toContain("─Review requests");
 
-  // ⏎ opens the PR (no browser in the container: the opener's error pops up).
-  await tui.sendKey("Enter");
+  // g opens the PR (no browser in the container: the opener's error pops up).
+  expect(await tui.keyBar()).toContain("⏎ pull  g PR");
+  await tui.sendKey("g");
   await tui.waitForMatch(/✗ |Opened https:\/\/github\.com\/acme\/work\/pull\/61/, 10_000);
   if ((await tui.getScreenText()).includes("✗ ")) {
     await tui.sendKey("x"); // any key closes the popup
@@ -72,11 +73,11 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.waitForText("#63 is from a fork");
   expect(await tui.getScreenText()).toContain("─Review requests");
 
-  // t on #61 pulls its branch into Reviewing, with no questions, and the
-  // page stays open (so more can be pulled) while the row shows progress.
+  // ⏎ on #61 pulls its branch into Reviewing (like t), with no questions,
+  // and the page stays open (so more can be pulled) while the row shows progress.
   await tui.sendKey("k");
   await tui.waitForText("1 of 3");
-  await tui.sendKey("t");
+  await tui.sendKey("Enter");
   await tui.waitForMatch(/pulling…|✓ pulled/, 10_000);
   await tui.waitForText("✓ pulled", 20_000);
   expect(await tui.getScreenText()).toContain("─Review requests");

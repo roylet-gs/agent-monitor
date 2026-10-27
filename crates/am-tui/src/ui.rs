@@ -2691,8 +2691,14 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
         let cmd = |c: Command, label, prio| {
             app.keymap.key(c).map(|k| (crate::keymap::display(k), label, Some(BarHit::Key(k)), prio))
         };
-        keys.push(raw("⏎", if app.review_worktree().is_some() { "open" } else { "open PR" }, Some(Key::Enter), 0));
-        keys.extend(cmd(Command::OpenPr, "PR", 1).filter(|_| app.review_worktree().is_some()));
+        // ⏎ opens a pulled PR's worktree, pulls one that isn't, and opens a fork's PR.
+        let enter = match app.selected_review() {
+            _ if app.review_worktree().is_some() => "open",
+            Some(r) if !r.is_cross_repository => "pull",
+            _ => "open PR",
+        };
+        keys.push(raw("⏎", enter, Some(Key::Enter), 0));
+        keys.extend(cmd(Command::OpenPr, "PR", 1).filter(|_| enter != "open PR"));
         keys.extend(cmd(Command::OpenLinear, "ticket", 0));
         keys.extend(cmd(Command::PullToTmpSpace, "pull into Reviewing", 0));
         keys.extend(cmd(Command::Delete, "remove", 2));
@@ -3813,13 +3819,16 @@ mod tests {
         assert_eq!(app.on_key(Key::Char('t')), Action::None, "a fork can't be pulled");
         assert!(app.notice.as_deref().unwrap().contains("fork"));
         assert!(!app.review_key_available(Key::Char('t')));
+        // A fork's ⏎ opens the PR instead.
+        assert_eq!(app.on_key(Key::Enter), Action::OpenUrl("https://github.com/acme/r1/pull/48".into()));
+        assert!(render(&app, 120, 10).lines().last().unwrap().contains("⏎ open PR"));
         app.on_key(Key::Down);
         assert_eq!(app.on_key(Key::Char('l')), Action::OpenUrl("https://linear.app/t/issue/ENG-77".into()));
-        // Not pulled: ⏎ opens the PR.
-        assert_eq!(app.on_key(Key::Enter), Action::OpenUrl("https://github.com/acme/r2/pull/902".into()));
-        assert!(render(&app, 120, 10).lines().last().unwrap().contains("⏎ open PR"));
+        // Not pulled: ⏎ pulls it, like t.
+        let bar = render(&app, 120, 10).lines().last().unwrap().to_string();
+        assert!(bar.contains("⏎ pull  g PR"), "{bar}");
         assert_eq!(app.on_key(Key::Char('r')), Action::ReloadReviews, "r clears the review caches");
-        let Action::Create(_, repo, req) = app.on_key(Key::Char('t')) else { panic!("expected a create") };
+        let Action::Create(_, repo, req) = app.on_key(Key::Enter) else { panic!("expected a create") };
         assert_eq!(repo.id, "r2");
         assert_eq!(req.branch, "feature/902");
         assert!(req.tmp_space);
@@ -3829,6 +3838,9 @@ mod tests {
         assert!(render(&app, 120, 10).contains("pulling…"));
         assert!(!app.review_key_available(Key::Char('t')));
         assert_eq!(app.on_key(Key::Char('t')), Action::None, "already pulling");
+        assert!(app.notice.as_deref().unwrap().contains("already being pulled"));
+        app.notice = None;
+        assert_eq!(app.on_key(Key::Enter), Action::None, "⏎ doesn't pull twice");
         assert!(app.notice.as_deref().unwrap().contains("already being pulled"));
         // A failed pull says so on the row, and t tries again.
         let job = app.jobs.list.last().unwrap().id;
@@ -3948,7 +3960,9 @@ mod tests {
         let at = find(&app, 120, 10, "Feeder load");
         assert_eq!(click(&mut app, 120, 10, at, false), crate::app::Action::None);
         assert_eq!(app.selected_review().unwrap().pr.number, 902);
-        assert!(matches!(click(&mut app, 120, 10, at, false), crate::app::Action::OpenUrl(_)));
+        // A second click (or a double-click) pulls it; once pulled, it opens the worktree.
+        assert!(matches!(click(&mut app, 120, 10, at, true), crate::app::Action::Create(..)));
+        assert!(matches!(click(&mut app, 120, 10, at, false), crate::app::Action::None));
     }
 
     #[test]
