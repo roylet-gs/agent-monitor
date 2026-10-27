@@ -151,24 +151,25 @@ jobs:
       - name: Homebrew formula + version bump
         run: |
           sha() { cut -d' ' -f1 < <(sha256sum "dist/agent-monitor-v$VERSION-$1.tar.gz"); }
-          mkdir -p Formula
-          sed -e "s/VERSION/$VERSION/g" \
-              -e "s/SHA256_DARWIN_ARM64/$(sha darwin-arm64)/" \
-              -e "s/SHA256_DARWIN_X64/$(sha darwin-x64)/" \
-              -e "s/SHA256_LINUX_ARM64/$(sha linux-arm64)/" \
-              -e "s/SHA256_LINUX_X64/$(sha linux-x64)/" \
-              npm/agent-monitor.rb.tmpl > Formula/agent-monitor.rb
-          perl -0pi -e 's/^version = "[^"]*"/version = "$ENV{VERSION}"/m' Cargo.toml
-          cargo update --workspace
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/agent-monitor.rb Cargo.toml Cargo.lock
-          git commit -m "chore: release v$VERSION"
-          # Another PR may have merged since this run checked out; its own
-          # Publish run waits on the concurrency group, so rebase and retry.
+          # main may have moved since this run checked out (another PR, or the
+          # previous run's own release commit, which touches the same version
+          # lines, so a rebase always conflicts). Regenerate the release commit
+          # on top of the latest main on every attempt instead.
           for attempt in 1 2 3; do
-            git pull --rebase origin main && git push origin HEAD:main && exit 0
-            git rebase --abort 2>/dev/null || true
+            git fetch origin main && git reset --hard origin/main
+            mkdir -p Formula
+            sed -e "s/VERSION/$VERSION/g" \
+                -e "s/SHA256_DARWIN_ARM64/$(sha darwin-arm64)/" \
+                -e "s/SHA256_DARWIN_X64/$(sha darwin-x64)/" \
+                -e "s/SHA256_LINUX_ARM64/$(sha linux-arm64)/" \
+                -e "s/SHA256_LINUX_X64/$(sha linux-x64)/" \
+                npm/agent-monitor.rb.tmpl > Formula/agent-monitor.rb
+            perl -0pi -e 's/^version = "[^"]*"/version = "$ENV{VERSION}"/m' Cargo.toml
+            cargo update --workspace
+            git add Formula/agent-monitor.rb Cargo.toml Cargo.lock
+            git commit -m "chore: release v$VERSION" && git push origin HEAD:main && exit 0
             echo "push attempt $attempt failed, retrying"
             sleep $((attempt * 5))
           done
