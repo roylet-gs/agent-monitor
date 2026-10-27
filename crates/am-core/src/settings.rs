@@ -47,6 +47,8 @@ pub struct Settings {
     pub default_base_branch: String,
     pub polling_interval_ms: u64,
     pub auto_sync_on_startup: bool,
+    /// Dense layout for small panes (1.x's key, reused): panes keep only
+    /// their top line, no blank rows, fewer columns, side panes open below.
     pub compact_view: bool,
     pub hide_main_branch: bool,
     pub audio_notifications: bool,
@@ -551,6 +553,14 @@ mod tests {
         assert!(!Settings::default().startup_script_in_window());
         assert!(!Settings::parse(r#"{"startupScriptMode":"bogus"}"#).startup_script_in_window());
         assert!(Settings::parse(r#"{"startupScriptMode":"window"}"#).startup_script_in_window());
+    }
+
+    #[test]
+    fn compact_view_is_off_by_default() {
+        assert!(!Settings::parse("{}").compact_view);
+        let on = Settings::parse(r#"{"compactView":true}"#);
+        assert!(on.compact_view);
+        assert_eq!(on.to_file_json()["compactView"], true);
     }
 
     #[test]

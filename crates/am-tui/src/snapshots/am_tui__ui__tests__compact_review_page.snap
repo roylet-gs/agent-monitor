@@ -1,0 +1,16 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 60, 12)"
+---
+─Review requests ─ you + your teams ── 1 of 3 ─ 3 to review
+agent-monitor ──────────────────────────────────────────────
+▌Batch the PR q…  @alice ✓ pulled you           #51✓ …   0s
+ Typo in README  @outsider fork   @docs         #48✓ …   0s
+gridsight ──────────────────────────────────────────────────
+ Feeder load forecast v2  @alice  you +1 ENG-77 #902✗ …  0s
+
+
+
+
+
+ ⏎ open  l ticket  t pull into Reviewing  │ esc back

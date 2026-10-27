@@ -13,15 +13,48 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
+use std::cell::Cell;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Key, Row};
 use crate::keymap::Command;
 use crate::theme::{Theme, status_glyph, status_label};
 
+thread_local! {
+    /// `compactView` for the frame being drawn (set by `draw`).
+    static COMPACT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The compact view: panes keep only their top line, overlays fill the
+/// screen, side panes open below and rows use glyphs.
+fn compact() -> bool {
+    COMPACT.with(Cell::get)
+}
+
+/// Room for words rather than glyphs (100 columns; never when compact).
+fn wide(width: u16) -> bool {
+    !compact() && width >= 100
+}
+
+/// A pane's footer (` N of M `, hints): its bottom border, or its top line
+/// when compact.
+fn foot<'a>(block: Block<'a>, line: Line<'a>) -> Block<'a> {
+    if compact() { block.title(line) } else { block.title_bottom(line) }
+}
+
+/// The row a pane's footer is drawn on.
+fn foot_y(rect: Rect) -> u16 {
+    if compact() { rect.y } else { rect.y + rect.height.saturating_sub(1) }
+}
+
+/// Border cells at a pane's left or right edge.
+fn edge() -> u16 {
+    u16::from(!compact())
+}
 
 pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[String]) {
+    COMPACT.with(|c| c.set(app.settings.compact_view));
     // The theme builder previews its draft on the whole dashboard.
     let draft;
     let theme = match app.settings_editor.as_ref().and_then(|e| e.builder.as_ref()) {
@@ -210,6 +243,12 @@ fn bottom_hint_hits(hits: &mut Vec<Hit>, text: &str, rect: Rect) {
     hint_hits(hits, text, x, rect.y + rect.height.saturating_sub(1));
 }
 
+/// Hints in a pane's right-aligned footer (`foot`).
+fn foot_hint_hits(hits: &mut Vec<Hit>, text: &str, rect: Rect) {
+    let x = (rect.x + rect.width).saturating_sub(edge() + text.width() as u16);
+    hint_hits(hits, text, x, foot_y(rect));
+}
+
 /// Tint the cells under the mouse pointer. Text drawn in the tint's own
 /// colour (faint text on `ansi`) switches to the text colour.
 fn hover(f: &mut Frame, theme: &Theme, rect: Rect) {
@@ -241,13 +280,17 @@ struct DashAreas {
 const SPLIT_SIDE_BY_SIDE: u16 = 100;
 
 fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
-    let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
+    let log_h = match (app.show_log, compact()) {
+        (false, _) => 0,
+        (true, false) => (area.height / 3).max(5),
+        (true, true) => (area.height / 4).max(3),
+    };
     let [body, log, keys] =
         Layout::vertical([Constraint::Min(5), Constraint::Length(log_h), Constraint::Length(1)]).areas(area);
     if app.reviews.as_ref().is_some_and(|p| p.split) {
-        // List | review page, or stacked when narrow; the jobs pane goes
-        // under the review page.
-        let [list, side] = if body.width >= SPLIT_SIDE_BY_SIDE {
+        // List | review page, or stacked when narrow or compact; the jobs
+        // pane goes under the review page.
+        let [list, side] = if body.width >= SPLIT_SIDE_BY_SIDE && !compact() {
             Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(body)
         } else {
             Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(body)
@@ -257,6 +300,12 @@ fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
             return DashAreas { list, jobs: Some(jobs), reviews: Some(reviews), log, keys };
         }
         return DashAreas { list, jobs: None, reviews: Some(side), log, keys };
+    }
+    if app.jobs.visible() && compact() {
+        // Under the list rather than beside it.
+        let jobs_h = (body.height * 2 / 5).clamp(5, 14);
+        let [list, jobs] = Layout::vertical([Constraint::Min(4), Constraint::Length(jobs_h)]).areas(body);
+        return DashAreas { list, jobs: Some(jobs), reviews: None, log, keys };
     }
     if app.jobs.visible() {
         let pane_w = (body.width / 3).clamp(34, 60).min(body.width.saturating_sub(40));
@@ -270,17 +319,22 @@ fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
 /// Settings box, then inside it the update banner, field list and help line.
 /// `rows` fields plus `extra` lines (headers, blanks, help) tall.
 fn settings_areas(area: Rect, update: Option<&am_core::update_check::Update>, rows: u16, extra: u16) -> (Rect, [Rect; 3]) {
-    let w = 84.min(area.width.saturating_sub(2));
+    let w = settings_width(area);
     // Headline, the (possibly wrapped) upgrade hint, then a blank line.
     let banner_h = update.map_or(0, |u| {
         let hint_w = " Update: ".width() + u.hint.width();
         2 + hint_w.div_ceil((w as usize).saturating_sub(2).max(1)) as u16
     });
-    let h = area.height.saturating_sub(2).min(rows + extra + banner_h);
+    let h = area.height.saturating_sub(2 * edge()).min(rows + extra + banner_h);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
     let parts = Layout::vertical([Constraint::Length(banner_h), Constraint::Min(3), Constraint::Length(2)])
         .areas(Block::bordered().inner(rect));
     (rect, parts)
+}
+
+/// The settings box's width: 84 columns, or the whole screen when compact.
+fn settings_width(area: Rect) -> u16 {
+    if compact() { area.width } else { 84.min(area.width.saturating_sub(2)) }
 }
 
 /// The settings list as lines: `Some(field index)` for a field, `None` for a
@@ -294,7 +348,7 @@ fn settings_lines(ed: &crate::settings_ui::SettingsEditor) -> Vec<Option<usize>>
     for (i, field) in crate::settings_ui::FIELDS.iter().enumerate() {
         if field.section != section {
             section = field.section;
-            if !lines.is_empty() {
+            if !lines.is_empty() && !compact() {
                 lines.push(None);
             }
             lines.push(None);
@@ -340,7 +394,7 @@ fn draw_settings(
         let rows = match ed.groups.as_ref() {
             Some(g) => match &g.form {
                 Some(form) => {
-                    let inner_w = (84.min(area.width.saturating_sub(2)) as usize).saturating_sub(2);
+                    let inner_w = (settings_width(area) as usize).saturating_sub(2);
                     group_form_lines(g.group(form.which), form, inner_w).len() + 2
                 }
                 None => g.groups.len() + 4,
@@ -1062,8 +1116,9 @@ fn theme_preview(theme: &Theme) -> Vec<Line<'static>> {
 }
 
 fn modal_rect(area: Rect, w: u16, h: u16) -> Rect {
-    let w = w.min(area.width.saturating_sub(2));
-    let h = h.min(area.height.saturating_sub(2));
+    // Compact: up to the screen's edges.
+    let w = w.min(area.width.saturating_sub(2 * edge()));
+    let h = h.min(area.height.saturating_sub(2 * edge()));
     Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
 }
 
@@ -1452,6 +1507,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
 
 fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
     let block = Block::bordered()
+        .borders(if compact() { Borders::TOP } else { Borders::ALL })
         .border_type(BorderType::Rounded)
         .border_style(theme.fg(theme.border))
         .title(Line::from(vec![Span::styled("─", theme.fg(theme.border)), Span::styled("[w] Log ", theme.fg(theme.text))]));
@@ -1479,7 +1535,7 @@ fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
 }
 
 fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
-    let w = 72.min(area.width.saturating_sub(4));
+    let w = if compact() { area.width } else { 72.min(area.width.saturating_sub(4)) };
     let mut lines: Vec<Line> = Vec::new();
     for raw in msg.lines() {
         let is_command = raw.starts_with("cd ") || am_core::harness::all().iter().any(|k| raw.starts_with(k.provider().program()));
@@ -1498,7 +1554,9 @@ fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
 
 fn pane_block<'a>(theme: &Theme, title: Line<'a>, focused: bool) -> Block<'a> {
     let border = if focused { theme.bold(theme.border_focus) } else { theme.fg(theme.border) };
-    Block::bordered().border_type(BorderType::Rounded).border_style(border).title(title)
+    // Compact: only the top line, which carries the footer too (`foot`).
+    let borders = if compact() { Borders::TOP } else { Borders::ALL };
+    Block::bordered().borders(borders).border_type(BorderType::Rounded).border_style(border).title(title)
 }
 
 fn title<'a>(name: &'a str, theme: &Theme) -> Line<'a> {
@@ -1609,6 +1667,20 @@ struct Columns {
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
     let focused = !app.jobs.focused && !app.review_focused();
     let mut block = pane_block(theme, title("Worktrees", theme), focused);
+    // Footer before the corner: compact puts both on the top line, and the
+    // last right-aligned title is the rightmost.
+    let mut used = 0;
+    if !app.flat.is_empty() {
+        let pos = format!(" {} of {} ", app.selected + 1, app.flat.len());
+        used += pos.width() + 1;
+        block = foot(block, Line::styled(pos, theme.faint()).alignment(Alignment::Right));
+    }
+    let corner_w = update_label(app, area.width).map_or(0, |l| l.width() + 1) + review_badge(app, area.width).map_or(0, |b| b.width());
+    if let Some(label) = tokens_label(app, area.width)
+        .filter(|l| !compact() || "─Worktrees ".width() + used + l.width() + 1 + corner_w <= area.width as usize)
+    {
+        block = foot(block, Line::styled(label, theme.faint()).alignment(Alignment::Right));
+    }
     // Top right: the update notice, then the review badge in the corner.
     let mut corner: Vec<Span> = Vec::new();
     if let Some(label) = update_label(app, area.width) {
@@ -1617,20 +1689,12 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     if let Some(badge) = review_badge(app, area.width) {
         // Clickable: opens the review page.
         let w = badge.width() as u16;
-        let rect = Rect::new((area.x + area.width).saturating_sub(1 + w), area.y, w, 1).intersection(area);
+        let rect = Rect::new((area.x + area.width).saturating_sub(edge() + w), area.y, w, 1).intersection(area);
         hits.push(Hit { rect, target: Target::Command(Command::ReviewRequests), selected: false });
         corner.push(Span::styled(badge, theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
     }
     if !corner.is_empty() {
         block = block.title(Line::from(corner).alignment(Alignment::Right));
-    }
-    if !app.flat.is_empty() {
-        block = block.title_bottom(
-            Line::styled(format!(" {} of {} ", app.selected + 1, app.flat.len()), theme.faint()).alignment(Alignment::Right),
-        );
-    }
-    if let Some(label) = tokens_label(app, area.width) {
-        block = block.title_bottom(Line::styled(label, theme.faint()).alignment(Alignment::Right));
     }
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -1642,13 +1706,14 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     }
 
     let s = &app.settings;
-    let pr_words = inner.width >= 100;
+    let pr_words = wide(inner.width);
     let cols = Columns {
         ticket: if s.show_linear_ticket { app.flat.iter().map(|v| ticket_text(v).width()).max().unwrap_or(0) } else { 0 },
         pr: if s.show_pr_status { app.flat.iter().map(|v| pr_text(v.pr.as_ref(), pr_words).width()).max().unwrap_or(0) } else { 0 },
         pr_words,
-        git: if s.show_git_ahead_behind { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
-        age: if s.show_last_commit { 3 } else { 0 },
+        // Compact: no git or last-commit columns.
+        git: if s.show_git_ahead_behind && !compact() { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
+        age: if s.show_last_commit && !compact() { 3 } else { 0 },
         ctx_bar: if s.show_context_window
             && app.flat.iter().any(|v| v.context.is_some() || v.sessions.iter().any(|s| s.context.is_some()))
         {
@@ -1712,21 +1777,21 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let cursor = app.reviews.as_ref().map_or(0, |p| p.cursor);
     let mut block = pane_block(theme, title("Review requests", theme), app.review_focused());
     if !ordered.is_empty() {
-        block = block.title_bottom(
-            Line::styled(format!(" {} of {} ", cursor + 1, ordered.len()), theme.faint()).alignment(Alignment::Right),
-        );
+        block = foot(block, Line::styled(format!(" {} of {} ", cursor + 1, ordered.len()), theme.faint()).alignment(Alignment::Right));
     }
     // Bottom left: what the search is filtered by; a click opens the filters.
     let hidden = crate::reviews_ui::counts(list, &app.snapshot.repos, grouping).1;
     let summary = format!(" {} ", review_filter_summary(&app.settings, hidden));
-    let room = (area.width as usize).saturating_sub(16);
+    // Compact: on the top line after the title, so it shares the row.
+    let lead = if compact() { "─Review requests ".width() + 1 } else { 0 };
+    let room = (area.width as usize).saturating_sub(16 + lead);
     if room > 10 {
         let summary = truncate(&summary, room);
         if let Some(k) = app.keymap.key(Command::Feedback) {
-            let rect = Rect::new(area.x + 1, area.y + area.height.saturating_sub(1), summary.width() as u16, 1);
+            let rect = Rect::new(area.x + edge() + lead as u16, foot_y(area), summary.width() as u16, 1);
             hits.push(Hit { rect, target: Target::Key(k), selected: false });
         }
-        block = block.title_bottom(Line::styled(summary, theme.faint()).alignment(Alignment::Left));
+        block = foot(block, Line::styled(summary, theme.faint()).alignment(Alignment::Left));
     }
     let error = app.snapshot.review_error.as_ref();
     // Top right: a failed refresh beside a list we still have (from before,
@@ -1786,7 +1851,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
         return;
     }
 
-    let words = inner.width >= 100;
+    let words = wide(inner.width);
     let ticket_w = ordered.iter().map(|&i| list[i].linear.as_ref().map_or(0, |l| l.identifier.width())).max().unwrap_or(0);
     let pr_w = ordered.iter().map(|&i| pr_text(Some(&list[i].pr), words).width()).max().unwrap_or(0);
     let who_w = ordered.iter().map(|&i| reviewers_text(&list[i]).width()).max().unwrap_or(0).min(if words { 16 } else { 10 });
@@ -2055,7 +2120,7 @@ fn worktree_line<'a>(
     let commands = if deleting { 0 } else { v.shell_commands };
     let command_badge = match commands {
         0 => String::new(),
-        n if width >= 100 => format!(" $ {n} command{}", if n == 1 { "" } else { "s" }),
+        n if wide(width) => format!(" $ {n} command{}", if n == 1 { "" } else { "s" }),
         1 => " $".to_string(),
         n => format!(" ${n}"),
     };
@@ -2064,16 +2129,16 @@ fn worktree_line<'a>(
     let agent_badge = match v.agent.as_ref().map(|a| a.agent) {
         _ if listed && !deleting => {
             let n = v.sessions.len();
-            if width >= 100 { format!(" ⧉ {n} sessions") } else { format!(" ⧉{n}") }
+            if wide(width) { format!(" ⧉ {n} sessions") } else { format!(" ⧉{n}") }
         }
         Some(kind) if !deleting && kind != HarnessKind::CLAUDE => {
-            if width >= 100 { format!(" ✦ {}", kind.id()) } else { " ✦".to_string() }
+            if wide(width) { format!(" ✦ {}", kind.id()) } else { " ✦".to_string() }
         }
         _ => String::new(),
     };
     badge.push_str(&agent_badge);
     if !deleting && subagents > 0 {
-        if width >= 100 {
+        if wide(width) {
             badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
         } else {
             badge.push_str(&format!(" ◆{subagents}"));
@@ -2228,7 +2293,7 @@ fn session_line<'a>(
     let detail = if age.is_empty() { format!("  {}", status_label(status)) } else { format!("  {} · {age}", status_label(status)) };
     let badge = match subagents {
         0 => String::new(),
-        n if width >= 100 => format!(" ◆ {n} subagent{}", if n == 1 { "" } else { "s" }),
+        n if wide(width) => format!(" ◆ {n} subagent{}", if n == 1 { "" } else { "s" }),
         n => format!(" ◆{n}"),
     };
 
@@ -2262,7 +2327,9 @@ fn session_line<'a>(
 /// Context-window bar plus tokens used (`████▌░░░ 380k`). The fill and the
 /// count go green → yellow → red as the session nears its window.
 fn ctx_spans<'a>(usage: Option<&ContextUsage>, theme: &Theme, bar_w: usize, configured: u64, deleting: bool) -> Vec<Span<'a>> {
-    let Some(u) = usage else { return vec![Span::raw(" ".repeat(bar_w + 5))] };
+    // Compact: the bar without the token count.
+    let count_w = if compact() { 0 } else { 5 };
+    let Some(u) = usage else { return vec![Span::raw(" ".repeat(bar_w + count_w))] };
     let window = context::window_for(u.tokens, configured);
     let style = if deleting {
         theme.faint()
@@ -2274,11 +2341,11 @@ fn ctx_spans<'a>(usage: Option<&ContextUsage>, theme: &Theme, bar_w: usize, conf
         }
     };
     let (filled, empty) = bar_cells(context::fraction(u.tokens, window), bar_w);
-    vec![
-        Span::styled(filled, style),
-        Span::styled(empty, theme.faint()),
-        Span::styled(format!(" {:>4}", context::short_tokens(u.tokens)), style),
-    ]
+    let mut spans = vec![Span::styled(filled, style), Span::styled(empty, theme.faint())];
+    if !compact() {
+        spans.push(Span::styled(format!(" {:>4}", context::short_tokens(u.tokens)), style));
+    }
+    spans
 }
 
 /// `frac` of `width` cells: (filled part, `░` remainder). A partly filled
@@ -2334,10 +2401,10 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits
     // Anywhere in the pane focuses it; rows, answers and hints below win.
     hits.push(Hit { rect: area, target: Target::JobsPane, selected: false });
     let hint = if jobs.waiting() && !jobs.focused {
-        block = block.border_style(theme.bold(theme.yellow)).title_bottom(Line::styled(" ⇥ answer ", theme.bold(theme.yellow)).alignment(Alignment::Right));
+        block = foot(block.border_style(theme.bold(theme.yellow)), Line::styled(" ⇥ answer ", theme.bold(theme.yellow)).alignment(Alignment::Right));
         " ⇥ answer "
     } else if jobs.focused {
-        block = block.title_bottom(Line::styled(" ⇥ back  x dismiss ", theme.faint()).alignment(Alignment::Right));
+        block = foot(block, Line::styled(" ⇥ back  x dismiss ", theme.faint()).alignment(Alignment::Right));
         " ⇥ back  x dismiss "
     } else {
         ""
@@ -2450,7 +2517,7 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits
         }
     }
     if !hint.is_empty() {
-        bottom_hint_hits(hits, hint, area);
+        foot_hint_hits(hits, hint, area);
     }
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
 }
@@ -2956,7 +3023,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         Span::styled("$ 1 command", theme.bold(theme.teal)),
         Span::styled(" an agent's shell command matching the process filter is running; the name turns teal", theme.faint()),
     ]));
-    let w = 80.min(area.width.saturating_sub(4));
+    let w = if compact() { area.width } else { 80.min(area.width.saturating_sub(4)) };
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
     let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
@@ -3299,6 +3366,71 @@ mod tests {
     #[test]
     fn dashboard_narrow_stacks_panes() {
         insta::assert_snapshot!(render(&fixture(), 80, 24));
+    }
+
+    fn compact(mut app: App) -> App {
+        app.settings.compact_view = true;
+        app.rebuild_rows();
+        app
+    }
+
+    #[test]
+    fn compact_dashboard_keeps_only_the_top_line() {
+        let app = compact(fixture());
+        let screen = render(&app, 60, 12);
+        insta::assert_snapshot!("compact_dashboard", screen);
+        let first = screen.lines().next().unwrap();
+        assert!(first.starts_with("─Worktrees") && first.contains(" of "), "{first}");
+        // No side or bottom border (the key bar's `│` separators aside).
+        let body = |s: &str| s.lines().rev().skip(1).map(str::to_string).collect::<Vec<_>>().join("\n");
+        assert!(!body(&screen).contains('│') && !screen.contains('╰'), "{screen}");
+        assert!(!app.rows.iter().any(|r| matches!(r, Row::Spacer | Row::Ticket(_))));
+        // Same worktrees, same order.
+        assert_eq!(app.flat.iter().map(|v| v.worktree.id.clone()).collect::<Vec<_>>(),
+            fixture().flat.iter().map(|v| v.worktree.id.clone()).collect::<Vec<_>>());
+        // Wide, it still uses glyphs and drops the token count.
+        let wide = render(&app, 120, 12);
+        assert!(wide.contains("◆2") && !wide.contains("subagents"), "{wide}");
+    }
+
+    #[test]
+    fn compact_clicks_land_on_the_drawn_rows() {
+        let mut app = compact(fixture());
+        let at = find(&app, 60, 12, "fix/offline-cache");
+        click(&mut app, 60, 12, at, false);
+        assert_eq!(app.flat[app.selected].worktree.branch, "fix/offline-cache");
+    }
+
+    #[test]
+    fn compact_puts_the_jobs_pane_and_split_reviews_below() {
+        let mut app = compact(fixture());
+        app.jobs.start_delete("w2".into(), "fix/offline-cache");
+        insta::assert_snapshot!("compact_jobs_below", render(&app, 60, 16));
+        let mut app = compact(by_repo());
+        app.on_key(Key::Char('V'));
+        // Stacked even where there's room side by side.
+        let screen = render(&app, 120, 16);
+        insta::assert_snapshot!("compact_review_split", screen);
+        assert!(!screen.lines().next().unwrap().contains("Review requests"), "{screen}");
+    }
+
+    #[test]
+    fn compact_review_page_and_overlays_fill_the_screen() {
+        let mut app = compact(by_repo());
+        app.on_key(Key::Char('v'));
+        insta::assert_snapshot!("compact_review_page", render(&app, 60, 12));
+        let mut app = compact(fixture());
+        app.show_log = true;
+        insta::assert_snapshot!("compact_log_pane", render(&app, 60, 16));
+        let mut app = compact(fixture());
+        app.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&app.settings));
+        let screen = render(&app, 60, 20);
+        insta::assert_snapshot!("compact_settings", screen);
+        assert!(screen.lines().next().unwrap().starts_with("╭─Settings") && screen.lines().next().unwrap().width() == 60, "{screen}");
+        let mut app = compact(fixture());
+        let repo = am_core::model::Repository { id: "r".into(), path: "/r".into(), name: "r".into() };
+        app.modal = Some(crate::modals::Modal::new_worktree(vec![repo], None, "", "main"));
+        insta::assert_snapshot!("compact_new_worktree_modal", render(&app, 60, 20));
     }
 
     #[test]

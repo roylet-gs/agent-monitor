@@ -1,0 +1,24 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 60, 20)"
+---
+╭─Settings ────────────────────────────────────────────────╮
+│ General                                                  │
+│▌  Open in                       vscode                   │
+│   Editor command                —                        │
+│   Resume last session on open   on                       │
+│   Repositories…                 0 tracked                │
+│   Harness plugins…              7 of 7 on · default cla… │
+│   Key bindings…                 defaults                 │
+│   Mouse                         on                       │
+│   Run startup script in         pane                     │
+│   Branch prefix                 feature/                 │
+│   Base branch                   main                     │
+│   Git refresh (ms)              30000                    │
+│ Appearance                                               │
+│   Theme                         ansi                     │
+│   Theme builder…                ⏎ open                   │
+│ Dashboard                                                │
+│                                                          │
+│ Which editor/IDE Enter opens worktrees in; custom runs Ed│
+╰─────── ⏎/space change  ←→ adjust  e edit file  esc close ╯
