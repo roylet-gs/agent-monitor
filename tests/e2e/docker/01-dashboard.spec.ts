@@ -19,6 +19,10 @@ test("dashboard renders the worktree pane and key bar with the seeded repo", asy
   // Repo header (two groups: the repo + "Other sessions"): name + rule.
   expect(text).toMatch(/│work ─+/);
   expect(text).toContain("main");
+  // The last-commit age column (git runs on its own thread, so it fills in
+  // a moment after the first frame): the seeded commit is minutes old.
+  await tui.waitForMatch(/ main [^\n]*\s\d{1,2}[smhdw] /);
+  await tui.waitForMatch(/feature\/to-delete[^\n]*\s\d{1,2}[smhdw] /);
   const keys = await tui.keyBar();
   expect(keys).toContain("⏎ open");
   expect(keys).toContain("g PR");
