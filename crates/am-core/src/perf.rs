@@ -21,8 +21,9 @@ pub const MODULE: &str = "perf";
 pub const REPORT_EVERY: Duration = Duration::from_secs(300);
 /// Samples kept per stage for the percentiles.
 const WINDOW: usize = 128;
-/// A stage is only judged once it has this many samples in its window.
-const MIN_SAMPLES: usize = 5;
+/// A stage is only judged once it has this many samples in its window: with
+/// fewer, p95 is just the max, and one startup outlier would trip it.
+const MIN_SAMPLES: usize = 20;
 
 /// Per-stage budgets: p95 above this is "slow". Unknown stages have none.
 pub const BUDGETS: &[(&str, u64)] = &[
@@ -328,9 +329,11 @@ mod tests {
     fn a_stage_turns_slow_and_recovers_on_p95() {
         let mut p = Perf::new();
         let now = Instant::now();
-        for _ in 0..10 {
+        for _ in 0..30 {
             p.record_at("ui.frame", d(2), now);
         }
+        // One outlier among 31 samples is not a slow stage.
+        p.record_at("ui.frame", d(400), now);
         assert!(p.slow_stages().is_empty());
         for _ in 0..10 {
             p.record_at("ui.frame", d(40), now);
@@ -354,7 +357,7 @@ mod tests {
     fn stages_without_a_budget_are_never_slow() {
         let mut p = Perf::new();
         let now = Instant::now();
-        for _ in 0..10 {
+        for _ in 0..30 {
             p.record_at("something.else", d(60_000), now);
         }
         assert!(p.slow_stages().is_empty());

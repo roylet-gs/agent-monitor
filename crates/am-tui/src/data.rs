@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use am_core::integrations::reviews::ReviewRepo;
 use am_core::integrations::{Integrations, RepoBranches};
 use am_core::harness::HarnessKind;
-use am_core::model::{CommitInfo, GitStatus, Ide, LinearInfo, PrInfo, ReviewFetchError, ReviewPerson, ReviewRequest, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
+use am_core::model::{Ide, LinearInfo, PrInfo, ReviewFetchError, ReviewPerson, ReviewRequest, RunningProcess, SessionView, Subagent, Worktree, WorktreeView};
 use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::context::ContextUsage;
@@ -26,6 +26,7 @@ use am_core::{db, debug, gitinfo, grouping, info, procscan, stacks, warn, worktr
 use rusqlite::Connection;
 
 use crate::app::{Health, Snapshot};
+use crate::gitwork::{self, Tracker};
 
 const TICK: Duration = Duration::from_millis(200);
 /// A native process snapshot costs ~2 ms, so terminals/editors/dev servers
@@ -158,12 +159,6 @@ struct ProcData {
     agents: HashMap<&'static str, usize>,
 }
 
-#[derive(Default, Clone)]
-struct GitData {
-    status: Option<GitStatus>,
-    commit: Option<CommitInfo>,
-}
-
 struct Worker {
     settings: Settings,
     conn: Connection,
@@ -176,7 +171,10 @@ struct Worker {
     people: Vec<ReviewPerson>,
     review_total: Option<u64>,
     review_hits: am_core::review_groups::QueryHits,
-    git: HashMap<String, GitData>,
+    /// Git status per worktree; the git itself runs on the `git` thread.
+    git: Tracker,
+    git_jobs: Sender<Vec<gitwork::Job>>,
+    git_done: Receiver<gitwork::Batch>,
     procs: HashMap<String, ProcData>,
     /// Context usage per worktree id, re-read with the git data.
     ctx: HashMap<String, Option<ContextUsage>>,
@@ -203,6 +201,7 @@ struct Worker {
 
 impl Worker {
     fn new(settings: Settings, conn: Connection, tx: Sender<Snapshot>, integrations: Receiver<IntegrationUpdate>) -> Worker {
+        let (git_jobs, git_done) = gitwork::spawn();
         Worker {
             settings,
             conn,
@@ -215,7 +214,9 @@ impl Worker {
             people: Vec::new(),
             review_total: None,
             review_hits: Default::default(),
-            git: HashMap::new(),
+            git: Tracker::default(),
+            git_jobs,
+            git_done,
             procs: HashMap::new(),
             ctx: HashMap::new(),
             usage: DailyUsage::new(),
@@ -245,7 +246,10 @@ impl Worker {
                 let _ = db::prune_sessions(&self.conn);
             }
             match cmds.recv_timeout(TICK) {
-                Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
+                Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => {
+                    self.perf.report(Instant::now());
+                    return;
+                }
                 Ok(Cmd::Refresh { force: f }) => force = f,
                 Ok(Cmd::RefreshReviews | Cmd::RefreshPeople | Cmd::ReloadReviews) => {}
                 Ok(Cmd::Settings(s)) => {
@@ -285,6 +289,11 @@ impl Worker {
             self.review_total = u.review_total;
             self.review_hits = u.review_hits;
             ints_changed = true;
+        }
+        while let Ok(batch) = self.git_done.try_recv() {
+            debug!("tui", "git refresh for {} worktree(s) in {:?}", batch.results.len(), batch.elapsed);
+            self.perf.record("collector.git", batch.elapsed);
+            ints_changed |= self.git.absorb(batch.results);
         }
         let dv = db::data_version(&self.conn)?;
         if !full_due && !procs_due && !usage_due && !ints_changed && dv == self.data_version {
@@ -331,44 +340,41 @@ impl Worker {
         let agents = db::agent_states(&self.conn)?;
         let mut sessions = db::open_worktree_sessions(&self.conn)?;
 
-        // Which worktrees need fresh git data this cycle?
-        let stale: Vec<&Worktree> = if full_due {
-            worktrees.iter().collect()
-        } else {
-            worktrees
-                .iter()
-                .filter(|w| {
-                    // New rows (just created or synced) get git data right away.
-                    if !self.git.contains_key(&w.id) {
-                        return true;
-                    }
-                    let updated = agents.get(&w.id).map(|a| a.updated_at.as_str());
-                    updated.is_some() && self.agent_seen.get(&w.id).map(String::as_str) != updated
-                })
-                .collect()
-        };
+        // Agent activity since last cycle: refresh that row's git and context.
+        let moved: HashSet<&str> = worktrees
+            .iter()
+            .filter(|w| {
+                let updated = agents.get(&w.id).map(|a| a.updated_at.as_str());
+                updated.is_some() && self.agent_seen.get(&w.id).map(String::as_str) != updated
+            })
+            .map(|w| w.id.as_str())
+            .collect();
+        if force {
+            self.git.deep_next();
+        }
+        let jobs = self.git.due(&worktrees, full_due, |w| moved.contains(w.id.as_str()), gitinfo::signature);
+        if !jobs.is_empty() {
+            debug!("tui", "git refresh queued for {} worktree(s)", jobs.len());
+            let _ = self.git_jobs.send(jobs);
+        }
+        let started = Instant::now();
+        for w in &worktrees {
+            if !(full_due || moved.contains(w.id.as_str()) || !self.ctx.contains_key(&w.id)) {
+                continue;
+            }
+            let root = Path::new(&w.path);
+            let usage = agents.get(&w.id).and_then(|a| session_context(a.agent, a.session_id.as_deref(), root));
+            self.ctx.insert(w.id.clone(), usage);
+            for s in sessions.get(&w.id).into_iter().flatten() {
+                let usage = session_context(s.agent, Some(&s.session_id), root);
+                self.ctx.insert(session_key(&w.id, &s.session_id), usage);
+            }
+        }
+        self.perf.record("collector.context", started.elapsed());
         for w in &worktrees {
             if let Some(a) = agents.get(&w.id) {
                 self.agent_seen.insert(w.id.clone(), a.updated_at.clone());
             }
-        }
-        if !stale.is_empty() {
-            let started = Instant::now();
-            let fresh = collect_git(&stale);
-            debug!("tui", "git refresh for {} worktree(s) in {:?}", fresh.len(), started.elapsed());
-            self.perf.record("collector.git", started.elapsed());
-            self.git.extend(fresh);
-            let started = Instant::now();
-            for w in &stale {
-                let root = Path::new(&w.path);
-                let usage = agents.get(&w.id).and_then(|a| session_context(a.agent, a.session_id.as_deref(), root));
-                self.ctx.insert(w.id.clone(), usage);
-                for s in sessions.get(&w.id).into_iter().flatten() {
-                    let usage = session_context(s.agent, Some(&s.session_id), root);
-                    self.ctx.insert(session_key(&w.id, &s.session_id), usage);
-                }
-            }
-            self.perf.record("collector.context", started.elapsed());
         }
         if full_due {
             self.last_full = Some(Instant::now());
@@ -642,22 +648,6 @@ impl Worker {
     }
 }
 
-/// Two git spawns per worktree, run concurrently.
-fn collect_git(worktrees: &[&Worktree]) -> Vec<(String, GitData)> {
-    std::thread::scope(|s| {
-        let handles: Vec<_> = worktrees
-            .iter()
-            .map(|w| {
-                s.spawn(move || {
-                    let p = Path::new(&w.path);
-                    (w.id.clone(), GitData { status: gitinfo::status(p), commit: gitinfo::last_commit(p) })
-                })
-            })
-            .collect();
-        handles.into_iter().filter_map(|h| h.join().ok()).collect()
-    })
-}
-
 /// Owns GitHub/Linear fetching. `gh` can take seconds, so it lives on its own
 /// thread and hands the collector a ready-made field map. Cached values are
 /// sent before the first fetch, so PR badges and tickets appear immediately
@@ -684,7 +674,10 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         let mut reviews_now = false;
         let mut people_now = false;
         match cmds.recv_timeout(Duration::from_secs(1)) {
-            Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return,
+            Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => {
+                perf.report(Instant::now());
+                return;
+            }
             Ok(Cmd::Refresh { force: f }) => force = f,
             Ok(Cmd::RefreshReviews) => reviews_now = true,
             Ok(Cmd::RefreshPeople) => people_now = true,

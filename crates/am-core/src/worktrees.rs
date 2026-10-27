@@ -249,14 +249,11 @@ pub fn fetch_and_reset_branch(repo_path: &Path, branch: &str) -> bool {
 /// `git worktree list`; the branch being rebased is in
 /// `<git-dir>/rebase-merge/head-name` (or `rebase-apply/head-name`).
 pub fn recover_detached_branch(worktree_path: &Path) -> Option<String> {
-    let git_dir = match git(worktree_path, &["rev-parse", "--git-dir"]) {
-        Ok(d) => d.trim().to_string(),
-        Err(e) => {
-            debug!("git", "Failed to recover detached branch for {}: {e}", worktree_path.display());
-            return None;
-        }
+    // Read from `.git` rather than `git rev-parse`: sync asks every 10 s.
+    let Some((git_dir, _)) = crate::gitinfo::git_dirs(worktree_path) else {
+        debug!("git", "Failed to recover detached branch for {}: no git dir", worktree_path.display());
+        return None;
     };
-    let git_dir = worktree_path.join(git_dir); // absolute git dirs replace the base
     for dir in ["rebase-merge", "rebase-apply"] {
         if let Ok(r) = std::fs::read_to_string(git_dir.join(dir).join("head-name")) {
             let branch = r.trim().trim_start_matches("refs/heads/").to_string();
@@ -266,6 +263,9 @@ pub fn recover_detached_branch(worktree_path: &Path) -> Option<String> {
     }
     None
 }
+
+/// Detached worktrees already warned about (see [`list_git_worktrees`]).
+static SKIPPED_DETACHED: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 /// One entry of `git worktree list` with a usable branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,7 +289,13 @@ pub fn list_git_worktrees(repo_path: &Path) -> Result<Vec<GitWorktree>, String> 
             None => match recover_detached_branch(Path::new(&path)) {
                 Some(b) => b,
                 None => {
-                    warn!("git", "Skipping detached worktree at {path} (could not recover branch)");
+                    // Sync runs every 10 s: say it once per path, not every time.
+                    let first = SKIPPED_DETACHED.lock().map(|mut seen| seen.insert(path.clone())).unwrap_or(true);
+                    if first {
+                        warn!("git", "Skipping detached worktree at {path} (could not recover branch)");
+                    } else {
+                        debug!("git", "Skipping detached worktree at {path} (could not recover branch)");
+                    }
                     continue;
                 }
             },
@@ -548,17 +554,24 @@ pub fn sync_repo(conn: &Connection, repo: &Repository) -> Result<SyncReport, Str
         report.removed.push(dw.branch.clone());
     }
 
+    // Rows that already match git aren't rewritten: sync runs every 10 s, and
+    // each write is a commit that contends with hooks for the lock.
+    let standalone = db::standalone_paths(conn).map_err(|e| e.to_string())?;
     for gw in &git_wts {
-        let known = db_wts.iter().any(|d| d.branch == gw.branch);
-        db::upsert_worktree(conn, &repo.id, &gw.path, &gw.branch, short_name(&gw.branch), gw.is_main)
-            .map_err(|e| e.to_string())?;
-        if !known {
+        let row = db_wts.iter().find(|d| d.branch == gw.branch);
+        let name = short_name(&gw.branch);
+        let unchanged = row.is_some_and(|d| d.path == gw.path && d.name == name && d.is_main == gw.is_main);
+        if unchanged && !standalone.contains(&gw.path) {
+            continue;
+        }
+        db::upsert_worktree(conn, &repo.id, &gw.path, &gw.branch, name, gw.is_main).map_err(|e| e.to_string())?;
+        if row.is_none() {
             info!("sync", "Added worktree {} to DB{}", gw.branch, if gw.is_main { " (main)" } else { "" });
             report.added.push(gw.branch.clone());
         }
     }
 
-    info!("sync", "Synced worktrees for repo {}: {} in git", repo.name, git_wts.len());
+    debug!("sync", "Synced worktrees for repo {}: {} in git", repo.name, git_wts.len());
     Ok(report)
 }
 
@@ -1316,6 +1329,31 @@ mod tests {
         assert_eq!(row2.id, row.id);
         assert_eq!(row2.path, moved.to_string_lossy());
         assert_eq!(row2.custom_name.as_deref(), Some("Nick"));
+    }
+
+    #[test]
+    fn sync_writes_nothing_when_git_matches_the_db() {
+        let fx = Fx::new();
+        let a = fx.root.join("wt-a");
+        sh(&fx.repo_path, &["worktree", "add", a.to_str().unwrap(), "-b", "feat"]);
+        let detached = fx.root.join("wt-d");
+        sh(&fx.repo_path, &["worktree", "add", "--detach", detached.to_str().unwrap()]);
+        sync_repo(&fx.conn, &fx.repo).unwrap();
+        let before = fx.conn.total_changes();
+        for _ in 0..3 {
+            sync_repo(&fx.conn, &fx.repo).unwrap();
+        }
+        assert_eq!(fx.conn.total_changes(), before, "an unchanged sync must not write");
+
+        // A standalone session at a tracked path is still promoted.
+        fx.conn
+            .execute(
+                "INSERT INTO standalone_sessions (path, status, updated_at) VALUES (?1, 'executing', datetime('now'))",
+                [a.to_str().unwrap()],
+            )
+            .unwrap();
+        sync_repo(&fx.conn, &fx.repo).unwrap();
+        assert!(db::standalone_paths(&fx.conn).unwrap().is_empty());
     }
 
     #[test]
