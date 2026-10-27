@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: screen
 ---
-╭─Review requests ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+╭─Review requests ──────────────────────────────────────────────────────────────────────────────────────── 3 to review ╮
 │Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
 │ Batch the PR queries  @alice (agent-monitor) ✓ pulled                                 you           #51✓ review   0s │

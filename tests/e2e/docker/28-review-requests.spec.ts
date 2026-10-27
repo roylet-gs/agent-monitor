@@ -24,6 +24,7 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   expect((await tui.lines())[0]).toMatch(/─Worktrees ─.* 3 to review ╮$/);
   expect(await tui.keyBar()).toContain("v reviews");
   await tui.screenshot("review-badge");
+  await tui.screenshot("dashboard-review-badge");
 
   await tui.sendKey("v");
   await tui.waitForText("─Review requests");
@@ -42,6 +43,9 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   // The bottom border sums up who's asked and the groups' filters.
   expect(screen).toMatch(/╰ you \+ your teams ─/);
   await tui.screenshot("review-page");
+  // The same badge sits in the page's own top-right border corner.
+  expect((await tui.lines())[0]).toMatch(/─Review requests.* 3 to review ╮$/);
+  await tui.screenshot("review-page-badge");
 
   // f opens just the review filters over the page; esc goes back to it.
   await tui.sendKey("f");
