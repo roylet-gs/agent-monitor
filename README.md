@@ -375,6 +375,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
 | `contextWindowTokens` | `1000000` | Context window the bar is scaled to. A session past it is shown against this value doubled until it fits. In the settings editor `⏎` takes `128k`/`1m` and `←→` step through common sizes; `am settings set contextWindowTokens 200k` works too |
 | `showDailyTokens` | `true` | Show today's token usage at the bottom right of the list |
+| `compactView` | `false` | Compact view for small panes: panes keep only their top line, no blank rows, glyphs instead of words, no git/age columns, and the jobs pane and `V` review split open below the list |
 | `dailyTokensScope` | `"all"` | What that total counts: `all` (every session today) or `visible` (only sessions under a row on screen) |
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
 | `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
@@ -402,7 +403,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `logLevel` | `"info"` | `debug`, `info`, `warn`, `error` |
 | `maxLogSizeMb` | `2` | `debug.log` is rotated to `debug.log.1` past this size |
 
-Keys from 1.x that the native app no longer uses (`compactView`, `autoSyncOnStartup`, `agentPermissionMode`, `agentClaudeArgs`) are kept in the file but ignored.
+Keys from 1.x that the native app no longer uses (`autoSyncOnStartup`, `agentPermissionMode`, `agentClaudeArgs`) are kept in the file but ignored.
 
 </details>
 

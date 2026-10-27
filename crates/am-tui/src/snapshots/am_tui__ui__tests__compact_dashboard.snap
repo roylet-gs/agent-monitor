@@ -1,0 +1,16 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+─Worktrees ───────────────────────────────────────── 1 of 3
+agent-monitor ──────────────────────────────────────────────
+▌◑ feature/refactor ◆2                ENG-412 #127✓ ✔ ▒░░░░
+ ◐ fix/offline-cache                                  ▓░░░░
+gridsight ──────────────────────────────────────────────────
+ · main
+
+
+
+
+
+ ⏎ open  │ g PR  l linear  │ h help  q quit

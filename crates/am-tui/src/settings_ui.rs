@@ -76,6 +76,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "pollingIntervalMs", label: "Git refresh (ms)", help: "Full git sweep interval; agent activity refreshes its worktree immediately", section: "General", kind: Kind::Number { step: 5000, min: 5000 } },
     Field { key: "theme", label: "Theme", help: "←→ to cycle; ansi follows your terminal palette", section: "Appearance", kind: Kind::Theme },
     Field { key: "themeBuilder", label: "Theme builder…", help: "Make your own theme from the current one: pick colours, preview live, save", section: "Appearance", kind: Kind::ThemeBuilder },
+    Field { key: "compactView", label: "Compact view", help: "Dense layout for small panes: top title lines only, no blank rows, fewer columns, side panes open below", section: "Appearance", kind: Kind::Bool },
     Field { key: "worktreeSort", label: "Sort order", help: "Criteria applied in order; first difference wins", section: "Dashboard", kind: Kind::Sort },
     Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout from the list", section: "Dashboard", kind: Kind::Bool },
     Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Unless the agent session is open", section: "Dashboard", kind: Kind::Bool },

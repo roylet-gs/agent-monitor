@@ -460,6 +460,11 @@ impl App {
             }
             self.rows.push(Row::Pending(job));
         }
+        // Compact: no blank lines, and no ticket headers (the ticket column
+        // names it). Neither takes a selection index.
+        if self.settings.compact_view {
+            self.rows.retain(|r| !matches!(r, Row::Spacer | Row::Ticket(_)));
+        }
     }
 
     /// A background delete finished. On failure the row is usable again
