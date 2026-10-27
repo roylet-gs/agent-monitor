@@ -2973,6 +2973,10 @@ fn pad(s: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    mod perf_tests {
+        include!("perf_tests.rs");
+    }
+
     use super::*;
     use crate::app::{Key, Snapshot};
     use am_core::context::ContextUsage;

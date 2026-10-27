@@ -398,6 +398,14 @@ pub static TOOLS: &[Tool] = &[
         timeout: SHORT,
         build: |a| with(with(with(cmd(&["logs"]), a, "lines", "-n"), a, "level", "--level"), a, "module", "--module"),
     },
+    Tool {
+        name: "perf",
+        description: "How long each part of am has been taking (UI frames, collector, git, GitHub/Linear, hooks), from its log, against per-stage budgets.",
+        params: &[opt("since", Kind::Str, "Window: 30m, 1h, 2d or all (default 24h)")],
+        hints: READ,
+        timeout: SHORT,
+        build: |a| with(cmd(&["perf", "--json"]), a, "since", "--since"),
+    },
 ];
 
 pub fn find(name: &str) -> Option<&'static Tool> {
@@ -522,6 +530,7 @@ mod tests {
             ["hooks", "install", "--agent", "claude", "--agent", "gemini"]
         );
         assert_eq!(argv("logs", json!({"lines": 10, "level": "warn"})).unwrap(), ["logs", "-n", "10", "--level", "warn"]);
+        assert_eq!(argv("perf", json!({"since": "1h"})).unwrap(), ["perf", "--json", "--since", "1h"]);
         assert_eq!(argv("pr_show", json!({"target": null})).unwrap(), ["pr", "show", "--json"]);
         assert_eq!(
             argv("agent_status", json!({"worktree": "/w", "set": "done"})).unwrap(),

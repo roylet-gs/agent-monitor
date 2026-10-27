@@ -11,6 +11,8 @@
 //! payload into the canonical event (`am_core::harness`). Never write to stdout
 //! or stderr: Gemini shows any hook output to the user.
 
+am_core::silence_unit_tests!();
+
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -97,7 +99,14 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) 
     if let Err(e) = handle(worktree, kind, &event) {
         warn!(MODULE, "event={} failed: {e}", event.event);
     }
-    debug!(MODULE, "event={} handled in {:.2}ms", event.event, started.elapsed().as_secs_f64() * 1000.0);
+    let elapsed = started.elapsed();
+    debug!(MODULE, "event={} handled in {:.2}ms", event.event, elapsed.as_secs_f64() * 1000.0);
+    // One process per event, so no p95 here: every event over budget says so.
+    if let Some(budget) = am_core::perf::budget("hook.event")
+        && elapsed > budget
+    {
+        warn!(am_core::perf::MODULE, "hook.event slow: {} > budget {} (event={})", am_core::perf::ms(elapsed), am_core::perf::ms(budget), event.event);
+    }
 }
 
 
