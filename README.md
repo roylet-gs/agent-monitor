@@ -301,7 +301,7 @@ With GitHub on, am also looks for the open PRs in your tracked repos that are wa
 
 | Key | Action |
 | --- | ------ |
-| `Enter` | On a pulled PR, open its worktree in your IDE (just like `Enter` on the dashboard); otherwise open the PR |
+| `Enter` | On a pulled PR, open its worktree in your IDE (just like `Enter` on the dashboard); otherwise pull it into Reviewing, like `t` (a PR from a fork, which can't be pulled, opens in the browser). Clicking the selected row (or double-clicking one) does the same |
 | `g` / `o` | Open the PR in the browser |
 | `l` | Open its Linear ticket |
 | `t` | Pull its branch into **Reviewing** (the same no-questions checkout as `t` on the dashboard). You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard; a PR from a fork can't be pulled |
