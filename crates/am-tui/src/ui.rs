@@ -880,13 +880,29 @@ fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_brow
     f.render_widget(Paragraph::new(vec![Line::raw(""), status]), foot);
 }
 
-/// Settings → Key bindings.
+/// Settings → Key bindings: the commands by section, each with its key,
+/// its default when changed and what it does on the review page.
 fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::keys_ui::KeyEditor, hits: &mut Vec<Hit>) {
     use crate::keymap::{self, Command};
+    // `▌` + label, key, `(default ctrl-v)`, then the review-page column.
+    const REVIEW_X: usize = 1 + 2 + 24 + 8 + 17;
+    let review_col = list.width as usize >= REVIEW_X + 20;
     let header = " Key bindings — ⏎ change · x reset · R reset all · esc back";
     hint_hits(hits, header, list.x, list.y);
-    let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
+    let column = if review_col { format!("{:REVIEW_X$}On the review page", "") } else { String::new() };
+    f.render_widget(
+        Paragraph::new(vec![Line::styled(header, theme.faint()), Line::styled(column, theme.faint())]),
+        Rect { height: 2.min(list.height), ..list },
+    );
+    let footer = " Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc back · ctrl-c quit";
+    // (command index, line); section headers take no index.
+    let mut rows: Vec<(Option<usize>, Line)> = Vec::new();
+    let mut section = "";
     for (i, cmd) in Command::ALL.into_iter().enumerate() {
+        if cmd.section() != section {
+            section = cmd.section();
+            rows.push((None, Line::styled(format!(" {section}"), theme.bold(theme.accent))));
+        }
         let sel = i == ed.cursor;
         let key = ed.keymap.key(cmd);
         let mut spans = vec![
@@ -898,23 +914,51 @@ fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &
         } else {
             let shown = ed.keymap.shown(cmd);
             spans.push(Span::styled(format!("{shown:<8}"), if key.is_some() { theme.bold(theme.accent) } else { theme.faint() }));
-            if key != cmd.default_key() {
-                let default = cmd.default_key().map(keymap::display).unwrap_or_else(|| "none".into());
-                spans.push(Span::styled(format!("(default {default})"), theme.faint()));
+            let default = if key != cmd.default_key() {
+                format!("(default {})", cmd.default_key().map(keymap::display).unwrap_or_else(|| "none".into()))
+            } else {
+                String::new()
+            };
+            spans.push(Span::styled(format!("{default:<17}"), theme.faint()));
+            if review_col {
+                let (text, style) = match cmd.on_review_page() {
+                    Some(t) => (t, theme.fg(theme.text)),
+                    None => ("—", theme.faint()),
+                };
+                spans.push(Span::styled(truncate(text, (list.width as usize).saturating_sub(REVIEW_X)), style));
             }
         }
         let line = Line::from(spans);
-        push_row(hits, list, lines.len(), Target::Item(List::Keys, i), sel);
-        lines.push(if sel { line.style(theme.selected()) } else { line });
+        rows.push((Some(i), if sel { line.style(theme.selected()) } else { line }));
     }
-    lines.push(Line::raw(""));
-    lines.push(Line::styled(" Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit", theme.faint()));
-    f.render_widget(Paragraph::new(lines), list);
-    let help_line = match &ed.message {
+    // The footer sits under the list, or at the bottom once the list scrolls.
+    let body = Rect { y: list.y + 2, height: list.height.saturating_sub(5).min(rows.len() as u16), ..list };
+    let foot = Rect { y: body.y + body.height, height: list.height.saturating_sub(2).min(3), ..list };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), Line::styled(truncate(footer, list.width as usize), theme.faint())]), foot);
+    // Keep the selection in view, with its section header when it opens one.
+    let height = body.height as usize;
+    let at = rows.iter().position(|(i, _)| *i == Some(ed.cursor)).unwrap_or(0);
+    let first = if at > 0 && rows[at - 1].0.is_none() { at - 1 } else { at };
+    let start = (at + 1).saturating_sub(height).min(first);
+    let mut lines = Vec::new();
+    for (n, (i, line)) in rows.into_iter().enumerate().skip(start).take(height) {
+        if let Some(i) = i {
+            push_row(hits, body, n - start, Target::Item(List::Keys, i), i == ed.cursor);
+        }
+        lines.push(line);
+    }
+    f.render_widget(Paragraph::new(lines), body);
+    let cmd = ed.selected();
+    let first_line = match &ed.message {
         Some((ok, m)) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
-        None => Line::styled(format!(" {}", ed.selected().help()), theme.faint()),
+        None => Line::styled(format!(" {}", cmd.help()), theme.faint()),
     };
-    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+    let review_line = match cmd.on_review_page() {
+        Some("same") => " Does the same on the review page".to_string(),
+        Some(t) => format!(" On the review page: {t}"),
+        None => " Does nothing on the review page".to_string(),
+    };
+    f.render_widget(Paragraph::new(vec![first_line, Line::styled(review_line, theme.faint())]), help);
 }
 
 /// One colour as a swatch: a filled block, or a word for the special values.
@@ -3477,6 +3521,16 @@ mod tests {
         keys.cursor = 12;
         keys.on_key(Key::Enter);
         insta::assert_snapshot!("key_bindings_capturing", render(&app, 100, 34));
+        // Too narrow for the review-page column.
+        let keys = app.settings_editor.as_mut().unwrap().keys.as_mut().unwrap();
+        keys.on_key(Key::Esc);
+        keys.cursor = 7;
+        insta::assert_snapshot!("key_bindings_narrow", render(&app, 66, 34));
+        // The list scrolls to keep the selection in view.
+        let keys = app.settings_editor.as_mut().unwrap().keys.as_mut().unwrap();
+        keys.on_key(Key::End);
+        let screen = render(&app, 100, 34);
+        assert!(screen.contains("Jump to bottom") && !screen.contains("Open worktree"), "{screen}");
     }
 
     fn with_builder(current: &str) -> App {
@@ -3933,6 +3987,20 @@ mod tests {
             assert!(app.reviews.is_some());
             assert_eq!(app.on_key(k), Action::None);
             assert!(app.reviews.is_none(), "{k:?}");
+        }
+    }
+
+    #[test]
+    fn keys_listed_as_doing_nothing_on_the_review_page_do_nothing_there() {
+        use crate::keymap::Command;
+        for cmd in Command::ALL.into_iter().filter(|c| c.on_review_page().is_none()) {
+            let mut app = by_repo();
+            app.on_key(Key::Char('v'));
+            let before = render(&app, 120, 20);
+            let key = app.keymap.key(cmd).unwrap();
+            assert_eq!(app.on_key(key), crate::app::Action::None, "{cmd:?}");
+            assert!(app.reviews.is_some() && app.modal.is_none() && app.settings_editor.is_none(), "{cmd:?}");
+            assert_eq!(render(&app, 120, 20), before, "{cmd:?}");
         }
     }
 

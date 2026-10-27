@@ -24,6 +24,9 @@ test("a dashboard key can be rebound in Settings → Key bindings, then reset", 
   await openKeyBindings(tui);
   // Help is on h; View logs is no longer a key (it's in Settings).
   await tui.waitForMatch(/Help\s+h\s/);
+  // Each key also says what it does on the review page.
+  await tui.waitForText("On the review page");
+  await tui.waitForMatch(/Open worktree\s+⏎\s+pull, or open the pulled one/);
   expect(await tui.getScreenText()).not.toMatch(/View logs\s+L/);
   await tui.screenshot("key-bindings-help-h");
   await tui.press("j", 4); // Open worktree → … → New worktree
@@ -62,7 +65,8 @@ test("a dashboard key can be rebound in Settings → Key bindings, then reset", 
   await openKeyBindings(tui);
   await tui.press("j", 4);
   await tui.sendKey("x");
-  await tui.waitForMatch(/New worktree {2,}n {2,}│/); // no "(default n)" any more
+  // No "(default n)" any more; the review-page column says n does nothing there.
+  await tui.waitForMatch(/New worktree {2,}n {2,}— {2,}│/);
   await tui.sendKey("Escape");
   await tui.waitForText("defaults");
   await tui.sendKey("Escape");

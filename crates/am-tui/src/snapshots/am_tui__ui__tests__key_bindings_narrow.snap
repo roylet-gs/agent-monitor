@@ -1,0 +1,38 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 66, 34)"
+---
+╭─Worktrees ─────────────────────────────────────────────────────╮
+│╭─Settings ────────────────────────────────────────────────────╮│
+││ Key bindings — ⏎ change · x reset · R reset all · esc back   ││
+││                                                              ││
+││ Worktrees                                                    ││
+││   Open worktree           ⏎                                  ││
+││   Open PR                 g                                  ││
+││   Open Linear ticket      l                                  ││
+││   Open Linear project     p                                  ││
+││   New worktree            N       (default n)                ││
+││   Delete worktree         d                                  ││
+││   Add repository          A                                  ││
+││ Review requests                                              ││
+││▌  Review requests         v                                  ││
+││   Reviews beside list     V                                  ││
+││   Reviews in new window   ctrl-v                             ││
+││   Pull into Reviewing     t                                  ││
+││ General                                                      ││
+││   Toggle log pane         w                                  ││
+││   Settings                s                                  ││
+││   Suggest a feature       f                                  ││
+││   Refresh now             r                                  ││
+││   Help                    h                                  ││
+││   Quit                    q                                  ││
+││ Moving                                                       ││
+││   Move down               j                                  ││
+││   Move up                 k                                  ││
+││                                                              ││
+││ Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc…││
+││                                                              ││
+││ PRs waiting on your review, in place of the list             ││
+││ On the review page: full page / back                         ││
+╰╰─────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯╯
+ ⏎ open  │ g PR  l linear  │ h help  q quit
