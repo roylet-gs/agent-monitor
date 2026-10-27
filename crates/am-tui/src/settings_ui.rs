@@ -68,7 +68,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
     Field { key: "repositories", label: "Repositories…", help: "Add or stop tracking repositories, edit their startup scripts", section: "General", kind: Kind::Repos },
     Field { key: "agentPlugins", label: "Harness plugins…", help: "Turn harnesses on/off, install their hooks, pick the default", section: "General", kind: Kind::Plugins },
-    Field { key: "keyBindings", label: "Key bindings…", help: "Choose the dashboard's keys", section: "General", kind: Kind::KeyBindings },
+    Field { key: "keyBindings", label: "Key bindings…", help: "Choose the dashboard's keys (the review page uses them too)", section: "General", kind: Kind::KeyBindings },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
     Field { key: "startupScriptMode", label: "Run startup script in", help: "pane: output in the Jobs pane; window: a new terminal window", section: "General", kind: Kind::Choice(&["pane", "window"]) },
     Field { key: "defaultBranchPrefix", label: "Branch prefix", help: "Prefix for new worktree branches", section: "General", kind: Kind::Text { secret: false } },

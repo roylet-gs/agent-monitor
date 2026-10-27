@@ -5,34 +5,34 @@ expression: "render(&app, 100, 34)"
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ Key bindings — ⏎ change · x reset · R reset all · esc back                       │░ 121k │
-│ ◐ fix/│                                                                                  │░ 185k │
-│       │   Open worktree           ⏎                                                      │       │
-│gridsig│   Open PR                 g                                                      │───────│
-│ · main│   Open Linear ticket      l                                                      │       │
-│       │   Open Linear project     p                                                      │       │
-│       │   New worktree            N       (default n)                                    │       │
-│       │   Delete worktree         d                                                      │       │
-│       │   Pull into Reviewing     t                                                      │       │
-│       │   Review requests         v                                                      │       │
-│       │   Reviews beside list     V                                                      │       │
-│       │   Reviews in new window   ctrl-v                                                 │       │
-│       │   Add repository          A                                                      │       │
-│       │   Toggle log pane         w                                                      │       │
+│ ◐ fix/│                                                    On the review page            │░ 185k │
+│       │ Worktrees                                                                        │       │
+│gridsig│   Open worktree           ⏎                        pull, or open the pulled one  │───────│
+│ · main│   Open PR                 g                        open the PR                   │       │
+│       │   Open Linear ticket      l                        the PR's ticket               │       │
+│       │   Open Linear project     p                        —                             │       │
+│       │   New worktree            N       (default n)      —                             │       │
+│       │   Delete worktree         d                        remove the pulled worktree    │       │
+│       │   Add repository          A                        —                             │       │
+│       │ Review requests                                                                  │       │
+│       │   Review requests         v                        full page / back              │       │
+│       │   Reviews beside list     V                        beside the list / close       │       │
+│       │   Reviews in new window   ctrl-v                   new window                    │       │
+│       │   Pull into Reviewing     t                        pull into Reviewing           │       │
+│       │ General                                                                          │       │
+│       │   Toggle log pane         w                        —                             │       │
 │       │▌  Settings                press a key…                                           │       │
-│       │   Suggest a feature       f                                                      │       │
-│       │   Refresh now             r                                                      │       │
-│       │   Help                    h                                                      │       │
-│       │   Quit                    q                                                      │       │
-│       │   Move down               j                                                      │       │
-│       │   Move up                 k                                                      │       │
-│       │   Page down               ctrl-d                                                 │       │
-│       │   Page up                 ctrl-u                                                 │       │
-│       │   Jump to top             —                                                      │       │
-│       │   Jump to bottom          G                                                      │       │
+│       │   Suggest a feature       f                        review filters                │       │
+│       │   Refresh now             r                        clear cache and refetch       │       │
+│       │   Help                    h                        same                          │       │
+│       │   Quit                    q                        back                          │       │
+│       │ Moving                                                                           │       │
+│       │   Move down               j                        same                          │       │
+│       │   Move up                 k                        same                          │       │
 │       │                                                                                  │       │
-│       │ Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit      │       │
-│       │                                                                                  │       │
+│       │ Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc back · ctrl-c quit  │       │
 │       │                                                                                  │       │
 │       │ Press the new key for Settings · esc cancels                                     │       │
+│       │ Does the same on the review page                                                 │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
  ⏎ open  │ g PR  l linear  │ N new  d delete  v reviews  │ s settings  r refresh  h help  q quit

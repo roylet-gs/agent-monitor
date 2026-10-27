@@ -1,8 +1,10 @@
 //! Dashboard key bindings. Each `Command` has one rebindable key (default:
 //! the 1.x key) plus fixed keys that can't be taken (arrows, PgUp/PgDn,
 //! Home/End, Esc, Ctrl-C, Tab), so the dashboard can always be driven and
-//! left. `keyBindings` in settings.json stores only the changed keys:
-//! command id → key name (`"N"`, `"ctrl-d"`, `"enter"`, `"none"`). Pure.
+//! left. The review page runs the same commands through the same keymap,
+//! some with their own meaning there (`Command::on_review_page`).
+//! `keyBindings` in settings.json stores only the changed keys: command id →
+//! key name (`"N"`, `"ctrl-d"`, `"enter"`, `"none"`). Pure.
 
 use std::collections::BTreeMap;
 
@@ -38,7 +40,8 @@ pub enum Command {
 }
 
 impl Command {
-    /// Every command, in the order the Key bindings page lists them.
+    /// Every command, in the order the Key bindings page lists them (grouped
+    /// by `section`).
     pub const ALL: [Command; 23] = [
         Command::Open,
         Command::OpenPr,
@@ -46,11 +49,11 @@ impl Command {
         Command::OpenProject,
         Command::NewWorktree,
         Command::Delete,
-        Command::PullToTmpSpace,
+        Command::AddRepo,
         Command::ReviewRequests,
         Command::ReviewSplit,
         Command::ReviewWindow,
-        Command::AddRepo,
+        Command::PullToTmpSpace,
         Command::ToggleLog,
         Command::Settings,
         Command::Feedback,
@@ -131,7 +134,19 @@ impl Command {
         }
     }
 
-    /// One-line description under the Key bindings page.
+    /// Heading the Key bindings page lists the command under.
+    pub fn section(self) -> &'static str {
+        match self {
+            Command::Open | Command::OpenPr | Command::OpenLinear | Command::OpenProject | Command::NewWorktree | Command::Delete | Command::AddRepo => {
+                "Worktrees"
+            }
+            Command::ReviewRequests | Command::ReviewSplit | Command::ReviewWindow | Command::PullToTmpSpace => "Review requests",
+            Command::ToggleLog | Command::Settings | Command::Feedback | Command::Refresh | Command::Help | Command::Quit => "General",
+            Command::MoveDown | Command::MoveUp | Command::PageDown | Command::PageUp | Command::Top | Command::Bottom => "Moving",
+        }
+    }
+
+    /// One-line description (on the dashboard) under the Key bindings page.
     pub fn help(self) -> &'static str {
         match self {
             Command::Open => "Open in the IDE (resumes the last agent session); double-click does the same",
@@ -140,24 +155,45 @@ impl Command {
             Command::OpenProject => "The ticket's Linear project",
             Command::NewWorktree => "New worktree form",
             Command::Delete => "Delete the selected worktree (asks first)",
-            Command::PullToTmpSpace => "On the review page: pull the selected PR into the Reviewing group",
-            Command::ReviewRequests => "PRs waiting on your review: open them, their tickets, or pull one into Reviewing",
-            Command::ReviewSplit => "The review page beside the worktree list (⇥ moves between them)",
-            Command::ReviewWindow => "The review page in a new terminal window",
             Command::AddRepo => "Track another repository",
+            Command::ReviewRequests => "PRs waiting on your review, in place of the list",
+            Command::ReviewSplit => "The review page beside the worktree list (⇥ moves between list, reviews and jobs)",
+            Command::ReviewWindow => "The review page in a new terminal window",
+            Command::PullToTmpSpace => "Pull the selected PR into the Reviewing group (review page only)",
             Command::ToggleLog => "Show or hide the debug.log pane",
-            Command::Settings => "Open this editor",
+            Command::Settings => "Open settings",
             Command::Feedback => "File a feature request on GitHub",
             Command::Refresh => "Refresh git, PRs and tickets now",
             Command::Help => "The keys overlay",
-            Command::Quit => "Leave am (esc and ctrl-c always quit too)",
-            Command::MoveDown => "Next worktree (↓ always works)",
-            Command::MoveUp => "Previous worktree (↑ always works)",
+            Command::Quit => "Leave am (esc on the list and ctrl-c always quit too)",
+            Command::MoveDown => "Next row (↓ always works)",
+            Command::MoveUp => "Previous row (↑ always works)",
             Command::PageDown => "Ten rows down (pgdn always works)",
             Command::PageUp => "Ten rows up (pgup always works)",
-            Command::Top => "First worktree (home always works)",
-            Command::Bottom => "Last worktree (end always works)",
+            Command::Top => "First row (home always works)",
+            Command::Bottom => "Last row (end always works)",
         }
+    }
+
+    /// What the key does on the review page (`App::review_key`), shortly;
+    /// `None` when it does nothing there.
+    pub fn on_review_page(self) -> Option<&'static str> {
+        Some(match self {
+            Command::Open => "pull, or open the pulled one",
+            Command::OpenPr => "open the PR",
+            Command::OpenLinear => "the PR's ticket",
+            Command::Delete => "remove the pulled worktree",
+            Command::ReviewRequests => "full page / back",
+            Command::ReviewSplit => "beside the list / close",
+            Command::ReviewWindow => "new window",
+            Command::PullToTmpSpace => "pull into Reviewing",
+            Command::Settings | Command::Help => "same",
+            Command::Feedback => "review filters",
+            Command::Refresh => "clear cache and refetch",
+            Command::Quit => "back",
+            Command::MoveDown | Command::MoveUp | Command::PageDown | Command::PageUp | Command::Top | Command::Bottom => "same",
+            Command::OpenProject | Command::NewWorktree | Command::AddRepo | Command::ToggleLog => return None,
+        })
     }
 
     /// Key-bar text; `None` for commands that aren't on the bar.
