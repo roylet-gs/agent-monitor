@@ -10,8 +10,8 @@ expression: "render(&app, 100, 20)"
 │gridsight│       g / l / p  open PR / Linear ticket / Linear project                    │─────────│
 │ · main  │           w / L  toggle log pane / open the log file (or folder)             │         │
 │         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
-│         │               v  PRs waiting on your review (the N to review badge)          │         │
-│         │               t  pull an existing branch into Reviewing                      │         │
+│         │  v / V / ctrl-v  PRs to review: page / beside the list / new window          │         │
+│         │               t  on the review page: pull the PR into Reviewing              │         │
 │         │               A  add repository                                              │         │
 │         │               f  suggest a feature (files a GitHub issue)                    │         │
 │         │               s  settings (Key bindings… changes these keys)                 │         │

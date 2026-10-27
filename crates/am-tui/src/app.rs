@@ -85,6 +85,8 @@ pub enum Action {
     ReloadReviews,
     /// Look up who can author PRs (review-group autocomplete).
     LoadReviewPeople,
+    /// `ctrl-v`: the review page in a new terminal window (`am-tui --reviews`).
+    OpenReviewWindow,
     /// Enter: open in the configured IDE (resuming the last session if set).
     Open(Box<WorktreeView>),
     /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
@@ -137,8 +139,12 @@ pub struct App {
     pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
     pub modal: Option<crate::modals::Modal>,
     pub setup: Option<crate::setup::Setup>,
-    /// `v`: the review-requests page, in place of the worktree list.
+    /// `v`: the review-requests page, in place of the worktree list (`V`:
+    /// beside it).
     pub reviews: Option<crate::reviews_ui::ReviewPage>,
+    /// `am-tui --reviews` (the window `ctrl-v` opens): only the review page,
+    /// and leaving it quits.
+    pub reviews_only: bool,
     /// The review groups being edited (Review filters → Groups…), which the
     /// page previews in place of the saved ones.
     pub group_preview: Option<(Vec<am_core::review_groups::ReviewGroup>, am_core::review_groups::ReviewGroup)>,
@@ -189,6 +195,7 @@ impl App {
             modal: None,
             setup: None,
             reviews: None,
+            reviews_only: false,
             group_preview: None,
             pending_select: None,
             unseen: Default::default(),
@@ -605,7 +612,7 @@ impl App {
             }
             return Action::None;
         }
-        if self.reviews.is_some() {
+        if self.reviews.as_ref().is_some_and(|p| !p.split) {
             return self.review_key(key);
         }
         if self.jobs.focused {
@@ -618,7 +625,24 @@ impl App {
                 JobEffect::RunScript { job, repo_id, worktree_path } => Action::RunScript { job, repo_id, worktree_path },
             };
         }
+        if self.review_focused() {
+            return self.review_key(key);
+        }
         self.dashboard_key(key)
+    }
+
+    /// Whether the review page takes the keys: a full page, or the review
+    /// side of a split while it (not the list or jobs pane) has focus.
+    pub fn review_focused(&self) -> bool {
+        self.reviews.as_ref().is_some_and(|p| !p.split || (p.focused && !self.jobs.focused))
+    }
+
+    /// Give the keys to the jobs pane (Tab, a click on it).
+    fn focus_jobs(&mut self) {
+        if let Some(p) = &mut self.reviews {
+            p.focused = false;
+        }
+        self.jobs.focus();
     }
 
     fn editor_outcome(&mut self, outcome: crate::settings_ui::Outcome) -> Action {
@@ -659,8 +683,13 @@ impl App {
     }
 
     fn dashboard_key(&mut self, key: Key) -> Action {
-        if key == Key::Tab && self.jobs.visible() {
-            self.jobs.focus();
+        // Tab: list → review pane (split) → jobs pane → list.
+        if key == Key::Tab {
+            if let Some(p) = &mut self.reviews {
+                p.focused = true;
+            } else if self.jobs.visible() {
+                self.focus_jobs();
+            }
             return Action::None;
         }
         match self.keymap.command(key) {
@@ -721,19 +750,29 @@ impl App {
                     }
                 }
             }
-            C::PullToTmpSpace => {
-                if self.snapshot.repos.is_empty() {
-                    self.modal = Some(self.add_repo_modal());
-                } else {
-                    let repo = self.selected_view().map(|v| v.worktree.repo_id.clone());
-                    self.modal = Some(crate::modals::Modal::tmp_branch(self.snapshot.repos.clone(), repo.as_deref()));
-                }
-            }
+            // Only the review page pulls (its selected PR).
+            C::PullToTmpSpace => {}
             C::Feedback => {
                 self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
             C::AddRepo => self.modal = Some(self.add_repo_modal()),
-            C::ReviewRequests => return self.open_reviews(),
+            C::ReviewRequests => match &mut self.reviews {
+                // From the split: the page takes the whole body.
+                Some(p) => *p = crate::reviews_ui::ReviewPage { cursor: p.cursor, split: false, focused: true },
+                None => return self.open_reviews(false),
+            },
+            C::ReviewSplit => match self.reviews.as_ref().map(|p| p.split) {
+                Some(true) => self.reviews = None,
+                Some(false) => {}
+                None => return self.open_reviews(true),
+            },
+            C::ReviewWindow => {
+                if self.reviews_refused() {
+                    return Action::None;
+                }
+                self.notice = Some("Opening review requests in a new window…".into());
+                return Action::OpenReviewWindow;
+            }
             C::Settings => self.open_settings(),
             C::MoveDown => self.move_by(1),
             C::MoveUp => self.move_by(-1),
@@ -794,16 +833,19 @@ impl App {
             Target::Key(k) => self.on_key(k),
             Target::Command(c) => self.run_command(c),
             Target::JobsPane => {
-                self.jobs.focus();
+                self.focus_jobs();
                 Action::None
             }
             Target::JobKey(job, k) => {
-                self.jobs.focus();
+                self.focus_jobs();
                 self.jobs.cursor = job;
                 self.on_key(k)
             }
             Target::Worktree(i) => {
                 self.jobs.focused = false;
+                if let Some(p) = &mut self.reviews {
+                    p.focused = false;
+                }
                 self.selected = i;
                 self.mark_selected_seen();
                 if double { self.run_command(crate::keymap::Command::Open) } else { Action::None }
@@ -912,10 +954,14 @@ impl App {
             }
             L::Reviews => {
                 let Some(p) = &mut self.reviews else { return Action::None };
-                (std::mem::replace(&mut p.cursor, i) == i).then_some(Key::Enter)
+                // A click on the unfocused split side only focuses it.
+                let was_focused = !p.split || (p.focused && !self.jobs.focused);
+                p.focused = true;
+                self.jobs.focused = false;
+                (std::mem::replace(&mut p.cursor, i) == i && was_focused).then_some(Key::Enter)
             }
             L::Jobs => {
-                self.jobs.focus();
+                self.focus_jobs();
                 self.jobs.cursor = i;
                 None
             }
@@ -992,18 +1038,37 @@ impl App {
         Some(parts)
     }
 
-    fn open_reviews(&mut self) -> Action {
+    /// Review requests are off: say so (and how to turn them on).
+    fn reviews_refused(&mut self) -> bool {
         if !self.settings.gh_pr_status {
             self.notice = Some("Review requests need GitHub PR status (Settings → Fetch PRs)".into());
-            return Action::None;
+            return true;
         }
         if !self.settings.review_requests_enabled {
             self.notice = Some("Review requests are off (Settings → Show review requests)".into());
+            return true;
+        }
+        false
+    }
+
+    /// The review page, in place of the list or (`split`) beside it, with
+    /// the keys.
+    pub fn open_reviews(&mut self, split: bool) -> Action {
+        if self.reviews_refused() {
             return Action::None;
         }
         self.jobs.focused = false;
-        self.reviews = Some(crate::reviews_ui::ReviewPage::default());
+        self.reviews = Some(crate::reviews_ui::ReviewPage { cursor: 0, split, focused: true });
         Action::RefreshReviews
+    }
+
+    /// Leave the review page: closes it, or quits a review-only window.
+    fn close_reviews(&mut self) -> Action {
+        if self.reviews_only {
+            return Action::Quit;
+        }
+        self.reviews = None;
+        Action::None
     }
 
     /// Whether a review-page key applies to the selected PR (the key bar
@@ -1036,9 +1101,24 @@ impl App {
         }
         let len = self.review_list().len();
         let cmd = self.keymap.command(key);
+        let reviews_only = self.reviews_only;
         let Some(page) = &mut self.reviews else { return Action::None };
+        // Tab in a split: on to the jobs pane when it's open, else the list.
+        if key == Key::Tab && page.split {
+            page.focused = false;
+            if self.jobs.visible() {
+                self.jobs.focus();
+            }
+            return Action::None;
+        }
         match cmd {
-            Some(C::Quit | C::ReviewRequests) => self.reviews = None,
+            Some(C::Quit) => return self.close_reviews(),
+            // `v` in a split takes the whole body; on the full page it goes back.
+            Some(C::ReviewRequests) if page.split => page.split = false,
+            Some(C::ReviewRequests) => return self.close_reviews(),
+            Some(C::ReviewSplit) if page.split => self.reviews = None,
+            Some(C::ReviewSplit) if !reviews_only => page.split = true,
+            Some(C::ReviewWindow) if !reviews_only => return self.run_command(C::ReviewWindow),
             Some(C::MoveDown) => page.move_by(1, len),
             Some(C::MoveUp) => page.move_by(-1, len),
             Some(C::PageDown) => page.move_by(10, len),
@@ -1119,7 +1199,17 @@ impl App {
             return Action::None;
         }
         if let Some(id) = r.worktree_id {
-            self.reviews = None;
+            // A review-only window has no list to show it in.
+            if self.reviews_only {
+                self.notice = Some(format!("{} is already checked out", r.head_ref_name));
+                return Action::None;
+            }
+            // A split stays open with the list taking the keys; the full
+            // page makes way for the list.
+            match &mut self.reviews {
+                Some(p) if p.split => p.focused = false,
+                _ => self.reviews = None,
+            }
             match self.flat.iter().position(|v| v.worktree.id == id) {
                 Some(i) => {
                     self.selected = i;
@@ -1315,4 +1405,5 @@ pub enum Key {
     CtrlD,
     CtrlU,
     CtrlS,
+    CtrlV,
 }

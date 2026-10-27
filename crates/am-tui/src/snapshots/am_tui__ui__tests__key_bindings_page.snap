@@ -14,6 +14,8 @@ expression: "render(&app, 100, 34)"
 │       │   Delete worktree         d                                                      │       │
 │       │   Pull into Reviewing     t                                                      │       │
 │       │   Review requests         v                                                      │       │
+│       │   Reviews beside list     V                                                      │       │
+│       │   Reviews in new window   ctrl-v                                                 │       │
 │       │   Add repository          A                                                      │       │
 │       │   Toggle log pane         w                                                      │       │
 │       │   View logs               L                                                      │       │
@@ -30,8 +32,6 @@ expression: "render(&app, 100, 34)"
 │       │   Jump to bottom          G                                                      │       │
 │       │                                                                                  │       │
 │       │ Always on: ↑↓ move · pgup/pgdn · home/end · ⇥ jobs pane · esc / ctrl-c quit      │       │
-│       │                                                                                  │       │
-│       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │ New worktree form                                                                │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯

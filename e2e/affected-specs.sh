@@ -58,7 +58,7 @@ specs_for() {
     crates/am-tui/src/jobs.rs) echo 09 10 22 27 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 ;;
     crates/am-tui/src/data.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 ;;
-    crates/am-tui/src/launcher.rs) echo 21 23 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens
+    crates/am-tui/src/launcher.rs) echo 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window
 
     # --- am-core ----------------------------------------------------------
     crates/am-core/src/lib.rs | crates/am-core/src/db.rs | crates/am-core/src/settings.rs | \

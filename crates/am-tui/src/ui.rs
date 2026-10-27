@@ -44,7 +44,14 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
         draw_log(f, theme, areas.log, log_lines);
     }
 
-    if app.reviews.is_some() {
+    if let Some(reviews) = areas.reviews {
+        // `V`: the review page beside the list.
+        draw_worktrees(f, app, theme, areas.list, now, &mut hits);
+        draw_reviews(f, app, theme, reviews, now, &mut hits);
+        if let Some(jobs) = areas.jobs {
+            draw_jobs(f, app, theme, jobs, now, &mut hits);
+        }
+    } else if app.reviews.is_some() {
         // The review page takes the whole body, jobs pane included.
         let body = areas.jobs.map_or(areas.list, |j| areas.list.union(j));
         draw_reviews(f, app, theme, body, now, &mut hits);
@@ -224,20 +231,39 @@ fn hover(f: &mut Frame, theme: &Theme, rect: Rect) {
 struct DashAreas {
     list: Rect,
     jobs: Option<Rect>,
+    /// The review page beside the list (`V`).
+    reviews: Option<Rect>,
     log: Rect,
     keys: Rect,
 }
+
+/// Narrower than this, the split review page goes under the list.
+const SPLIT_SIDE_BY_SIDE: u16 = 100;
 
 fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
     let log_h = if app.show_log { (area.height / 3).max(5) } else { 0 };
     let [body, log, keys] =
         Layout::vertical([Constraint::Min(5), Constraint::Length(log_h), Constraint::Length(1)]).areas(area);
+    if app.reviews.as_ref().is_some_and(|p| p.split) {
+        // List | review page, or stacked when narrow; the jobs pane goes
+        // under the review page.
+        let [list, side] = if body.width >= SPLIT_SIDE_BY_SIDE {
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(body)
+        } else {
+            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(body)
+        };
+        if app.jobs.visible() {
+            let [reviews, jobs] = Layout::vertical([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(side);
+            return DashAreas { list, jobs: Some(jobs), reviews: Some(reviews), log, keys };
+        }
+        return DashAreas { list, jobs: None, reviews: Some(side), log, keys };
+    }
     if app.jobs.visible() {
         let pane_w = (body.width / 3).clamp(34, 60).min(body.width.saturating_sub(40));
         let [list, jobs] = Layout::horizontal([Constraint::Min(40), Constraint::Length(pane_w)]).areas(body);
-        DashAreas { list, jobs: Some(jobs), log, keys }
+        DashAreas { list, jobs: Some(jobs), reviews: None, log, keys }
     } else {
-        DashAreas { list: body, jobs: None, log, keys }
+        DashAreas { list: body, jobs: None, reviews: None, log, keys }
     }
 }
 
@@ -1108,25 +1134,13 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             } else if form.remote_exists() {
                 Some(Line::styled("           ✓ on origin and locally — Enter will ask first", theme.fg(theme.green)))
             } else if form.local_only() {
-                let offer = if form.tmp_space { "" } else { "offer to " };
-                Some(Line::styled(format!("           ! exists locally only — Enter will {offer}reuse it"), theme.fg(theme.yellow)))
-            } else if form.tmp_space && form.missing() {
-                Some(Line::styled("           ✗ not found locally or on origin", theme.fg(theme.red)))
+                Some(Line::styled("           ! exists locally only — Enter will offer to reuse it", theme.fg(theme.yellow)))
             } else if form.pending_check.is_some() {
                 Some(Line::styled("           checking…", theme.faint()))
             } else {
                 None
             };
             field(&mut lines, "Branch", form.branch.clone(), FormField::Branch, note);
-            if form.tmp_space {
-                lines.push(Line::styled(" Checks out an existing branch to look at, in the Reviewing group", theme.faint()));
-                if let Some(e) = &form.error {
-                    lines.push(Line::raw(""));
-                    lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
-                }
-                let hint = if form.repos.len() > 1 { "tab next  ⏎ pull  esc cancel" } else { "⏎ pull  esc cancel" };
-                ("Pull into Reviewing".into(), theme.border_focus, hint, lines)
-            } else {
             field(&mut lines, "Name", if form.name.is_empty() && form.field != FormField::Name { "(optional)".into() } else { form.name.clone() }, FormField::Name, None);
             if form.remote_exists() {
                 lines.push(Line::styled(format!(" Base      tracks origin/{}", form.branch), theme.faint()));
@@ -1138,7 +1152,6 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
                 lines.push(Line::styled(format!(" {e}"), theme.fg(theme.red)));
             }
             ("New worktree".into(), theme.border_focus, "tab next  ⏎ create  esc cancel", lines)
-            }
         }
         Modal::Delete(d) => {
             let w = &d.view.worktree;
@@ -1588,7 +1601,7 @@ struct Columns {
 }
 
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
-    let focused = !app.jobs.focused;
+    let focused = !app.jobs.focused && !app.review_focused();
     let mut block = pane_block(theme, title("Worktrees", theme), focused);
     // Top right: the update notice, then the review badge in the corner.
     let mut corner: Vec<Span> = Vec::new();
@@ -1691,7 +1704,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let grouping = app.grouping();
     let ordered = order(list, &app.snapshot.repos, grouping);
     let cursor = app.reviews.as_ref().map_or(0, |p| p.cursor);
-    let mut block = pane_block(theme, title("Review requests", theme), true);
+    let mut block = pane_block(theme, title("Review requests", theme), app.review_focused());
     if !ordered.is_empty() {
         block = block.title_bottom(
             Line::styled(format!(" {} of {} ", cursor + 1, ordered.len()), theme.faint()).alignment(Alignment::Right),
@@ -2642,8 +2655,8 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (None, 0),
     (Some(Command::NewWorktree), 1),
     (Some(Command::Delete), 1),
-    (Some(Command::PullToTmpSpace), 3),
     (Some(Command::ReviewRequests), 1),
+    (Some(Command::ReviewSplit), 3),
     (Some(Command::AddRepo), 3),
     (None, 0),
     (Some(Command::ToggleLog), 3),
@@ -2686,7 +2699,7 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
     // (key, label, click, priority); an empty key is a separator.
     let mut keys: Vec<(String, &'static str, Option<BarHit>, u8)> = Vec::new();
     let raw = |k: &str, label, hit: Option<Key>, prio| (k.to_string(), label, hit.map(BarHit::Key), prio);
-    if app.reviews.is_some() {
+    if app.review_focused() {
         // The review page takes the dashboard's own keys for these.
         let cmd = |c: Command, label, prio| {
             app.keymap.key(c).map(|k| (crate::keymap::display(k), label, Some(BarHit::Key(k)), prio))
@@ -2706,7 +2719,12 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
         keys.push(raw("", "", None, 0));
         keys.extend(cmd(Command::Refresh, "refresh", 1));
         keys.extend(cmd(Command::Help, "help", 2));
-        keys.push(raw("esc", "back", Some(Key::Esc), 0));
+        if app.reviews.as_ref().is_some_and(|p| p.split) {
+            keys.push(raw("⇥", if app.jobs.visible() { "jobs" } else { "list" }, Some(Key::Tab), 0));
+            keys.push(raw("esc", "close", Some(Key::Esc), 0));
+        } else {
+            keys.push(raw("esc", if app.reviews_only { "quit" } else { "back" }, Some(Key::Esc), 0));
+        }
     } else if app.jobs.focused {
         // While jobs are showing, Tab moves between the list and the pane.
         keys.extend([
@@ -2717,7 +2735,9 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             raw("q", "quit", Some(Key::Char('q')), 0),
         ]);
     } else {
-        if app.jobs.visible() {
+        if app.reviews.is_some() {
+            keys.extend([raw("⇥", "reviews", Some(Key::Tab), 0), raw("", "", None, 0)]);
+        } else if app.jobs.visible() {
             keys.extend([raw("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, Some(Key::Tab), 0), raw("", "", None, 0)]);
         }
         for &(cmd, prio) in KEYS {
@@ -2747,7 +2767,7 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             }
             let available = match hit {
                 Some(BarHit::Command(c)) => app.key_available(*c),
-                Some(BarHit::Key(k)) if app.reviews.is_some() => app.review_key_available(*k),
+                Some(BarHit::Key(k)) if app.review_focused() => app.review_key_available(*k),
                 _ => true,
             };
             items.push(KeyItem::Key { key: k.clone(), label, hit: *hit, available });
@@ -2837,8 +2857,8 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog, C::ViewLogs], "", "toggle log pane / open the log file (or folder)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
-        (&[C::ReviewRequests], "", "PRs waiting on your review (the N to review badge)"),
-        (&[C::PullToTmpSpace], "", "pull an existing branch into Reviewing"),
+        (&[C::ReviewRequests, C::ReviewSplit, C::ReviewWindow], "", "PRs to review: page / beside the list / new window"),
+        (&[C::PullToTmpSpace], "", "on the review page: pull the PR into Reviewing"),
         (&[C::AddRepo], "", "add repository"),
         (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
         (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
@@ -3425,7 +3445,7 @@ mod tests {
         app.settings_editor = Some(ed);
         insta::assert_snapshot!("key_bindings_page", render(&app, 100, 34));
         let keys = app.settings_editor.as_mut().unwrap().keys.as_mut().unwrap();
-        keys.cursor = 11;
+        keys.cursor = 13;
         keys.on_key(Key::Enter);
         insta::assert_snapshot!("key_bindings_capturing", render(&app, 100, 34));
     }
@@ -3885,6 +3905,106 @@ mod tests {
             assert_eq!(app.on_key(k), Action::None);
             assert!(app.reviews.is_none(), "{k:?}");
         }
+    }
+
+    #[test]
+    fn review_split_sits_beside_the_list_and_tab_moves_focus() {
+        use crate::app::Action;
+        let mut app = by_repo();
+        assert_eq!(app.on_key(Key::Char('V')), Action::RefreshReviews);
+        assert!(app.review_focused());
+        let wide = render(&app, 120, 10);
+        assert!(wide.contains("Worktrees") && wide.contains("Review requests"), "{wide}");
+        insta::assert_snapshot!("review_split_wide", wide);
+        insta::assert_snapshot!("review_split_narrow", render(&app, 80, 16));
+        // Keys go to the review side: j moves its cursor, not the list's.
+        let selected = app.selected;
+        app.on_key(Key::Char('j'));
+        assert_eq!(app.reviews.as_ref().unwrap().cursor, 1);
+        assert_eq!(app.selected, selected);
+        // ⇥ hands the keys to the list (the split stays), and back.
+        app.on_key(Key::Tab);
+        assert!(!app.review_focused() && app.reviews.is_some());
+        app.on_key(Key::Char('j'));
+        assert_eq!(app.reviews.as_ref().unwrap().cursor, 1);
+        assert!(render(&app, 120, 10).lines().last().unwrap().contains("⇥ reviews"));
+        app.on_key(Key::Tab);
+        assert!(app.review_focused());
+        // v takes the whole body; V splits again; esc closes.
+        app.on_key(Key::Char('v'));
+        assert!(app.reviews.as_ref().is_some_and(|p| !p.split));
+        app.on_key(Key::Char('V'));
+        assert!(app.reviews.as_ref().is_some_and(|p| p.split && p.focused));
+        app.on_key(Key::Esc);
+        assert!(app.reviews.is_none());
+        // V from the list closes the split too.
+        app.on_key(Key::Char('V'));
+        app.on_key(Key::Tab);
+        app.on_key(Key::Char('V'));
+        assert!(app.reviews.is_none());
+    }
+
+    #[test]
+    fn review_split_keeps_open_when_a_pulled_pr_is_shown_in_the_list() {
+        let mut app = by_repo();
+        app.on_key(Key::End);
+        app.on_key(Key::Char('V'));
+        app.on_key(Key::Char('t'));
+        assert!(app.reviews.as_ref().is_some_and(|p| p.split), "the split stays");
+        assert!(!app.review_focused(), "the list takes the keys");
+        assert_eq!(app.selected_view().unwrap().worktree.id, "w1");
+    }
+
+    #[test]
+    fn review_split_puts_the_jobs_pane_under_the_page() {
+        let mut app = by_repo();
+        app.on_key(Key::Char('V'));
+        app.on_key(Key::Down);
+        app.on_key(Key::Down);
+        assert!(matches!(app.on_key(Key::Enter), crate::app::Action::Create(..)));
+        insta::assert_snapshot!("review_split_jobs", render(&app, 120, 16));
+        // ⇥: reviews → jobs → list → reviews.
+        app.on_key(Key::Tab);
+        assert!(app.jobs.focused && !app.review_focused());
+        app.on_key(Key::Tab);
+        assert!(!app.jobs.focused && !app.review_focused());
+        app.on_key(Key::Tab);
+        assert!(app.review_focused());
+    }
+
+    #[test]
+    fn ctrl_v_opens_the_review_page_in_a_new_window() {
+        use crate::app::Action;
+        let mut app = by_repo();
+        assert_eq!(app.on_key(Key::CtrlV), Action::OpenReviewWindow);
+        app.settings.review_requests_enabled = false;
+        assert_eq!(app.on_key(Key::CtrlV), Action::None);
+        assert!(app.notice.as_deref().unwrap().contains("Review requests are off"));
+    }
+
+    #[test]
+    fn a_review_only_window_quits_when_the_page_closes() {
+        use crate::app::Action;
+        let mut app = by_repo();
+        app.reviews_only = true;
+        app.on_key(Key::Char('v'));
+        assert!(render(&app, 120, 10).lines().last().unwrap().contains("esc quit"));
+        assert_eq!(app.on_key(Key::Char('V')), Action::None, "no split in a review-only window");
+        assert!(app.reviews.as_ref().is_some_and(|p| !p.split));
+        assert_eq!(app.on_key(Key::CtrlV), Action::None);
+        // An already-pulled PR (#51, first) stays on the page: there's no list to show.
+        app.on_key(Key::Home);
+        assert_eq!(app.on_key(Key::Char('t')), Action::None);
+        assert!(app.reviews.is_some());
+        assert_eq!(app.on_key(Key::Esc), Action::Quit);
+    }
+
+    #[test]
+    fn t_on_the_dashboard_does_nothing() {
+        let mut app = by_repo();
+        assert_eq!(app.on_key(Key::Char('t')), crate::app::Action::None);
+        assert!(app.modal.is_none());
+        assert!(!render(&app, 200, 10).lines().last().unwrap().contains("pull"));
     }
 
     #[test]
@@ -4462,26 +4582,6 @@ mod tests {
             m.on_check_result("feature/x".into(), am_core::worktrees::BranchCheck { local: false, remote: Some(true) });
         }
         insta::assert_snapshot!(render(&app, 100, 16));
-    }
-
-    #[test]
-    fn tmp_space_pull_modal_renders_and_refuses_a_missing_branch() {
-        let mut app = fixture();
-        app.snapshot.repos = vec![Repository { id: "r1".into(), path: "/r1".into(), name: "agent-monitor".into() }];
-        app.on_key(Key::Char('t'));
-        for c in "bob/pr".chars() {
-            app.on_key(Key::Char(c));
-        }
-        if let Some(m) = &mut app.modal {
-            m.on_check_result("bob/pr".into(), am_core::worktrees::BranchCheck { local: false, remote: Some(true) });
-        }
-        insta::assert_snapshot!(render(&app, 100, 14));
-        if let Some(m) = &mut app.modal {
-            m.on_check_result("bob/pr".into(), am_core::worktrees::BranchCheck { local: false, remote: Some(false) });
-        }
-        assert_eq!(app.on_key(Key::Enter), crate::app::Action::None);
-        let screen = render(&app, 100, 14);
-        assert!(screen.contains("✗ not found locally or on origin") && screen.contains("No such branch"), "{screen}");
     }
 
     #[test]

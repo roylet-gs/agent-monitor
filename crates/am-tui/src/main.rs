@@ -42,6 +42,7 @@ fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
         KeyCode::Char('d') if ctrl => Key::CtrlD,
         KeyCode::Char('u') if ctrl => Key::CtrlU,
         KeyCode::Char('s') if ctrl => Key::CtrlS,
+        KeyCode::Char('v') if ctrl => Key::CtrlV,
         KeyCode::Char(c) => Key::Char(c),
         KeyCode::Up => Key::Up,
         KeyCode::Left => Key::Left,
@@ -75,10 +76,19 @@ fn main() -> io::Result<()> {
     // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
     let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
     let show_log = args.iter().any(|a| a == "--log");
+    // `ctrl-v` opens a terminal running `am-tui --reviews`: just the review page.
+    let reviews_only = !first_run && args.iter().any(|a| a == "--reviews");
     let setup = first_run.then(|| setup::Setup::new(repo_names(), &settings));
     let mut app = App::new(settings);
     app.setup = setup;
     app.show_log = show_log;
+    if reviews_only {
+        // Review requests off: say why, on the full dashboard.
+        if app.open_reviews(false) == app::Action::RefreshReviews {
+            app.reviews_only = true;
+            collector.refresh_reviews();
+        }
+    }
     // Hooks pointing at a deleted am-hook (removed worktree, upgraded install)
     // fail on every agent event; re-point them at the current binary.
     let repaired = am_core::hooks_installer::repair_dangling_hooks();
@@ -472,6 +482,7 @@ fn dispatch(
             *theme = theme::Theme::load(&app.settings.theme);
             collector.update_settings(app.settings.clone());
         }
+        Action::OpenReviewWindow => launcher::open_review_window(launch_tx.clone()),
         Action::ViewLogs => {
             use am_core::launch::{IdeChoice, LogView};
             let files = am_core::paths::log_files();

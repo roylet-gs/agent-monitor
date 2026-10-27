@@ -19,6 +19,8 @@ test("? opens the key help overlay and closes it again", async ({ page }) => {
   expect(text).toContain("refresh now (bypasses backoff)");
   // View logs (L) shares a line with the log-pane toggle.
   expect(text).toMatch(/w \/ L\s+toggle log pane \/ open the log file \(or folder\)/);
+  // The review page: full, beside the list, or in a new window.
+  expect(text).toMatch(/v \/ V \/ ctrl-v\s+PRs to review: page \/ beside the list \/ new window/);
   // Status legend.
   for (const s of ["executing", "planning", "waiting", "delegating", "done", "idle"]) {
     expect(text).toContain(s);

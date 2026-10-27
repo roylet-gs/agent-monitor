@@ -20,6 +20,8 @@ pub enum Command {
     Delete,
     PullToTmpSpace,
     ReviewRequests,
+    ReviewSplit,
+    ReviewWindow,
     AddRepo,
     ToggleLog,
     ViewLogs,
@@ -38,7 +40,7 @@ pub enum Command {
 
 impl Command {
     /// Every command, in the order the Key bindings page lists them.
-    pub const ALL: [Command; 22] = [
+    pub const ALL: [Command; 24] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -47,6 +49,8 @@ impl Command {
         Command::Delete,
         Command::PullToTmpSpace,
         Command::ReviewRequests,
+        Command::ReviewSplit,
+        Command::ReviewWindow,
         Command::AddRepo,
         Command::ToggleLog,
         Command::ViewLogs,
@@ -78,6 +82,8 @@ impl Command {
             Command::Delete => "deleteWorktree",
             Command::PullToTmpSpace => "pullToTmpSpace",
             Command::ReviewRequests => "reviewRequests",
+            Command::ReviewSplit => "reviewSplit",
+            Command::ReviewWindow => "reviewWindow",
             Command::AddRepo => "addRepo",
             Command::ToggleLog => "toggleLog",
             Command::ViewLogs => "viewLogs",
@@ -110,6 +116,8 @@ impl Command {
             Command::Delete => "Delete worktree",
             Command::PullToTmpSpace => "Pull into Reviewing",
             Command::ReviewRequests => "Review requests",
+            Command::ReviewSplit => "Reviews beside list",
+            Command::ReviewWindow => "Reviews in new window",
             Command::AddRepo => "Add repository",
             Command::ToggleLog => "Toggle log pane",
             Command::ViewLogs => "View logs",
@@ -136,8 +144,10 @@ impl Command {
             Command::OpenProject => "The ticket's Linear project",
             Command::NewWorktree => "New worktree form",
             Command::Delete => "Delete the selected worktree (asks first)",
-            Command::PullToTmpSpace => "Paste an existing branch (someone else's PR) to check it out in the Reviewing group",
+            Command::PullToTmpSpace => "On the review page: pull the selected PR into the Reviewing group",
             Command::ReviewRequests => "PRs waiting on your review: open them, their tickets, or pull one into Reviewing",
+            Command::ReviewSplit => "The review page beside the worktree list (⇥ moves between them)",
+            Command::ReviewWindow => "The review page in a new terminal window",
             Command::AddRepo => "Track another repository",
             Command::ToggleLog => "Show or hide the debug.log pane",
             Command::ViewLogs => "Open debug.log in the editor (the log folder once it has rotated)",
@@ -166,6 +176,8 @@ impl Command {
             Command::Delete => "delete",
             Command::PullToTmpSpace => "pull",
             Command::ReviewRequests => "reviews",
+            Command::ReviewSplit => "split",
+            Command::ReviewWindow => "new window",
             Command::AddRepo => "add repo",
             Command::ToggleLog => "log",
             Command::ViewLogs => "logs",
@@ -188,6 +200,8 @@ impl Command {
             Command::Delete => Key::Char('d'),
             Command::PullToTmpSpace => Key::Char('t'),
             Command::ReviewRequests => Key::Char('v'),
+            Command::ReviewSplit => Key::Char('V'),
+            Command::ReviewWindow => Key::CtrlV,
             Command::AddRepo => Key::Char('A'),
             Command::ToggleLog => Key::Char('w'),
             Command::ViewLogs => Key::Char('L'),
@@ -238,13 +252,13 @@ const PR_ALIAS: Key = Key::Char('o');
 /// Keys no command can take: the fixed keys, plus Tab/Shift-Tab (jobs pane).
 pub fn reserved(key: Key) -> Option<&'static str> {
     if matches!(key, Key::Tab | Key::BackTab) {
-        return Some("moves between the list and the jobs pane");
+        return Some("moves between the list, the review pane and the jobs pane");
     }
     Command::ALL.into_iter().find(|c| c.fixed_keys().contains(&key)).map(|c| c.label())
 }
 
 /// `keyBindings` value → key: one character, or a name (`space`, `enter`,
-/// `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`).
+/// `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`, `ctrl-v`).
 pub fn parse_key(s: &str) -> Option<Key> {
     let mut chars = s.chars();
     if let (Some(c), None) = (chars.next(), chars.next()) {
@@ -259,6 +273,7 @@ pub fn parse_key(s: &str) -> Option<Key> {
         "ctrl-d" => Key::CtrlD,
         "ctrl-u" => Key::CtrlU,
         "ctrl-s" => Key::CtrlS,
+        "ctrl-v" => Key::CtrlV,
         _ => return None,
     })
 }
@@ -275,6 +290,7 @@ pub fn key_name(key: Key) -> Option<String> {
         Key::CtrlD => "ctrl-d".into(),
         Key::CtrlU => "ctrl-u".into(),
         Key::CtrlS => "ctrl-s".into(),
+        Key::CtrlV => "ctrl-v".into(),
         _ => return None,
     })
 }
@@ -301,6 +317,7 @@ pub fn display(key: Key) -> String {
         Key::CtrlD => "ctrl-d".into(),
         Key::CtrlU => "ctrl-u".into(),
         Key::CtrlS => "ctrl-s".into(),
+        Key::CtrlV => "ctrl-v".into(),
     }
 }
 
