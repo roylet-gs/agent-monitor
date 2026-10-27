@@ -754,6 +754,9 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         if !(gh_due || linear_due || reviews_due || people_due || first || new_branches) {
             continue;
         }
+        // Intervals run from the start of a cycle, so a slow GitHub PR fetch
+        // ahead of the review search doesn't push every refresh later.
+        let cycle_start = Instant::now();
         if first {
             // Publish what's cached before the (slow) first fetch.
             let _ = tx.send(update(&ints, &branches, &settings));
@@ -780,7 +783,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             let outcome = ints.refresh_reviews(&conn, &review_repos, &settings, force || reviews_now);
             info!("integrations", "review requests refresh: {outcome:?} in {:?}", started.elapsed());
             perf.record("integrations.reviews", started.elapsed());
-            last_reviews = Some(Instant::now());
+            last_reviews = Some(cycle_start);
             known_repos = repo_ids;
         }
         if people_due {
