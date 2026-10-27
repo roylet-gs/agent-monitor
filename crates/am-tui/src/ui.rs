@@ -1533,6 +1533,13 @@ fn update_label(app: &App, width: u16) -> Option<String> {
 /// counts are left out, and there's no badge while all are 0 or the feature
 /// is off.
 fn review_badge(app: &App, width: u16) -> Option<String> {
+    let (wide, narrow) = review_badge_forms(app)?;
+    // The wide form needs room beside the pane title.
+    Some(if width >= 60 && wide.width() + 14 <= width as usize { wide } else { narrow })
+}
+
+/// The review badge's wide and narrow (`⚑`) forms.
+fn review_badge_forms(app: &App) -> Option<(String, String)> {
     use crate::app::BadgePart;
     let parts: Vec<BadgePart> = app
         .review_badge_parts()?
@@ -1553,8 +1560,7 @@ fn review_badge(app: &App, width: u16) -> Option<String> {
         BadgePart::Total(n) => n.map_or("?".into(), |n| n.to_string()),
     });
     let narrow = format!(" ⚑{} ", narrow.collect::<Vec<_>>().join("·"));
-    // The wide form needs room beside the pane title.
-    Some(if width >= 60 && wide.width() + 14 <= width as usize { wide } else { narrow })
+    Some((wide, narrow))
 }
 
 /// Bottom-right ` today 4.1M ` (` today (visible) 4.1M ` for the visible
@@ -1723,14 +1729,29 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
         block = block.title_bottom(Line::styled(summary, theme.faint()).alignment(Alignment::Left));
     }
     let error = app.snapshot.review_error.as_ref();
-    // A failed refresh beside a list we still have (from before, or the cache).
+    // Top right: a failed refresh beside a list we still have (from before,
+    // or the cache), then the dashboard's review badge in the corner.
+    let mut corner: Vec<Span> = Vec::new();
     if let Some(e) = error.filter(|_| !ordered.is_empty()) {
         let what = if e.rate_limited { "rate-limited" } else { "couldn't refresh" };
         let label = match reset_text(e, now) {
             Some(r) => format!(" ⚠ GitHub {what} ({r}) — showing cached "),
             None => format!(" ⚠ GitHub {what} — showing cached "),
         };
-        block = block.title(Line::styled(label, theme.bold(theme.yellow)).alignment(Alignment::Right));
+        corner.push(Span::styled(label, theme.bold(theme.yellow)));
+    }
+    // Beside the list (`V`), the ─Worktrees border already shows it.
+    let split = app.reviews.as_ref().is_some_and(|p| p.split);
+    if let Some((wide, narrow)) = review_badge_forms(app).filter(|_| !split) {
+        // Two corners, `─Review requests `, the warning and one border cell.
+        let used = corner.iter().map(|s| s.content.width()).sum::<usize>();
+        let room = (area.width as usize).saturating_sub(2 + "─Review requests ".width() + used + 1);
+        if let Some(badge) = [wide, narrow].into_iter().find(|b| b.width() <= room) {
+            corner.push(Span::styled(badge, theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
+        }
+    }
+    if !corner.is_empty() {
+        block = block.title(Line::from(corner).alignment(Alignment::Right));
     }
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -4119,6 +4140,25 @@ mod tests {
         // A second click (or a double-click) pulls it; once pulled, it opens the worktree.
         assert!(matches!(click(&mut app, 120, 10, at, true), crate::app::Action::Create(..)));
         assert!(matches!(click(&mut app, 120, 10, at, false), crate::app::Action::None));
+    }
+
+    #[test]
+    fn review_page_shows_the_badge_too() {
+        let mut app = with_reviews();
+        app.on_key(Key::Char('v'));
+        let top = render(&app, 120, 10).lines().next().unwrap().to_string();
+        assert!(top.starts_with("╭─Review requests ─") && top.ends_with(" 3 to review ╮"), "{top}");
+        // Narrow: the short form; beside a stale-list warning, after it.
+        assert!(render(&app, 28, 10).lines().next().unwrap().ends_with(" ⚑3 ╮"), "{}", render(&app, 28, 10));
+        let mut snap = app.snapshot.clone();
+        snap.review_error = Some(am_core::model::ReviewFetchError {
+            message: "rate limited".into(),
+            rate_limited: true,
+            resets_at: None,
+        });
+        app.apply(snap);
+        let top = render(&app, 120, 10).lines().next().unwrap().to_string();
+        assert!(top.ends_with(" ⚠ GitHub rate-limited — showing cached  3 to review ╮"), "{top}");
     }
 
     #[test]

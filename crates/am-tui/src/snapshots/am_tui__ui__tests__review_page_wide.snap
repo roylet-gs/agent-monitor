@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 120, 10)"
 ---
-╭─Review requests ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+╭─Review requests ──────────────────────────────────────────────────────────────────────────────────────── 3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌Batch the PR queries  @alice ✓ pulled                                                 you           #51✓ review   0s │
 │ Typo in README  @outsider fork                                                        @docs         #48✓ review   0s │
