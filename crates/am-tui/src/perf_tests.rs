@@ -212,6 +212,9 @@ fn work_grows_no_worse_than_linearly_with_worktrees_and_reviews() {
 
 /// Per-call budgets for a release build at roughly the size of a busy setup
 /// (and 4× that). Generous: they flag a step change, not a few percent.
+/// `AM_PERF_BUDGET_SCALE` multiplies them (CI's shared runners are slower and
+/// noisier than a laptop); `AM_PERF_REPORT` names a file to append a markdown
+/// table to (CI points it at the job summary).
 #[test]
 #[ignore = "timing budgets: cargo test --release -p am-tui perf_budget -- --ignored --nocapture"]
 fn perf_budget() {
@@ -222,18 +225,31 @@ fn perf_budget() {
         ("review page frame", Duration::from_millis(4)),
         ("key + frame, review page", Duration::from_millis(4)),
     ];
+    let scale: f64 = std::env::var("AM_PERF_BUDGET_SCALE").ok().and_then(|s| s.parse().ok()).filter(|s| *s > 0.0).unwrap_or(1.0);
+    let mut table = String::from("| Size | Operation | Time | Budget | |\n|---|---|---|---|---|\n");
     let mut failed = Vec::new();
     for size in [(60, 50), (240, 200)] {
         println!("\n{} worktrees, {} reviews", size.0, size.1);
         for (name, took) in measure(size, 10) {
             let budget = budgets.iter().find(|(b, _)| *b == name).map(|(_, d)| *d).unwrap();
-            let budget = if size.0 > 60 { budget * 4 } else { budget };
+            let budget = if size.0 > 60 { budget * 4 } else { budget }.mul_f64(scale);
             let ok = took <= budget;
-            println!("  {name:<20} {took:>12?}  budget {budget:>8?}  {}", if ok { "ok" } else { "SLOW" });
+            println!("  {name:<26} {took:>12?}  budget {budget:>10?}  {}", if ok { "ok" } else { "SLOW" });
+            table.push_str(&format!(
+                "| {} worktrees, {} reviews | {name} | {took:.2?} | {budget:.2?} | {} |\n",
+                size.0,
+                size.1,
+                if ok { "✅" } else { "❌ slow" }
+            ));
             if !ok {
                 failed.push(format!("{name} at {size:?}: {took:?} > {budget:?}"));
             }
         }
+    }
+    if let Ok(path) = std::env::var("AM_PERF_REPORT") {
+        let head = format!("### UI timing budgets (×{scale} budget scale)\n\n");
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+        std::io::Write::write_all(&mut f, (head + &table + "\n").as_bytes()).unwrap();
     }
     assert!(failed.is_empty(), "over budget: {failed:?}");
 }
