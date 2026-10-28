@@ -239,9 +239,9 @@ The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has
 | Campfire event | Canonical event | Resulting status |
 | --- | --- | --- |
 | `session_start` | `SessionStart` | `idle` |
-| `before_agent_start` | `UserPromptSubmit` (once per turn) | `executing` |
-| observer `join.requested` / `permission.asked` | `Notification` `permission_prompt` | `waiting` (a `done` session is left alone) |
-| `agent_end` | `Stop` (once per turn; `PostToolUse` first when the turn saw an ask) | `done` after work |
+| `before_agent_start` / `agent_start` | `UserPromptSubmit` (once per run) | `executing` |
+| observer `join.requested` / `permission.asked` | `PreToolUse` with `permission_prompt: true` and the ask as `message` | `waiting` (also after a finished turn: the `done` guard drops a `Notification`, not a `PreToolUse`) |
+| `agent_end` | `Stop` (once per run; `PostToolUse` first when the run saw an ask) | `done` after work |
 | `session_end` / `session_shutdown` | `SessionEnd` | `idle` |
 
-There is no event for the host answering a join request or capability ask, so a `waiting` row from an ask between turns stays until the next prompt.
+`agent_end` isn't the end of the work: after a retry, a compaction retry or a queued follow-up message Pi starts another run with `agent_start` and no `before_agent_start`, so that run reports `UserPromptSubmit` again (the row goes `done` → `executing` → `done`). There is no event for the host answering a join request or capability ask, so a `waiting` row from an ask between turns stays until the next prompt. am-hook stores a needs-user `PreToolUse`'s `message` as the row's last message, as it does a `Notification`'s.

@@ -16,16 +16,20 @@
 //! wait (except up to 1.5 s at shutdown, so `SessionEnd` gets out):
 //! - `session_start` → `SessionStart`; `session_end` / Pi's
 //!   `session_shutdown` → `SessionEnd` (once).
-//! - `before_agent_start` → `UserPromptSubmit`, `agent_end` → `Stop` with the
-//!   last assistant text, once per turn, since a second `Stop` would turn
-//!   `done` into `idle`.
+//! - `before_agent_start` or `agent_start` → `UserPromptSubmit`, `agent_end`
+//!   → `Stop` with the last assistant text, once per run, since a second
+//!   `Stop` would turn `done` into `idle`. `agent_end` isn't the end of the
+//!   work: a retry, a compaction retry or a queued follow-up message starts
+//!   another run with `agent_start` alone, which moves the row back to
+//!   `executing`.
 //! - The collaborative observer bridge (`Symbol.for("campfire.observer.v1")`
 //!   on `globalThis`): `join.requested` (someone waits in the lobby) and
 //!   `permission.asked` (a collaborator asks for a capability) need the host,
-//!   so they are a `Notification` of type `permission_prompt` (waiting; the
-//!   rules leave a `done` session alone). There is no event for the answer:
-//!   the next prompt moves the row on, and a turn that saw an ask sends
-//!   `PostToolUse` before its `Stop` (as `Stop` keeps `waiting`).
+//!   so they are a `PreToolUse` with `permission_prompt: true` and the ask as
+//!   `message` (waiting, also after a finished turn: the rules' `done` guard
+//!   drops a `Notification` but not a `PreToolUse`). There is no event for
+//!   the answer: the next prompt moves the row on, and a turn that saw an ask
+//!   sends `PostToolUse` before its `Stop` (as `Stop` keeps `waiting`).
 //!   `relay.error` is ignored.
 //! - Only the host is reported (`CAMPFIRE_SESSION_ROLE=host`): a joiner is an
 //!   ephemeral view of someone else's session whose argv carries the invite
@@ -136,9 +140,11 @@ mod tests {
         assert_eq!(step(None, p("SessionStart")), Some(Idle));
         let s = step(Some(Idle), p("UserPromptSubmit"));
         assert_eq!(s, Some(Executing));
-        let mut ask = p("Notification");
-        ask["notification_type"] = "permission_prompt".into();
+        let mut ask = p("PreToolUse");
+        ask["permission_prompt"] = true.into();
         ask["message"] = "Ana is waiting to join the Campfire session".into();
+        let a = CAMPFIRE.normalize(&ask, None);
+        assert!(a.needs_user() && a.tool_name.is_none(), "{a:?}");
         let w = step(s, ask.clone());
         assert_eq!(w, Some(Waiting));
         // The turn ends: PostToolUse first, so the Stop lands on done.
@@ -147,9 +153,13 @@ mod tests {
         assert_eq!(step(s, p("Stop")), Some(Done));
         // A second Stop would have turned it idle (why the extension sends one).
         assert_eq!(step(Some(Done), p("Stop")), Some(Idle));
-        // An ask while idle waits; a finished session is left alone.
+        // An ask waits whether the session is idle or its turn is done, and
+        // the next prompt moves it on.
         assert_eq!(step(Some(Idle), ask.clone()), Some(Waiting));
-        assert_eq!(step(Some(Done), ask), None);
+        assert_eq!(step(Some(Done), ask), Some(Waiting));
+        assert_eq!(step(Some(Waiting), p("UserPromptSubmit")), Some(Executing));
+        // A retry or follow-up run after agent_end goes back to executing.
+        assert_eq!(step(Some(Done), p("UserPromptSubmit")), Some(Executing));
         assert_eq!(step(Some(Waiting), p("SessionEnd")), Some(Idle));
     }
 
@@ -216,18 +226,24 @@ const fire = async (name, event = {}) => { const h = handlers.get(name); if (h) 
 const observe = (e) => { const b = globalThis[Symbol.for("campfire.observer.v1")]; if (b) for (const l of b.listeners) l(e); };
 await fire("session_start", { type: "session_start" });
 await fire("before_agent_start", { prompt: "secret prompt" });
+await fire("agent_start", {});
 await fire("before_agent_start", { prompt: "again" });
 observe({ type: "join.requested", displayName: "Ana" });
 observe({ type: "relay.error", reason: "down" });
 observe({ type: "presence.changed" });
 await fire("agent_end", { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: [{ type: "text", text: "All done." }] }] });
 await fire("agent_end", { messages: [] });
+// A retry / queued follow-up: agent_start without before_agent_start.
+await fire("agent_start", {});
+await fire("agent_end", {});
+// An ask after a finished turn still reaches am.
 observe({ type: "permission.asked", displayName: "Bo", capability: "shell:exec" });
 await fire("before_agent_start", {});
+await fire("agent_start", {});
 await fire("agent_end", {});
 await fire("session_shutdown", {});
 await fire("session_end", {});
-const want = role === "host" ? 9 : 0;
+const want = role === "host" ? 11 : 0;
 const start = Date.now();
 const lines = () => { try { return fs.readFileSync(log, "utf8").split("\n").filter(Boolean).length; } catch { return 0; } };
 while (lines() < want && Date.now() - start < 8000) await new Promise((r) => setTimeout(r, 25));
@@ -257,17 +273,45 @@ await new Promise((r) => setTimeout(r, 200));
         let events: Vec<&str> = sent.iter().map(|(e, _)| e.as_str()).collect();
         assert_eq!(
             events,
-            ["SessionStart", "UserPromptSubmit", "Notification", "PostToolUse", "Stop", "Notification", "UserPromptSubmit", "Stop", "SessionEnd"]
+            [
+                "SessionStart",
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PostToolUse",
+                "Stop",
+                "UserPromptSubmit",
+                "Stop",
+                "PreToolUse",
+                "UserPromptSubmit",
+                "Stop",
+                "SessionEnd"
+            ]
         );
         for (event, p) in &sent {
             assert_eq!(p["hook_event_name"], event.as_str());
             assert_eq!((&p["session_id"], &p["cwd"]), (&json!("cf-1"), &json!("/w/repo")));
             assert!(p.get("prompt").is_none(), "prompts are never sent");
         }
-        assert_eq!(sent[2].1["notification_type"], "permission_prompt");
+        assert_eq!(sent[2].1["permission_prompt"], true);
         assert_eq!(sent[2].1["message"], "Ana is waiting to join the Campfire session");
         assert_eq!(sent[4].1["last_assistant_message"], "All done.");
-        assert_eq!(sent[5].1["message"], "Bo asked for permission: shell:exec");
-        assert!(sent[7].1.get("last_assistant_message").is_none());
+        assert!(sent[6].1.get("last_assistant_message").is_none());
+        assert_eq!(sent[7].1["permission_prompt"], true);
+        assert_eq!(sent[7].1["message"], "Bo asked for permission: shell:exec");
+        // Replayed through the rules, the retry ends done and the late ask waits.
+        let mut status = None;
+        let seen: Vec<_> = sent
+            .iter()
+            .map(|(_, p)| {
+                if let Some(s) = map_event_to_status(&CAMPFIRE.normalize(p, None), status, 0) {
+                    status = Some(s);
+                }
+                status
+            })
+            .collect();
+        assert_eq!(
+            seen,
+            [Some(Idle), Some(Executing), Some(Waiting), Some(Executing), Some(Done), Some(Executing), Some(Done), Some(Waiting), Some(Executing), Some(Done), Some(Idle)]
+        );
     }
 }

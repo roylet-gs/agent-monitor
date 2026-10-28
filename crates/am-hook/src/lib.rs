@@ -149,7 +149,7 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
         None
     } else if let Some(m) = ev.last_assistant_message.as_deref().filter(|_| !ev.is_subagent_lifecycle()) {
         Some(m)
-    } else if ev.is("Notification") {
+    } else if ev.is("Notification") || ev.needs_user() {
         ev.message.as_deref()
     } else {
         None

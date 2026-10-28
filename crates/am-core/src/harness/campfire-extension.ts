@@ -134,13 +134,17 @@ export default function agentMonitor(api) {
     emit("SessionStart");
   });
 
-  // Once per turn: a second Stop would turn `done` into `idle`.
-  on("before_agent_start", () => {
+  // Once per run: a second Stop would turn `done` into `idle`. A prompt
+  // fires before_agent_start then agent_start; a retry, a compaction retry
+  // or a queued follow-up message starts another run with agent_start alone.
+  const start = () => {
     if (turn) return;
     turn = true;
     asked = false;
     emit("UserPromptSubmit");
-  });
+  };
+  on("before_agent_start", start);
+  on("agent_start", start);
 
   on("agent_end", (event) => {
     if (!turn) return;
@@ -166,7 +170,9 @@ export default function agentMonitor(api) {
   on("session_end", end);
   on("session_shutdown", end);
 
-  // A join request or a capability ask needs the host: the row waits.
+  // A join request or a capability ask needs the host: the row waits. Sent as
+  // a PreToolUse permission prompt, which (unlike a Notification) also moves a
+  // session whose turn is done.
   const bridge = call(() => {
     const g = globalThis;
     if (!g[OBSERVER_KEY]) g[OBSERVER_KEY] = { listeners: new Set() };
@@ -178,7 +184,7 @@ export default function agentMonitor(api) {
         const message = e && askMessage(e);
         if (!message || ended) return;
         if (turn) asked = true;
-        emit("Notification", { notification_type: "permission_prompt", message });
+        emit("PreToolUse", { permission_prompt: true, message });
       } catch (_) {}
     };
     call(() => {
