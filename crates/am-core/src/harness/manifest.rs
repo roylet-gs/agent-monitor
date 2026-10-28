@@ -41,6 +41,8 @@
 //!   `hooksKey: ""` puts events at the top level of the file. Without
 //!   `projectDirVar` the command passes `--worktree ""` and am-hook uses the
 //!   payload's `cwd`.
+//! - `resume.start` (optional) holds the arguments a fresh session needs
+//!   when the program alone doesn't start one (`["rovodev", "run"]`).
 //! - `sessions.command` (optional) prints a JSON array of
 //!   `{"id", "cwd", "modified"}` (modified = unix seconds) for `{root}`;
 //!   without it, resuming falls back to `resume.continue`. Built-ins without
@@ -213,11 +215,15 @@ pub struct ResumeSpec {
     pub session: Vec<String>,
     #[serde(default, rename = "continue")]
     pub continue_latest: Vec<String>,
+    /// Arguments that start a fresh session, for a CLI whose program alone
+    /// doesn't (`acli` needs `rovodev run`). Default: none.
+    #[serde(default)]
+    pub start: Vec<String>,
 }
 
 impl Default for ResumeSpec {
     fn default() -> Self {
-        ResumeSpec { session: default_resume_session(), continue_latest: Vec::new() }
+        ResumeSpec { session: default_resume_session(), continue_latest: Vec::new(), start: Vec::new() }
     }
 }
 
@@ -363,7 +369,7 @@ impl Manifest {
         match (session_id, continue_latest) {
             (Some(id), _) => self.resume.session.iter().map(|a| a.replace("{id}", id)).collect(),
             (None, true) => self.resume.continue_latest.clone(),
-            (None, false) => Vec::new(),
+            (None, false) => self.resume.start.clone(),
         }
     }
 

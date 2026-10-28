@@ -14,7 +14,7 @@ use serde_json::{Map, Value};
 
 use super::{Harness, HarnessKind, is_within};
 use super::manifest::{Manifest, expand_home};
-use crate::hooks_installer::HookInstall;
+use crate::hooks_installer::{HookContext, HookInstall};
 use crate::launch::Session;
 use crate::status::HookEvent;
 
@@ -26,12 +26,17 @@ pub struct Embedded {
     hook_file: Option<fn() -> (PathBuf, &'static str)>,
     /// How the hooks are installed when not merged into a JSON file.
     hook_install: Option<fn() -> HookInstall>,
+    /// Where a text block goes ([`Harness::place_hook_block`]).
+    place_block: Option<PlaceBlock>,
 }
+
+/// [`Harness::place_hook_block`] as a function.
+pub type PlaceBlock = fn(&str, &HookContext) -> std::io::Result<Option<String>>;
 
 impl Embedded {
     /// `load` parses the embedded JSON (`|| Manifest::builtin(include_str!(…))`).
     pub const fn new(load: fn() -> Manifest, discover: Option<fn(&Path) -> Vec<Session>>) -> Embedded {
-        Embedded { manifest: LazyLock::new(load), discover, hook_file: None, hook_install: None }
+        Embedded { manifest: LazyLock::new(load), discover, hook_file: None, hook_install: None, place_block: None }
     }
 
     pub const fn with_hook_file(mut self, f: fn() -> (PathBuf, &'static str)) -> Embedded {
@@ -44,6 +49,13 @@ impl Embedded {
     /// manifest's `hooks.settingsPath`.
     pub const fn with_hook_install(mut self, f: fn() -> HookInstall) -> Embedded {
         self.hook_install = Some(f);
+        self
+    }
+
+    /// Place the [`HookInstall::TextBlock`] block somewhere other than the
+    /// end of the file ([`Harness::place_hook_block`]).
+    pub const fn with_block_placement(mut self, f: PlaceBlock) -> Embedded {
+        self.place_block = Some(f);
         self
     }
 
@@ -105,6 +117,13 @@ impl Harness for Embedded {
 
     fn hook_install(&self) -> HookInstall {
         self.hook_install.map(|f| f()).unwrap_or(HookInstall::Json)
+    }
+
+    fn place_hook_block(&self, text: &str, ctx: &HookContext) -> std::io::Result<Option<String>> {
+        match self.place_block {
+            Some(f) => f(text, ctx),
+            None => Ok(None),
+        }
     }
 
     fn hook_command(&self, event: &str, invocation: &str) -> String {

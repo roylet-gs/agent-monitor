@@ -1,0 +1,36 @@
+{
+  "id": "rovodev",
+  "name": "Rovo Dev CLI",
+  "shortName": "Rovo Dev",
+  "program": "acli",
+  "configDir": "~/.rovodev",
+  "hooks": {
+    "settingsPath": "~/.rovodev/config.yml",
+    "projectDirVar": "PWD"
+  },
+  "events": {
+    "on_session_start": "SessionStart",
+    "on_user_prompt": "UserPromptSubmit",
+    "on_tool_start": "PreToolUse",
+    "on_tool_end": "PostToolUse",
+    "on_tool_permission": "PermissionRequest",
+    "on_complete": "Stop",
+    "on_error": "StopFailure",
+    "on_session_end": "SessionEnd"
+  },
+  "tools": {
+    "bash": "Bash",
+    "open_files": "Read",
+    "create_file": "Write",
+    "find_and_replace_code": "Edit",
+    "grep": "Grep"
+  },
+  "fields": { "tool_name": "/attributes/tool_input/tool_name", "tool_input": "/attributes/tool_input/args" },
+  "resume": {
+    "session": ["rovodev", "run", "--restore", "{id}"],
+    "continue": ["rovodev", "run", "--restore"],
+    "start": ["rovodev", "run"]
+  },
+  "process": { "argvContains": ["rovodev"] },
+  "notes": "Rovo Dev reads its hooks at startup; restart running sessions after installing"
+}

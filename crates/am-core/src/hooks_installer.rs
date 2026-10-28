@@ -415,9 +415,8 @@ fn check_provider(p: &dyn Harness) -> std::io::Result<()> {
     let path = p.settings_path();
     match p.hook_install() {
         HookInstall::Json => read_settings(&path).map(drop),
-        HookInstall::TextBlock(tb) => {
-            find_block(&read_text(&path)?, &block_begin(tb.comment, p.id()), &block_end(tb.comment, p.id())).map(drop)
-        }
+        // Also catches a file the harness can't place its block in.
+        HookInstall::TextBlock(tb) => place_text_block(p, &tb, &read_text(&path)?, &HookContext::new(p, None)).map(drop),
         HookInstall::OwnedFile(of) => {
             if path.exists() && !read_text(&path)?.contains(OWNED_FILE_MARKER) {
                 return Err(not_ours(&path));
@@ -669,13 +668,24 @@ pub fn remove_block(text: &str, comment: &str, id: &str) -> std::io::Result<Opti
     Ok(Some(format!("{before}{after}")))
 }
 
+/// `text` with am's block set to what `tb` renders: where the harness puts
+/// it ([`Harness::place_hook_block`], given the text without the old block),
+/// else replaced in place or appended ([`upsert_block`]).
+fn place_text_block(provider: &dyn Harness, tb: &TextBlock, text: &str, ctx: &HookContext) -> std::io::Result<String> {
+    let without = remove_block(text, tb.comment, provider.id())?;
+    match provider.place_hook_block(without.as_deref().unwrap_or(text), ctx)? {
+        Some(placed) => Ok(placed),
+        None => upsert_block(text, tb.comment, provider.id(), &(tb.render)(ctx)),
+    }
+}
+
 fn install_text(provider: &dyn Harness, style: &HookInstall, native: Option<PathBuf>) -> std::io::Result<Option<PathBuf>> {
     let path = provider.settings_path();
     let ctx = HookContext::new(provider, native.as_deref());
     match style {
         HookInstall::Json => unreachable!("JSON hooks go through install_json"),
         HookInstall::TextBlock(tb) => {
-            let text = upsert_block(&read_text(&path)?, tb.comment, provider.id(), &(tb.render)(&ctx))?;
+            let text = place_text_block(provider, tb, &read_text(&path)?, &ctx)?;
             write_text(&path, &text)?;
         }
         HookInstall::OwnedFile(of) => {

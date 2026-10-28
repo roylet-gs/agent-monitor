@@ -23,6 +23,7 @@ pub mod droid;
 pub mod embedded;
 pub mod gemini;
 pub mod qwen;
+pub mod rovodev;
 pub mod manifest;
 
 use std::path::{Path, PathBuf};
@@ -104,6 +105,19 @@ pub trait Harness: Sync + Send {
     /// [`HookInstall`](crate::hooks_installer::HookInstall).
     fn hook_install(&self) -> crate::hooks_installer::HookInstall {
         crate::hooks_installer::HookInstall::Json
+    }
+
+    /// [`TextBlock`](crate::hooks_installer::TextBlock) style only: where am's
+    /// block goes when it can't simply sit at the end of the file, e.g. inside
+    /// a YAML mapping the user already has (a second top-level key of that
+    /// name would be a duplicate). `text` is the file without am's block;
+    /// return the whole new text, with the block between
+    /// [`block_begin`](crate::hooks_installer::block_begin) /
+    /// [`block_end`](crate::hooks_installer::block_end) lines (they may be
+    /// indented), or `None` to replace the block in place or append it
+    /// (the default). An error refuses the install and is shown to the user.
+    fn place_hook_block(&self, _text: &str, _ctx: &crate::hooks_installer::HookContext) -> std::io::Result<Option<String>> {
+        Ok(None)
     }
 
     /// The full shell command one hook runs for native `event`, given the
@@ -233,6 +247,7 @@ impl HarnessKind {
     pub const DROID: HarnessKind = HarnessKind(&droid::DROID);
     pub const COPILOT: HarnessKind = HarnessKind(&copilot::COPILOT);
     pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
+    pub const ROVODEV: HarnessKind = HarnessKind(&rovodev::ROVODEV);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -295,6 +310,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::DROID,
     HarnessKind::COPILOT,
     HarnessKind::CURSOR,
+    HarnessKind::ROVODEV,
 ];
 
 struct Registry {

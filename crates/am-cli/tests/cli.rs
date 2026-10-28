@@ -489,6 +489,68 @@ fn hooks_for_gemini() {
     assert!(o.stderr.contains(&format!("Unknown agent: aider. Valid agents: {}", builtin_ids().join(", "))), "{}", o.stderr);
 }
 
+/// Rovo Dev's hooks are a marked YAML block in `~/.rovodev/config.yml`: the
+/// whole `eventHooks:` mapping when the file has none, else am's events
+/// inside the user's mapping (a second `eventHooks:` key would be a
+/// duplicate). Reinstalling is a no-op and uninstalling restores the file.
+#[test]
+fn hooks_for_rovodev() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let config = env.home().join(".rovodev/config.yml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let cmd = |event: &str| format!("\"\\\"{}\\\" hook-event --agent rovodev --worktree \\\"$PWD\\\" --event {event}\"", fake_hook.display());
+
+    // No eventHooks: the whole block goes at the end.
+    let user = "agent:\n  streaming: true\nsessions:\n  auto_restore: false\n";
+    std::fs::write(&config, user).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "rovodev"]).stdout, "Hooks installed into ~/.rovodev/config.yml\n");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let head = format!(
+        "{user}\n# agent-monitor hooks rovodev begin\neventHooks:\n  events:\n    - name: on_session_start\n      commands:\n        - command: {}\n",
+        cmd("on_session_start")
+    );
+    assert!(text.starts_with(&head), "{text}");
+    assert!(text.ends_with(&format!("    - name: on_session_end\n      commands:\n        - command: {}\n# agent-monitor hooks rovodev end\n", cmd("on_session_end"))), "{text}");
+    assert_eq!(text.matches("- name: ").count(), 8);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["rovodev"], true);
+    env.ok(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text, "reinstalling changes nothing");
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "rovodev"]).stdout, "Hooks removed from ~/.rovodev/config.yml\n");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+
+    // The user's own eventHooks: am's events go inside their list.
+    let user = "eventHooks:\n  logFile: ~/.rovodev/event_hooks.log\n  events:\n    - name: on_complete\n      commands:\n        - command: afplay /System/Library/Sounds/Glass.aiff\nsessions:\n  auto_restore: false\n";
+    std::fs::write(&config, user).unwrap();
+    env.ok(&["hooks", "install", "--agent", "rovodev"]);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(
+        text.starts_with(&format!(
+            "eventHooks:\n  logFile: ~/.rovodev/event_hooks.log\n  events:\n    # agent-monitor hooks rovodev begin\n    - name: on_session_start\n      commands:\n        - command: {}\n",
+            cmd("on_session_start")
+        )),
+        "{text}"
+    );
+    assert!(text.ends_with("    # agent-monitor hooks rovodev end\n    - name: on_complete\n      commands:\n        - command: afplay /System/Library/Sounds/Glass.aiff\nsessions:\n  auto_restore: false\n"), "{text}");
+    assert_eq!(text.matches("eventHooks:").count(), 1);
+    env.ok(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text, "reinstalling changes nothing");
+    assert!(env.ok(&["doctor"]).stdout.contains("Rovo Dev hooks: Installed in ~/.rovodev/config.yml"));
+    env.ok(&["hooks", "uninstall", "--agent", "rovodev"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+
+    // An inline list am can't extend without editing the user's line: refused, file untouched.
+    let user = "eventHooks:\n  events: []\n";
+    std::fs::write(&config, user).unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("inline `eventHooks.events` value"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {
