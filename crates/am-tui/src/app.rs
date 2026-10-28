@@ -164,6 +164,12 @@ pub struct App {
     seen_status: std::collections::HashMap<String, Option<Status>>,
     /// System sounds to play for this update (audio notifications).
     pub sounds: Vec<String>,
+    /// Review requests already seen (by PR URL); `None` until the first list,
+    /// which only fills it, so starting am doesn't announce everything.
+    seen_reviews: Option<std::collections::HashSet<String>>,
+    /// New review requests to post as cmux notifications (`cmuxSync`):
+    /// (title, body).
+    pub review_alerts: Vec<(String, String)>,
     /// Worktrees being deleted in the background → whether the job has
     /// finished. Their rows are greyed out and take no actions; a finished
     /// entry is dropped on the next snapshot, so the row doesn't flash back
@@ -217,6 +223,8 @@ impl App {
             unseen: Default::default(),
             seen_status: Default::default(),
             sounds: Vec::new(),
+            seen_reviews: None,
+            review_alerts: Vec::new(),
             deleting: Default::default(),
             jobs: Default::default(),
             hover: None,
@@ -241,6 +249,7 @@ impl App {
         }
         self.selected = self.selected.min(self.flat.len().saturating_sub(1));
         self.track_status_changes();
+        self.track_new_reviews();
         self.sync_editor();
         let n = self.review_list().len();
         if let Some(p) = &mut self.reviews {
@@ -357,6 +366,31 @@ impl App {
             }
         }
         self.mark_selected_seen();
+    }
+
+    /// Queue a notification for each review request that wasn't listed
+    /// before (one the review groups show, not one you already approved).
+    fn track_new_reviews(&mut self) {
+        if self.snapshot.reviews.is_none() {
+            return;
+        }
+        let shown: Vec<(String, String, String)> = self
+            .review_list()
+            .into_iter()
+            .filter(|r| !r.approved_by_you)
+            .map(|r| (r.pr.url.clone(), format!("Review requested: {} #{}", r.repo, r.pr.number), format!("{} — @{}", r.pr.title, r.author)))
+            .collect();
+        let first = self.seen_reviews.is_none();
+        let seen = self.seen_reviews.get_or_insert_with(Default::default);
+        let mut alerts = Vec::new();
+        for (url, title, body) in shown {
+            if seen.insert(url) && !first {
+                alerts.push((title, body));
+            }
+        }
+        if self.settings.cmux_sync {
+            self.review_alerts.extend(alerts);
+        }
     }
 
     fn mark_selected_seen(&mut self) {

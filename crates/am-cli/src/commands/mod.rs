@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod cmux;
 pub mod doctor;
 pub mod hooks;
 pub mod lifecycle;

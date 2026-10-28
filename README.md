@@ -36,6 +36,7 @@
 - [Themes](#themes)
 - [CLI Reference](#cli-reference)
 - [Use am from your agents (MCP)](#use-am-from-your-agents-mcp)
+- [Use am in cmux](#use-am-in-cmux)
 - [How It Works](#how-it-works)
   - [Supported harnesses](#supported-harnesses)
 - [Upgrading from 1.x](#upgrading-from-1x)
@@ -380,7 +381,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
-| `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, or `custom` |
+| `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, `cmux` (see [Use am in cmux](#use-am-in-cmux)), or `custom` |
 | `ideCommand` | `""` | The command `ide: "custom"` runs, through `sh`. `{path}` is replaced by the quoted worktree path, or the path is appended when there's no `{path}`. E.g. `idea`, `subl -n`, `open -a Nova {path}` |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
 | `defaultAgent` | `"claude"` | Harness plugin `Enter` starts in a worktree with no session yet (set it in Settings → Harness plugins) |
@@ -412,6 +413,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `audioWaitingSound` | `"Glass"` | Sound for waiting |
 | `audioDoneSound` | `"Funk"` | Sound for done |
 | `appMode` | `"full"` | `full` (the dashboard) or `reviews` ([review-only mode](#review-only-mode): `am` opens to the review page alone) |
+| `cmuxSync` | `true` | Inside [cmux](#use-am-in-cmux): show each worktree's PR, Linear ticket and running agent commands as pills on its cmux workspace, its context use as the workspace's progress bar, and post new review requests as cmux notifications. Does nothing outside cmux |
 | `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
@@ -544,6 +546,7 @@ am --version
 | `am theme export <name>` | Print a theme as a standalone JSON file | `-o, --output <file>` |
 | `am theme import <file>` | Validate a theme file and copy it into `~/.agent-monitor/themes/` | `--name <name>`, `--force` |
 | `am theme remove <name>` | Delete a custom theme (switches back to `ansi` if it was active) | |
+| `am cmux dock` | Add am to the [cmux](#use-am-in-cmux) Dock (`~/.config/cmux/dock.json`; an existing file is backed up) | `--reviews` (also the review page), `--project` (the repo's `.cmux/dock.json`), `--remove` |
 | `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
 | `am perf` | How long each part of am has been taking (UI frames, the collector, git, GitHub/Linear, hooks), from the log, against per-stage budgets | `--since <window>` (`30m`, `1h`, `2d`, `all`; default `24h`), `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear`, `--open` (in your editor, or the folder once rotated) |
@@ -552,6 +555,19 @@ am --version
 | `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
 
 </details>
+
+---
+
+## Use am in cmux
+
+[cmux](https://cmux.com) is a macOS terminal built for running many coding agents side by side. am fits beside it: cmux runs the agents, am keeps track of their worktrees, PRs, CI, tickets and review requests.
+
+- **Put am in the Dock.** `am cmux dock` adds am to cmux's Dock (its right sidebar) in `~/.config/cmux/dock.json`; `--reviews` adds the review page as a second control, `--project` writes the repo's `.cmux/dock.json` instead (cmux asks you to trust it once), `--remove` takes them out. An existing file is backed up first. A Dock cmux has already saved isn't seeded again, so reload it from the Dock's menu. Compact view (Settings → Appearance) suits the narrow Dock.
+- **Open worktrees as workspaces.** With Open in set to `cmux` (`am settings set ide cmux`), `Enter` switches to the cmux workspace already open in that worktree, or creates one named after it that runs the agent's resume command (`claude --resume <id>`…). Startup and review scripts set to run in a window open as cmux workspaces too.
+- **Sidebar pills.** With `cmuxSync` on (the default), each workspace whose terminal is in a tracked worktree shows that worktree's PR (`#42 ✓ approved`, coloured like the dashboard), Linear ticket and `$ N commands`, and the agent's context use as the workspace's progress bar. cmux already shows the branch and the agent's state. am takes its pills down when it quits or the setting goes off.
+- **Review requests** that arrive while am runs become cmux notifications.
+
+cmux's control socket only answers programs started inside cmux (its default `cmuxOnly` mode), so the workspace and sidebar features work when am runs in a cmux terminal or the Dock. Run elsewhere, `Enter` with `ide: cmux` opens the worktree through `cmux <path>` and copies the resume command to the clipboard.
 
 ---
 

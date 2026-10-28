@@ -231,7 +231,7 @@ fn settings_set_coerces_and_validates() {
     assert_eq!(env.settings()["ide"], "zed");
     let o = env.run(&["settings", "set", "ide", "notepad"]);
     assert_eq!(o.code, 1);
-    assert!(o.stderr.contains("Use one of: vscode, cursor, zed, windsurf, terminal, custom"), "{}", o.stderr);
+    assert!(o.stderr.contains("Use one of: vscode, cursor, zed, windsurf, terminal, cmux, custom"), "{}", o.stderr);
     env.ok(&["settings", "set", "ideCommand", "open -a Nova {path}"]);
     assert_eq!(env.settings()["ideCommand"], "open -a Nova {path}");
 

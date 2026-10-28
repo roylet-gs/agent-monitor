@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use am_core::grouping;
+use am_core::{cmux, grouping};
 use am_core::launch::{self, IdeChoice, OpenAction};
 use am_core::model::WorktreeView;
 use am_core::settings::Settings;
@@ -41,7 +41,9 @@ fn known_agent(v: &WorktreeView) -> Option<am_core::harness::HarnessKind> {
     v.agent.as_ref().filter(|a| a.session_id.is_some()).map(|a| a.agent)
 }
 
-pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
+/// `roots`: every worktree and repo path, so a cmux workspace is matched to
+/// its most specific worktree (`am_core::cmux::workspace_for`).
+pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender<Msg>) {
     let ide = IdeChoice::from_setting(&settings.ide);
     let resume_on = settings.resume_last_session;
     let default_agent = settings.default_agent();
@@ -54,6 +56,20 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
             report(&tx, launch::focus_terminal_app(), format!("Focused terminal for {label}"));
             return;
         }
+        // A cmux workspace is already open there: switch to it.
+        if ide == IdeChoice::Cmux && cmux::inside() {
+            let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
+            match cmux::list_workspaces(&cmux::SystemCmux) {
+                Ok(list) => {
+                    if let Some(w) = cmux::workspace_for(&list, &v.worktree.path, &roots) {
+                        let r = cmux::select_workspace(&cmux::SystemCmux, &w.id).map_err(|e| format!("Couldn't switch cmux workspace: {e}"));
+                        report(&tx, r, format!("Switched to {label} in cmux"));
+                        return;
+                    }
+                }
+                Err(e) => am_core::warn!("launcher", "Couldn't list cmux workspaces: {e}"),
+            }
+        }
         let already_open = grouping::is_open_now(v.agent.as_ref());
         let resume = if resume_on && !already_open {
             launch::resume_for(path, known_agent(&v), default_agent)
@@ -61,7 +77,22 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
             Default::default()
         };
         let result = match launch::resolve_open_action(resume_on, already_open, ide, resume) {
+            OpenAction::Plain if ide == IdeChoice::Cmux => launch::open_in_cmux(path, Some(&label), None),
             OpenAction::Plain => launch::open_in_editor(path, ide, &ide_command),
+            OpenAction::TerminalAgent(r) if ide == IdeChoice::Cmux => {
+                let cmd = launch::agent_command(&r);
+                if !cmux::inside() {
+                    // `cmux <path>` can't run a command: hand it over like an editor.
+                    let msg = if launch::copy_to_clipboard(&cmd) {
+                        format!("✓ Copied to clipboard — paste in the cmux terminal to resume:\n\n{cmd}\n\nRun am inside cmux to have it start there.")
+                    } else {
+                        format!("Couldn't copy. Run this in the cmux terminal:\n\n{cmd}")
+                    };
+                    let _ = tx.send(Msg::Popup(msg));
+                    std::thread::sleep(POPUP_BEFORE_OPEN);
+                }
+                launch::open_in_cmux(path, Some(&label), Some(&cmd))
+            }
             OpenAction::TerminalAgent(r) => launch::open_terminal(path, Some(&launch::agent_command(&r))),
             OpenAction::CopyAndOpen(r) => {
                 let cmd = launch::agent_command(&r);

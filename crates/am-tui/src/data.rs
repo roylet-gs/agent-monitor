@@ -192,6 +192,9 @@ struct Worker {
     plugins_stamp: Option<std::time::SystemTime>,
     /// Stage timings (`am perf`).
     perf: Perf,
+    /// The `cmux-sync` thread, started the first time pills are due
+    /// (`cmuxSync` on, inside cmux), and what it was last sent.
+    cmux: Option<(Sender<crate::cmux_sync::Desired>, crate::cmux_sync::Desired)>,
 }
 
 impl Worker {
@@ -226,6 +229,7 @@ impl Worker {
             data_version: -1,
             last_sent: None,
             perf: Perf::new(),
+            cmux: None,
         }
     }
 
@@ -265,6 +269,21 @@ impl Worker {
                 Ok(false) => {}
                 Err(e) => warn!("tui", "Refresh failed: {e}"),
             }
+        }
+    }
+
+    /// Hand the cmux sidebar pills to the `cmux-sync` thread when they change
+    /// (an empty set once `cmuxSync` is turned off clears them).
+    fn sync_cmux(&mut self, views: &[WorktreeView]) {
+        let on = self.settings.cmux_sync && am_core::cmux::inside();
+        if !on && self.cmux.is_none() {
+            return;
+        }
+        let desired = if on { crate::cmux_sync::desired(views, &self.settings) } else { Default::default() };
+        let (tx, last) = self.cmux.get_or_insert_with(|| (crate::cmux_sync::spawn(), Default::default()));
+        if *last != desired {
+            let _ = tx.send(desired.clone());
+            *last = desired;
         }
     }
 
@@ -443,6 +462,10 @@ impl Worker {
             self.perf.record("collector.stacks", started.elapsed());
         }
         let stack = self.infer_stacks(&views);
+        if dashboard {
+            // Before the hide* filters: a hidden row's workspace still gets its pills.
+            self.sync_cmux(&views);
+        }
         let reviews = self.reviews_with_worktrees(&views);
         let mut roots: Vec<String> = views.iter().map(|v| v.worktree.path.clone()).collect();
         // Review-only: every worktree, unfiltered, so a pulled PR's ⏎/`d`

@@ -40,6 +40,8 @@ pub enum IdeChoice {
     Zed,
     Windsurf,
     Terminal,
+    /// A cmux workspace (`crate::cmux`).
+    Cmux,
     /// The `ideCommand` setting.
     Custom,
 }
@@ -47,15 +49,16 @@ pub enum IdeChoice {
 impl IdeChoice {
     /// Every `ide` value with its label, in the order the settings editor,
     /// setup wizard and CLI offer them.
-    pub const ALL: [(&'static str, &'static str); 6] = [
+    pub const ALL: [(&'static str, &'static str); 7] = [
         ("vscode", "VS Code"),
         ("cursor", "Cursor"),
         ("zed", "Zed"),
         ("windsurf", "Windsurf"),
         ("terminal", "Terminal"),
+        ("cmux", "cmux"),
         ("custom", "Custom command"),
     ];
-    pub const IDS: [&'static str; 6] = ["vscode", "cursor", "zed", "windsurf", "terminal", "custom"];
+    pub const IDS: [&'static str; 7] = ["vscode", "cursor", "zed", "windsurf", "terminal", "cmux", "custom"];
 
     /// Unknown values fall back to VS Code.
     pub fn from_setting(s: &str) -> IdeChoice {
@@ -64,9 +67,15 @@ impl IdeChoice {
             "zed" => IdeChoice::Zed,
             "windsurf" => IdeChoice::Windsurf,
             "terminal" => IdeChoice::Terminal,
+            "cmux" => IdeChoice::Cmux,
             "custom" => IdeChoice::Custom,
             _ => IdeChoice::Vscode,
         }
+    }
+
+    /// Opens in a terminal (the agent runs there itself), not an editor.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, IdeChoice::Terminal | IdeChoice::Cmux)
     }
 
     /// Shell CLI and macOS app name of a built-in editor.
@@ -76,7 +85,7 @@ impl IdeChoice {
             IdeChoice::Cursor => Some(("cursor", "Cursor")),
             IdeChoice::Zed => Some(("zed", "Zed")),
             IdeChoice::Windsurf => Some(("windsurf", "Windsurf")),
-            IdeChoice::Terminal | IdeChoice::Custom => None,
+            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
         }
     }
 }
@@ -108,7 +117,7 @@ pub fn resolve_open_action(resume_last_session: bool, already_open: bool, ide: I
     if !resume_last_session || already_open {
         return OpenAction::Plain;
     }
-    if ide == IdeChoice::Terminal {
+    if ide.is_terminal() {
         return OpenAction::TerminalAgent(resume);
     }
     if resume.session_id.is_none() && !resume.continue_session {
@@ -184,6 +193,7 @@ pub fn open_in_editor(path: &Path, ide: IdeChoice, custom_cmd: &str) -> Result<(
     let (cli, app) = match ide.editor() {
         Some(e) => e,
         None if ide == IdeChoice::Terminal => return open_terminal(path, None),
+        None if ide == IdeChoice::Cmux => return open_in_cmux(path, None, None),
         None => return open_custom(path, custom_cmd),
     };
     let result = run(Command::new(cli).arg(path)).or_else(|e| {
@@ -283,7 +293,12 @@ fn open_custom(path: &Path, cmd: &str) -> Result<(), String> {
 
 /// Which terminal app to drive. Inside an editor's integrated terminal
 /// (TERM_PROGRAM=vscode) there is no app to drive, so use Terminal.app.
+/// cmux reports `ghostty` too, so it is told apart by its own variable;
+/// driving the Ghostty app from there would open a second terminal app.
 pub fn terminal_app() -> &'static str {
+    if crate::cmux::inside() {
+        return "cmux";
+    }
     match std::env::var("TERM_PROGRAM").as_deref() {
         Ok("iTerm.app") => "iTerm2",
         Ok("ghostty") => "Ghostty",
@@ -304,6 +319,9 @@ pub fn open_terminal(path: &Path, command: Option<&str>) -> Result<(), String> {
         None => format!("cd {}", sh_quote(&dir)),
     };
     let app = terminal_app();
+    if app == "cmux" {
+        return open_in_cmux(path, None, command);
+    }
     let result = if !cfg!(target_os = "macos") {
         let mut c = Command::new("x-terminal-emulator");
         c.arg(format!("--working-directory={dir}"));
@@ -343,6 +361,22 @@ pub fn open_terminal(path: &Path, command: Option<&str>) -> Result<(), String> {
         Err(e) => warn!("launch", "Failed to open {app} at {dir}: {e}"),
     }
     result.map_err(|e| format!("Couldn't open {app}: {e}"))
+}
+
+/// A new cmux workspace at `path` running `command`, named `name` (else
+/// after the directory). Outside cmux the socket won't answer (see
+/// `crate::cmux`), so the directory is opened with `cmux <path>` and the
+/// command doesn't run: callers with a resume command check
+/// `crate::cmux::inside()` first.
+pub fn open_in_cmux(path: &Path, name: Option<&str>, command: Option<&str>) -> Result<(), String> {
+    let runner = crate::cmux::SystemCmux;
+    let dir_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string_lossy().into_owned());
+    let result = if crate::cmux::inside() {
+        crate::cmux::create_workspace(&runner, path, name.unwrap_or(&dir_name), command)
+    } else {
+        crate::cmux::open_path(&runner, path)
+    };
+    result.map_err(|e| format!("Couldn't open cmux: {e}"))
 }
 
 /// Bring the terminal app forward (a terminal is already open at the worktree).
