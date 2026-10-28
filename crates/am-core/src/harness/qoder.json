@@ -25,5 +25,5 @@
   },
   "resume": { "session": ["--resume", "{id}"], "continue": ["-c"] },
   "process": { "names": ["qodercli"], "argvContains": ["/@qoder-ai/qodercli/"] },
-  "notes": "Qoder reads hooks at startup: restart running sessions after installing"
+  "notes": "The Qoder IDE reads hooks at startup: restart it after installing (the CLI reloads them live)"
 }

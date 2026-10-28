@@ -13,7 +13,14 @@
 //!   `qodercli`; only `qodercli` is matched by name, since `qoder` may also
 //!   be the Qoder IDE's shell command. The npm build runs under `node` and is
 //!   found through its package path.
-//! - Hooks are read at startup, so running sessions need a restart.
+//! - The Qoder IDE and its JetBrains plugin read the same
+//!   `~/.qoder/settings.json` hooks, but don't set `$QODER_PROJECT_DIR`, so
+//!   their agent turns arrive as `--worktree ""` and am-hook falls back to the
+//!   payload `cwd` (an IDE payload without `cwd` can't be placed and is
+//!   dropped). They're recorded as `qoder` sessions, and resume offers
+//!   `qodercli --resume <id>`, which may not find an IDE session.
+//! - The CLI reloads hooks live; the Qoder IDE reads them at startup, so it
+//!   needs a restart after installing.
 //! - Resume is `qodercli --resume <id>` (`-r`), continue `-c`. No session
 //!   store layout is documented, so resume discovery uses the sessions am's
 //!   hooks recorded.
