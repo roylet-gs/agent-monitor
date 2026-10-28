@@ -430,6 +430,59 @@ fn a_kiro_session_is_tracked_through_its_agent_hooks() {
 }
 
 #[test]
+fn a_rovodev_session_without_session_ids_updates_the_worktree_row() {
+    let env = Env::new();
+    // The hook passes `--worktree "$PWD"`: where `acli rovodev run` started.
+    let pwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&pwd).unwrap();
+    let rovo = |event: &str, payload: Value| env.send_raw("rovodev", event, &pwd, payload);
+    rovo("on_session_start", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("rovodev")));
+    rovo("on_user_prompt", json!({}));
+    assert_eq!(env.status().0, "executing");
+    let tool = json!({ "attributes": { "tool_input": { "tool_name": "bash", "args": { "command": "cargo test" } } } });
+    rovo("on_tool_permission", tool.clone());
+    assert_eq!(env.status().0, "waiting");
+    rovo("on_tool_start", tool.clone());
+    rovo("on_tool_end", tool);
+    assert_eq!(env.status().0, "executing");
+    rovo("on_complete", json!({ "transcript_path": "/tmp/gone.json" }));
+    assert_eq!(env.status().0, "done");
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 0, "no session id, so no session rows");
+    rovo("on_user_prompt", json!({}));
+    rovo("on_error", json!({}));
+    assert_eq!(env.status().0, "idle");
+}
+
+/// Current Rovo Dev (202608.25.1) sends `{session_id, transcript_path, cwd,
+/// timestamp, hook_event_name, attributes}`: the session gets its own row,
+/// headlines the worktree, and `on_session_end` closes it.
+#[test]
+fn a_rovodev_session_with_the_real_envelope_gets_a_session_row() {
+    let env = Env::new();
+    let pwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&pwd).unwrap();
+    let rovo = |event: &str, attributes: Value| {
+        let payload = json!({ "session_id": "rs-1", "transcript_path": "/tmp/rs-1.json", "cwd": pwd, "timestamp": "2026-10-28T05:00:00Z",
+                              "hook_event_name": event, "attributes": attributes });
+        env.send_raw("rovodev", event, &pwd, payload);
+    };
+    rovo("on_session_start", json!({}));
+    assert_eq!(env.session("rs-1"), ("idle".into(), true));
+    rovo("on_user_prompt", json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref(), env.headline().as_str()), ("executing", Some("rovodev"), "rs-1"));
+    rovo("on_tool_permission", json!({ "tool_name": "bash", "args": { "command": "cargo test" } }));
+    assert_eq!(env.session("rs-1").0, "waiting");
+    rovo("on_tool_start", json!({ "tool_calls": [{ "tool_name": "bash", "args": { "command": "cargo test" } }] }));
+    assert_eq!(env.status().0, "executing");
+    rovo("on_complete", json!({}));
+    assert_eq!((env.status().0.as_str(), env.session("rs-1").0.as_str()), ("done", "done"));
+    rovo("on_session_end", json!({}));
+    assert!(!env.session("rs-1").1, "on_session_end closes the session");
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

@@ -29,6 +29,7 @@ pub mod grok;
 pub mod muse;
 pub mod kiro;
 pub mod qwen;
+pub mod rovodev;
 pub mod manifest;
 
 use std::path::{Path, PathBuf};
@@ -280,6 +281,7 @@ impl HarnessKind {
     pub const GROK: HarnessKind = HarnessKind(&grok::GROK);
     pub const MUSE: HarnessKind = HarnessKind(&muse::MUSE);
     pub const KIRO: HarnessKind = HarnessKind(&kiro::KIRO);
+    pub const ROVODEV: HarnessKind = HarnessKind(&rovodev::ROVODEV);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -348,6 +350,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::GROK,
     HarnessKind::MUSE,
     HarnessKind::KIRO,
+    HarnessKind::ROVODEV,
 ];
 
 struct Registry {
