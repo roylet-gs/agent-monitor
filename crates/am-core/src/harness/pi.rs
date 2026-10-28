@@ -13,6 +13,8 @@
 //! `hook_event_name`, `tool_name`, `tool_input`, `agent_id`…). Runs are queued
 //! one at a time so am sees them in order, never block or throw into Pi, and
 //! are killed after 5 s; tool events are dropped when 32 runs are queued.
+//! `session_shutdown` (which Pi awaits on quit, `/new`, `/resume`…) waits at
+//! most 5 s for `SessionEnd`; past that, the tool events still queued are dropped.
 //!
 //! Event mapping (native names are the canonical ones):
 //! - `session_start` → `SessionStart`; `session_shutdown` → `SessionEnd`.
@@ -162,6 +164,7 @@ const SUBAGENT_TOOLS = new Set(["subagent", "task", "agent", "team_spawn"]);
 
 let queue = Promise.resolve();
 let queued = 0;
+let closing = false; // from a shutdown that timed out until the next session_start
 
 // One am-hook run, payload on stdin; resolves on exit, failure or timeout and never throws. The
 // child stays referenced so a run queued at quit (SessionEnd) finishes before Node exits; it is
@@ -188,16 +191,23 @@ function sessionId(ctx) {
   try { return ctx.sessionManager.getSessionId() || ""; } catch { return ""; }
 }
 
-// Queue a hook so am sees events in order. Tool events are dropped while many runs are queued.
+// Queue a hook so am sees events in order. Tool events are dropped while many runs are queued,
+// and after a shutdown gave up waiting (even those already queued).
 function send(ctx, event, extra = {}, droppable = false) {
   const id = sessionId(ctx);
-  if (!id || (droppable && queued >= MAX_QUEUED)) return queue;
+  if (!id || (droppable && (closing || queued >= MAX_QUEUED))) return queue;
   let cwd = process.cwd();
   try { cwd = ctx.cwd || cwd; } catch {}
   const payload = { session_id: id, cwd, hook_event_name: event, ...extra };
   queued++;
-  queue = queue.then(() => run(event, payload)).catch(() => {}).finally(() => { queued--; });
+  queue = queue.then(() => (droppable && closing ? undefined : run(event, payload))).catch(() => {}).finally(() => { queued--; });
   return queue;
+}
+
+// Resolves when `p` does or after one run's timeout, whichever is first, so Pi never waits on a
+// stalled queue.
+function within(p) {
+  return Promise.race([p, new Promise((r) => { const t = setTimeout(r, TIMEOUT_MS); t.unref?.(); })]);
 }
 
 // The few tool arguments am summarises, with Claude's key names.
@@ -272,6 +282,7 @@ export default function agentMonitor(pi) {
   };
 
   pi.on("session_start", (_event, ctx) => {
+    closing = false;
     turns.delete(sessionId(ctx));
     try { unpatch?.(); } catch {}
     try { unpatch = patchDialogs(ctx); } catch {}
@@ -301,11 +312,16 @@ export default function agentMonitor(pi) {
     try { idle = typeof ctx.isIdle !== "function" || ctx.isIdle(); } catch {}
     if (idle) stop(ctx);
   });
+  // Pi awaits this on quit, /new, /resume, /fork and /reload, so a stalled am-hook can hold it
+  // up for at most one run's timeout. Past that, the tool events still queued are dropped so
+  // SessionEnd goes as soon as the lifecycle events ahead of it have.
   pi.on("session_shutdown", async (_event, ctx) => {
     turns.delete(sessionId(ctx));
     try { unpatch?.(); } catch {}
     unpatch = undefined;
-    await send(ctx, "SessionEnd");
+    const ended = send(ctx, "SessionEnd");
+    await within(ended);
+    closing = true;
   });
 }
 "#;
@@ -423,28 +439,48 @@ mod tests {
     /// Runs the generated extension in Node against a fake Pi, with a fake
     /// am-hook that records each run, and checks what am would be sent.
     /// Skipped when `node` isn't on PATH.
-    #[test]
-    fn the_extension_runs_in_node() {
-        let Some(node) = which("node") else { return };
+    /// Runs `driver` in Node next to the generated extension (as `ext.mjs`,
+    /// with `edit` applied to its text) and a fake am-hook that appends
+    /// `<argv> <stdin>` per run to a log (then runs `hook_tail`), with
+    /// `package_json` beside them when given. Returns the log, or `None` when
+    /// `node` isn't on PATH.
+    fn run_in_node(driver: &str, package_json: Option<Value>, hook_tail: &str, edit: impl Fn(String) -> String) -> Option<String> {
+        let node = which("node")?;
         let dir = tempfile::tempdir().unwrap();
         let log = dir.path().join("runs.log");
         let hook = dir.path().join("am-hook");
-        std::fs::write(&hook, format!("#!/bin/sh\n{{ printf '%s ' \"$@\"; cat; echo; }} >> '{}'\n", log.display())).unwrap();
+        std::fs::write(&hook, format!("#!/bin/sh\n{{ printf '%s ' \"$@\"; cat; echo; }} >> '{}'\n{hook_tail}", log.display())).unwrap();
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::write(dir.path().join("ext.mjs"), render(&HookContext::new(&PI, Some(&hook)))).unwrap();
-        std::fs::write(dir.path().join("driver.mjs"), NODE_DRIVER).unwrap();
+        std::fs::write(dir.path().join("ext.mjs"), edit(render(&HookContext::new(&PI, Some(&hook))))).unwrap();
+        std::fs::write(dir.path().join("driver.mjs"), format!("{NODE_FAKE_PI}{driver}")).unwrap();
+        if let Some(pkg) = package_json {
+            std::fs::write(dir.path().join("package.json"), pkg.to_string()).unwrap();
+        }
         let out = std::process::Command::new(node).arg(dir.path().join("driver.mjs")).current_dir(dir.path()).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        let runs = std::fs::read_to_string(&log).unwrap();
-        let lines: Vec<(&str, Value)> = runs
-            .lines()
+        Some(std::fs::read_to_string(&log).unwrap_or_default())
+    }
+
+    /// Each run's argv and payload.
+    fn parse_runs(runs: &str) -> Vec<(&str, Value)> {
+        runs.lines()
             .map(|l| {
                 let (args, payload) = l.split_at(l.find('{').unwrap());
                 (args, serde_json::from_str(payload).unwrap())
             })
-            .collect();
-        let events: Vec<&str> = lines.iter().map(|(_, p)| p["hook_event_name"].as_str().unwrap()).collect();
+            .collect()
+    }
+
+    fn events(lines: &[(&str, Value)]) -> Vec<String> {
+        lines.iter().map(|(_, p)| p["hook_event_name"].as_str().unwrap().to_owned()).collect()
+    }
+
+    #[test]
+    fn the_extension_runs_in_node() {
+        let Some(runs) = run_in_node(NODE_DRIVER, None, "", |t| t) else { return };
+        let lines = parse_runs(&runs);
+        let events = events(&lines);
         assert_eq!(
             events,
             [
@@ -470,19 +506,87 @@ mod tests {
         std::env::var_os("PATH")?.to_str()?.split(':').map(|d| Path::new(d).join(name)).find(|p| p.is_file())
     }
 
-    /// A fake Pi: fires one session's events through the extension. `node`
-    /// isn't a Pi package, so the extension settles on `agent_end`, and the
-    /// late `agent_settled` must not send a second Stop.
-    const NODE_DRIVER: &str = r#"
+    /// Current Pi (a `package.json` named `@earendil-works/pi-coding-agent`
+    /// 1.4.0 above `argv[1]`) settles on `agent_settled`: `agent_end` alone
+    /// sends nothing, `agent_settled` while not idle (a queued message
+    /// continues the run, still the same turn) neither, and the idle one sends
+    /// exactly one Stop, after the continued run's tool events.
+    #[test]
+    fn current_pi_settles_on_agent_settled() {
+        let pkg = json!({"name": "@earendil-works/pi-coding-agent", "version": "1.4.0"});
+        let Some(runs) = run_in_node(NODE_SETTLED_DRIVER, Some(pkg), "", |t| t) else { return };
+        assert_eq!(
+            events(&parse_runs(&runs)),
+            ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"],
+            "{runs}"
+        );
+    }
+
+    /// A stalled am-hook can't hold Pi's `session_shutdown` (awaited on quit,
+    /// `/new`, `/resume`…) beyond one run's timeout, and the tool events still
+    /// queued then are dropped rather than run.
+    #[test]
+    fn shutdown_waits_at_most_one_timeout() {
+        let edit = |t: String| t.replace("const TIMEOUT_MS = 5000;", "const TIMEOUT_MS = 300;");
+        let Some(runs) = run_in_node(NODE_SHUTDOWN_DRIVER, None, "exec sleep 10\n", edit) else { return };
+        let events = events(&parse_runs(&runs));
+        // Past the deadline the queued tool events are skipped: at most the
+        // one already running when it passed shows up.
+        assert!(events.iter().filter(|e| *e == "PreToolUse").count() <= 1, "{runs}");
+        assert_eq!(events.last().map(String::as_str), Some("SessionEnd"), "{runs}");
+    }
+
+    /// The fake Pi the drivers below share: `fire(name, event)` runs the
+    /// extension's handlers for a Pi event against one session's `ctx`.
+    const NODE_FAKE_PI: &str = r#"
 import ext from "./ext.mjs";
 const handlers = {};
 const pi = { on: (name, fn) => { (handlers[name] ||= []).push(fn); } };
 let answer;
 const ui = { confirm: () => new Promise((r) => { answer = r; }), select: async () => undefined, input: async () => undefined };
 const confirm = ui.confirm;
-const ctx = { cwd: "/w/repo", hasUI: true, ui, sessionManager: { getSessionId: () => "sess-1" }, isIdle: () => true };
+let idle = true;
+const ctx = { cwd: "/w/repo", hasUI: true, ui, sessionManager: { getSessionId: () => "sess-1" }, isIdle: () => idle };
 const fire = async (name, event = {}) => { for (const fn of handlers[name] || []) await fn({ type: name, ...event }, ctx); };
 ext(pi);
+"#;
+
+    const NODE_SETTLED_DRIVER: &str = r#"
+await fire("session_start", { reason: "startup" });
+await fire("before_agent_start", { prompt: "hi" });
+await fire("agent_start");
+await fire("tool_execution_start", { toolCallId: "call_1", toolName: "bash", args: { command: "ls" } });
+await fire("tool_execution_end", { toolCallId: "call_1", toolName: "bash", result: {}, isError: false });
+await fire("agent_end", { messages: [] });
+idle = false;
+await fire("agent_settled", { aborted: false });
+// A queued follow-up continues the run without a new prompt.
+await fire("agent_start");
+await fire("tool_execution_start", { toolCallId: "call_2", toolName: "read", args: { path: "a.rs" } });
+await fire("tool_execution_end", { toolCallId: "call_2", toolName: "read", result: {}, isError: false });
+await fire("agent_end", { messages: [] });
+idle = true;
+await fire("agent_settled", { aborted: false });
+await fire("agent_settled", { aborted: false });
+await fire("session_shutdown", { reason: "quit" });
+"#;
+
+    /// Queues 20 tool events behind a hook that hangs, then shuts down: the
+    /// await must end within about one timeout (300 ms here), not 20.
+    const NODE_SHUTDOWN_DRIVER: &str = r#"
+await fire("session_start", { reason: "startup" });
+await fire("before_agent_start", { prompt: "hi" });
+for (let i = 0; i < 20; i++) await fire("tool_execution_start", { toolCallId: `c${i}`, toolName: "bash", args: { command: "ls" } });
+const t0 = Date.now();
+await fire("session_shutdown", { reason: "quit" });
+const took = Date.now() - t0;
+if (took > 1500) throw new Error(`session_shutdown took ${took} ms`);
+"#;
+
+    /// One session's events. `node` isn't a Pi package, so the extension
+    /// settles on `agent_end`, and the late `agent_settled` must not send a
+    /// second Stop.
+    const NODE_DRIVER: &str = r#"
 await fire("session_start", { reason: "startup" });
 await fire("before_agent_start", { prompt: "hi" });
 await fire("agent_start");

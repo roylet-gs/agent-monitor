@@ -234,7 +234,7 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `ctx.ui.confirm`/`select`/`input` opened during a turn | `PermissionRequest`, then `PostToolUse` when answered | `waiting`, then `executing` |
 | `agent_settled` with `ctx.isIdle()` (Pi ≥ 0.80.5), else `agent_end` | `Stop`, once per turn | `done` |
 
-Stop waits for `agent_settled` because retries, compaction and queued messages start another run after `agent_end`; a second `Stop` would turn `done` into `idle`, so the extension sends one per turn.
+Stop waits for `agent_settled` because retries, compaction and queued messages start another run after `agent_end`; a second `Stop` would turn `done` into `idle`, so the extension sends one per turn. Pi awaits `session_shutdown` (quit, `/new`, `/resume`, `/fork`, `/reload`), so the extension waits at most one run's timeout (5 s) for `SessionEnd` to reach am-hook; if that runs out, the tool events still queued are dropped.
 
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 

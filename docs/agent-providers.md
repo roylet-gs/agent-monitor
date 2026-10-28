@@ -263,7 +263,7 @@ Most CLIs read hooks from a JSON file, but not all. A built-in picks how am's ho
 
 ## Built-in harnesses and the survey behind them (Oct 2026)
 
-Most coding-agent CLIs now copy Claude Code's hook design: a command per event, JSON on stdin, Claude-style event names and `session_id`/`cwd`/`tool_name` keys. That's why the canonical event stays Claude's vocabulary, and why each built-in below is a manifest (plus Rust discovery for Codex). The details come from each tool's official hook docs.
+Most coding-agent CLIs now copy Claude Code's hook design: a command per event, JSON on stdin, Claude-style event names and `session_id`/`cwd`/`tool_name` keys. That's why the canonical event stays Claude's vocabulary, and why each built-in below is a manifest (plus Rust discovery for Codex and Pi). Pi is the exception: it has no command hooks, so its manifest is paired with an extension am generates (`HookInstall::OwnedFile`) that turns Pi's events into the same Claude-shaped payloads. The details come from each tool's official hook or extension docs.
 
 | Harness | Hook file and shape | Payload notes | Waiting | Resume |
 |---|---|---|---|---|
@@ -272,6 +272,7 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+| Pi (`pi`) | `~/.pi/agent/extensions/agent-monitor.ts` (`$PI_CODING_AGENT_DIR/extensions/` when set): an extension am writes and owns (`agent-monitor-hook-plugin v1` marker), plain JavaScript importing only Node built-ins, that spawns am-hook once per event (`--worktree ""`, queued, killed after 5 s) | Claude-shaped payload built by the extension: `session_id` from `ctx.sessionManager`, `cwd` from `ctx.cwd`; Pi's tool names (`bash`, `read`…) mapped in `pi.json`; subagent tools (`subagent`, `task`…) become `SubagentStart`/`Stop` with the tool call id; one `Stop` per turn, on `agent_settled` + `ctx.isIdle()` (Pi ≥ 0.80.5) else `agent_end` | `ctx.ui.confirm`/`select`/`input` dialogs during a turn (wrapped, no permission event) | `pi --session <id>` / `--continue`; sessions `~/.pi/agent/sessions/--<cwd>--/<time>_<id>.jsonl` (or `$PI_CODING_AGENT_SESSION_DIR`), header line `{"type":"session","id","cwd"}` |
 
 Not built in, and why:
 
