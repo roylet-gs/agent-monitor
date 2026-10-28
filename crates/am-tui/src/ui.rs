@@ -1987,7 +1987,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let who_w = ordered.iter().map(|&i| reviewers_text(&list[i]).width()).max().unwrap_or(0).min(if words { 16 } else { 10 });
 
     let rows = rows(list, &ordered, &app.snapshot.repos, grouping);
-    let tree = crate::reviews_ui::prefixes(list, &ordered);
+    let tree = crate::reviews_ui::prefixes(list, &ordered, &app.snapshot.repos, grouping);
     // Outside the repo order, name each row's repo when there are several.
     let tag_repos = !grouping.by_repo()
         && ordered.windows(2).any(|w| list[w[0]].repo_id != list[w[1]].repo_id);
@@ -4534,6 +4534,30 @@ mod tests {
             assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), want, "{sort}");
             assert!(!render(&app, 120, 10).contains("Asked you"), "{sort}");
         }
+    }
+
+    #[test]
+    fn review_page_puts_approved_pulled_prs_at_the_bottom() {
+        let mut app = with_reviews();
+        let before = app.review_badge_parts();
+        let mut snap = app.snapshot.clone();
+        let r = snap.reviews.as_mut().unwrap().iter_mut().find(|r| r.pr.number == 902).unwrap();
+        r.approved_by_you = true;
+        r.reviewed_by_you = true;
+        r.pr.review_decision = "APPROVED".into();
+        r.worktree_id = Some("wt-902".into());
+        app.apply(snap);
+        app.on_key(Key::Char('v'));
+        assert_eq!(app.review_list().iter().map(|r| r.pr.number).collect::<Vec<_>>(), [51, 48, 902]);
+        let screen = render(&app, 120, 12);
+        assert!(screen.contains("Approved, still pulled ─"), "{screen}");
+        insta::assert_snapshot!("review_page_approved_pulled", screen);
+        // Not counted in the badge as waiting on a review.
+        let count = |parts: Option<Vec<crate::app::BadgePart>>| match parts.unwrap()[0] {
+            crate::app::BadgePart::Rest(n) => n,
+            ref p => panic!("{p:?}"),
+        };
+        assert_eq!(count(app.review_badge_parts()), count(before) - 1);
     }
 
     #[test]

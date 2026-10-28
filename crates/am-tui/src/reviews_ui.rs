@@ -1,6 +1,9 @@
 //! The review-requests page (`v`): open PRs waiting on your review, split
 //! into the review groups (`reviewGroups`, then `reviewDefaultGroup`; see
-//! `am_core::review_groups`), each in its own `sort` order.
+//! `am_core::review_groups`), each in its own `sort` order. A PR you
+//! approved that is still pulled ([`cleanup`]) goes to the first named group
+//! that matches it, else to an [`APPROVED_PULLED`] section at the bottom,
+//! never to the default group.
 //! Pure state; `App` turns its keys into actions.
 
 use std::cmp::Ordering;
@@ -10,6 +13,10 @@ use std::sync::LazyLock;
 use am_core::model::{Repository, ReviewRequest};
 use am_core::review_groups::{QueryHits, ReviewGroup, assign};
 use am_core::settings::{ReviewSort, Settings};
+
+/// Header of the bottom section: PRs you approved whose worktree is still
+/// there ([`cleanup`]).
+pub const APPROVED_PULLED: &str = "Approved, still pulled";
 
 /// A visual row of the page. Headers take no cursor index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,8 +58,16 @@ impl<'a> Grouping<'a> {
         Grouping { groups: &settings.review_groups, default: &settings.review_default_group, now, hits }
     }
 
+    /// The bottom section's index: after the default group (`groups.len()`).
+    pub fn cleanup_index(&self) -> usize {
+        self.groups.len() + 1
+    }
+
     /// The order group `g` (`groups.len()` = the default) sorts by.
     pub fn sort(&self, g: usize) -> ReviewSort {
+        if g == self.cleanup_index() {
+            return ReviewSort::Updated;
+        }
         let group = self.groups.get(g).unwrap_or(self.default);
         ReviewSort::parse(&group.sort).unwrap_or(ReviewSort::Direct)
     }
@@ -66,6 +81,9 @@ impl<'a> Grouping<'a> {
     /// Header of group `g` (`groups.len()` = the default group), when it has
     /// one of its own.
     fn name(&self, g: usize) -> Option<String> {
+        if g == self.cleanup_index() {
+            return Some(APPROVED_PULLED.into());
+        }
         match self.groups.get(g) {
             Some(group) if group.name.trim().is_empty() => Some(format!("Group {}", g + 1)),
             Some(group) => Some(group.name.trim().to_string()),
@@ -79,13 +97,30 @@ pub fn asks_you(r: &ReviewRequest) -> bool {
     r.requested.iter().any(|w| w == "you")
 }
 
+/// You approved it and its worktree is still there: it waits on you to
+/// remove it, not to review it.
+pub fn cleanup(r: &ReviewRequest) -> bool {
+    r.approved_by_you && r.worktree_id.is_some()
+}
+
 /// The group each of `reviews` is shown in (`None` = hidden): the first
 /// whose rules it matches, except that a PR stacked on a shown PR follows
-/// it, so a stack is never split.
+/// it, so a stack is never split. A [`cleanup`] PR skips the default group
+/// for the bottom section ([`Grouping::cleanup_index`]), and neither follows
+/// nor leads a stack across it.
 pub fn groups_of(reviews: &[ReviewRequest], repos: &[Repository], g: Grouping) -> Vec<Option<usize>> {
     let mut out = assign(reviews, g.groups, g.default, repos, g.now, g.hits);
+    let bottom = g.cleanup_index();
+    let named_only = ReviewGroup { enabled: false, ..ReviewGroup::default() };
+    for (i, r) in reviews.iter().enumerate().filter(|(_, r)| cleanup(r)) {
+        let named = assign(std::slice::from_ref(r), g.groups, &named_only, repos, g.now, g.hits)[0];
+        out[i] = Some(named.unwrap_or(bottom));
+    }
     let all: Vec<usize> = (0..reviews.len()).collect();
-    let parents: Vec<Option<usize>> = reviews.iter().map(|r| stacked_on(reviews, &all, r)).collect();
+    let parents: Vec<Option<usize>> = reviews
+        .iter()
+        .map(|r| stacked_on(reviews, &all, r).filter(|&p| !cleanup(r) && !cleanup(&reviews[p])))
+        .collect();
     // A chain settles in at most its length.
     for _ in 0..reviews.len() {
         let mut changed = false;
@@ -107,13 +142,14 @@ pub fn groups_of(reviews: &[ReviewRequest], repos: &[Repository], g: Grouping) -
 }
 
 /// How many PRs each group shows (the default group last) and how many are
-/// hidden.
+/// hidden. The bottom section isn't counted: nothing there waits on a review.
 pub fn counts(reviews: &[ReviewRequest], repos: &[Repository], g: Grouping) -> (Vec<usize>, usize) {
     let mut per = vec![0; g.groups.len() + 1];
     let mut hidden = 0;
     for grp in groups_of(reviews, repos, g) {
         match grp {
-            Some(i) => per[i] += 1,
+            Some(i) if i < per.len() => per[i] += 1,
+            Some(_) => {}
             None => hidden += 1,
         }
     }
@@ -145,10 +181,17 @@ fn stacked_on(reviews: &[ReviewRequest], list: &[usize], r: &ReviewRequest) -> O
     })
 }
 
+/// The PR among `list` that `list[k]` is stacked on, when both are shown in
+/// the same group (`groups`, from [`groups_of`]).
+fn parent_in(reviews: &[ReviewRequest], list: &[usize], groups: &[Option<usize>], k: usize) -> Option<usize> {
+    stacked_on(reviews, list, &reviews[list[k]]).filter(|&p| groups[list[p]] == groups[list[k]])
+}
+
 /// Tree prefix per entry of `ordered` (from [`order`]): "" for a PR on its
 /// own, "├─ "/"└─ "… for one stacked on another listed PR.
-pub fn prefixes(reviews: &[ReviewRequest], ordered: &[usize]) -> Vec<String> {
-    let tree = crate::app::tree_order(ordered.len(), |k| stacked_on(reviews, ordered, &reviews[ordered[k]]));
+pub fn prefixes(reviews: &[ReviewRequest], ordered: &[usize], repos: &[Repository], g: Grouping) -> Vec<String> {
+    let groups = groups_of(reviews, repos, g);
+    let tree = crate::app::tree_order(ordered.len(), |k| parent_in(reviews, ordered, &groups, k));
     let mut out = vec![String::new(); ordered.len()];
     for (k, prefix) in tree {
         out[k] = prefix;
@@ -162,7 +205,7 @@ pub fn prefixes(reviews: &[ReviewRequest], ordered: &[usize]) -> Vec<String> {
 pub fn order(reviews: &[ReviewRequest], repos: &[Repository], g: Grouping) -> Vec<usize> {
     let groups = groups_of(reviews, repos, g);
     let sorted = sorted(reviews, &groups, repos, g);
-    crate::app::tree_order(sorted.len(), |k| stacked_on(reviews, &sorted, &reviews[sorted[k]]))
+    crate::app::tree_order(sorted.len(), |k| parent_in(reviews, &sorted, &groups, k))
         .into_iter()
         .map(|(k, _)| sorted[k])
         .collect()
@@ -199,7 +242,7 @@ pub fn rows(
     let groups = groups_of(reviews, repos, g);
     // A stacked PR stays in its parent's section.
     let mut sections: Vec<Option<String>> = Vec::with_capacity(ordered.len());
-    for (k, prefix) in prefixes(reviews, ordered).into_iter().enumerate() {
+    for (k, prefix) in prefixes(reviews, ordered, repos, g).into_iter().enumerate() {
         let i = ordered[k];
         let sec = match sections.last() {
             Some(prev) if !prefix.is_empty() => prev.clone(),
@@ -207,7 +250,9 @@ pub fn rows(
         };
         sections.push(sec);
     }
-    let several = sections.windows(2).any(|w| w[0] != w[1]);
+    // The bottom section always says what it is.
+    let several =
+        sections.windows(2).any(|w| w[0] != w[1]) || sections.iter().any(|s| s.as_deref() == Some(APPROVED_PULLED));
     let mut out = Vec::new();
     for (pos, sec) in sections.iter().enumerate() {
         if several && (pos == 0 || sections[pos - 1] != *sec) {
@@ -269,6 +314,8 @@ pub(crate) mod tests {
             requested: vec![who.into()],
             linear: None,
             reviewed_by_you: false,
+            approved_by_you: false,
+            approved_only: false,
             worktree_id: None,
         }
     }
@@ -350,14 +397,14 @@ pub(crate) mod tests {
         // #3 is the newest asking you, but it follows its stack: #1 → #2 → #3.
         let ordered = order(&list, &repos, by(&plain(ReviewSort::Direct)));
         assert_eq!(ordered, [4, 3, 0, 1, 2]);
-        assert_eq!(prefixes(&list, &ordered), ["", "", "", "└─ ", "   └─ "]);
+        assert_eq!(prefixes(&list, &ordered, &repos, by(&plain(ReviewSort::Direct))), ["", "", "", "└─ ", "   └─ "]);
         let rows = rows(&list, &ordered, &repos, by(&plain(ReviewSort::Direct)));
         assert!(!rows.contains(&ReviewRow::Header("Asked your team".into())), "{rows:?}");
         // A sibling stack branches.
         list[3].pr.base_ref_name = Some("feature/1".into());
         let ordered = order(&list, &repos, by(&plain(ReviewSort::Updated)));
         assert_eq!(ordered, [4, 0, 1, 2, 3]);
-        assert_eq!(prefixes(&list, &ordered), ["", "", "├─ ", "│  └─ ", "└─ "]);
+        assert_eq!(prefixes(&list, &ordered, &repos, by(&plain(ReviewSort::Updated))), ["", "", "├─ ", "│  └─ ", "└─ "]);
     }
 
     fn groups(json: &str) -> Vec<ReviewGroup> {
@@ -426,6 +473,67 @@ pub(crate) mod tests {
         assert_eq!(order(&list, &[repo("a")], g), [2, 0, 1]);
         let none = QueryHits::new();
         assert_eq!(order(&list, &[repo("a")], Grouping { hits: &none, ..g }), [0, 2, 1], "terms not fetched: no match");
+    }
+
+    /// You approved it and it's still pulled.
+    fn approved_pulled(mut r: ReviewRequest) -> ReviewRequest {
+        r.approved_by_you = true;
+        r.reviewed_by_you = true;
+        r.worktree_id = Some(format!("wt-{}", r.pr.number));
+        r
+    }
+
+    #[test]
+    fn approved_pulled_prs_sink_to_their_own_section() {
+        let list = vec![
+            approved_pulled(review("a", 1, "2026-10-09")),
+            review("a", 2, "2026-10-01"),
+            approved_pulled(review("a", 3, "2026-10-05")),
+            // Approved but not pulled: still an ordinary row.
+            ReviewRequest { approved_by_you: true, reviewed_by_you: true, ..review("a", 4, "2026-10-03") },
+        ];
+        let repos = vec![repo("a")];
+        let header = |s: &str| ReviewRow::Header(s.into());
+        let all = ReviewGroup::default();
+        let g = by(&all);
+        let ordered = order(&list, &repos, g);
+        assert_eq!(ordered, [3, 1, 0, 2], "the default group never takes them; newest first at the bottom");
+        assert_eq!(
+            rows(&list, &ordered, &repos, g),
+            [header("Asked you"), ReviewRow::Pr(0), ReviewRow::Pr(1), header(APPROVED_PULLED), ReviewRow::Pr(2), ReviewRow::Pr(3)]
+        );
+        assert_eq!(counts(&list, &repos, g), (vec![2], 0), "not counted as waiting on a review");
+
+        // The section's header shows even when it's all there is.
+        let only = vec![list[0].clone()];
+        assert_eq!(rows(&only, &[0], &repos, g), [header(APPROVED_PULLED), ReviewRow::Pr(0)]);
+
+        // A named group that matches still takes it; the setup's "asked you,
+        // not reviewed" group doesn't.
+        let gs = groups(r#"[{"name": "Asked you", "asked": "you", "reviewed": "no"}, {"name": "Done", "reviewed": "yes"}]"#);
+        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS };
+        assert_eq!(groups_of(&list, &repos, g), [Some(1), Some(0), Some(1), Some(1)]);
+        let gs = groups(r#"[{"name": "Asked you", "asked": "you", "reviewed": "no"}]"#);
+        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS };
+        assert_eq!(groups_of(&list, &repos, g), [Some(2), Some(0), Some(2), Some(1)]);
+        assert_eq!(counts(&list, &repos, g), (vec![1, 1], 0));
+        // A default group that would hide it doesn't either.
+        let none = groups(r#"[{"enabled": false}]"#).remove(0);
+        assert_eq!(groups_of(&list, &repos, by(&none)), [Some(1), None, Some(1), None]);
+    }
+
+    #[test]
+    fn stacks_do_not_cross_into_the_approved_section() {
+        // #2 targets #1. #1 is approved and pulled, #2 still waits on you.
+        let mut list = vec![approved_pulled(review("a", 1, "2026-10-01")), review("a", 2, "2026-10-09")];
+        list[1].pr.base_ref_name = Some("feature/1".into());
+        let repos = vec![repo("a")];
+        let all = ReviewGroup::default();
+        let g = by(&all);
+        assert_eq!(groups_of(&list, &repos, g), [Some(1), Some(0)]);
+        let ordered = order(&list, &repos, g);
+        assert_eq!(ordered, [1, 0]);
+        assert_eq!(prefixes(&list, &ordered, &repos, g), ["", ""]);
     }
 
     #[test]

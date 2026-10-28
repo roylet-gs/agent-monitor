@@ -298,6 +298,8 @@ mod tests {
             requested: requested.iter().map(|s| s.to_string()).collect(),
             linear: None,
             reviewed_by_you: false,
+            approved_by_you: false,
+            approved_only: false,
             worktree_id: None,
         }
     }
