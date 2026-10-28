@@ -66,6 +66,9 @@ pub trait Harness: Sync + Send {
     fn settings_path(&self) -> PathBuf;     // ~/.gemini/settings.json
     fn hook_events(&self) -> Vec<String>;
     fn hook_entry(&self, event: &str, invocation: &str, native: bool) -> Value;
+    fn hook_install(&self) -> HookInstall;  // default Json; TextBlock / OwnedFile (see "Hook install styles")
+    fn hook_command(&self, event: &str, invocation: &str) -> String; // full command line, for the text styles
+    fn hook_timeout_ms(&self) -> u64;       // default 5000
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent;
     fn discover_sessions(&self, root: &Path) -> Vec<Session>;
     fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>;
@@ -212,9 +215,25 @@ The fields are:
 
 Invalid files are skipped and reported on the plugin page and in `am doctor`. Then turn the plugin on (it is on by default) and install its hooks from **Settings → Harness plugins**, or with `am hooks install --agent mycli`.
 
+### Hook install styles
+
+Most CLIs read hooks from a JSON file, but not all. A built-in picks how am's hooks get into its CLI's config with `Harness::hook_install()` (an `Embedded` sets it with `.with_hook_install(f)`). The file is always `settings_path()` (the manifest's `hooks.settingsPath`). All three styles go through the same `install_hooks` / `uninstall_hooks` / `is_hooks_installed` / `dangling_hook_binaries` / `repair_dangling_hooks` / `check_hook_config` (`am doctor`) in `am_core::hooks_installer`, so nothing outside the harness module changes per style.
+
+| Style | Use when | How am's hooks are recognised | Uninstall removes |
+|---|---|---|---|
+| `HookInstall::Json` (default) | The CLI reads hooks from a JSON file (Claude, Gemini, Codex, Qwen, Droid, Copilot, Cursor, manifest plugins) | Entries whose command matches `is_am_hook_command` under `hooks_key` | Only am's entries; everyone else's stay. A file that isn't a JSON object (comments) is refused |
+| `HookInstall::TextBlock(TextBlock { comment, render })` | Hooks live in a TOML or YAML file (Kimi Code, Rovo Dev, Hermes) | The lines between `<comment> agent-monitor hooks <id> begin` and `… end` | Exactly the block (plus the blank line install put before it when it is last). Nothing outside the block is touched; a `begin` without `end` is an error, never half-replaced |
+| `HookInstall::OwnedFile(OwnedFile { render, register })` | The CLI loads a JS/TS plugin or extension that must spawn am-hook (OpenCode, Pi, OMP, Campfire, Amp) | The file contains `OWNED_FILE_MARKER` (`agent-monitor-hook-plugin v1`) | The file, only while it holds the marker (a file of that name without it is never overwritten or deleted), and `register`'s JSON list value |
+
+- **`render: fn(&HookContext) -> String`.** `HookContext` has `agent_id`, `program` (the absolute native `am-hook`, or `am` for the CLI fallback), `native`, `invocation` (`"/abs/am-hook" hook-event` or `cat | am hook-event`) and `hooks: Vec<HookCommand>`, one per `hook_events()` in order, each `{ event, command, timeout_ms }` with `timeout_secs()`. `command` is `hook_command()`: `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`. For a plugin that spawns without a shell, `ctx.argv(event, worktree)` gives `[program, "hook-event", "--agent", id, "--worktree", worktree, "--event", event]`; an empty worktree makes am-hook use the payload's `cwd`. The payload goes to the child's stdin.
+- **Quoting:** `toml_string(s)` (TOML basic string), `yaml_string(s)` (YAML double-quoted scalar) and `js_string(s)` (a JSON string literal, valid JS/TS) quote a value, including a command with its own `"`. Don't hand-roll escaping; there is no toml/yaml dependency.
+- **`TextBlock`** installs by replacing the existing block in place, or appending it after a blank line, creating the file and its directory when missing. Reinstalling is byte-for-byte idempotent. The block must be valid where it is appended: a YAML block that opens a top-level key the user's file already has (say `hooks:`) makes a duplicate key, so such a CLI needs a key it owns or a note.
+- **`OwnedFile.register: Option<JsonListEntry { path, key, value }>`** is for a CLI that also needs the file listed in its JSON config (OpenCode's `"plugin": [...]`): `value` is added to the array at top-level `key` of `path` when missing, and removed on uninstall (the key goes with its last value). The JSON file is read like a hook file, so one am can't parse stops the install before anything is written.
+- **Dangling binaries:** for the text styles am scans the block (or owned file) for quoted absolute paths named `am-hook`/`am`/`am-rs` or followed by `hook-event` (`hook_programs_in_text`), so `repair_dangling_hooks` and `am doctor` work for them too. Write the binary's path as its own quoted string (`ctx.program` via `js_string`, or the quoted `command`).
+
 ### As a built-in (when a manifest isn't enough)
 
-1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. If most of the agent is declarative, make it an `Embedded` (`embedded.rs`): a compiled-in manifest plus optional Rust session discovery, as `gemini.rs` and `codex.rs` do. Without discovery, resume offers the sessions am's hooks recorded.
+1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. If most of the agent is declarative, make it an `Embedded` (`embedded.rs`): a compiled-in manifest plus optional Rust session discovery, as `gemini.rs` and `codex.rs` do. Without discovery, resume offers the sessions am's hooks recorded. A CLI whose hooks aren't in a JSON file adds `.with_hook_install(f)` with a [hook install style](#hook-install-styles).
 2. Add one entry to `harness::BUILTIN`. Nothing else in am changes.
 3. Give it unit tests next to the module: normalisation, a full turn through `map_event_to_status`, the hook entry shape, and session discovery against a temp dir. Add an `am-hook` integration test that replays native payloads.
 4. Update this file, `README.md`, `CLAUDE.md` and `STATUS_MAPPING.md`.

@@ -87,7 +87,7 @@ pub fn run(as_json: bool) {
         let path = hi::display_path(p);
         let note = p.notes().map(|n| format!(" ({n})")).unwrap_or_default();
         let dangling = if hooks { hi::dangling_hook_binaries(kind) } else { Vec::new() };
-        let (status, message) = match hi::read_settings(&p.settings_path()) {
+        let (status, message) = match hi::check_hook_config(kind) {
             Err(e) => ("warn", e.to_string()),
             Ok(_) if !dangling.is_empty() => (
                 "warn",

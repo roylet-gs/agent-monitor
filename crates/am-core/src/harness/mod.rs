@@ -97,6 +97,28 @@ pub trait Harness: Sync + Send {
     /// `invocation` is the program part (`"/path/am-hook" hook-event`).
     fn hook_entry(&self, event: &str, invocation: &str, native: bool) -> Value;
 
+    /// How am's hooks get into the CLI's config: merged into a JSON settings
+    /// file (the default, driven by [`hooks_key`](Harness::hooks_key) and
+    /// [`hook_entry`](Harness::hook_entry)), a block am owns in a TOML/YAML
+    /// file, or a whole generated plugin file. See
+    /// [`HookInstall`](crate::hooks_installer::HookInstall).
+    fn hook_install(&self) -> crate::hooks_installer::HookInstall {
+        crate::hooks_installer::HookInstall::Json
+    }
+
+    /// The full shell command one hook runs for native `event`, given the
+    /// program part (`"/path/am-hook" hook-event`). Used by the text-block
+    /// and owned-file install styles; JSON entries come from
+    /// [`hook_entry`](Harness::hook_entry).
+    fn hook_command(&self, event: &str, invocation: &str) -> String {
+        hook_command_line(self.id(), None, event, invocation)
+    }
+
+    /// How long the CLI should let one hook run, in milliseconds.
+    fn hook_timeout_ms(&self) -> u64 {
+        5_000
+    }
+
     /// Translate a native hook payload into the canonical event.
     /// `event_override` is the `--event` flag (a native event name).
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent;
@@ -265,7 +287,7 @@ impl std::fmt::Debug for HarnessKind {
 
 /// Compiled-in providers, in display order. To add one: a module here and
 /// one entry in this list.
-pub const BUILTIN: [HarnessKind; 7] = [
+pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::CLAUDE,
     HarnessKind::GEMINI,
     HarnessKind::CODEX,
@@ -370,6 +392,14 @@ pub fn detected(settings: &Settings) -> Vec<HarnessKind> {
     enabled(settings).into_iter().filter(|k| *k == HarnessKind::CLAUDE || k.provider().is_present()).collect()
 }
 
+/// `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`: the
+/// command line every non-Claude hook runs. Without a project-dir variable,
+/// `--worktree ""` makes am-hook use the payload's `cwd`.
+pub fn hook_command_line(id: &str, project_dir_var: Option<&str>, event: &str, invocation: &str) -> String {
+    let worktree = project_dir_var.map(|v| format!("\"${v}\"")).unwrap_or_else(|| "\"\"".into());
+    format!("{invocation} --agent {id} --worktree {worktree} --event {event}")
+}
+
 pub(crate) fn home_join(rel: &str) -> PathBuf {
     paths::home_dir().join(rel)
 }
@@ -385,7 +415,7 @@ mod tests {
 
     #[test]
     fn builtins_are_registered_and_resolvable() {
-        for k in BUILTIN {
+        for &k in BUILTIN {
             assert_eq!(HarnessKind::get(k.id()), Some(k));
             assert!(k.is_builtin());
         }

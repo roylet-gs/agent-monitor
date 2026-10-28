@@ -326,10 +326,15 @@ impl Manifest {
         self.events.keys().cloned().collect()
     }
 
+    /// The full hook command line for `event`:
+    /// `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`.
+    pub fn hook_command(&self, event: &str, invocation: &str) -> String {
+        super::hook_command_line(&self.id, self.hooks.project_dir_var.as_deref(), event, invocation)
+    }
+
     pub fn hook_entry(&self, event: &str, invocation: &str) -> Value {
         let h = &self.hooks;
-        let worktree = h.project_dir_var.as_deref().map(|v| format!("\"${v}\"")).unwrap_or_else(|| "\"\"".into());
-        let command = format!("{invocation} --agent {} --worktree {worktree} --event {event}", self.id);
+        let command = self.hook_command(event, invocation);
         let timeout = match h.timeout_unit {
             TimeoutUnit::Ms => h.timeout_ms,
             TimeoutUnit::S => h.timeout_ms.div_ceil(1000),
@@ -450,6 +455,12 @@ impl Harness for ManifestProvider {
     }
     fn hook_entry(&self, event: &str, invocation: &str, _native: bool) -> Value {
         self.manifest.hook_entry(event, invocation)
+    }
+    fn hook_command(&self, event: &str, invocation: &str) -> String {
+        self.manifest.hook_command(event, invocation)
+    }
+    fn hook_timeout_ms(&self) -> u64 {
+        self.manifest.hooks.timeout_ms
     }
     fn hook_file_defaults(&self) -> Map<String, Value> {
         self.manifest.hooks.file.clone()

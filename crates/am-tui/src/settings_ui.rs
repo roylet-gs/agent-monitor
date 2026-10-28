@@ -1198,13 +1198,12 @@ pub(crate) mod tests {
 
         let mut ed = SettingsEditor::new(&Settings::parse(r#"{"defaultAgent":"gemini"}"#));
         goto(&mut ed, "agentPlugins");
-        assert_eq!(ed.display(ed.field()), "7 of 7 on · default gemini");
+        let builtin: Vec<&str> = am_core::harness::BUILTIN.iter().map(|k| k.id()).collect();
+        let n = builtin.len();
+        assert_eq!(ed.display(ed.field()), format!("{n} of {n} on · default gemini"));
         ed.on_key(Key::Enter);
         let rows = &ed.plugins.as_ref().unwrap().rows;
-        assert_eq!(
-            rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
-            ["claude", "gemini", "codex", "qwen", "droid", "copilot", "cursor"]
-        );
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), builtin);
         assert!(rows.iter().all(|r| r.enabled && !r.hooks));
 
         // Install Gemini's hooks, then switch it off: hooks go, and so does the default.

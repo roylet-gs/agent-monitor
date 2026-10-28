@@ -2,9 +2,9 @@
 //! into `<app dir>/agents/`, compiled in with `include_str!`, plus optional
 //! Rust session discovery for CLIs whose session store needs code. Without
 //! it, the sessions am's own hooks recorded are the ones offered for resume.
-//! Gemini,
-//! Codex, Qwen Code, Factory Droid, Copilot CLI, Cursor, Junie and Auggie are
-//! all one of these.
+//! Every built-in except Claude Code is one of these (see `BUILTIN`). A CLI
+//! whose hook config isn't a JSON file picks another [`HookInstall`] style
+//! with [`Embedded::with_hook_install`].
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 
 use super::{Harness, HarnessKind, is_within};
 use super::manifest::{Manifest, expand_home};
+use crate::hooks_installer::HookInstall;
 use crate::launch::Session;
 use crate::status::HookEvent;
 
@@ -23,16 +24,26 @@ pub struct Embedded {
     /// Picks the hook file and its hooks key at runtime, for a CLI that reads
     /// one of several files (Factory Droid).
     hook_file: Option<fn() -> (PathBuf, &'static str)>,
+    /// How the hooks are installed when not merged into a JSON file.
+    hook_install: Option<fn() -> HookInstall>,
 }
 
 impl Embedded {
     /// `load` parses the embedded JSON (`|| Manifest::builtin(include_str!(…))`).
     pub const fn new(load: fn() -> Manifest, discover: Option<fn(&Path) -> Vec<Session>>) -> Embedded {
-        Embedded { manifest: LazyLock::new(load), discover, hook_file: None }
+        Embedded { manifest: LazyLock::new(load), discover, hook_file: None, hook_install: None }
     }
 
     pub const fn with_hook_file(mut self, f: fn() -> (PathBuf, &'static str)) -> Embedded {
         self.hook_file = Some(f);
+        self
+    }
+
+    /// Install the hooks with a [`HookInstall`] style other than the JSON
+    /// merge (a TOML/YAML block, a generated plugin file). The file is the
+    /// manifest's `hooks.settingsPath`.
+    pub const fn with_hook_install(mut self, f: fn() -> HookInstall) -> Embedded {
+        self.hook_install = Some(f);
         self
     }
 
@@ -90,6 +101,18 @@ impl Harness for Embedded {
 
     fn hook_entry(&self, event: &str, invocation: &str, _native: bool) -> Value {
         self.manifest.hook_entry(event, invocation)
+    }
+
+    fn hook_install(&self) -> HookInstall {
+        self.hook_install.map(|f| f()).unwrap_or(HookInstall::Json)
+    }
+
+    fn hook_command(&self, event: &str, invocation: &str) -> String {
+        self.manifest.hook_command(event, invocation)
+    }
+
+    fn hook_timeout_ms(&self) -> u64 {
+        self.manifest.hooks.timeout_ms
     }
 
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent {
