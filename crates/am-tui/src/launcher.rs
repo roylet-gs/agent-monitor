@@ -96,7 +96,7 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
                 }
                 launch::open_in_cmux(path, Some(&label), Some(&cmd))
             }
-            OpenAction::TerminalAgent(r) => launch::open_terminal(path, Some(&launch::agent_command(&r))),
+            OpenAction::TerminalAgent(r) => launch::open_terminal(path, Some(&launch::agent_command(&r))).map(|_| ()),
             OpenAction::CopyAndOpen(r) => {
                 let cmd = launch::agent_command(&r);
                 let msg = if launch::copy_to_clipboard(&cmd) {
@@ -147,7 +147,10 @@ pub fn open_review_window(tx: Sender<Msg>) {
             am_core::info!("launcher", "Opening the review page in a new terminal: {command}");
             launch::open_terminal(&am_core::paths::home_dir(), Some(&command))
         });
-        report(&tx, r.map_err(|e| format!("Couldn't open a terminal window: {e}")), "Opened review requests in a new window".into());
+        let _ = tx.send(match r {
+            Ok(place) => Msg::Notice(format!("Opened review requests in {place}")),
+            Err(e) => Msg::Popup(format!("✗ Couldn't open a terminal window: {e}")),
+        });
     });
 }
 

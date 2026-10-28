@@ -198,7 +198,7 @@ While am captures the mouse, your terminal's click-and-drag text selection needs
 - **Terminal** mode: the new terminal runs `claude --resume <id>` directly.
 - **Cursor / VS Code** mode: `claude --resume <id>` is copied to the clipboard, a popup tells you so, and the editor opens. Paste it into the editor's terminal. am doesn't type into the editor's terminal for you, because that needs macOS Accessibility permission and fails silently without it.
 
-Supported terminals: Terminal.app, iTerm2, Ghostty and Warp on macOS (the one you run am in), and `x-terminal-emulator` on Linux.
+Supported terminals: Terminal.app, iTerm2, Ghostty and Warp on macOS (the one you run am in), cmux (inside it, new terminals open as cmux workspaces), and `x-terminal-emulator` on Linux. If am can't drive the terminal you run it in (say, a Ghostty-based terminal without Ghostty.app installed), it opens a Terminal.app window instead.
 
 ### Status Legend
 
