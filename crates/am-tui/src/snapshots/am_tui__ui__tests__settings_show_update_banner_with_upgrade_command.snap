@@ -1,6 +1,6 @@
 ---
 source: crates/am-tui/src/ui.rs
-expression: "render(&app, 100, 24)"
+expression: "fixed_plugin_count(&render(&app, 100, 24))"
 ---
 ╭─Worktrees ─────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available ╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
@@ -13,7 +13,7 @@ expression: "render(&app, 100, 24)"
 │       │   Editor command                —                                                │       │
 │       │   Resume last session on open   on                                               │       │
 │       │   Repositories…                 0 tracked                                        │       │
-│       │   Harness plugins…              7 of 7 on · default claude                       │       │
+│       │   Harness plugins…              N of N on · default claude                       │       │
 │       │   Key bindings…                 defaults                                         │       │
 │       │   Mouse                         on                                               │       │
 │       │   Run startup script in         pane                                             │       │

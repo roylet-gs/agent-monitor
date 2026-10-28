@@ -32,6 +32,25 @@ impl Out {
     }
 }
 
+/// Environment variables that move an agent CLI's config or data dir.
+/// Cleared for every `am` run so a developer's own setting can't leak in.
+const AGENT_ENV: &[&str] = &[
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "GROK_HOME",
+    "HERMES_HOME",
+    "KIMI_CODE_HOME",
+    "KIMI_SHARE_DIR",
+    "KIRO_HOME",
+    "OPENCODE_CONFIG_DIR",
+    "OPENCODE_DB",
+    "PI_CODING_AGENT_DIR",
+    "PI_CONFIG_DIR",
+    "PI_CODING_AGENT_SESSION_DIR",
+    "OMP_AGENT_DIR",
+    "CAMPFIRE_CODING_AGENT_DIR",
+];
+
 impl Env {
     fn new() -> Env {
         let tmp = tempfile::tempdir().unwrap();
@@ -85,6 +104,11 @@ impl Env {
             .env_remove("AM_LINEAR_API_URL")
             .current_dir(cwd.unwrap_or(&self.root()))
             .stdin(Stdio::null());
+        // Whatever the machine running the tests has: agent config dirs come
+        // from $HOME unless a test sets one through `extra_env`.
+        for var in AGENT_ENV {
+            c.env_remove(var);
+        }
         for (k, v) in &self.extra_env {
             c.env(k, v);
         }
@@ -498,6 +522,30 @@ fn builtin_ids() -> Vec<&'static str> {
 /// `hooks status --json`'s `agents` map: every built-in, `true` for `on`.
 fn hooks_installed(on: &[&str]) -> Value {
     Value::Object(builtin_ids().into_iter().map(|id| (id.to_string(), Value::Bool(on.contains(&id)))).collect())
+}
+
+/// With nothing to resume, `am agent attach` suggests the default agent's
+/// fresh-start command, `resume.start` included (`acli rovodev run`).
+#[test]
+fn agent_attach_suggests_the_fresh_start_command() {
+    let env = Env::new();
+    let (_, wt) = env.seed_repo();
+    std::fs::create_dir_all(env.data().join("agents")).unwrap();
+    std::fs::write(
+        env.data().join("agents/mycli.json"),
+        json!({
+            "id": "mycli", "name": "My CLI", "program": "mycli",
+            "hooks": {"settingsPath": "~/.mycli/hooks.json"},
+            "events": {"Done": "Stop"},
+            "resume": {"session": ["--resume", "{id}"], "start": ["chat", "--agent", "am"]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    env.ok(&["settings", "set", "defaultAgent", "mycli"]);
+    let o = env.run(&["agent", "attach", "feature/login"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    assert!(o.stderr.contains(&format!("Start one with: cd {} && mycli chat --agent am", wt.display())), "{}", o.stderr);
 }
 
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.

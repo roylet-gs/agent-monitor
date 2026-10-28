@@ -62,16 +62,18 @@ pub trait Harness: Sync + Send {
     fn program(&self) -> &str;              // "gemini"
     fn origin(&self) -> Origin;             // BuiltIn | Plugin(path)
     fn notes(&self) -> Option<&str>;        // caveat shown next to hook status
-    fn is_present(&self) -> bool;           // config dir exists → install hooks by default
+    fn is_present(&self) -> bool;           // config dir exists → install hooks by default (Embedded: + with_presence)
     fn settings_path(&self) -> PathBuf;     // ~/.gemini/settings.json
     fn hook_events(&self) -> Vec<String>;
     fn hook_entry(&self, event: &str, invocation: &str, native: bool) -> Value;
     fn hook_install(&self) -> HookInstall;  // default Json; TextBlock / OwnedFile (see "Hook install styles")
+    fn place_hook_block(&self, text: &str, block: &str, ctx: &HookContext) -> io::Result<Option<String>>; // TextBlock: where the block goes; default None
+    fn hook_companion(&self, ctx: Option<&HookContext>) -> io::Result<()>; // state beside the hook config; default nothing
     fn hook_command(&self, event: &str, invocation: &str) -> String; // full command line, for the text styles
     fn hook_timeout_ms(&self) -> u64;       // default 5000
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent;
     fn discover_sessions(&self, root: &Path) -> Vec<Session>;
-    fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>;
+    fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String>; // (None, false) = fresh start
     fn context_usage(&self, root: &Path, session_id: &str) -> Option<ContextUsage>; // default None
     fn usage_files(&self, since: SystemTime) -> Vec<PathBuf>;           // default empty
     fn usage_record(&self, line: &str) -> Option<UsageRecord>;          // default None
@@ -207,7 +209,7 @@ The fields are:
 - **`tools`**: maps native tool names to Claude's (`Bash`, `Read`, `Edit`, `AskUserQuestion`, `EnterPlanMode`, `ExitPlanMode`, `Agent`…), so the waiting and planning rules apply.
 - **`fields`**: renames canonical payload keys (`session_id`, `transcript_path`, `cwd`, `tool_name`, `tool_input`, `last_assistant_message`, `message`, `notification_type`, `stop_hook_active`, `permission_mode`, `agent_id`, `agent_type`…) to the CLI's own. Keys you don't list are read as-is. A value starting with `/` is a JSON pointer into the payload (`"cwd": "/workspace_roots/0"`). A CLI that sends `agent_id` and `agent_type` gets subagent tracking for free.
 - **`notificationTypes`**: maps native notification types to canonical ones. Map whatever means "the user is being asked" to `permission_prompt`.
-- **`resume`**: `{id}` is replaced by the session id. `continue` holds the arguments for "latest session".
+- **`resume`**: `{id}` is replaced by the session id. `continue` holds the arguments for "latest session". `start` (optional, default none) holds the arguments a fresh session needs when the bare program doesn't start one: `acli` needs `["rovodev", "run"]`, Kiro `["chat", "--agent", "agent-monitor"]`. It is what am runs for a new session and what `am agent attach` suggests when there is nothing to resume.
 - **`sessions.command`** (optional): prints a JSON array of `{"id", "cwd", "modified"}` (modified is unix seconds) for `{root}`. It is killed after 3 s. Without it, am resumes with `resume.continue`.
 - **`process`**: matches the CLI's processes so they are excluded from "running processes".
 - **`notes`** (optional): a caveat shown next to the hook status.
@@ -227,13 +229,34 @@ Most CLIs read hooks from a JSON file, but not all. A built-in picks how am's ho
 
 - **`render: fn(&HookContext) -> String`.** `HookContext` has `agent_id`, `program` (the absolute native `am-hook`, or `am` for the CLI fallback), `native`, `invocation` (`"/abs/am-hook" hook-event` or `cat | am hook-event`) and `hooks: Vec<HookCommand>`, one per `hook_events()` in order, each `{ event, command, timeout_ms }` with `timeout_secs()`. `command` is `hook_command()`: `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`. For a plugin that spawns without a shell, `ctx.argv(event, worktree)` gives `[program, "hook-event", "--agent", id, "--worktree", worktree, "--event", event]`; an empty worktree makes am-hook use the payload's `cwd`. The payload goes to the child's stdin.
 - **Quoting:** `toml_string(s)` (TOML basic string), `yaml_string(s)` (YAML double-quoted scalar) and `js_string(s)` (a JSON string literal, valid JS/TS) quote a value, including a command with its own `"`. Don't hand-roll escaping; there is no toml/yaml dependency.
-- **`TextBlock`** installs by replacing the existing block in place, or appending it after a blank line, creating the file and its directory when missing. Reinstalling is byte-for-byte idempotent. The block must be valid where it is appended: a YAML block that opens a top-level key the user's file already has (say `hooks:`) makes a duplicate key, so such a CLI needs a key it owns or a note.
+- **`TextBlock`** installs by replacing the existing block in place, or appending it after a blank line, creating the file and its directory when missing. Reinstalling is byte-for-byte idempotent. The marker lines may be indented (they are matched trimmed), so the block can sit inside a mapping.
+- **Placing the block (`Harness::place_hook_block`)**: a YAML block that opens a top-level key the user's file already has (`hooks:`, `eventHooks:`) would make a duplicate key. Such a harness places the block itself:
+
+  ```rust
+  fn place_hook_block(&self, text: &str, block: &str, ctx: &HookContext) -> io::Result<Option<String>>;
+  // Embedded: .with_block_placement(place), place: hooks_installer::PlaceBlock
+  //   = fn(text: &str, block: &str, ctx: &HookContext) -> io::Result<Option<String>>
+  ```
+
+  `text` is the file without am's block (an earlier one is removed first, so every install re-places it); `block` is am's whole block (`block_text(comment, id, render(ctx))`: the `block_begin` line, the rendered body, the `block_end` line). Return `Some(new file text)`: nest the block under the user's key, re-indenting it or rendering the events again from `ctx` at the right indent, between `block_begin`/`block_end` lines (indent them too). Return `None` for the default (in place, else `append_block(text, block)`). Return an error to refuse a file am can't extend without editing the user's lines (`hooks: {}` inline, a clashing event); the install stops before anything is written and `am doctor` shows the message, since `check_hook_config` runs the placement too. A placed text that lost the marker lines is refused, so the hooks can always be found and removed again. Uninstall removes exactly the block wherever it sits. Rovo Dev (under `eventHooks.events`) and Hermes (under `hooks:`) use it.
+- **State beside the config (`Harness::hook_companion`)**: some CLIs need more than the hook config, e.g. Hermes only runs a shell hook whose `(event, command)` pair is in `shell-hooks-allowlist.json`. `hook_companion(Some(ctx))` runs on install in every style, after the new config is worked out and just before it is written (an error stops the install with nothing written); `hook_companion(None)` runs after uninstall, also when there was nothing to remove. Embedded: `.with_hook_companion(f)`, `f: hooks_installer::HookCompanion = fn(Option<&HookContext>) -> io::Result<()>`.
 - **`OwnedFile.register: Option<JsonListEntry { path, key, value }>`** is for a CLI that also needs the file listed in its JSON config (OpenCode's `"plugin": [...]`): `value` is added to the array at top-level `key` of `path` when missing, and removed on uninstall (the key goes with its last value). The JSON file is read like a hook file, so one am can't parse stops the install before anything is written.
-- **Dangling binaries:** for the text styles am scans the block (or owned file) for quoted absolute paths named `am-hook`/`am`/`am-rs` or followed by `hook-event` (`hook_programs_in_text`), so `repair_dangling_hooks` and `am doctor` work for them too. Write the binary's path as its own quoted string (`ctx.program` via `js_string`, or the quoted `command`).
+- **Dangling binaries:** for the text styles am scans the block (or owned file) for quoted absolute paths named `am-hook`/`am`/`am-rs` or followed by `hook-event`, in the same string or as the next element of an argv array (`["/abs/my-hook", "hook-event", …]`, also split across lines) (`hook_programs_in_text`), so `repair_dangling_hooks` and `am doctor` work for them too. Write the binary's path as its own quoted string (`ctx.program` via `js_string`, `ctx.argv(…)` rendered as a JS array, or the quoted `command`).
 
 ### As a built-in (when a manifest isn't enough)
 
-1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. If most of the agent is declarative, make it an `Embedded` (`embedded.rs`): a compiled-in manifest plus optional Rust session discovery, as `gemini.rs` and `codex.rs` do. Without discovery, resume offers the sessions am's hooks recorded. A CLI whose hooks aren't in a JSON file adds `.with_hook_install(f)` with a [hook install style](#hook-install-styles).
+1. Add a module in `crates/am-core/src/harness/` that implements `Harness`. If most of the agent is declarative, make it an `Embedded` (`embedded.rs`): a compiled-in manifest plus optional Rust session discovery, as `gemini.rs` and `codex.rs` do. Without discovery, resume offers the sessions am's hooks recorded. A CLI whose hooks aren't in a JSON file adds `.with_hook_install(f)` with a [hook install style](#hook-install-styles). The other `Embedded` builders cover the rest, so a built-in doesn't need its own `Harness` impl wrapping an `Embedded`:
+
+   | Builder | Signature | For |
+   |---|---|---|
+   | `.with_hook_file(f)` | `fn() -> (PathBuf, &'static str)` | the hook file and its hooks key, picked at runtime (`$KIRO_HOME/agents/…`, `$XDG_CONFIG_HOME/muse/settings.json`) |
+   | `.with_presence(f)` | `fn() -> bool` | also present when `f()` (as well as when the manifest's `configDir` exists): a config dir an env var moves (`$OMP_AGENT_DIR`, `$GROK_HOME`), or `\|\| hook_file().0.parent().is_some_and(Path::is_dir)` |
+   | `.with_normalize(f)` | `NormalizeFn = fn(&Manifest, &Value, Option<&str>) -> HookEvent` | a payload rule the manifest maps can't express: rewrite the payload before `manifest.normalize(payload, event)` (camelCase keys), adjust the event after it, or drop it (with `--worktree ""`, an event with no `cwd` is skipped) |
+   | `.with_hook_install(f)` | `fn() -> HookInstall` | a non-JSON [hook install style](#hook-install-styles) |
+   | `.with_block_placement(f)` | `PlaceBlock` | where a text block goes (`place_hook_block`) |
+   | `.with_hook_companion(f)` | `HookCompanion` | state kept beside the hook config (`hook_companion`) |
+
+   `paths::home_dir()` falls back to the passwd entry when `$HOME` is unset or empty (some CLIs run hooks with a scrubbed environment), so use it (or `harness::home_join`) rather than reading `$HOME`.
 2. Add one entry to `harness::BUILTIN`. Nothing else in am changes.
 3. Give it unit tests next to the module: normalisation, a full turn through `map_event_to_status`, the hook entry shape, and session discovery against a temp dir. Add an `am-hook` integration test that replays native payloads.
 4. Update this file, `README.md`, `CLAUDE.md` and `STATUS_MAPPING.md`.

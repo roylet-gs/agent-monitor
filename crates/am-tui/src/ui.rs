@@ -3533,6 +3533,29 @@ mod tests {
         app
     }
 
+    /// `screen` with the Settings row "Harness plugins…" value (`8 of 8 on ·
+    /// default claude`, which counts the built-ins) replaced by a fixed text
+    /// of the same width, so adding a harness doesn't change a snapshot.
+    fn fixed_plugin_count(screen: &str) -> String {
+        const LABEL: &str = "Harness plugins…";
+        let fix = |line: &str| -> String {
+            let Some(at) = line.find(LABEL) else { return line.to_owned() };
+            let after = &line[at + LABEL.len()..];
+            let Some(start) = after.find(|c: char| c != ' ') else { return line.to_owned() };
+            let value = &after[start..];
+            let len = value.find('│').unwrap_or(value.len());
+            // The cell up to the border, less the one-space margin before it.
+            let width = value[..len].chars().count().saturating_sub(1);
+            let fixed = "N of N on · default claude";
+            let mut text: String = fixed.chars().chain(std::iter::repeat(' ')).take(width).collect();
+            if width < fixed.chars().count() {
+                text = text.chars().take(width.saturating_sub(1)).chain(['…']).collect();
+            }
+            format!("{}{text} {}", &line[..at + LABEL.len() + start], &value[len..])
+        };
+        screen.lines().map(fix).collect::<Vec<_>>().join("\n")
+    }
+
     fn render(app: &App, w: u16, h: u16) -> String {
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| draw(f, app, &Theme::ansi(), NOW, &[])).unwrap();
@@ -3596,7 +3619,7 @@ mod tests {
         let mut app = fixture();
         app.update_available = Some(update("2.2.0"));
         app.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&app.settings));
-        insta::assert_snapshot!(render(&app, 100, 24));
+        insta::assert_snapshot!(fixed_plugin_count(&render(&app, 100, 24)));
         app.settings.check_for_updates = false;
         assert!(!render(&app, 100, 24).contains("is available"));
     }
@@ -3751,7 +3774,7 @@ mod tests {
         let mut app = compact(fixture());
         app.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&app.settings));
         let screen = render(&app, 60, 20);
-        insta::assert_snapshot!("compact_settings", screen);
+        insta::assert_snapshot!("compact_settings", fixed_plugin_count(&screen));
         assert!(screen.lines().next().unwrap().starts_with("╭─Settings") && screen.lines().next().unwrap().width() == 60, "{screen}");
         let mut app = compact(fixture());
         let repo = am_core::model::Repository { id: "r".into(), path: "/r".into(), name: "r".into() };
