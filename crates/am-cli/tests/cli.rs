@@ -548,6 +548,49 @@ fn agent_attach_suggests_the_fresh_start_command() {
     assert!(o.stderr.contains(&format!("Start one with: cd {} && mycli chat --agent am", wt.display())), "{}", o.stderr);
 }
 
+/// Kiro keeps hooks in an agent file: am writes a whole `agent-monitor`
+/// agent (with every tool, or the tool hooks never fire), and keeps it.
+#[test]
+fn hooks_for_kiro() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // A fresh ~/.kiro (no agents dir yet): install creates the agent file.
+    std::fs::create_dir_all(env.home().join(".kiro")).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "kiro"]).stdout, "Hooks installed into ~/.kiro/agents/agent-monitor.json\n");
+    let file = env.home().join(".kiro/agents/agent-monitor.json");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!((&v["name"], &v["tools"]), (&json!("agent-monitor"), &json!(["*"])));
+    assert!(v["description"].is_string());
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(hooks.keys().map(String::as_str).collect::<Vec<_>>(), ["agentSpawn", "userPromptSubmit", "preToolUse", "postToolUse", "stop"]);
+    assert_eq!(
+        hooks["stop"],
+        json!([{"command": format!("\"{}\" hook-event --agent kiro --worktree \"\" --event stop", fake_hook.display()), "timeout_ms": 5000}])
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["kiro"], true);
+
+    // The user's own edits to the agent survive a reinstall.
+    let mut edited = v.clone();
+    edited["tools"] = json!(["read", "shell"]);
+    edited["hooks"]["stop"].as_array_mut().unwrap().insert(0, json!({"command": "./notify.sh"}));
+    std::fs::write(&file, edited.to_string()).unwrap();
+    env.ok(&["hooks", "install", "--agent", "kiro"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v["tools"], json!(["read", "shell"]));
+    assert_eq!(v["hooks"]["stop"].as_array().unwrap().len(), 2);
+    assert_eq!(v["hooks"]["stop"][0]["command"], "./notify.sh");
+
+    // Uninstall takes only am's hooks out.
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "kiro"]).stdout, "Hooks removed from ~/.kiro/agents/agent-monitor.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v["hooks"], json!({"stop": [{"command": "./notify.sh"}]}));
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["kiro"], false);
+}
+
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
 #[test]
 fn manifest_plugins_need_no_code() {
