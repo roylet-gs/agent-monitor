@@ -15,6 +15,7 @@
 //! ([`manifest`]). Plugins can be disabled with the `disabledAgents`
 //! setting. See `docs/agent-providers.md`.
 
+pub mod amp;
 pub mod claude;
 pub mod codex;
 pub mod copilot;
@@ -261,6 +262,7 @@ impl HarnessKind {
     pub const DROID: HarnessKind = HarnessKind(&droid::DROID);
     pub const COPILOT: HarnessKind = HarnessKind(&copilot::COPILOT);
     pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
+    pub const AMP: HarnessKind = HarnessKind(&amp::AMP);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -323,6 +325,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::DROID,
     HarnessKind::COPILOT,
     HarnessKind::CURSOR,
+    HarnessKind::AMP,
 ];
 
 struct Registry {

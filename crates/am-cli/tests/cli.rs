@@ -513,6 +513,55 @@ fn hooks_for_gemini() {
     assert!(o.stderr.contains(&format!("Unknown agent: aider. Valid agents: {}", builtin_ids().join(", "))), "{}", o.stderr);
 }
 
+/// Amp has no hooks: am writes (and owns) a plugin file in its plugins dir.
+#[test]
+fn hooks_for_amp_are_a_plugin_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let plugins = env.home().join(".config/amp/plugins");
+    std::fs::create_dir_all(&plugins).unwrap();
+    let theirs = plugins.join("other.ts");
+    std::fs::write(&theirs, "export default function (amp) {}\n").unwrap();
+    let plugin = plugins.join("agent-monitor.ts");
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "amp"]).stdout, "Hooks installed into ~/.config/amp/plugins/agent-monitor.ts\n");
+    let text = std::fs::read_to_string(&plugin).unwrap();
+    assert!(text.starts_with("// @i-know-the-amp-plugin-api-is-wip-and-very-experimental-right-now\n"), "{text}");
+    assert!(text.contains(am_core::hooks_installer::OWNED_FILE_MARKER));
+    let argv = format!("const HOOK = [\"{}\", \"hook-event\", \"--agent\", \"amp\", \"--worktree\", \"\", \"--event\"];", fake_hook.display());
+    assert!(text.contains(&argv), "{text}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["amp"], true);
+    env.ok(&["hooks", "install", "--agent", "amp"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), text, "reinstalling changes nothing");
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("Amp hooks: Installed in ~/.config/amp/plugins/agent-monitor.ts"), "{doctor}");
+
+    // A binary that's gone is found in the plugin.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains(&format!("run a missing {}", fake_hook.display())), "{doctor}");
+
+    env.ok(&["hooks", "uninstall", "--agent", "amp"]);
+    assert!(!plugin.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["amp"], false);
+    assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "export default function (amp) {}\n", "other plugins untouched");
+
+    // A file of that name that isn't am's is left alone.
+    std::fs::write(&plugin, "export default function (amp) {}\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "amp"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    env.ok(&["hooks", "uninstall", "--agent", "amp"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), "export default function (amp) {}\n");
+
+    // $XDG_CONFIG_HOME moves Amp's config dir.
+    let xdg = env.root().join("xdg");
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "amp"]);
+    assert!(xdg.join("amp/plugins/agent-monitor.ts").exists());
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {

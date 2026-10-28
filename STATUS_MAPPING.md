@@ -223,6 +223,20 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 - Droid: a cancelled turn sends `Notification` (`idle_prompt`) rather than `Stop`. No `SubagentStart`, so its subagents aren't tracked.
 - Copilot: registered with PascalCase names, which select its Claude-shaped payload. Its permission and notification hooks only exist in the camelCase format, so only `AskUserQuestion` reaches `waiting`.
 
+**Amp** (`--agent amp`): Amp has no command hooks. am's plugin (`~/.config/amp/plugins/agent-monitor.ts`) sends canonical event names itself, with `--worktree ""`, the thread id as `session_id` and the workspace root as `cwd`:
+
+| Amp event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session.start` | `SessionStart` | `idle` |
+| `agent.start` | `UserPromptSubmit` (once per turn) | `executing` |
+| `tool.call` / `tool.result` | `PreToolUse` / `PostToolUse` | `executing` (`edit_file` → `Edit`, `create_file` → `Write`…) |
+| thread `state` `awaiting-approval` / `awaiting-input` | `PermissionRequest` | `waiting` |
+| thread `state` back to `running` | `PostToolUse` | `executing` |
+| `agent.end` (`done`/`cancelled`) once `state` is `idle` | `Stop` (once per turn) | `done` after work |
+| `agent.end` `error`, or `state` `error` | `StopFailure` | `idle` |
+
+The plugin sends one `Stop` per turn, since a second would turn `done` into `idle`, and waits for the thread's `state` to reach `idle` (another plugin can continue a turn from `agent.end`); without a `state` observable (older Amp) `agent.end` ends the turn. A turn that ends while waiting sends `PostToolUse` first, since `Stop` keeps `waiting`. Amp has no session-end event.
+
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 
 | Cursor event | Canonical event | Resulting status |

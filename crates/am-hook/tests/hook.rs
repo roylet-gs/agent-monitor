@@ -271,6 +271,42 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn an_amp_thread_is_tracked_through_its_plugins_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Exactly what am's Amp plugin sends: `--worktree ""`, canonical event
+    // names, the thread id as the session.
+    let amp = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "T-1", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("amp", event, "", p);
+    };
+    amp("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("amp")));
+    amp("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    amp("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" } }));
+    amp("PermissionRequest", json!({ "tool_name": "Bash" }));
+    assert_eq!(env.status().0, "waiting");
+    amp("PostToolUse", json!({}));
+    assert_eq!(env.status().0, "executing");
+    amp("PreToolUse", json!({ "tool_name": "edit_file", "tool_input": { "file_path": "src/a.rs" } }));
+    amp("PostToolUse", json!({ "tool_name": "edit_file" }));
+    amp("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("T-1").0, "done");
+
+    amp("UserPromptSubmit", json!({}));
+    amp("PermissionRequest", json!({}));
+    amp("PostToolUse", json!({}));
+    amp("StopFailure", json!({}));
+    assert_eq!(env.status().0, "idle");
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 1);
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

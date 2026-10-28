@@ -225,7 +225,7 @@ Most CLIs read hooks from a JSON file, but not all. A built-in picks how am's ho
 |---|---|---|---|
 | `HookInstall::Json` (default) | The CLI reads hooks from a JSON file (Claude, Gemini, Codex, Qwen, Droid, Copilot, Cursor, manifest plugins) | Entries whose command matches `is_am_hook_command` under `hooks_key` | Only am's entries; everyone else's stay. A file that isn't a JSON object (comments) is refused |
 | `HookInstall::TextBlock(TextBlock { comment, render })` | Hooks live in a TOML or YAML file (Kimi Code, Rovo Dev, Hermes) | The lines between `<comment> agent-monitor hooks <id> begin` and `… end` | Exactly the block (plus the blank line install put before it when it is last). Nothing outside the block is touched; a `begin` without `end` is an error, never half-replaced |
-| `HookInstall::OwnedFile(OwnedFile { render, register })` | The CLI loads a JS/TS plugin or extension that must spawn am-hook (OpenCode, Pi, OMP, Campfire, Amp) | The file contains `OWNED_FILE_MARKER` (`agent-monitor-hook-plugin v1`) | The file, only while it holds the marker (a file of that name without it is never overwritten or deleted), and `register`'s JSON list value |
+| `HookInstall::OwnedFile(OwnedFile { render, register })` | The CLI loads a JS/TS plugin or extension that must spawn am-hook (Amp; also how OpenCode, Pi, OMP or Campfire would fit) | The file contains `OWNED_FILE_MARKER` (`agent-monitor-hook-plugin v1`) | The file, only while it holds the marker (a file of that name without it is never overwritten or deleted), and `register`'s JSON list value |
 
 - **`render: fn(&HookContext) -> String`.** `HookContext` has `agent_id`, `program` (the absolute native `am-hook`, or `am` for the CLI fallback), `native`, `invocation` (`"/abs/am-hook" hook-event` or `cat | am hook-event`) and `hooks: Vec<HookCommand>`, one per `hook_events()` in order, each `{ event, command, timeout_ms }` with `timeout_secs()`. `command` is `hook_command()`: `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`. For a plugin that spawns without a shell, `ctx.argv(event, worktree)` gives `[program, "hook-event", "--agent", id, "--worktree", worktree, "--event", event]`; an empty worktree makes am-hook use the payload's `cwd`. The payload goes to the child's stdin.
 - **Quoting:** `toml_string(s)` (TOML basic string), `yaml_string(s)` (YAML double-quoted scalar) and `js_string(s)` (a JSON string literal, valid JS/TS) quote a value, including a command with its own `"`. Don't hand-roll escaping; there is no toml/yaml dependency.
@@ -273,6 +273,8 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
 
+| Amp (`amp`) | No hooks: an `OwnedFile` plugin, `$XDG_CONFIG_HOME/amp/plugins/agent-monitor.ts` (else `~/.config/amp/plugins/`), which the Amp CLI loads when started with `PLUGINS=all` | The plugin subscribes to Amp's plugin events and each thread's `state` observable and runs am-hook per state change with a Claude-shaped payload and canonical event names (see below); the thread id is the `session_id`, `cwd` is the workspace root | `PermissionRequest` from `state` = `awaiting-approval` | `amp threads continue <id>`; threads live on Amp's servers, so resume offers the sessions am's hooks recorded |
+
 Not built in, and why:
 
 - **JetBrains Junie CLI**: Claude-shaped hooks in `~/.junie/config.json`, but they're Early Access, there's no project-dir variable, and `Stop` carries no `session_id` or `cwd`, so the end of a turn can't be attributed.
@@ -282,8 +284,24 @@ Not built in, and why:
 - **Windsurf / Devin Desktop**: no session, stop or permission events; the only turn end is the async `post_cascade_response`.
 - **Crush**: `PreToolUse` only.
 - **Cline**: one executable file per hook, and current docs point to in-process SDK plugins.
-- **OpenCode, Amp**: JS/TS plugins only; supporting them means shipping a small bridge plugin that runs `am-hook`.
+- **OpenCode**: JS/TS plugins only; supporting it means shipping a small bridge plugin that runs `am-hook`, as am does for Amp.
 - **Aider**: no hooks, only a `--notifications-command` with no payload.
 - **Mistral Vibe**: TOML config with tool and `post_agent` events only.
 
 Any of these can still be added as a manifest where its hooks fit the format above.
+
+### Amp's bridge plugin
+
+Amp has no command hooks; its CLI loads TS/JS plugins (run with Bun) from `.amp/plugins/` and `~/.config/amp/plugins/`, but only when started with `PLUGINS=all`, only in the CLI (not the editor extension), and only from a file whose first line is `// @i-know-the-amp-plugin-api-is-wip-and-very-experimental-right-now`. `am hooks install --agent amp` writes `agent-monitor.ts` there (`harness/amp-plugin.ts` with am-hook's argv filled in; `HookInstall::OwnedFile`, no registration). The template is plain JavaScript with no `import type` from `@ampcode/plugin`, so nothing must resolve at runtime. It runs `am-hook hook-event --agent amp --worktree "" --event <E>` without a shell, one at a time, detached, with the payload on stdin, a 5 s kill and an allow-listed environment (`HOME`, `PATH`, `AM_DATA_DIR`…; never `AMP_API_KEY`), and never throws into Amp. `cwd` is `amp.system.workspaceRoot` (the plugin process may run elsewhere), else `$PWD`.
+
+| Amp | Sent |
+|---|---|
+| `session.start` | `SessionStart` |
+| `agent.start` (or `state` → `running` outside a turn) | `UserPromptSubmit`, once per turn |
+| `tool.call` / `tool.result` | `PreToolUse` / `PostToolUse` with Amp's tool name (`edit_file` → `Edit`… in `amp.json`) and only `command`/`file_path`/`pattern`/`url`/`query`/`description`; `tool.call` answers `allow`. Threads that never started in this process (a subagent's) are left out |
+| thread `state` → `awaiting-approval` / `awaiting-input` | `PermissionRequest` (with the last tool's name) |
+| thread `state` back to `running` | `PostToolUse` (back to `executing`) |
+| `agent.end` + thread `state` → `idle` | `Stop` (`done`, `cancelled`) or `StopFailure` (`error`), once per turn; `PostToolUse` first when still waiting, since `Stop` keeps `waiting`. A thread without a `state` observable (older Amp) ends at `agent.end` |
+| thread `state` → `error` | `StopFailure` |
+
+There is no session-end event; a thread stays open until Amp's process goes, and the process scan stops counting it then.
