@@ -40,6 +40,7 @@ const AGENT_ENV: &[&str] = &[
     "GROK_HOME",
     "HERMES_HOME",
     "KIMI_CODE_HOME",
+    "KIMI_SHARE_DIR",
     "KIRO_HOME",
     "OPENCODE_CONFIG_DIR",
     "OPENCODE_DB",
