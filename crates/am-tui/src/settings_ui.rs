@@ -203,6 +203,8 @@ pub struct SettingsEditor {
     pub candidates: Candidates,
     /// PRs per review group under the saved groups (the app keeps it current).
     pub group_counts: GroupCounts,
+    /// First visible line of the field list (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 impl SettingsEditor {
@@ -212,7 +214,7 @@ impl SettingsEditor {
             _ => Map::new(),
         };
         let only = settings.reviews_mode().then_some(REVIEW_MODE_FIELDS);
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, confirm: None, only, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default() }
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, confirm: None, only, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default(), scroll: Default::default() }
     }
 
     /// An editor showing only the `keys` fields, starting on the first.
@@ -233,10 +235,10 @@ impl SettingsEditor {
         (0..FIELDS.len()).filter(|&i| self.only.is_none_or(|keys| keys.contains(&FIELDS[i].key))).collect()
     }
 
-    fn move_cursor(&mut self, dir: isize) {
+    fn move_cursor(&mut self, delta: isize) {
         let fields = self.fields();
-        let pos = fields.iter().position(|&i| i == self.cursor).unwrap_or(0) as isize;
-        self.cursor = fields[(pos + dir).clamp(0, fields.len() as isize - 1) as usize];
+        let pos = fields.iter().position(|&i| i == self.cursor).unwrap_or(0);
+        self.cursor = fields[crate::nav::moved(pos, delta, fields.len())];
     }
 
     /// A click on field `i`: selects it, or changes it (like ⏎) when it is
@@ -429,8 +431,7 @@ impl SettingsEditor {
             Key::Esc | Key::Char('q') | Key::Char('s') => return Outcome::Close,
             Key::Char('f') if self.is_filter_box() => return Outcome::Close,
             Key::Char('e') if !self.is_filter_box() => return Outcome::EditFile,
-            Key::Down | Key::Char('j') => self.move_cursor(1),
-            Key::Up | Key::Char('k') => self.move_cursor(-1),
+            k if let Some(d) = crate::nav::delta(k, true) => self.move_cursor(d),
             Key::Enter | Key::Char(' ') => return self.activate(),
             Key::Right | Key::Char('l') => return self.step(1),
             Key::Left | Key::Char('h') => return self.step(-1),
@@ -775,8 +776,7 @@ impl SortEditor {
         match key {
             Key::Esc => return SortOutcome::Done(None),
             Key::Enter | Key::Char('q') => return SortOutcome::Done(Some(self.items.clone())),
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(n - 1),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
+            k if let Some(to) = crate::nav::step(k, true, self.cursor, n) => self.cursor = to,
             Key::Char(' ') => self.items[self.cursor].enabled ^= true,
             Key::Char('d') => {
                 let c = &mut self.items[self.cursor];

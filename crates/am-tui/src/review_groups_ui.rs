@@ -93,6 +93,8 @@ pub struct GroupForm {
     pub editing: Option<String>,
     /// Highlighted entry of `completions`.
     pub suggest: usize,
+    /// First visible line (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -346,7 +348,7 @@ impl GroupsEditor {
 
     fn open(&mut self, i: usize) {
         let which = (i < self.groups.len()).then_some(i);
-        self.form = Some(GroupForm { which, cursor: 0, editing: None, suggest: 0 });
+        self.form = Some(GroupForm { which, cursor: 0, editing: None, suggest: 0, scroll: Default::default() });
     }
 
     pub fn on_key(&mut self, key: Key, cands: &Candidates) -> GroupsOutcome {
@@ -365,8 +367,8 @@ impl GroupsEditor {
         let on_group = self.cursor < n;
         match key {
             Key::Esc | Key::Char('q') => return GroupsOutcome::Close,
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(n),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
+            // The groups, then the default group.
+            k if let Some(to) = crate::nav::step(k, true, self.cursor, n + 1) => self.cursor = to,
             Key::Char('a') => {
                 // A new group goes after the selected one (above the default).
                 let at = if on_group { self.cursor + 1 } else { n };
@@ -451,8 +453,7 @@ impl GroupsEditor {
         let which = form.which;
         match key {
             Key::Esc | Key::Char('q') => self.form = None,
-            Key::Down | Key::Char('j') => form.cursor = (form.cursor + 1).min(FORM.len() - 1),
-            Key::Up | Key::Char('k') => form.cursor = form.cursor.saturating_sub(1),
+            k if let Some(to) = crate::nav::step(k, true, form.cursor, FORM.len()) => form.cursor = to,
             Key::Enter | Key::Char(' ') => match field.kind {
                 FormKind::Bool => {
                     toggle(self.group_mut(which), field.key);

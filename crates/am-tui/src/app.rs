@@ -801,7 +801,10 @@ impl App {
             C::AddRepo => self.modal = Some(self.add_repo_modal()),
             C::ReviewRequests => match &mut self.reviews {
                 // From the split: the page takes the whole body.
-                Some(p) => *p = crate::reviews_ui::ReviewPage { cursor: p.cursor, split: false, focused: true },
+                Some(p) => {
+                    p.split = false;
+                    p.focused = true;
+                }
                 None => return self.open_reviews(false),
             },
             C::ReviewSplit => match self.reviews.as_ref().map(|p| p.split) {
@@ -819,8 +822,8 @@ impl App {
             C::Settings => self.open_settings(),
             C::MoveDown => self.move_by(1),
             C::MoveUp => self.move_by(-1),
-            C::PageDown => self.move_by(10),
-            C::PageUp => self.move_by(-10),
+            C::PageDown => self.move_by(crate::nav::PAGE),
+            C::PageUp => self.move_by(-crate::nav::PAGE),
             C::Bottom => self.move_by(isize::MAX / 2),
             C::Top => self.move_by(isize::MIN / 2),
         }
@@ -1124,7 +1127,7 @@ impl App {
     /// (the page then says how to turn them on), and a fetch.
     pub fn enter_reviews_mode(&mut self) {
         self.jobs.focused = false;
-        self.reviews = Some(crate::reviews_ui::ReviewPage { cursor: 0, split: false, focused: true });
+        self.reviews = Some(crate::reviews_ui::ReviewPage { focused: true, ..Default::default() });
         self.review_fetch_due = self.settings.review_requests_on();
     }
 
@@ -1135,7 +1138,7 @@ impl App {
             return Action::None;
         }
         self.jobs.focused = false;
-        self.reviews = Some(crate::reviews_ui::ReviewPage { cursor: 0, split, focused: true });
+        self.reviews = Some(crate::reviews_ui::ReviewPage { split, focused: true, ..Default::default() });
         Action::RefreshReviews
     }
 
@@ -1207,8 +1210,8 @@ impl App {
             Some(C::ReviewWindow) if !reviews_only => return self.run_command(C::ReviewWindow),
             Some(C::MoveDown) => page.move_by(1, len),
             Some(C::MoveUp) => page.move_by(-1, len),
-            Some(C::PageDown) => page.move_by(10, len),
-            Some(C::PageUp) => page.move_by(-10, len),
+            Some(C::PageDown) => page.move_by(crate::nav::PAGE, len),
+            Some(C::PageUp) => page.move_by(-crate::nav::PAGE, len),
             Some(C::Top) => page.move_by(isize::MIN / 2, len),
             Some(C::Bottom) => page.move_by(isize::MAX / 2, len),
             Some(C::Open) => return self.review_open(),
@@ -1427,7 +1430,7 @@ impl App {
         if len == 0 {
             return;
         }
-        self.selected = (self.selected as isize).saturating_add(delta).clamp(0, len as isize - 1) as usize;
+        self.selected = crate::nav::moved(self.selected, delta, len);
         self.mark_selected_seen();
     }
 }

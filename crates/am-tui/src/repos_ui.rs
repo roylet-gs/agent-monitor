@@ -44,6 +44,8 @@ pub struct RepoEditor {
     pub confirm_remove: Option<String>,
     /// Result of the last action.
     pub message: Option<(bool, String)>,
+    /// First visible row (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
     /// `s`/`⏎` on a repo: which of its scripts to edit or remove (cursor
     /// into [`SCRIPTS`]).
     pub scripts: Option<usize>,
@@ -88,7 +90,7 @@ pub fn load_rows() -> Vec<RepoRow> {
 
 impl RepoEditor {
     pub fn new(rows: Vec<RepoRow>) -> RepoEditor {
-        RepoEditor { rows, cursor: 0, confirm_remove: None, message: None, scripts: None }
+        RepoEditor { rows, cursor: 0, confirm_remove: None, message: None, scroll: Default::default(), scripts: None }
     }
 
     pub fn selected(&self) -> Option<&RepoRow> {
@@ -106,8 +108,7 @@ impl RepoEditor {
         match key {
             Key::Esc | Key::Char('q') => return RepoOutcome::Close,
             Key::Char('a') => return RepoOutcome::Add,
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(self.rows.len().saturating_sub(1)),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
+            k if let Some(to) = crate::nav::step(k, true, self.cursor, self.rows.len()) => self.cursor = to,
             _ => {}
         }
         let Some(row) = self.rows.get(self.cursor) else { return RepoOutcome::Stay };
@@ -126,11 +127,13 @@ impl RepoEditor {
             self.scripts = None;
             return RepoOutcome::Stay;
         };
+        if let Some(to) = crate::nav::step(key, true, at, SCRIPTS.len()) {
+            self.scripts = Some(to);
+            return RepoOutcome::Stay;
+        }
         let kind = SCRIPTS[at];
         match key {
             Key::Esc | Key::Char('q') => self.scripts = None,
-            Key::Down | Key::Char('j') => self.scripts = Some((at + 1).min(SCRIPTS.len() - 1)),
-            Key::Up | Key::Char('k') => self.scripts = Some(at.saturating_sub(1)),
             Key::Enter | Key::Char('s') => return RepoOutcome::EditScript(row.id.clone(), kind),
             Key::Char('x') if row.has(kind) => return RepoOutcome::RemoveScript(row.id.clone(), kind),
             Key::Char('x') => self.message = Some((false, format!("{} has no {}", row.name, kind.label()))),

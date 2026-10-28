@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use crate::app::Key;
 use crate::keymap::{self, Command, Keymap};
+use crate::nav;
 
 pub enum KeyOutcome {
     Stay,
@@ -24,11 +25,13 @@ pub struct KeyEditor {
     /// Review-only mode: only the commands that do something on the review
     /// page are listed.
     pub reviews_mode: bool,
+    /// First visible row (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 impl KeyEditor {
     pub fn new(keymap: Keymap) -> KeyEditor {
-        KeyEditor { cursor: 0, capturing: false, keymap, message: None, reviews_mode: false }
+        KeyEditor { cursor: 0, capturing: false, keymap, message: None, reviews_mode: false, scroll: Default::default() }
     }
 
     /// The editor for review-only mode (see [`KeyEditor::reviews_mode`]).
@@ -43,10 +46,10 @@ impl KeyEditor {
         (0..Command::ALL.len()).filter(|&i| !self.reviews_mode || Command::ALL[i].in_reviews_mode().is_some()).collect()
     }
 
-    fn move_by(&mut self, dir: isize) {
+    fn move_by(&mut self, delta: isize) {
         let listed = self.listed();
-        let pos = listed.iter().position(|&i| i == self.cursor).unwrap_or(0) as isize;
-        self.cursor = listed[(pos + dir).clamp(0, listed.len() as isize - 1) as usize];
+        let pos = listed.iter().position(|&i| i == self.cursor).unwrap_or(0);
+        self.cursor = listed[nav::moved(pos, delta, listed.len())];
     }
 
     pub fn selected(&self) -> Command {
@@ -62,10 +65,7 @@ impl KeyEditor {
         let cmd = self.selected();
         match key {
             Key::Esc | Key::Char('q') => return KeyOutcome::Close,
-            Key::Down | Key::Char('j') => self.move_by(1),
-            Key::Up | Key::Char('k') => self.move_by(-1),
-            Key::Home => self.move_by(isize::MIN / 2),
-            Key::End => self.move_by(isize::MAX / 2),
+            k if let Some(d) = nav::delta(k, true) => self.move_by(d),
             Key::Enter | Key::Char(' ') => {
                 self.capturing = true;
                 self.message = Some((true, format!("Press the new key for {} · esc cancels", cmd.label())));

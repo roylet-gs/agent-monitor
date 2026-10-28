@@ -30,6 +30,8 @@ pub struct ReviewPage {
     /// In a split, whether the page (not the list) takes the keys; a full
     /// page always does.
     pub focused: bool,
+    /// First visible row (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 /// The review groups the page is split by, and the time their age rules
@@ -220,11 +222,7 @@ pub fn rows(
 
 impl ReviewPage {
     pub fn move_by(&mut self, delta: isize, len: usize) {
-        if len == 0 {
-            self.cursor = 0;
-            return;
-        }
-        self.cursor = (self.cursor as isize).saturating_add(delta).clamp(0, len as isize - 1) as usize;
+        self.cursor = crate::nav::moved(self.cursor, delta, len);
     }
 
     /// Keep the cursor on the list after it shrinks.
