@@ -328,6 +328,7 @@ impl Manifest {
             agent_type: self.lookup(v, "agent_type").and_then(Value::as_str).map(str::to_owned),
             agent_transcript_path: s("agent_transcript_path"),
             stop_ends_wait: false,
+            turn_bound: false,
         }
     }
 
