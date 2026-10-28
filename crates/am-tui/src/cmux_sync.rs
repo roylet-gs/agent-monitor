@@ -3,8 +3,10 @@
 //! PR (number, CI, review), Linear ticket and running agent shell commands,
 //! with the agent's context use as the workspace's progress bar. cmux shows
 //! the branch and agent state itself. am's own workspace gets a summary
-//! instead: how many agents wait, work or are done, review requests to do,
-//! and PRs with failing CI ([`own_pills`]).
+//! instead: how many agents wait, work or are done, review requests to do
+//! (and how many ask you by name), PRs with failing CI, and how many
+//! worktrees have a live agent as its progress bar ([`own_pills`]). Every
+//! pill carries an SF Symbol icon.
 //!
 //! The collector computes what each worktree should show ([`desired`]) and
 //! sends it on change; a `cmux-sync` thread maps workspaces to worktrees and
@@ -54,14 +56,14 @@ pub struct Desired {
     pub own: WorktreePills,
 }
 
-fn pill(value: String, color: Option<&'static str>, priority: i32) -> Pill {
-    Pill { value, icon: None, color, priority }
+fn pill(value: String, icon: &'static str, color: Option<&'static str>, priority: i32) -> Pill {
+    Pill { value, icon: Some(icon), color, priority }
 }
 
 /// `#42 ✓ approved`, coloured like the dashboard's PR cell.
 fn pr_pill(pr: &am_core::model::PrInfo) -> Pill {
     if pr.state == "MERGED" {
-        return pill(format!("#{} merged", pr.number), Some(PURPLE), 30);
+        return pill(format!("#{} merged", pr.number), "arrow.triangle.merge", Some(PURPLE), 30);
     }
     let checks = match pr.checks_status {
         ChecksStatus::Passing => " ✓",
@@ -86,7 +88,8 @@ fn pr_pill(pr: &am_core::model::PrInfo) -> Pill {
         (_, ChecksStatus::Pending) => YELLOW,
         _ => GREEN,
     };
-    pill(format!("#{}{checks}{review}", pr.number), Some(color), 30)
+    let icon = if pr.state == "CLOSED" { "xmark.circle" } else { "arrow.triangle.pull" };
+    pill(format!("#{}{checks}{review}", pr.number), icon, Some(color), 30)
 }
 
 /// What `v`'s workspace should show.
@@ -96,11 +99,11 @@ pub fn worktree_pills(v: &WorktreeView, settings: &Settings) -> WorktreePills {
         out.pills.insert("am_pr", pr_pill(pr));
     }
     if let Some(t) = &v.linear {
-        out.pills.insert("am_ticket", pill(t.identifier.clone(), None, 20));
+        out.pills.insert("am_ticket", pill(t.identifier.clone(), "tag.fill", None, 20));
     }
     if v.shell_commands > 0 {
         let n = v.shell_commands;
-        out.pills.insert("am_cmds", pill(format!("$ {n} command{}", if n == 1 { "" } else { "s" }), None, 10));
+        out.pills.insert("am_cmds", pill(format!("{n} command{}", if n == 1 { "" } else { "s" }), "terminal.fill", None, 10));
     }
     if settings.show_context_window
         && let Some(c) = &v.context
@@ -112,12 +115,22 @@ pub fn worktree_pills(v: &WorktreeView, settings: &Settings) -> WorktreePills {
     out
 }
 
+/// Review requests the dashboard's badge counts, and how many of them ask
+/// you by name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReviewCount {
+    pub total: usize,
+    pub you: usize,
+}
+
 /// `2 waiting`, `3 working`, `1 done` (open sessions, by each worktree's
-/// headline), `4 to review` and `1 CI failing`; counts of zero are left out.
-pub fn own_pills(views: &[WorktreeView], to_review: Option<usize>) -> WorktreePills {
-    let (mut waiting, mut working, mut done, mut failing) = (0, 0, 0, 0);
+/// headline), `4 to review · 2 you` and `1 CI failing`, counts of zero left
+/// out; the progress bar says how many worktrees have a live agent.
+pub fn own_pills(views: &[WorktreeView], to_review: Option<ReviewCount>) -> WorktreePills {
+    let (mut waiting, mut working, mut done, mut failing, mut active) = (0, 0, 0, 0, 0);
     for v in views {
         if am_core::grouping::is_open_now(v.agent.as_ref()) {
+            active += 1;
             match v.agent.as_ref().map(|a| a.status) {
                 Some(Status::Waiting) => waiting += 1,
                 Some(Status::Executing | Status::Planning | Status::Delegating) => working += 1,
@@ -130,33 +143,48 @@ pub fn own_pills(views: &[WorktreeView], to_review: Option<usize>) -> WorktreePi
         }
     }
     let mut out = WorktreePills::default();
-    let mut put = |key, n: usize, label: &str, color, priority| {
+    let mut put = |key, n: usize, label: String, icon, color, priority| {
         if n > 0 {
-            out.pills.insert(key, pill(format!("{n} {label}"), color, priority));
+            out.pills.insert(key, pill(format!("{n} {label}"), icon, color, priority));
         }
     };
-    put("am_waiting", waiting, "waiting", Some(YELLOW), 50);
-    put("am_working", working, "working", Some(BLUE), 45);
-    put("am_done", done, "done", Some(GREEN), 40);
-    put("am_reviews", to_review.unwrap_or(0), "to review", Some(PURPLE), 35);
-    put("am_ci", failing, "CI failing", Some(RED), 30);
+    let reviews = to_review.unwrap_or_default();
+    let you = if reviews.you > 0 { format!(" · {} you", reviews.you) } else { String::new() };
+    put("am_waiting", waiting, "waiting".into(), "hand.raised.fill", Some(YELLOW), 50);
+    put("am_reviews", reviews.total, format!("to review{you}"), "eye.fill", Some(PURPLE), 48);
+    put("am_working", working, "working".into(), "hammer.fill", Some(BLUE), 45);
+    put("am_done", done, "done".into(), "checkmark.circle.fill", Some(GREEN), 40);
+    put("am_ci", failing, "CI failing".into(), "xmark.octagon.fill", Some(RED), 30);
+    if !views.is_empty() {
+        let total = views.len();
+        out.progress = Some((active as f64 / total as f64, format!("{active} of {total} worktrees active")));
+    }
     out
 }
 
 /// The review requests the dashboard's badge counts: those in groups with
-/// `badge` on. `None` while review requests are off or not fetched yet.
-pub fn to_review(list: Option<&[ReviewRequest]>, repos: &[Repository], settings: &Settings, hits: &QueryHits) -> Option<usize> {
+/// `badge` on, and of those the ones asking you by name. `None` while review
+/// requests are off or not fetched yet.
+pub fn to_review(list: Option<&[ReviewRequest]>, repos: &[Repository], settings: &Settings, hits: &QueryHits) -> Option<ReviewCount> {
     let list = list.filter(|_| settings.review_requests_on())?;
     let g = crate::reviews_ui::Grouping::new(settings, am_core::timefmt::now_unix(), hits);
-    let (per, _) = crate::reviews_ui::counts(list, repos, g);
-    let named = g.groups.iter().enumerate().filter(|(_, x)| x.badge && x.enabled).map(|(i, _)| per[i]);
-    let default = (g.default.badge && g.default.enabled).then(|| per[g.groups.len()]);
-    Some(named.chain(default).sum())
+    let badged = |i: usize| match g.groups.get(i) {
+        Some(x) => x.badge && x.enabled,
+        None => i == g.groups.len() && g.default.badge && g.default.enabled,
+    };
+    let mut n = ReviewCount::default();
+    for (r, grp) in list.iter().zip(crate::reviews_ui::groups_of(list, repos, g)) {
+        if grp.is_some_and(badged) {
+            n.total += 1;
+            n.you += usize::from(crate::reviews_ui::asks_you(r));
+        }
+    }
+    Some(n)
 }
 
 /// Every worktree (empty pills for one with nothing to show), plus am's own
 /// workspace's summary.
-pub fn desired(views: &[WorktreeView], to_review: Option<usize>, settings: &Settings) -> Desired {
+pub fn desired(views: &[WorktreeView], to_review: Option<ReviewCount>, settings: &Settings) -> Desired {
     Desired {
         worktrees: views.iter().map(|v| (v.worktree.path.clone(), worktree_pills(v, settings))).collect(),
         own: own_pills(views, to_review),
@@ -394,7 +422,7 @@ mod tests {
 
     fn wp(pr: &str, progress: Option<f64>) -> WorktreePills {
         let mut p = WorktreePills::default();
-        p.pills.insert("am_pr", pill(pr.into(), Some(GREEN), 30));
+        p.pills.insert("am_pr", pill(pr.into(), "arrow.triangle.pull", Some(GREEN), 30));
         p.progress = progress.map(|v| (v, format!("ctx {}%", (v * 100.0) as u32)));
         p
     }
@@ -424,8 +452,8 @@ mod tests {
         assert_eq!(
             &calls[2..],
             [
-                "set-status am_pr #1 ✓ --workspace A --color #34c759 --priority 30",
-                "set-status am_pr #2 ◌ --workspace B --color #34c759 --priority 30",
+                "set-status am_pr #1 ✓ --workspace A --icon arrow.triangle.pull --color #34c759 --priority 30",
+                "set-status am_pr #2 ◌ --workspace B --icon arrow.triangle.pull --color #34c759 --priority 30",
                 "set-progress 0.50 --label ctx 50% --workspace B",
             ]
         );
@@ -437,14 +465,14 @@ mod tests {
         // The feature's PR goes away and its context bar with it; main is untouched.
         d.worktrees.insert("/r/repo/.claude/worktrees/feat".into(), {
             let mut p = WorktreePills::default();
-            p.pills.insert("am_ticket", pill("ENG-1".into(), None, 20));
+            p.pills.insert("am_ticket", pill("ENG-1".into(), "tag.fill", None, 20));
             p
         });
         sync.apply(&d, t0 + Duration::from_secs(2));
         assert_eq!(
             sync.runner.take(),
             [
-                "set-status am_ticket ENG-1 --workspace B --priority 20",
+                "set-status am_ticket ENG-1 --workspace B --icon tag.fill --priority 20",
                 "clear-status am_pr --workspace B",
                 "clear-progress --workspace B",
             ]
@@ -467,7 +495,7 @@ mod tests {
         let calls = sync.runner.take();
         assert_eq!(
             &calls[2..],
-            ["set-status am_pr #1 ✓ --workspace A --color #34c759 --priority 30", "set-progress 0.40 --label ctx 40% --workspace A"]
+            ["set-status am_pr #1 ✓ --workspace A --icon arrow.triangle.pull --color #34c759 --priority 30", "set-progress 0.40 --label ctx 40% --workspace A"]
         );
         assert!(!sync.pushed.contains_key("B"));
     }
@@ -553,12 +581,35 @@ mod tests {
             view("d", Some(Status::Idle), None),
             view("e", None, None),
         ];
-        let p = own_pills(&views, Some(4));
+        let p = own_pills(&views, Some(ReviewCount { total: 4, you: 1 }));
         let got: Vec<(&str, &str)> = p.pills.iter().map(|(k, v)| (*k, v.value.as_str())).collect();
-        assert_eq!(got, [("am_ci", "1 CI failing"), ("am_reviews", "4 to review"), ("am_waiting", "1 waiting"), ("am_working", "2 working")]);
-        assert!(p.progress.is_none());
-        // Nothing to say: no pills at all.
-        assert_eq!(own_pills(&views[3..], Some(0)), WorktreePills::default());
+        assert_eq!(
+            got,
+            [("am_ci", "1 CI failing"), ("am_reviews", "4 to review · 1 you"), ("am_waiting", "1 waiting"), ("am_working", "2 working")]
+        );
+        assert!(p.pills.values().all(|p| p.icon.is_some()));
+        // a, b and c have a live agent; d went idle long ago, e has none.
+        assert_eq!(p.progress, Some((0.6, "3 of 5 worktrees active".into())));
+        // No one asks you by name: the count alone.
+        let p = own_pills(&views, Some(ReviewCount { total: 2, you: 0 }));
+        assert_eq!(p.pills["am_reviews"].value, "2 to review");
+        // Nothing to say: no pills, only the bar.
+        let quiet = own_pills(&views[4..], Some(ReviewCount::default()));
+        assert!(quiet.pills.is_empty());
+        assert_eq!(quiet.progress, Some((0.0, "0 of 1 worktrees active".into())));
+        assert_eq!(own_pills(&[], None), WorktreePills::default());
+    }
+
+    #[test]
+    fn to_review_counts_the_badge_and_who_is_asked() {
+        use crate::reviews_ui::tests::{review, review_asking};
+        let settings = Settings { gh_pr_status: true, review_requests_enabled: true, ..Settings::default() };
+        let list = [review("a", 1, "2026-10-01"), review_asking("a", 2, "2026-10-02", "@platform"), review("a", 3, "2026-10-03")];
+        let hits = QueryHits::default();
+        assert_eq!(to_review(Some(&list), &[], &settings, &hits), Some(ReviewCount { total: 3, you: 2 }));
+        assert_eq!(to_review(None, &[], &settings, &hits), None);
+        let off = Settings { review_requests_enabled: false, ..settings };
+        assert_eq!(to_review(Some(&list), &[], &off, &hits), None);
     }
 
     #[test]
@@ -566,9 +617,9 @@ mod tests {
         let mut sync = Sync::new(fake());
         sync.own = Some("C".into());
         let mut d = Desired::default();
-        d.own.pills.insert("am_waiting", pill("1 waiting".into(), Some(YELLOW), 50));
+        d.own.pills.insert("am_waiting", pill("1 waiting".into(), "hand.raised.fill", Some(YELLOW), 50));
         sync.apply(&d, Instant::now());
-        assert_eq!(&sync.runner.take()[2..], ["set-status am_waiting 1 waiting --workspace C --color #ffcc00 --priority 50"]);
+        assert_eq!(&sync.runner.take()[2..], ["set-status am_waiting 1 waiting --workspace C --icon hand.raised.fill --color #ffcc00 --priority 50"]);
         sync.clear_all();
         assert_eq!(sync.runner.take(), ["clear-status am_waiting --workspace C"]);
     }
