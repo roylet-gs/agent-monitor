@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use crate::app::Key;
 use crate::keymap::{self, Command, Keymap};
+use crate::nav;
 
 pub enum KeyOutcome {
     Stay,
@@ -21,11 +22,13 @@ pub struct KeyEditor {
     pub keymap: Keymap,
     /// (ok, text) under the list.
     pub message: Option<(bool, String)>,
+    /// First visible row (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 impl KeyEditor {
     pub fn new(keymap: Keymap) -> KeyEditor {
-        KeyEditor { cursor: 0, capturing: false, keymap, message: None }
+        KeyEditor { cursor: 0, capturing: false, keymap, message: None, scroll: Default::default() }
     }
 
     pub fn selected(&self) -> Command {
@@ -41,10 +44,7 @@ impl KeyEditor {
         let cmd = self.selected();
         match key {
             Key::Esc | Key::Char('q') => return KeyOutcome::Close,
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(Command::ALL.len() - 1),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
-            Key::Home => self.cursor = 0,
-            Key::End => self.cursor = Command::ALL.len() - 1,
+            k if let Some(to) = nav::step(k, true, self.cursor, Command::ALL.len()) => self.cursor = to,
             Key::Enter | Key::Char(' ') => {
                 self.capturing = true;
                 self.message = Some((true, format!("Press the new key for {} · esc cancels", cmd.label())));

@@ -38,6 +38,8 @@ pub struct RepoEditor {
     pub confirm_remove: Option<String>,
     /// Result of the last action.
     pub message: Option<(bool, String)>,
+    /// First visible row (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 /// Snapshot the tracked repositories (most recently used first).
@@ -65,7 +67,7 @@ pub fn load_rows() -> Vec<RepoRow> {
 
 impl RepoEditor {
     pub fn new(rows: Vec<RepoRow>) -> RepoEditor {
-        RepoEditor { rows, cursor: 0, confirm_remove: None, message: None }
+        RepoEditor { rows, cursor: 0, confirm_remove: None, message: None, scroll: Default::default() }
     }
 
     pub fn selected(&self) -> Option<&RepoRow> {
@@ -80,8 +82,7 @@ impl RepoEditor {
         match key {
             Key::Esc | Key::Char('q') => return RepoOutcome::Close,
             Key::Char('a') => return RepoOutcome::Add,
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(self.rows.len().saturating_sub(1)),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
+            k if let Some(to) = crate::nav::step(k, true, self.cursor, self.rows.len()) => self.cursor = to,
             _ => {}
         }
         let Some(row) = self.rows.get(self.cursor) else { return RepoOutcome::Stay };

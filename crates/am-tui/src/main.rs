@@ -15,6 +15,7 @@ mod keymap;
 mod keys_ui;
 mod launcher;
 mod modals;
+mod nav;
 mod ops;
 mod plugins_ui;
 mod repos_ui;

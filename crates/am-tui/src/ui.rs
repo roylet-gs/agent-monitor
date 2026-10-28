@@ -363,12 +363,6 @@ fn settings_lines(ed: &crate::settings_ui::SettingsEditor) -> Vec<Option<usize>>
     lines
 }
 
-/// First visible settings line: keeps the cursor (plus one line) in view.
-fn settings_start(lines: &[Option<usize>], cursor: usize, height: usize) -> usize {
-    let sel_line = lines.iter().position(|l| *l == Some(cursor)).unwrap_or(0);
-    (sel_line + 2).saturating_sub(height)
-}
-
 fn contains(r: Rect, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height
 }
@@ -523,7 +517,8 @@ fn draw_settings(
         lines.push(if sel { line.style(theme.selected()) } else { line });
     }
     let height = list.height as usize;
-    let start = settings_start(&layout, ed.cursor, height);
+    let sel = layout.iter().position(|l| *l == Some(ed.cursor)).unwrap_or(0);
+    let start = scroll_start(&ed.scroll, layout.len(), height, (sel, sel), |i| layout[i].is_some());
     for (row, entry) in layout.iter().skip(start).take(height).enumerate() {
         if let Some(i) = *entry {
             push_row(hits, list, row, Target::Item(List::Settings, i), i == ed.cursor);
@@ -656,7 +651,7 @@ fn draw_group_form(
     let height = body.height as usize;
     let last = rows.iter().rposition(|r| r.0 == form.cursor).unwrap_or(0);
     let first = rows.iter().position(|r| r.0 == form.cursor).unwrap_or(0);
-    let start = (last + 1).saturating_sub(height).min(first);
+    let start = scroll_start(&form.scroll, rows.len(), height, (first, last), |_| true);
     let mut lines = Vec::new();
     for (n, (i, head, value)) in rows.iter().enumerate().skip(start).take(height) {
         let field = &FORM[*i];
@@ -838,7 +833,7 @@ fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::
     // name, path, "12 worktrees", "script"
     let path_w = (list.width as usize).saturating_sub(1 + 2 + name_w + 14 + 8).max(8);
     let height = (list.height as usize).saturating_sub(lines.len());
-    let start = (ed.cursor + 1).saturating_sub(height);
+    let start = scroll_start(&ed.scroll, ed.rows.len(), height, (ed.cursor, ed.cursor), |_| true);
     for (i, r) in ed.rows.iter().enumerate().skip(start).take(height) {
         let sel = i == ed.cursor;
         let count = match r.worktrees {
@@ -904,7 +899,7 @@ fn draw_browser(f: &mut Frame, theme: &Theme, area: Rect, b: &crate::folder_brow
     );
     let rows = b.visible();
     let height = list.height as usize;
-    let start = (b.cursor + 1).saturating_sub(height);
+    let start = scroll_start(&b.scroll, rows.len(), height, (b.cursor, b.cursor), |_| true);
     let mut lines: Vec<Line> = Vec::new();
     if rows.is_empty() && !b.path_mode() {
         lines.push(Line::styled(if b.filter.is_empty() { "  (no folders here)" } else { "  (no match)" }, theme.faint()));
@@ -997,8 +992,7 @@ fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &
     // Keep the selection in view, with its section header when it opens one.
     let height = body.height as usize;
     let at = rows.iter().position(|(i, _)| *i == Some(ed.cursor)).unwrap_or(0);
-    let first = if at > 0 && rows[at - 1].0.is_none() { at - 1 } else { at };
-    let start = (at + 1).saturating_sub(height).min(first);
+    let start = scroll_start(&ed.scroll, rows.len(), height, (at, at), |i| rows[i].0.is_some());
     let mut lines = Vec::new();
     for (n, (i, line)) in rows.into_iter().enumerate().skip(start).take(height) {
         if let Some(i) = i {
@@ -1912,10 +1906,10 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
         && ordered.windows(2).any(|w| list[w[0]].repo_id != list[w[1]].repo_id);
     let height = inner.height as usize;
     let sel_row = rows.iter().position(|r| *r == ReviewRow::Pr(cursor)).unwrap_or(0);
-    let mut start = sel_row.saturating_sub(height.saturating_sub(1));
-    if start > 0 && sel_row - start < height.saturating_sub(1) {
-        start -= 1;
-    }
+    let is_pr = |i: usize| matches!(rows[i], ReviewRow::Pr(_));
+    let unscrolled = Cell::new(0);
+    let offset = app.reviews.as_ref().map_or(&unscrolled, |p| &p.scroll);
+    let start = scroll_start(offset, rows.len(), height, (sel_row, sel_row), is_pr);
     let mut lines = Vec::new();
     for (n, row) in rows.iter().skip(start).take(height).enumerate() {
         lines.push(match row {
@@ -2070,28 +2064,37 @@ fn review_line<'a>(
     line.style(theme.selected())
 }
 
-/// First visible row of the worktree list. Scrolls only as far as needed
-/// to keep the selected row in view (the offset is kept in
-/// `App::list_scroll`); headers scroll with their rows.
+/// First visible row of the worktree list (offset kept in `App::list_scroll`);
+/// the selection's session rows count as part of it.
 fn list_start(app: &App, height: usize) -> usize {
     let sel_row = app.rows.iter().position(|r| *r == Row::Worktree(app.selected)).unwrap_or(0);
-    // Keep the selection's session rows in view too, but never scroll its
-    // own row off the top.
     let sessions = app.rows[sel_row.min(app.rows.len())..].iter().skip(1).take_while(|r| matches!(r, Row::Session(..))).count();
-    let sel_end = sel_row + sessions.min(height.saturating_sub(1));
-    let mut start = app.list_scroll.get();
-    if sel_end >= start + height {
-        start = sel_end + 1 - height.max(1);
-    } else if sel_row < start {
-        start = sel_row;
-        // Bring the headers and blank lines just above it into view too.
-        while start > 0 && sel_end + 1 - start < height && !matches!(app.rows[start - 1], Row::Worktree(_) | Row::Session(..)) {
+    let is_row = |i: usize| matches!(app.rows[i], Row::Worktree(_) | Row::Session(..));
+    scroll_start(&app.list_scroll, app.rows.len(), height, (sel_row, sel_row + sessions), is_row)
+}
+
+/// First visible line of a scrolling list of `len` lines, `height` of them on
+/// screen. Every list scrolls this way: only as far as needed to keep the
+/// selection (its first and last line) in view, so moving inside the page
+/// never scrolls it; the offset is remembered in `offset` between frames.
+/// Scrolling up brings the lines that aren't items (`is_item` false: headers,
+/// blank lines) just above the selection into view too.
+fn scroll_start(offset: &Cell<usize>, len: usize, height: usize, sel: (usize, usize), is_item: impl Fn(usize) -> bool) -> usize {
+    let (first, last) = sel;
+    // Never scroll the selection's first line off the top.
+    let last = last.min(first + height.saturating_sub(1));
+    let mut start = offset.get();
+    if last >= start + height {
+        start = last + 1 - height.max(1);
+    } else if first < start {
+        start = first;
+        while start > 0 && last + 1 - start < height && !is_item(start - 1) {
             start -= 1;
         }
     }
-    // Never leave blank lines below the list (it shrank, or the pane grew).
-    start = start.min(app.rows.len().saturating_sub(height));
-    app.list_scroll.set(start);
+    // Never leave blank lines below the list (it shrank, or the area grew).
+    start = start.min(len.saturating_sub(height));
+    offset.set(start);
     start
 }
 
@@ -4553,6 +4556,71 @@ mod tests {
         assert_eq!(visible(&app), ["wt-06", "wt-07", "wt-08", "wt-09"]);
         app.on_key(Key::Home);
         assert_eq!(visible(&app), ["wt-00", "wt-01", "wt-02", "wt-03"]);
+    }
+
+    /// The labels of `labels` drawn as list rows (after `│ ` or `│▌`), in order.
+    fn rows_shown(screen: &str, labels: &[&str]) -> Vec<String> {
+        let line_label = |line: &str| labels.iter().find(|l| [" ", "▌"].iter().any(|bar| line.contains(&format!("│{bar}  {l}  ")))).map(|l| l.to_string());
+        screen.lines().filter_map(line_label).collect()
+    }
+
+    #[test]
+    fn settings_scroll_like_the_worktree_list() {
+        use crate::settings_ui::FIELDS;
+        let mut app = fixture();
+        app.settings_editor = Some(crate::settings_ui::SettingsEditor::new(&app.settings));
+        let labels: Vec<&str> = FIELDS.iter().map(|f| f.label).collect();
+        let shown = |app: &App| rows_shown(&render(app, 100, 24), &labels);
+        let selected = |app: &App| FIELDS[app.settings_editor.as_ref().unwrap().cursor].label;
+
+        app.on_key(Key::End);
+        let page = shown(&app);
+        assert_eq!(page.last().map(String::as_str), Some(selected(&app)));
+        // Moving up inside the page doesn't scroll it, up to its top field.
+        while selected(&app) != page[0] {
+            app.on_key(Key::Up);
+            assert_eq!(shown(&app), page);
+        }
+        // One more scrolls, bringing the field above (and any section header) in.
+        app.on_key(Key::Char('k'));
+        let above = shown(&app);
+        assert_eq!(above[0], selected(&app));
+        assert_eq!(above[1], page[0]);
+        // Going back down stays put until the bottom row.
+        for _ in 1..above.len() {
+            app.on_key(Key::Char('j'));
+            assert_eq!(shown(&app), above);
+        }
+        // Page and end keys move the cursor too.
+        app.on_key(Key::Home);
+        assert_eq!(selected(&app), FIELDS[0].label);
+        app.on_key(Key::PageDown);
+        assert_eq!(app.settings_editor.as_ref().unwrap().cursor, crate::nav::PAGE as usize);
+        app.on_key(Key::Char('G'));
+        assert_eq!(selected(&app), FIELDS[FIELDS.len() - 1].label);
+    }
+
+    #[test]
+    fn key_bindings_scroll_like_the_worktree_list() {
+        use crate::keymap::Command;
+        let mut app = fixture();
+        let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
+        ed.keys = Some(crate::keys_ui::KeyEditor::new(app.keymap.clone()));
+        app.settings_editor = Some(ed);
+        let labels: Vec<&str> = Command::ALL.iter().map(|c| c.label()).collect();
+        let shown = |app: &App| rows_shown(&render(app, 100, 20), &labels);
+        let selected = |app: &App| Command::ALL[app.settings_editor.as_ref().unwrap().keys.as_ref().unwrap().cursor].label();
+
+        app.on_key(Key::End);
+        let page = shown(&app);
+        assert!(page.len() < Command::ALL.len(), "the page should scroll");
+        assert_eq!(page.last().map(String::as_str), Some(selected(&app)));
+        while selected(&app) != page[0] {
+            app.on_key(Key::Up);
+            assert_eq!(shown(&app), page);
+        }
+        app.on_key(Key::Up);
+        assert_eq!(shown(&app)[0], selected(&app));
     }
 
     #[test]
