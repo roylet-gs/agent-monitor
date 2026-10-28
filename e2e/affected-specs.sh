@@ -54,6 +54,7 @@ specs_for() {
     crates/am-tui/src/reviews_ui.rs | crates/am-tui/src/review_groups_ui.rs) echo 28 31 32 ;;    # the review-requests page and its groups
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
     crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 24 ;; # Settings → Repositories, add-repo browser
+    crates/am-tui/src/nav.rs) echo 01 03 23 28 29 ;; # list movement: dashboard, Settings, folder browser, review page, scrolling
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
     crates/am-tui/src/modals.rs) echo 09 10 22 23 27 ;;
     crates/am-tui/src/jobs.rs) echo 09 10 22 27 31 ;;

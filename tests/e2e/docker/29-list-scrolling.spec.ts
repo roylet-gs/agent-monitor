@@ -71,3 +71,59 @@ test("the list scrolls only when the selection leaves the view", async ({ page }
   expect(scrolled.some((l) => l.startsWith("│▌"))).toBe(true);
   await tui.screenshot("list-scroll-past-top");
 });
+
+/**
+ * Rows inside the Settings box, cut to its left part (label + value), so
+ * whatever the worktree pane shows beside it doesn't count.
+ */
+async function settingsRows(tui: RustTui): Promise<string[]> {
+  const lines = await tui.lines();
+  const top = lines.findIndex((l) => l.includes("─Settings"));
+  const col = lines[top].indexOf("╭─Settings");
+  const bottom = lines.findIndex((l, i) => i > top && l[col] === "╰");
+  return lines.slice(top + 1, bottom).map((l) => l.slice(col, col + 40));
+}
+
+/** The settings page with the selection bar removed, to tell whether it scrolled. */
+const pageText = (rows: string[]) => rows.map((l) => l.replace("│▌", "│ ")).join("\n");
+
+/** A settings field row (not a section header, blank line or banner). */
+const FIELD_ROW = /^│[▌ ] {2}\S/;
+
+test("settings scroll like the worktree list", async ({ page }) => {
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.sendKey("s");
+  await tui.waitForText("─Settings");
+
+  // End: the last field sits on the box's bottom field row.
+  await tui.sendKey("End");
+  await tui.waitForText("Reset settings…");
+  const bottomPage = await settingsRows(tui);
+  expect(bottomPage.join("\n"), `settings don't overflow:\n${await tui.getScreenText()}`).not.toMatch(/│ General/);
+  const selIndex = (rows: string[]) => rows.findIndex((l) => l.startsWith("│▌"));
+  expect(bottomPage[selIndex(bottomPage)]).toContain("Reset settings…");
+  await tui.screenshot("settings-scroll-bottom");
+
+  // ↑ (and k) move up the page without scrolling it while a field is above.
+  for (let guard = 0; guard < 40; guard++) {
+    const rows = await settingsRows(tui);
+    if (!rows.slice(0, selIndex(rows)).some((l) => FIELD_ROW.test(l))) break;
+    await tui.sendKey(guard % 2 ? "k" : "ArrowUp");
+    expect(pageText(await settingsRows(tui))).toBe(pageText(bottomPage));
+  }
+  await tui.screenshot("settings-scroll-at-top");
+  // The selection is the top field on the page; one more ↑ scrolls.
+  await tui.sendKey("ArrowUp");
+  const scrolled = await settingsRows(tui);
+  expect(pageText(scrolled)).not.toBe(pageText(bottomPage));
+  expect(selIndex(scrolled)).toBeGreaterThanOrEqual(0);
+  await tui.screenshot("settings-scroll-past-top");
+
+  // Home goes back to the first field.
+  await tui.sendKey("Home");
+  await tui.waitForMatch(/│ General/);
+  expect((await settingsRows(tui)).find((l) => l.startsWith("│▌"))).toContain("Open in");
+  await tui.sendKey("Escape");
+  await tui.waitForGone("─Settings");
+});
