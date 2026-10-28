@@ -14,8 +14,10 @@ expression: "render(&app, 66, 34)"
 ││   New worktree            N       (default n)                ││
 ││   Delete worktree         d                                  ││
 ││   Add repository          A                                  ││
+││▌  Filter worktrees        f                                  ││
+││   Filters on/off          F                                  ││
 ││ Review requests                                              ││
-││▌  Review requests         v                                  ││
+││   Review requests         v                                  ││
 ││   Reviews beside list     V                                  ││
 ││   Reviews in new window   ctrl-v                             ││
 ││   Pull into Reviewing     t                                  ││
@@ -23,16 +25,14 @@ expression: "render(&app, 66, 34)"
 ││ General                                                      ││
 ││   Toggle log pane         w                                  ││
 ││   Settings                s                                  ││
-││   Suggest a feature       f                                  ││
 ││   Refresh now             r                                  ││
 ││   Help                    h                                  ││
 ││   Quit                    q                                  ││
 ││ Moving                                                       ││
-││   Move down               j                                  ││
 ││                                                              ││
 ││ Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc…││
 ││                                                              ││
-││ PRs waiting on your review, in place of the list             ││
-││ On the review page: full page / back                         ││
+││ Worktree filters: text, status, PR, git and the hide toggles ││
+││ On the review page: review filters                           ││
 ╰╰─────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯╯
  ⏎ open  │ g PR  l linear  │ h help  q quit

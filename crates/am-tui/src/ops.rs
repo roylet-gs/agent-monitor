@@ -154,31 +154,3 @@ pub fn add_repo(path: String, tx: Sender<Msg>) {
         let _ = tx.send(Msg::RepoAdded(path, result.map(|r| r.name)));
     });
 }
-
-/// `gh issue create` on the app's repo with an environment footer
-/// (port of `createFeatureRequest`).
-pub fn suggest(title: String, body: String, tx: Sender<Msg>) {
-    std::thread::spawn(move || {
-        let full = format!(
-            "{body}\n\n---\n_Submitted from agent-monitor_\n- am version: {} (native)\n- platform: {}",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS
-        );
-        let out = std::process::Command::new("gh")
-            .args(["issue", "create", "--repo", am_core::update_check::OWN_REPO, "--title", &title, "--body", &full])
-            .stdin(std::process::Stdio::null())
-            .output();
-        let result = match out {
-            Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).trim().to_string()),
-            Ok(o) => Err(String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("gh failed").to_string()),
-            Err(e) => Err(format!("Couldn't run gh: {e}")),
-        };
-        if let Ok(url) = &result {
-            info!("tui", "Feature request created: {url}");
-        }
-        let _ = tx.send(match result {
-            Ok(url) => Msg::Popup(format!("✓ Feature request filed — thanks!\n\n{url}")),
-            Err(e) => Msg::Popup(format!("✗ {e}")),
-        });
-    });
-}

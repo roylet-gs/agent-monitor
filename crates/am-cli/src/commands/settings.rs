@@ -126,6 +126,17 @@ pub fn set(key: &str, value: &str) {
         fail(&format!("Invalid value for appMode: {value}. Use one of: {}.", am_core::settings::AppMode::IDS.join(", ")));
     }
 
+    use am_core::settings::{WORKTREE_GIT_FILTERS, WORKTREE_PR_FILTERS, WORKTREE_STATUS_FILTERS};
+    for (name, ids) in [
+        ("worktreeFilterStatus", &WORKTREE_STATUS_FILTERS[..]),
+        ("worktreeFilterPr", &WORKTREE_PR_FILTERS[..]),
+        ("worktreeFilterGit", &WORKTREE_GIT_FILTERS[..]),
+    ] {
+        if key == name && !ids.contains(&value) {
+            fail(&format!("Invalid value for {name}: {value}. Use one of: {}.", ids.join(", ")));
+        }
+    }
+
     if key == "reviewGroups" || key == "reviewDefaultGroup" {
         fail(&format!(
             "{key} holds review groups and can't be set from the CLI.\n\

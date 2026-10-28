@@ -166,7 +166,6 @@ pub enum List {
     SetupReviews,
     SetupContext,
     NewForm,
-    Suggest,
     /// Autocomplete under a review group's list field.
     Authors,
     /// The review groups page: its list, or a group's form.
@@ -350,7 +349,7 @@ fn settings_width(area: Rect) -> u16 {
 }
 
 /// The settings list as lines: `Some(field index)` for a field, `None` for a
-/// section header or blank line. The review filter box has no headers.
+/// section header or blank line. The filter boxes have no headers.
 fn settings_lines(ed: &crate::settings_ui::SettingsEditor) -> Vec<Option<usize>> {
     if ed.is_filter_box() {
         return ed.fields().into_iter().map(Some).collect();
@@ -389,9 +388,9 @@ fn draw_settings(
     hits: &mut Vec<Hit>,
 ) {
     use crate::settings_ui::{FIELDS, Kind, sort_label};
-    // The review page's filter box (`f`) is the same editor, cut down.
+    // The filter boxes (`f`) are the same editor, cut down.
     let filters = ed.is_filter_box();
-    let (name, hint, update) = if filters { ("Review filters ", FILTERS_HINT, None) } else { ("Settings ", SETTINGS_HINT, update) };
+    let (name, hint, update) = if filters { (ed.filter_title(), FILTERS_HINT, None) } else { ("Settings ", SETTINGS_HINT, update) };
     let form = ed.groups.as_ref().and_then(|g| g.form.as_ref());
     let typing_list =
         form.is_some_and(|f| f.editing.is_some() && matches!(f.field().kind, crate::review_groups_ui::FormKind::List(_)));
@@ -538,10 +537,10 @@ fn draw_settings(
     let help_line = match &ed.error {
         Some(e) => Line::styled(format!(" {e}"), theme.fg(theme.red)),
         None if ed.confirm.is_some() => {
-            let what = if ed.confirm == Some("resetReviewGroups") {
-                "Remove every review group?"
-            } else {
-                "Reset the review filters to their defaults?"
+            let what = match ed.confirm {
+                Some("resetReviewGroups") => "Remove every review group?",
+                Some("resetWorktreeFilters") => "Reset the worktree filters to their defaults?",
+                _ => "Reset the review filters to their defaults?",
             };
             let text = format!(" {what} y confirm, any other key cancels");
             let at = help.x + format!(" {what}").width() as u16;
@@ -1273,10 +1272,6 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
     // worked out once the box width is known).
     let mut marks: Vec<(usize, Target, bool)> = Vec::new();
     let (title, color, hint, lines): (String, _, &str, Vec<Line>) = match modal {
-        Modal::Busy { text } => {
-            let line = Line::from(vec![Span::styled(format!("{} ", spinner(now)), theme.fg(theme.accent)), Span::raw(text.clone())]);
-            ("Working".into(), theme.accent, "", vec![line])
-        }
         Modal::New(form) => {
             let field_index = |which: FormField| match which {
                 FormField::Repo => 0,
@@ -1397,32 +1392,6 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             ("Add a review script".into(), theme.yellow, "", lines)
         }
         Modal::AddRepo(_) => unreachable!("drawn by draw_browser"),
-        Modal::Suggest { title, body, on_body, error } => {
-            let row = |label: &str, value: &str, active: bool, placeholder: &str| {
-                Line::from(vec![
-                    Span::styled(if active { "▌" } else { " " }, theme.bold(theme.border_focus)),
-                    Span::styled(format!("{label:<13}"), if active { theme.bold(theme.text) } else { theme.faint() }),
-                    if value.is_empty() && !active {
-                        Span::styled(placeholder.to_string(), theme.faint())
-                    } else {
-                        Span::raw(format!("{value}{}", if active { "▏" } else { "" }))
-                    },
-                ])
-            };
-            marks.push((2, Target::Item(List::Suggest, 0), false));
-            marks.push((3, Target::Item(List::Suggest, 1), false));
-            let mut lines = vec![
-                Line::styled("Opens an issue on roylet-gs/agent-monitor via gh.", theme.faint()),
-                Line::raw(""),
-                row("Title", title, !*on_body, "(required)"),
-                row("Description", body, *on_body, "(optional)"),
-            ];
-            if let Some(e) = error {
-                lines.push(Line::raw(""));
-                lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
-            }
-            ("Suggest a feature".into(), theme.border_focus, "tab next field  ⏎ submit  esc cancel", lines)
-        }
     };
     // Long names wrap rather than run off the edge; size the box to fit.
     let w = 72.min(area.width.saturating_sub(2));
@@ -1865,7 +1834,25 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     if let Some(label) = tokens_label(app, area.width)
         .filter(|l| !compact() || "─Worktrees ".width() + used + l.width() + 1 + corner_w <= area.width as usize)
     {
+        used += label.width() + 1;
         block = foot(block, Line::styled(label, theme.faint()).alignment(Alignment::Right));
+    }
+    // Bottom left: the filters in force; a click opens the filter box.
+    if let Some(summary) = worktree_filter_summary(&app.settings, app.snapshot.hidden_worktrees) {
+        let summary = format!(" {summary} ");
+        // Compact: on the top line after the title, so it shares the row.
+        let lead = if compact() { "─Worktrees ".width() + 1 } else { 0 };
+        let taken = if compact() { used + corner_w } else { 0 };
+        let room = (area.width as usize).saturating_sub(16 + lead + taken);
+        if room > 10 {
+            let summary = truncate(&summary, room);
+            if let Some(k) = app.keymap.key(Command::Filter) {
+                let rect = Rect::new(area.x + edge() + lead as u16, foot_y(area), summary.width() as u16, 1);
+                hits.push(Hit { rect, target: Target::Key(k), selected: false });
+            }
+            let style = if app.settings.worktree_filters_enabled { theme.faint() } else { theme.fg(theme.yellow) };
+            block = foot(block, Line::styled(summary, style).alignment(Alignment::Left));
+        }
     }
     // Top right: the update notice, then the review badge in the corner.
     let mut corner: Vec<Span> = Vec::new();
@@ -1886,7 +1873,14 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     f.render_widget(block, area);
 
     if app.flat.is_empty() && !app.rows.iter().any(|r| matches!(r, Row::Pending(_))) {
-        let msg = if app.loaded { "No worktrees yet — press A to add a repository" } else { "Loading…" };
+        let msg = match (app.loaded, app.snapshot.hidden_worktrees) {
+            (false, _) => "Loading…".to_string(),
+            (true, 0) => "No worktrees yet — press A to add a repository".to_string(),
+            (true, n) => {
+                let key = |c| app.keymap.key(c).map_or("?".into(), crate::keymap::display);
+                format!("{n} filtered out — {} changes the filters, {} turns them off", key(Command::Filter), key(Command::ToggleFilters))
+            }
+        };
         f.render_widget(Paragraph::new(Line::styled(msg, theme.faint())).alignment(Alignment::Center), centered_line(inner));
         return;
     }
@@ -1973,7 +1967,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let room = (area.width as usize).saturating_sub(16 + lead);
     if room > 10 {
         let summary = truncate(&summary, room);
-        if let Some(k) = app.keymap.key(Command::Feedback) {
+        if let Some(k) = app.keymap.key(Command::Filter) {
             let rect = Rect::new(area.x + edge() + lead as u16, foot_y(area), summary.width() as u16, 1);
             hits.push(Hit { rect, target: Target::Key(k), selected: false });
         }
@@ -2115,6 +2109,60 @@ fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
         (Some(w), 1) => short(w),
         (Some(w), n) => format!("{} +{}", short(w), n - 1),
     }
+}
+
+/// The dashboard's filters in a few words, e.g. `"auth" · waiting · CI
+/// failing · no main · 3 hidden`; `filters off · F` while `F` has them off;
+/// `None` while only the defaults apply.
+fn worktree_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> Option<String> {
+    let mut parts = Vec::new();
+    let text = s.worktree_filter_text.trim();
+    if !text.is_empty() {
+        parts.push(format!("\"{text}\""));
+    }
+    match s.worktree_filter_status.as_str() {
+        "waiting" => parts.push("waiting".into()),
+        "active" => parts.push("active agents".into()),
+        "idle" => parts.push("idle agents".into()),
+        _ => {}
+    }
+    match s.worktree_filter_pr.as_str() {
+        "open" => parts.push("open PR".into()),
+        "none" => parts.push("no PR".into()),
+        "failing" => parts.push("CI failing".into()),
+        _ => {}
+    }
+    match s.worktree_filter_git.as_str() {
+        "changes" => parts.push("changes".into()),
+        "clean" => parts.push("clean".into()),
+        _ => {}
+    }
+    for (on, label) in [
+        (s.hide_merged_closed_prs, "no merged/closed"),
+        (s.hide_idle_done_agents, "no idle/done"),
+        (s.hide_without_linear_ticket, "ticketed only"),
+    ] {
+        if on {
+            parts.push(label.to_string());
+        }
+    }
+    // Hiding the main checkout is the default, so it's only named beside
+    // another filter; showing it is worth saying.
+    if !s.hide_main_branch {
+        parts.push("main shown".into());
+    } else if !parts.is_empty() {
+        parts.push("no main".into());
+    }
+    if !s.worktree_filters_enabled {
+        return Some("filters off · F".into());
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    if hidden > 0 {
+        parts.push(format!("{hidden} hidden"));
+    }
+    Some(parts.join(" · "))
 }
 
 /// What the page shows in a few words, e.g. `you + your teams · 2 groups ·
@@ -2985,7 +3033,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (None, 0),
     (Some(Command::ToggleLog), 3),
     (Some(Command::Settings), 1),
-    (Some(Command::Feedback), 3),
+    (Some(Command::Filter), 3),
     (Some(Command::Refresh), 1),
     (Some(Command::Help), 0),
     (Some(Command::Quit), 0),
@@ -3051,7 +3099,7 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             keys.extend(cmd(Command::PullAndRunScript, "pull + script", 3));
         }
         keys.extend(cmd(Command::Delete, "remove", 2));
-        keys.extend(cmd(Command::Feedback, "filter", 2));
+        keys.extend(cmd(Command::Filter, "filter", 2));
         keys.push(raw("", "", None, 0));
         keys.extend(cmd(Command::Refresh, "refresh", 1));
         keys.extend(cmd(Command::Help, "help", 2));
@@ -3264,7 +3312,7 @@ fn draw_review_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::ke
         (&[C::PullToTmpSpace], ""),
         (&[C::PullAndRunScript], " / ctrl-⏎"),
         (&[C::Delete], ""),
-        (&[C::Feedback], ""),
+        (&[C::Filter], ""),
         (&[C::Refresh], ""),
         (&[C::Settings], ""),
         (&[C::Help], ""),
@@ -3314,7 +3362,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::ReviewRequests, C::ReviewSplit, C::ReviewWindow], "", "PRs to review: page / beside the list / new window"),
         (&[C::PullToTmpSpace, C::PullAndRunScript], " / ctrl-⏎", "review page: pull into Reviewing / + run script"),
         (&[C::AddRepo], "", "add repository"),
-        (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
+        (&[C::Filter, C::ToggleFilters], "", "filter worktrees / filters on/off"),
         (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
         (&[C::Refresh], "", "refresh now (bypasses backoff)"),
         (&[C::Help], "", "toggle help"),
@@ -3527,6 +3575,7 @@ mod tests {
             review_total: None,
             review_query_hits: Default::default(),
             worktree_paths: Vec::new(),
+            hidden_worktrees: 0,
         };
         let settings = Settings { worktree_sort: vec![], ..Settings::default() };
         let mut app = App::new(settings);
@@ -3570,6 +3619,28 @@ mod tests {
     #[test]
     fn dashboard_wide() {
         insta::assert_snapshot!(render(&fixture(), 120, 16));
+    }
+
+    #[test]
+    fn worktree_filters_box_and_border_summary() {
+        let mut app = fixture();
+        app.settings.worktree_filter_text = "auth".into();
+        app.settings.worktree_filter_status = "waiting".into();
+        app.snapshot.hidden_worktrees = 3;
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains(r#" "auth" · waiting · no main · 3 hidden "#), "{screen}");
+        // A click on the summary opens the box.
+        let at = find(&app, 120, 16, "3 hidden");
+        click(&mut app, 120, 16, at, false);
+        assert_eq!(app.settings_editor.as_ref().map(|e| e.only), Some(Some(crate::settings_ui::WORKTREE_FILTERS)));
+        insta::assert_snapshot!(render(&app, 120, 24));
+        // Off: the summary says so, whatever is set.
+        app.settings_editor = None;
+        app.settings.worktree_filters_enabled = false;
+        assert!(render(&app, 120, 16).contains(" filters off · F "));
+        // Only the defaults: nothing on the border.
+        app.settings = am_core::settings::Settings { worktree_sort: vec![], ..Default::default() };
+        assert!(!render(&app, 120, 16).contains("hidden"));
     }
 
     fn update(latest: &str) -> am_core::update_check::Update {
@@ -3932,10 +4003,10 @@ mod tests {
 
     #[test]
     fn key_bar_and_help_show_rebound_keys() {
-        let mut app = rebound(r#"{"newWorktree":"N","feedback":"none"}"#);
+        let mut app = rebound(r#"{"newWorktree":"N","filter":"none"}"#);
         let screen = render(&app, 120, 16);
         let bar = screen.lines().last().unwrap();
-        assert!(bar.contains("N new") && !bar.contains("feedback"), "{bar}");
+        assert!(bar.contains("N new") && !bar.contains("filter"), "{bar}");
         // Clicking the hint runs the command.
         let hint = find(&app, 120, 16, "N new");
         click(&mut app, 120, 16, hint, false);
@@ -3944,7 +4015,7 @@ mod tests {
         app.on_key(Key::Char('h'));
         let help = render(&app, 100, 24);
         assert!(help.contains("N / d / tab"), "{help}");
-        assert!(help.contains("—  suggest a feature"), "{help}");
+        assert!(help.contains("— / F  filter worktrees"), "{help}");
     }
 
     #[test]

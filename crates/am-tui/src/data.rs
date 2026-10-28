@@ -481,7 +481,9 @@ impl Worker {
         let worktree_paths = roots.clone();
         // Review-only: every worktree, unfiltered, so a pulled PR's ⏎/`d`
         // always find theirs (the dashboard's hide* filters don't apply).
+        let total = views.len();
         let views = if dashboard { grouping::apply_filters(views, &self.settings) } else { views };
+        let hidden_worktrees = total - views.len();
         let mut groups = grouping::build_groups(&repos, views, &self.settings);
         if let Some(g) = if dashboard { self.standalone_group()? } else { None } {
             roots.extend(g.worktrees.iter().map(|v| v.worktree.path.clone()));
@@ -503,6 +505,7 @@ impl Worker {
             review_total: self.review_total,
             review_query_hits: self.review_hits.clone(),
             worktree_paths,
+            hidden_worktrees,
         };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());

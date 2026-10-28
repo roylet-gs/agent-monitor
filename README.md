@@ -170,12 +170,13 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
-| `f` | Suggest a feature (files a GitHub issue via `gh`) |
+| `f` | Worktree filters: text search, agent status (`waiting` / `active` / `idle`), PR (`open` / `none` / `failing`), git (`changes` / `clean`) and the hide toggles. The `─Worktrees` border sums up what's filtered (`"auth" · waiting · no main · 3 hidden`; a click opens the box) |
+| `F` | Turn every worktree filter off, and back on (`worktreeFiltersEnabled`; the border reads `filters off · F` meanwhile) |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
 | `h` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
 
-These are the defaults. To change them, open **Settings → Key bindings…**. It lists the actions by section (Worktrees, Review requests, General, Moving), each with its key, its default when you changed it, and what the key does on the review page, which uses the same keys (`⏎` pulls a PR or opens the pulled worktree, `f` opens the review filters, `r` clears the review cache and fetches again, `q` goes back; `—` means the key does nothing there). Pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `h` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "feedback": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`, `ctrl-v`; `none` unbinds the action.
+These are the defaults. To change them, open **Settings → Key bindings…**. It lists the actions by section (Worktrees, Review requests, General, Moving), each with its key, its default when you changed it, and what the key does on the review page, which uses the same keys (`⏎` pulls a PR or opens the pulled worktree, `f` opens the review filters, `r` clears the review cache and fetches again, `q` goes back; `—` means the key does nothing there). Pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `h` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "filter": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`, `ctrl-v`; `none` unbinds the action.
 
 Every other list moves the same way: Settings and its pages (repositories, harness plugins, key bindings, sort order, review groups, theme builder), the review page and the folder browser take `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End`, and (except where letters are typed, like the folder browser) `j`/`k`, `Ctrl-d`/`Ctrl-u` and `G`. Like the worktree list, they scroll only when the selection leaves the view, so moving within the visible rows never shifts the page.
 
@@ -386,7 +387,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
 | `defaultAgent` | `"claude"` | Harness plugin `Enter` starts in a worktree with no session yet (set it in Settings → Harness plugins) |
 | `disabledAgents` | `[]` | Harness plugins switched off: no hooks, no session discovery (Settings → Harness plugins) |
-| `keyBindings` | `{}` | Dashboard keys you changed: action id (`open`, `openPr`, `openLinear`, `openProject`, `newWorktree`, `deleteWorktree`, `addRepo`, `reviewRequests`, `reviewSplit`, `reviewWindow`, `pullToTmpSpace`, `toggleLog`, `settings`, `feedback`, `refresh`, `help`, `quit`, `moveDown`, `moveUp`, `pageDown`, `pageUp`, `top`, `bottom`) → key. Edit it in Settings → Key bindings…; see [Keyboard Shortcuts](#keyboard-shortcuts) |
+| `keyBindings` | `{}` | Dashboard keys you changed: action id (`open`, `openPr`, `openLinear`, `openProject`, `newWorktree`, `deleteWorktree`, `addRepo`, `filter`, `toggleFilters`, `reviewRequests`, `reviewSplit`, `reviewWindow`, `pullToTmpSpace`, `toggleLog`, `settings`, `refresh`, `help`, `quit`, `moveDown`, `moveUp`, `pageDown`, `pageUp`, `top`, `bottom`) → key. Edit it in Settings → Key bindings…; see [Keyboard Shortcuts](#keyboard-shortcuts) |
 | `mouseEnabled` | `true` | Mouse support (click, double-click, scroll, hover highlight); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
@@ -398,6 +399,13 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `hideMergedClosedPrs` | `false` | Hide worktrees whose PR is merged or closed |
 | `hideIdleDoneAgents` | `false` | Hide worktrees whose agent is idle, done or absent |
 | `hideWithoutLinearTicket` | `false` | Hide worktrees with no Linear ticket |
+| `worktreeFiltersEnabled` | `true` | Master switch for the worktree filters (`F`); off shows every worktree |
+| `worktreeFilterText` | `""` | Only worktrees whose name, branch or ticket contains this (any case) |
+| `worktreeFilterStatus` | `"any"` | `waiting`, `active` (an agent working or waiting) or `idle` (idle, done or no agent) |
+| `worktreeFilterPr` | `"any"` | `open` (an open PR), `none` (no PR) or `failing` (CI failing) |
+| `worktreeFilterGit` | `"any"` | `changes` (uncommitted or unpushed work) or `clean` |
+
+The `hide*` toggles never hide a worktree with a live agent session; the `worktreeFilter*` ones do, since you asked for them. All of them are in the `f` box and in Settings → Filters.
 | `showPrStatus` | `true` | Show the PR column |
 | `showLinearTicket` | `true` | Show the ticket column |
 | `showGitAheadBehind` | `true` | Show the ahead/behind/dirty column |

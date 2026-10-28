@@ -42,8 +42,9 @@ pub enum Kind {
     ViewLogs,
     /// Asks, then puts every setting back to its default and runs setup.
     Reset,
-    /// Asks (`y`), then puts the review filters back to their defaults.
-    ResetReviewFilters,
+    /// Asks (`y`), then puts the review or the worktree filters (by the
+    /// field's key) back to their defaults.
+    ResetFilters,
     /// Asks (`y`), then removes every review group.
     ResetReviewGroups,
 }
@@ -79,10 +80,6 @@ pub const FIELDS: &[Field] = &[
     Field { key: "themeBuilder", label: "Theme builder…", help: "Make your own theme from the current one: pick colours, preview live, save", section: "Appearance", kind: Kind::ThemeBuilder },
     Field { key: "compactView", label: "Compact view", help: "Dense layout for small panes: top title lines only, no blank rows, fewer columns, side panes open below", section: "Appearance", kind: Kind::Bool },
     Field { key: "worktreeSort", label: "Sort order", help: "Criteria applied in order; first difference wins", section: "Dashboard", kind: Kind::Sort },
-    Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout from the list", section: "Dashboard", kind: Kind::Bool },
-    Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Unless the agent session is open", section: "Dashboard", kind: Kind::Bool },
-    Field { key: "hideIdleDoneAgents", label: "Hide idle/done agents", help: "Only show worktrees with active agents", section: "Dashboard", kind: Kind::Bool },
-    Field { key: "hideWithoutLinearTicket", label: "Hide without Linear ticket", help: "Unless the session is open", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showPrStatus", label: "Show PR column", help: "PR number and checks on each row", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showLinearTicket", label: "Show ticket column", help: "Linear identifier on each row", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showGitAheadBehind", label: "Show git column", help: "Ahead/behind/dirty counts", section: "Dashboard", kind: Kind::Bool },
@@ -94,6 +91,17 @@ pub const FIELDS: &[Field] = &[
     Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Bar scale; a session past it doubles the scale until it fits (⏎ to type, e.g. 128k)", section: "Dashboard", kind: Kind::Tokens { min: context::MIN_WINDOW } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only show processes and agent commands whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
+    Field { key: "worktreeFiltersEnabled", label: "Filters on", help: "Off shows every worktree whatever the filters below say (F on the list)", section: "Filters", kind: Kind::Bool },
+    Field { key: "worktreeFilterText", label: "Text search", help: "Only worktrees whose name, branch or ticket contains this (any case)", section: "Filters", kind: Kind::Text { secret: false } },
+    Field { key: "worktreeFilterStatus", label: "Agent status", help: "waiting: needs you; active: working or waiting; idle: idle, done or no agent", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_STATUS_FILTERS) },
+    Field { key: "worktreeFilterPr", label: "PR", help: "open: has an open PR; none: no PR; failing: CI failing", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_PR_FILTERS) },
+    Field { key: "worktreeFilterGit", label: "Git", help: "changes: uncommitted or unpushed work; clean: none", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_GIT_FILTERS) },
+    Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout from the list", section: "Filters", kind: Kind::Bool },
+    Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Unless the agent session is open", section: "Filters", kind: Kind::Bool },
+    Field { key: "hideIdleDoneAgents", label: "Hide idle/done agents", help: "Only show worktrees with active agents", section: "Filters", kind: Kind::Bool },
+    Field { key: "hideWithoutLinearTicket", label: "Hide without Linear ticket", help: "Unless the session is open", section: "Filters", kind: Kind::Bool },
+    // An action, not a setting: its key is never written.
+    Field { key: "resetWorktreeFilters", label: "Reset filters…", help: "Every filter above back to its default (only the main branch hidden)", section: "Filters", kind: Kind::ResetFilters },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
     Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
     Field { key: "cmuxSync", label: "cmux sidebar", help: "Inside cmux: PR, ticket and context on each worktree's workspace; review requests as notifications", section: "Notifications", kind: Kind::Bool },
@@ -106,7 +114,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "reviewRequestsScope", label: "Requested from", help: "all: you or a team you're on; direct: you by name; teams: only your teams", section: "Review requests", kind: Kind::Choice(&am_core::settings::ReviewScope::IDS) },
     Field { key: "reviewGroups", label: "Groups…", help: "Each group takes the PRs it matches (with its own order and filters), the rest fall to the next", section: "Review requests", kind: Kind::ReviewGroups },
     Field { key: "reviewBadgeTotal", label: "Badge: total on GitHub", help: "Also count every open PR asking you or your teams on GitHub, ignoring filters", section: "Review requests", kind: Kind::Bool },
-    Field { key: "resetReviewFilters", label: "Reset filters…", help: "Requested from: you + your teams; the default group's filters off; no GitHub total (groups kept)", section: "Review requests", kind: Kind::ResetReviewFilters },
+    Field { key: "resetReviewFilters", label: "Reset filters…", help: "Requested from: you + your teams; the default group's filters off; no GitHub total (groups kept)", section: "Review requests", kind: Kind::ResetFilters },
     Field { key: "resetReviewGroups", label: "Reset groups…", help: "Remove every review group (the default group and filters kept)", section: "Review requests", kind: Kind::ResetReviewGroups },
     Field { key: "reviewPollingIntervalMs", label: "Review refresh (ms)", help: "How often to look for new review requests", section: "Review requests", kind: Kind::Number { step: 30000, min: 30000 } },
     Field { key: "linearEnabled", label: "Fetch tickets", help: "Linked Linear tickets for each branch", section: "Linear", kind: Kind::Bool },
@@ -124,6 +132,20 @@ pub const FIELDS: &[Field] = &[
     // Actions, not settings: their keys are never written.
     Field { key: "rerunSetup", label: "Run setup again…", help: "Walk the setup wizard again; nothing is saved until you finish (esc cancels)", section: "Setup", kind: Kind::RunSetup },
     Field { key: "resetSettings", label: "Reset settings…", help: "Defaults for every setting, then setup (repos, themes, scripts, hooks kept)", section: "Setup", kind: Kind::Reset },
+];
+
+/// The rows of the dashboard's filter box (`f`), a cut-down editor.
+pub const WORKTREE_FILTERS: &[&str] = &[
+    "worktreeFiltersEnabled",
+    "worktreeFilterText",
+    "worktreeFilterStatus",
+    "worktreeFilterPr",
+    "worktreeFilterGit",
+    "hideMainBranch",
+    "hideMergedClosedPrs",
+    "hideIdleDoneAgents",
+    "hideWithoutLinearTicket",
+    "resetWorktreeFilters",
 ];
 
 /// The rows of the review page's filter box (`f`), a cut-down editor.
@@ -227,9 +249,15 @@ impl SettingsEditor {
         e
     }
 
-    /// The review page's filter box (`f`), not the full Settings.
+    /// A filter box (`f`: the dashboard's or the review page's), not the
+    /// full Settings.
     pub fn is_filter_box(&self) -> bool {
-        self.only == Some(REVIEW_FILTERS)
+        self.only == Some(REVIEW_FILTERS) || self.only == Some(WORKTREE_FILTERS)
+    }
+
+    /// The filter box's title.
+    pub fn filter_title(&self) -> &'static str {
+        if self.only == Some(WORKTREE_FILTERS) { "Worktree filters " } else { "Review filters " }
     }
 
     /// Indices into `FIELDS` this editor shows.
@@ -283,7 +311,7 @@ impl SettingsEditor {
                 _ => "not set".into(),
             },
             Kind::ThemeBuilder | Kind::RunSetup | Kind::ViewLogs => "⏎ open".into(),
-            Kind::Reset | Kind::ResetReviewFilters => "⏎ reset".into(),
+            Kind::Reset | Kind::ResetFilters => "⏎ reset".into(),
             Kind::ResetReviewGroups => match self.settings().review_groups.len() {
                 0 => "no groups".into(),
                 n => format!("⏎ remove {n}"),
@@ -426,7 +454,7 @@ impl SettingsEditor {
             return Outcome::None;
         }
         if let Some(which) = self.confirm.take() {
-            return if key == Key::Char('y') { self.reset_reviews(which) } else { Outcome::None };
+            return if key == Key::Char('y') { self.reset_filters(which) } else { Outcome::None };
         }
         self.error = None;
         match key {
@@ -492,7 +520,7 @@ impl SettingsEditor {
             Kind::RunSetup => Outcome::RunSetup,
             Kind::ViewLogs => Outcome::ViewLogs,
             Kind::Reset => Outcome::ConfirmReset,
-            Kind::ResetReviewFilters | Kind::ResetReviewGroups => {
+            Kind::ResetFilters | Kind::ResetReviewGroups => {
                 self.confirm = Some(f.key);
                 Outcome::None
             }
@@ -567,12 +595,24 @@ impl SettingsEditor {
 }
 
 impl SettingsEditor {
-    /// Run a confirmed review reset: `resetReviewFilters` (scope, the
-    /// default group, the GitHub total back to defaults; groups kept) or
-    /// `resetReviewGroups` (every group removed).
-    fn reset_reviews(&mut self, which: &str) -> Outcome {
+    /// Run a confirmed reset: `resetWorktreeFilters` (every worktree filter
+    /// back to its default), `resetReviewFilters` (scope, the default group,
+    /// the GitHub total back to defaults; groups kept) or `resetReviewGroups`
+    /// (every review group removed).
+    fn reset_filters(&mut self, which: &str) -> Outcome {
         let d = Settings::default();
         let keys: Vec<(&str, Value)> = match which {
+            "resetWorktreeFilters" => vec![
+                ("worktreeFiltersEnabled", Value::Bool(d.worktree_filters_enabled)),
+                ("worktreeFilterText", Value::from(d.worktree_filter_text)),
+                ("worktreeFilterStatus", Value::from(d.worktree_filter_status)),
+                ("worktreeFilterPr", Value::from(d.worktree_filter_pr)),
+                ("worktreeFilterGit", Value::from(d.worktree_filter_git)),
+                ("hideMainBranch", Value::Bool(d.hide_main_branch)),
+                ("hideMergedClosedPrs", Value::Bool(d.hide_merged_closed_prs)),
+                ("hideIdleDoneAgents", Value::Bool(d.hide_idle_done_agents)),
+                ("hideWithoutLinearTicket", Value::Bool(d.hide_without_linear_ticket)),
+            ],
             "resetReviewFilters" => vec![
                 ("reviewRequestsScope", Value::from(d.review_requests_scope)),
                 ("reviewBadgeTotal", Value::Bool(d.review_badge_total)),
@@ -580,7 +620,7 @@ impl SettingsEditor {
             ],
             _ => vec![("reviewGroups", Value::Array(Vec::new()))],
         };
-        am_core::info!("settings", "Review reset via TUI: {which}");
+        am_core::info!("settings", "Filter reset via TUI: {which}");
         let mut out = Outcome::None;
         for (key, value) in keys {
             out = self.set(key, value);
@@ -1178,6 +1218,55 @@ pub(crate) mod tests {
         let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         assert_eq!(file["showIdeStatus"], true, "unknown keys survive");
         assert_eq!(file["reviewGroups"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn f_opens_the_worktree_filters_and_f_on_the_review_page_its_own() {
+        let (_lock, _) = data_dir();
+        let mut app = crate::app::App::new(Settings::default());
+        app.on_key(Key::Char('f'));
+        let ed = app.settings_editor.as_ref().expect("the filter box");
+        assert_eq!(ed.only, Some(WORKTREE_FILTERS));
+        assert_eq!(ed.filter_title(), "Worktree filters ");
+        assert!(app.modal.is_none(), "no feature-request modal any more");
+        app.on_key(Key::Char('f'));
+        assert!(app.settings_editor.is_none(), "f closes it");
+        for key in WORKTREE_FILTERS {
+            assert!(FIELDS.iter().any(|f| f.key == *key), "{key} isn't a field");
+        }
+    }
+
+    #[test]
+    fn the_worktree_filter_box_saves_and_stays_a_filter_box() {
+        let (_lock, dir) = data_dir();
+        let mut app = crate::app::App::new(Settings::default());
+        app.on_key(Key::Char('f'));
+        goto(app.settings_editor.as_mut().unwrap(), "worktreeFilterStatus");
+        app.on_key(Key::Right);
+        assert_eq!(app.settings.worktree_filter_status, "waiting");
+        assert_eq!(app.settings_editor.as_ref().unwrap().only, Some(WORKTREE_FILTERS), "rebuilt as the same box");
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(file["worktreeFilterStatus"], "waiting");
+        // Reset asks, then puts everything back.
+        goto(app.settings_editor.as_mut().unwrap(), "resetWorktreeFilters");
+        app.on_key(Key::Enter);
+        app.on_key(Key::Char('y'));
+        assert_eq!(app.settings.worktree_filter_status, "any");
+        assert!(app.settings.hide_main_branch);
+    }
+
+    #[test]
+    fn capital_f_turns_every_filter_off_and_on() {
+        let (_lock, dir) = data_dir();
+        let mut app = crate::app::App::new(Settings::default());
+        assert!(matches!(app.on_key(Key::Char('F')), crate::app::Action::SettingsChanged));
+        assert!(!app.settings.worktree_filters_enabled);
+        assert!(app.notice.as_deref().is_some_and(|n| n.starts_with("Filters off")), "{:?}", app.notice);
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(file["worktreeFiltersEnabled"], false);
+        app.on_key(Key::Char('F'));
+        assert!(app.settings.worktree_filters_enabled);
+        assert_eq!(app.notice.as_deref(), Some("Filters on"));
     }
 
     #[test]

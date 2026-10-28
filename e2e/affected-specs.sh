@@ -49,8 +49,8 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 28 32 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 ;;
-    crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 ;;
+    crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 33 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/reviews_ui.rs | crates/am-tui/src/review_groups_ui.rs) echo 28 31 32 ;;    # the review-requests page and its groups
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
     crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 24 28 ;; # Settings → Repositories, add-repo browser
@@ -59,14 +59,14 @@ specs_for() {
     crates/am-tui/src/modals.rs) echo 09 10 22 23 27 ;;
     crates/am-tui/src/jobs.rs) echo 09 10 22 27 28 31 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 28 ;;
-    crates/am-tui/src/data.rs | crates/am-tui/src/gitwork.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 32 ;;
+    crates/am-tui/src/data.rs | crates/am-tui/src/gitwork.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 32 33 ;;
     crates/am-tui/src/cmux_sync.rs) echo - ;; # only runs inside cmux; unit tests cover it
     crates/am-tui/src/launcher.rs) echo 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window
 
     # --- am-core ----------------------------------------------------------
     crates/am-core/src/lib.rs | crates/am-core/src/db.rs | crates/am-core/src/settings.rs | \
     crates/am-core/src/model.rs | crates/am-core/src/paths.rs) echo ALL ;;
-    crates/am-core/src/grouping.rs) echo 01 05 08 18 24 27 28 ;;
+    crates/am-core/src/grouping.rs) echo 01 05 08 18 24 27 28 33 ;;
     crates/am-core/src/gitinfo.rs) echo 01 ;;
     crates/am-core/src/timefmt.rs) echo 01 17 ;;
     crates/am-core/src/log.rs | crates/am-core/src/perf.rs) echo 01 ;; # `w` log pane; perf writes `[perf]` log lines

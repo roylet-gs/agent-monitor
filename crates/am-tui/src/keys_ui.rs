@@ -141,7 +141,7 @@ mod tests {
     fn review_mode_lists_only_review_page_commands() {
         let mut ed = KeyEditor::for_reviews_mode(Keymap::default());
         let listed: Vec<Command> = ed.listed().into_iter().map(|i| Command::ALL[i]).collect();
-        assert!(listed.contains(&Command::PullToTmpSpace) && listed.contains(&Command::Feedback));
+        assert!(listed.contains(&Command::PullToTmpSpace) && listed.contains(&Command::Filter));
         for gone in [Command::NewWorktree, Command::AddRepo, Command::ToggleLog, Command::ReviewSplit, Command::ReviewWindow] {
             assert!(!listed.contains(&gone), "{gone:?}");
         }

@@ -254,9 +254,6 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
         while let Ok(msg) = launch_rx.try_recv() {
             match msg {
                 launcher::Msg::Popup(p) => {
-                    if matches!(app.modal, Some(modals::Modal::Busy { .. })) {
-                        app.modal = None;
-                    }
                     app.popup = Some(p);
                     popup_since = Some(Instant::now());
                 }
@@ -619,7 +616,6 @@ fn dispatch(
                 e.refresh_repos(Some((true, format!("{label}: {shown}"))));
             }
         }
-        Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
         Action::InstallHooks => {
             // Every agent the wizard listed; the first failure is reported.
             let kinds: Vec<_> = app.setup.as_ref().map(|s| s.agents.iter().map(|(k, _)| *k).collect()).unwrap_or_default();

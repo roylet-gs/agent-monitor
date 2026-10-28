@@ -13,7 +13,7 @@ expression: "render(&app, 100, 20)"
 │         │  v / V / ctrl-v  PRs to review: page / beside the list / new window          │         │
 │         │  t / T / ctrl-⏎  review page: pull into Reviewing / + run script             │         │
 │         │               A  add repository                                              │         │
-│         │               f  suggest a feature (files a GitHub issue)                    │         │
+│         │           f / F  filter worktrees / filters on/off                           │         │
 │         │               s  settings (Key bindings… changes these keys)                 │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
 │         │               h  toggle help                                                 │         │

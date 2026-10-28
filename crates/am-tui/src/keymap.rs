@@ -28,7 +28,8 @@ pub enum Command {
     AddRepo,
     ToggleLog,
     Settings,
-    Feedback,
+    Filter,
+    ToggleFilters,
     Refresh,
     Help,
     Quit,
@@ -43,7 +44,7 @@ pub enum Command {
 impl Command {
     /// Every command, in the order the Key bindings page lists them (grouped
     /// by `section`).
-    pub const ALL: [Command; 24] = [
+    pub const ALL: [Command; 25] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -51,6 +52,8 @@ impl Command {
         Command::NewWorktree,
         Command::Delete,
         Command::AddRepo,
+        Command::Filter,
+        Command::ToggleFilters,
         Command::ReviewRequests,
         Command::ReviewSplit,
         Command::ReviewWindow,
@@ -58,7 +61,6 @@ impl Command {
         Command::PullAndRunScript,
         Command::ToggleLog,
         Command::Settings,
-        Command::Feedback,
         Command::Refresh,
         Command::Help,
         Command::Quit,
@@ -91,7 +93,8 @@ impl Command {
             Command::AddRepo => "addRepo",
             Command::ToggleLog => "toggleLog",
             Command::Settings => "settings",
-            Command::Feedback => "feedback",
+            Command::Filter => "filter",
+            Command::ToggleFilters => "toggleFilters",
             Command::Refresh => "refresh",
             Command::Help => "help",
             Command::Quit => "quit",
@@ -105,6 +108,10 @@ impl Command {
     }
 
     pub fn from_id(id: &str) -> Option<Command> {
+        // `f` was the feature-request key; a binding saved for it moves to the filters.
+        if id == "feedback" {
+            return Some(Command::Filter);
+        }
         Command::ALL.into_iter().find(|c| c.id() == id)
     }
 
@@ -125,7 +132,8 @@ impl Command {
             Command::AddRepo => "Add repository",
             Command::ToggleLog => "Toggle log pane",
             Command::Settings => "Settings",
-            Command::Feedback => "Suggest a feature",
+            Command::Filter => "Filter worktrees",
+            Command::ToggleFilters => "Filters on/off",
             Command::Refresh => "Refresh now",
             Command::Help => "Help",
             Command::Quit => "Quit",
@@ -141,13 +149,19 @@ impl Command {
     /// Heading the Key bindings page lists the command under.
     pub fn section(self) -> &'static str {
         match self {
-            Command::Open | Command::OpenPr | Command::OpenLinear | Command::OpenProject | Command::NewWorktree | Command::Delete | Command::AddRepo => {
-                "Worktrees"
-            }
+            Command::Open
+            | Command::OpenPr
+            | Command::OpenLinear
+            | Command::OpenProject
+            | Command::NewWorktree
+            | Command::Delete
+            | Command::AddRepo
+            | Command::Filter
+            | Command::ToggleFilters => "Worktrees",
             Command::ReviewRequests | Command::ReviewSplit | Command::ReviewWindow | Command::PullToTmpSpace | Command::PullAndRunScript => {
                 "Review requests"
             },
-            Command::ToggleLog | Command::Settings | Command::Feedback | Command::Refresh | Command::Help | Command::Quit => "General",
+            Command::ToggleLog | Command::Settings | Command::Refresh | Command::Help | Command::Quit => "General",
             Command::MoveDown | Command::MoveUp | Command::PageDown | Command::PageUp | Command::Top | Command::Bottom => "Moving",
         }
     }
@@ -169,7 +183,8 @@ impl Command {
             Command::PullAndRunScript => "Pull the selected PR into Reviewing, then run the repo's review script (review page only)",
             Command::ToggleLog => "Show or hide the debug.log pane",
             Command::Settings => "Open settings",
-            Command::Feedback => "File a feature request on GitHub",
+            Command::Filter => "Worktree filters: text, status, PR, git and the hide toggles (the review filters on the review page)",
+            Command::ToggleFilters => "Turn every worktree filter off, and back on",
             Command::Refresh => "Refresh git, PRs and tickets now",
             Command::Help => "The keys overlay",
             Command::Quit => "Leave am (esc on the list and ctrl-c always quit too)",
@@ -196,11 +211,13 @@ impl Command {
             Command::PullToTmpSpace => "pull into Reviewing",
             Command::PullAndRunScript => "pull, then run its script",
             Command::Settings | Command::Help => "same",
-            Command::Feedback => "review filters",
+            Command::Filter => "review filters",
             Command::Refresh => "clear cache and refetch",
             Command::Quit => "back",
             Command::MoveDown | Command::MoveUp | Command::PageDown | Command::PageUp | Command::Top | Command::Bottom => "same",
-            Command::OpenProject | Command::NewWorktree | Command::AddRepo | Command::ToggleLog => return None,
+            Command::OpenProject | Command::NewWorktree | Command::AddRepo | Command::ToggleLog | Command::ToggleFilters => {
+                return None;
+            }
         })
     }
 
@@ -232,7 +249,8 @@ impl Command {
             Command::AddRepo => "add repo",
             Command::ToggleLog => "log",
             Command::Settings => "settings",
-            Command::Feedback => "feedback",
+            Command::Filter => "filter",
+            Command::ToggleFilters => "filters",
             Command::Refresh => "refresh",
             Command::Help => "help",
             Command::Quit => "quit",
@@ -256,7 +274,8 @@ impl Command {
             Command::AddRepo => Key::Char('A'),
             Command::ToggleLog => Key::Char('w'),
             Command::Settings => Key::Char('s'),
-            Command::Feedback => Key::Char('f'),
+            Command::Filter => Key::Char('f'),
+            Command::ToggleFilters => Key::Char('F'),
             Command::Refresh => Key::Char('r'),
             Command::Help => Key::Char('h'),
             Command::Quit => Key::Char('q'),
@@ -514,16 +533,24 @@ mod tests {
 
     #[test]
     fn overrides_apply_and_round_trip() {
-        let b = bindings(&[("newWorktree", "N"), ("moveDown", "ctrl-s"), ("feedback", "none"), ("top", "space")]);
+        let b = bindings(&[("newWorktree", "N"), ("moveDown", "ctrl-s"), ("filter", "none"), ("top", "space")]);
         let (m, problems) = Keymap::from_bindings(&b);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(m.command(Key::Char('N')), Some(Command::NewWorktree));
         assert_eq!(m.command(Key::Char('n')), None);
         assert_eq!(m.command(Key::CtrlS), Some(Command::MoveDown));
         assert_eq!(m.command(Key::Down), Some(Command::MoveDown), "fixed keys stay");
-        assert_eq!(m.key(Command::Feedback), None);
+        assert_eq!(m.key(Command::Filter), None);
         assert_eq!(m.command(Key::Char(' ')), Some(Command::Top));
         assert_eq!(m.overrides(), b);
+    }
+
+    #[test]
+    fn the_old_feedback_binding_moves_to_the_filters() {
+        let (m, problems) = Keymap::from_bindings(&bindings(&[("feedback", "ctrl-s")]));
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(m.command(Key::CtrlS), Some(Command::Filter));
+        assert_eq!(Keymap::default().command(Key::Char('F')), Some(Command::ToggleFilters));
     }
 
     #[test]
