@@ -626,6 +626,48 @@ fn hooks_for_codebuddy() {
     assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], true);
 }
 
+/// Antigravity's hook file holds named groups; am owns `agent-monitor` and
+/// leaves the others (cmux's) alone.
+#[test]
+fn hooks_for_antigravity() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Gemini CLI's dir alone doesn't make Antigravity detected.
+    std::fs::create_dir_all(env.home().join(".gemini")).unwrap();
+    assert!(!env.ok(&["hooks", "install"]).stdout.contains("config/hooks.json"));
+
+    let file = env.home().join(".gemini/config/hooks.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let cmux = json!({"Stop": [{"type": "command", "command": "cmux hooks antigravity stop", "timeout": 10}]});
+    std::fs::write(&file, json!({"cmux": cmux}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "antigravity"]).stdout, "Hooks installed into ~/.gemini/config/hooks.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v["cmux"], cmux);
+    let ours = v["agent-monitor"].as_object().unwrap();
+    assert_eq!(ours.keys().map(String::as_str).collect::<Vec<_>>(), ["SessionStart", "PreInvocation", "Stop"]);
+    assert_eq!(
+        ours["Stop"],
+        json!([{"type": "command", "command": format!("\"{}\" hook-event --agent antigravity --worktree \"\" --event Stop", fake_hook.display()), "timeout": 10}])
+    );
+    // Idempotent.
+    env.ok(&["hooks", "install", "--agent", "antigravity"]);
+    assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap(), v);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["antigravity"], true);
+
+    // Uninstall drops our group and keeps cmux's.
+    env.ok(&["hooks", "uninstall", "--agent", "antigravity"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v, json!({"cmux": cmux}));
+
+    // Once agy has run here, a default install covers it.
+    std::fs::create_dir_all(env.home().join(".gemini/antigravity-cli")).unwrap();
+    assert!(env.ok(&["hooks", "install"]).stdout.contains("Hooks installed into ~/.gemini/config/hooks.json"));
+}
+
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
 #[test]
 fn manifest_plugins_need_no_code() {

@@ -157,6 +157,10 @@ impl Harness for Embedded {
         self.manifest.hook_events()
     }
 
+    fn ends_sessions(&self) -> bool {
+        self.manifest.ends_sessions()
+    }
+
     fn hook_file_defaults(&self) -> Map<String, Value> {
         self.manifest.hooks.file.clone()
     }

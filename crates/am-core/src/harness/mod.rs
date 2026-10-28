@@ -15,6 +15,7 @@
 //! ([`manifest`]). Plugins can be disabled with the `disabledAgents`
 //! setting. See `docs/agent-providers.md`.
 
+pub mod antigravity;
 pub mod claude;
 pub mod codebuddy;
 pub mod codex;
@@ -82,6 +83,13 @@ pub trait Harness: Sync + Send {
 
     /// Native event names am registers a hook for.
     fn hook_events(&self) -> Vec<String>;
+
+    /// Whether a hook marks a session closed (`SessionEnd`). Without one,
+    /// am-hook closes the owner's other settled sessions of this harness when
+    /// a new one starts, so finished conversations don't pile up.
+    fn ends_sessions(&self) -> bool {
+        true
+    }
 
     /// The key holding `event → entries` in the settings file; empty when the
     /// file is that map itself.
@@ -265,6 +273,7 @@ impl HarnessKind {
     pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
     pub const QODER: HarnessKind = HarnessKind(&qoder::QODER);
     pub const CODEBUDDY: HarnessKind = HarnessKind(&codebuddy::CODEBUDDY);
+    pub const ANTIGRAVITY: HarnessKind = HarnessKind(&antigravity::ANTIGRAVITY);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -329,6 +338,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::CURSOR,
     HarnessKind::QODER,
     HarnessKind::CODEBUDDY,
+    HarnessKind::ANTIGRAVITY,
 ];
 
 struct Registry {
