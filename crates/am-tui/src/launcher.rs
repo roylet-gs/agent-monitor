@@ -62,7 +62,7 @@ pub fn open(v: WorktreeView, settings: &Settings, tx: Sender<Msg>) {
         };
         let result = match launch::resolve_open_action(resume_on, already_open, ide, resume) {
             OpenAction::Plain => launch::open_in_editor(path, ide, &ide_command),
-            OpenAction::TerminalAgent(r) => launch::open_terminal(path, Some(&launch::agent_command(&r))),
+            OpenAction::TerminalAgent(r) => launch::open_terminal(path, Some(&launch::agent_command(&r))).map(|_| ()),
             OpenAction::CopyAndOpen(r) => {
                 let cmd = launch::agent_command(&r);
                 let msg = if launch::copy_to_clipboard(&cmd) {
@@ -113,7 +113,10 @@ pub fn open_review_window(tx: Sender<Msg>) {
             am_core::info!("launcher", "Opening the review page in a new terminal: {command}");
             launch::open_terminal(&am_core::paths::home_dir(), Some(&command))
         });
-        report(&tx, r.map_err(|e| format!("Couldn't open a terminal window: {e}")), "Opened review requests in a new window".into());
+        let _ = tx.send(match r {
+            Ok(place) => Msg::Notice(format!("Opened review requests in {place}")),
+            Err(e) => Msg::Popup(format!("✗ Couldn't open a terminal window: {e}")),
+        });
     });
 }
 
