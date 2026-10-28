@@ -271,6 +271,47 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn a_qoder_session_is_tracked_with_its_subagents() {
+    let env = Env::new();
+    let qoder = |event: &str, payload: Value| env.send_as(Some("qoder"), event, with_session("q-1", payload));
+    qoder("SessionStart", json!({ "source": "startup", "model": "auto" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("qoder")));
+    qoder("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!(env.status().0, "executing");
+    qoder("PermissionRequest", json!({ "tool_name": "Bash", "tool_input": { "command": "rm -rf target" } }));
+    assert_eq!(env.status().0, "waiting");
+    qoder("PostToolUse", json!({ "tool_name": "Bash", "tool_use_id": "t1" }));
+    qoder("SubagentStart", sub("qa1", json!({})));
+    qoder("Stop", json!({ "last_assistant_message": "Started a helper.", "stop_hook_active": false }));
+    assert_eq!(env.status(), ("delegating".into(), 1));
+    qoder("SubagentStop", sub("qa1", json!({ "last_assistant_message": "report" })));
+    assert_eq!(env.status(), ("done".into(), 0));
+    assert_eq!(env.session("q-1").0, "done");
+}
+
+#[test]
+fn a_qoder_ide_turn_is_found_from_the_payload_cwd() {
+    // The Qoder IDE runs the same hooks without `$QODER_PROJECT_DIR`, so the
+    // hook passes `--worktree ""` and the payload `cwd` places the session.
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    let ide = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "ide-1", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("qoder", event, "", p);
+    };
+    ide("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("qoder")));
+    ide("PermissionRequest", json!({ "tool_name": "Bash", "tool_input": { "command": "rm -rf target" } }));
+    assert_eq!(env.status().0, "waiting");
+    ide("PostToolUse", json!({ "tool_name": "Bash" }));
+    ide("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("ide-1").0, "done");
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

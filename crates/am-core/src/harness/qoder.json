@@ -1,0 +1,29 @@
+{
+  "id": "qoder",
+  "name": "Qoder CLI",
+  "shortName": "Qoder",
+  "program": "qodercli",
+  "configDir": "~/.qoder",
+  "hooks": {
+    "settingsPath": "~/.qoder/settings.json",
+    "projectDirVar": "QODER_PROJECT_DIR",
+    "timeoutMs": 5000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "PermissionRequest": "PermissionRequest",
+    "Notification": "Notification",
+    "SubagentStart": "SubagentStart",
+    "SubagentStop": "SubagentStop",
+    "Stop": "Stop",
+    "StopFailure": "StopFailure"
+  },
+  "resume": { "session": ["--resume", "{id}"], "continue": ["-c"] },
+  "process": { "names": ["qodercli"], "argvContains": ["/@qoder-ai/qodercli/"] },
+  "notes": "The Qoder IDE reads hooks at startup: restart it after installing (the CLI reloads them live)"
+}
