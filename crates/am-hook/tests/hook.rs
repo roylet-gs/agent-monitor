@@ -271,6 +271,32 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn a_rovodev_session_without_session_ids_updates_the_worktree_row() {
+    let env = Env::new();
+    // The hook passes `--worktree "$PWD"`: where `acli rovodev run` started.
+    let pwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&pwd).unwrap();
+    let rovo = |event: &str, payload: Value| env.send_raw("rovodev", event, &pwd, payload);
+    rovo("on_session_start", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("rovodev")));
+    rovo("on_user_prompt", json!({}));
+    assert_eq!(env.status().0, "executing");
+    let tool = json!({ "attributes": { "tool_input": { "tool_name": "bash", "args": { "command": "cargo test" } } } });
+    rovo("on_tool_permission", tool.clone());
+    assert_eq!(env.status().0, "waiting");
+    rovo("on_tool_start", tool.clone());
+    rovo("on_tool_end", tool);
+    assert_eq!(env.status().0, "executing");
+    rovo("on_complete", json!({ "transcript_path": "/tmp/gone.json" }));
+    assert_eq!(env.status().0, "done");
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 0, "no session id, so no session rows");
+    rovo("on_user_prompt", json!({}));
+    rovo("on_error", json!({}));
+    assert_eq!(env.status().0, "idle");
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

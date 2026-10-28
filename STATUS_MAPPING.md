@@ -233,3 +233,16 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**Rovo Dev CLI** (`--agent rovodev`, hooks in `~/.rovodev/config.yml` under `eventHooks`, `--worktree "$PWD"`):
+
+| Rovo Dev event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `on_session_start` / `on_session_end` | `SessionStart` / `SessionEnd` | `idle` |
+| `on_user_prompt` | `UserPromptSubmit` | `executing` |
+| `on_tool_start` / `on_tool_end` | `PreToolUse` / `PostToolUse` | `executing` (tool from `attributes.tool_input.tool_name`; `bash` → `Bash`) |
+| `on_tool_permission` | `PermissionRequest` | `waiting` |
+| `on_complete` | `Stop` | `done` after work, else `idle` |
+| `on_error` | `StopFailure` | `idle` |
+
+Rovo Dev's payload has no session id, so every event updates the worktree's `agent_status` row directly (no `sessions` rows, no per-session headline). It has no subagent events, so no `delegating`. `on_tool_permission` maps to `waiting` (cmux shows it as running): the user has to answer. Older Rovo Dev releases only fire `on_complete`, `on_error` and `on_tool_permission`; there a session never shows `executing`, and an `on_complete` after `waiting` leaves it `waiting` (the rules keep `waiting` through a `Stop`).
