@@ -16,6 +16,7 @@
 //! setting. See `docs/agent-providers.md`.
 
 pub mod antigravity;
+pub mod campfire;
 pub mod claude;
 pub mod codebuddy;
 pub mod codex;
@@ -292,6 +293,7 @@ impl HarnessKind {
     pub const OPENCODE: HarnessKind = HarnessKind(&opencode::OPENCODE);
     pub const PI: HarnessKind = HarnessKind(&pi::PI);
     pub const OMP: HarnessKind = HarnessKind(&omp::OMP);
+    pub const CAMPFIRE: HarnessKind = HarnessKind(&campfire::CAMPFIRE);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -366,6 +368,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::OPENCODE,
     HarnessKind::PI,
     HarnessKind::OMP,
+    HarnessKind::CAMPFIRE,
 ];
 
 struct Registry {

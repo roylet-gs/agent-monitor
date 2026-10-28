@@ -368,3 +368,15 @@ OpenCode reports idle twice (`session.status` and `session.idle`); the plugin se
 | `agent_end` | `Stop` | `done` after work, else `idle` |
 
 The extension skips an `agent_end` with `willContinue: true` (an automatic continuation follows) and sends one `Stop` per turn, since a second `Stop` would turn `done` into `idle`. Hooks run one at a time in the order OMP fired them, so a `PreToolUse` can't land after its `PermissionRequest` or a `PostToolUse` after the `Stop`. A switch to another session (`/new`, resume, fork) is `SessionEnd` for the old id then `SessionStart` for the new one. Other sessions in the same omp process are task subagents: they report as `SubagentStart`/`SubagentStop` (and tool events with `agent_id`) under the owner session, so `delegating` and subagent rows work, and a subagent's approval prompt shows `waiting`.
+
+**Campfire** (`--agent campfire`): Campfire has no command hooks. am's extension (`${CAMPFIRE_CODING_AGENT_DIR:-~/.campfire/agent}/extensions/agent-monitor-campfire.ts`) sends canonical event names itself, with `--worktree ""` and the session's directory as `cwd`, and only for the session's host (`CAMPFIRE_SESSION_ROLE=host`):
+
+| Campfire event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` | `SessionStart` | `idle` |
+| `before_agent_start` / `agent_start` | `UserPromptSubmit` (once per run) | `executing` |
+| observer `join.requested` / `permission.asked` | `PreToolUse` with `permission_prompt: true` and the ask as `message` | `waiting` (also after a finished turn: the `done` guard drops a `Notification`, not a `PreToolUse`) |
+| `agent_end` | `Stop` (once per run; `PostToolUse` first when the run saw an ask) | `done` after work |
+| `session_end` / `session_shutdown` | `SessionEnd` | `idle` |
+
+`agent_end` isn't the end of the work: after a retry, a compaction retry or a queued follow-up message Pi starts another run with `agent_start` and no `before_agent_start`, so that run reports `UserPromptSubmit` again (the row goes `done` → `executing` → `done`). There is no event for the host answering a join request or capability ask, so a `waiting` row from an ask between turns stays until the next prompt. am-hook stores a needs-user `PreToolUse`'s `message` as the row's last message, as it does a `Notification`'s.

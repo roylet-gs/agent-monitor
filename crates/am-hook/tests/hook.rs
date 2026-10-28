@@ -655,6 +655,42 @@ fn an_opencode_session_is_tracked_through_its_plugins_payloads() {
 }
 
 #[test]
+fn a_campfire_session_is_tracked_through_its_extensions_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Exactly what am's Campfire extension sends: `--worktree ""`, canonical
+    // event names, a collaborator's ask as a PreToolUse permission prompt.
+    let campfire = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "cf-1", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("campfire", event, "", p);
+    };
+    let ask = json!({ "permission_prompt": true, "message": "Ana is waiting to join the Campfire session" });
+    campfire("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("campfire")));
+    campfire("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    campfire("PreToolUse", ask.clone());
+    assert_eq!(env.status().0, "waiting");
+    // The ask is the row's message, as a Notification's would be.
+    let last: Option<String> = env.db().query_row("SELECT last_response FROM agent_status WHERE worktree_id = 'w'", [], |r| r.get(0)).unwrap();
+    assert_eq!(last.as_deref(), Some("Ana is waiting to join the Campfire session"));
+    campfire("PostToolUse", json!({}));
+    campfire("Stop", json!({ "last_assistant_message": "All done." }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("cf-1").0, "done");
+    // An ask after the turn still needs the host.
+    campfire("PreToolUse", ask.clone());
+    assert_eq!(env.status().0, "waiting");
+    campfire("UserPromptSubmit", json!({}));
+    campfire("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    campfire("SessionEnd", json!({}));
+    assert!(!env.session("cf-1").1);
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();
