@@ -513,6 +513,69 @@ fn hooks_for_gemini() {
     assert!(o.stderr.contains(&format!("Unknown agent: aider. Valid agents: {}", builtin_ids().join(", "))), "{}", o.stderr);
 }
 
+/// Pi has no hook config: am owns a generated extension in Pi's agent dir.
+#[test]
+fn hooks_for_pi_write_an_owned_extension() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // ~/.pi: Pi is detected and a default install covers it.
+    let ext_dir = env.home().join(".pi/agent/extensions");
+    std::fs::create_dir_all(&ext_dir).unwrap();
+    std::fs::write(ext_dir.join("mine.ts"), "export default function () {}\n").unwrap();
+    assert_eq!(
+        env.ok(&["hooks", "install"]).stdout,
+        "Hooks installed into ~/.claude/settings.json\nHooks installed into ~/.pi/agent/extensions/agent-monitor.ts\n"
+    );
+    let ext = ext_dir.join("agent-monitor.ts");
+    let text = std::fs::read_to_string(&ext).unwrap();
+    assert!(text.contains("agent-monitor-hook-plugin v1"), "{text}");
+    let argv = json!([fake_hook.display().to_string(), "hook-event", "--agent", "pi", "--worktree", "", "--event"]);
+    assert!(text.contains(&format!("const ARGV = {};", argv.to_string().replace(",", ", "))), "{text}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"], hooks_installed(&["claude", "pi"]));
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("Pi hooks: Installed in ~/.pi/agent/extensions/agent-monitor.ts"), "{doctor}");
+
+    // Reinstalling is idempotent; uninstalling removes only am's file.
+    env.ok(&["hooks", "install", "--agent", "pi"]);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), text);
+    assert_eq!(
+        env.ok(&["hooks", "uninstall", "--agent", "pi"]).stdout,
+        "Hooks removed from ~/.pi/agent/extensions/agent-monitor.ts\n"
+    );
+    assert!(!ext.exists());
+    assert_eq!(std::fs::read_to_string(ext_dir.join("mine.ts")).unwrap(), "export default function () {}\n");
+
+    // A file of that name am didn't write is left alone.
+    std::fs::write(&ext, "// my own\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "pi"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("wasn't written by am"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), "// my own\n");
+    std::fs::remove_file(&ext).unwrap();
+
+    // $PI_CODING_AGENT_DIR moves the agent dir, extensions with it.
+    let agent_dir = env.root().join("pi-agent");
+    env.extra_env.push(("PI_CODING_AGENT_DIR".into(), agent_dir.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "pi"]);
+    let moved = agent_dir.join("extensions/agent-monitor.ts");
+    assert!(std::fs::read_to_string(&moved).unwrap().contains("agent-monitor-hook-plugin v1"));
+    assert!(!ext.exists());
+
+    // A deleted am-hook is reported by doctor.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(
+        doctor.contains(&format!("[WARN]  Pi hooks: Hooks in {} run a missing {}", moved.display(), fake_hook.display())),
+        "{doctor}"
+    );
+    env.ok(&["hooks", "uninstall", "--agent", "pi"]);
+    assert!(!moved.exists());
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {

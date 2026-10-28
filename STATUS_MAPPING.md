@@ -223,6 +223,19 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 - Droid: a cancelled turn sends `Notification` (`idle_prompt`) rather than `Stop`. No `SubagentStart`, so its subagents aren't tracked.
 - Copilot: registered with PascalCase names, which select its Claude-shaped payload. Its permission and notification hooks only exist in the camelCase format, so only `AskUserQuestion` reaches `waiting`.
 
+**Pi** (`--agent pi`): Pi has no command hooks. am installs an extension (`~/.pi/agent/extensions/agent-monitor.ts`, or under `$PI_CODING_AGENT_DIR`) that turns Pi's events into Claude-shaped payloads (`--worktree ""`, so the directory is the payload's `cwd`):
+
+| Pi event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` / `session_shutdown` | `SessionStart` / `SessionEnd` | `idle` |
+| `before_agent_start`; `agent_start` when no turn is open | `UserPromptSubmit` | `executing` |
+| `tool_execution_start` / `_end` (not calls made by another tool) | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`, `read` → `Read`…) |
+| the same for a subagent tool (`subagent`, `task`, `agent`, `team_spawn`, or a name containing "subagent") | `SubagentStart` / `SubagentStop`, `agent_id` = the tool call id | `executing`; `delegating` if the turn ends first |
+| `ctx.ui.confirm`/`select`/`input` opened during a turn | `PermissionRequest`, then `PostToolUse` when answered | `waiting`, then `executing` |
+| `agent_settled` with `ctx.isIdle()` (Pi ≥ 0.80.5), else `agent_end` | `Stop`, once per turn | `done` |
+
+Stop waits for `agent_settled` because retries, compaction and queued messages start another run after `agent_end`; a second `Stop` would turn `done` into `idle`, so the extension sends one per turn.
+
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 
 | Cursor event | Canonical event | Resulting status |
