@@ -1,0 +1,54 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: settings
+---
+╭─Review requests ──────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
+│agent-monitor ───╭─Settings ────────────────────────────────────────────────────────────────────────╮─────────────────│
+│▌Batch the PR que│ ⬆ am v2.2.0 is available (you have v2.1.1)                                       │#51✓ review   0s │
+│ Typo in README  │ Update: brew update && brew upgrade agent-monitor                                │#48✓ review   0s │
+│gridsight ───────│                                                                                  │─────────────────│
+│ Feeder load fore│ General                                                                          │#902✗ review  0s │
+│                 │▌  Mode                          reviews                                          │                 │
+│                 │   Open in                       vscode                                           │                 │
+│                 │   Editor command                —                                                │                 │
+│                 │   Repositories…                 2 tracked                                        │                 │
+│                 │   Key bindings…                 defaults                                         │                 │
+│                 │   Mouse                         on                                               │                 │
+│                 │                                                                                  │                 │
+│                 │ Appearance                                                                       │                 │
+│                 │   Theme                         ansi                                             │                 │
+│                 │   Theme builder…                ⏎ open                                           │                 │
+│                 │   Compact view                  off                                              │                 │
+│                 │                                                                                  │                 │
+│                 │ Notifications                                                                    │                 │
+│                 │   Check for updates             on                                               │                 │
+│                 │                                                                                  │                 │
+│                 │ Review requests                                                                  │                 │
+│                 │   Requested from                all                                              │                 │
+│                 │   Groups…                       no groups                                        │                 │
+│                 │   Badge: total on GitHub        off                                              │                 │
+│                 │   Reset filters…                ⏎ reset                                          │                 │
+│                 │   Reset groups…                 no groups                                        │                 │
+│                 │   Review refresh (ms)           120000                                           │                 │
+│                 │                                                                                  │                 │
+│                 │ Linear                                                                           │                 │
+│                 │   Fetch tickets                 off                                              │                 │
+│                 │   API key                       not set                                          │                 │
+│                 │   Open in desktop app           off                                              │                 │
+│                 │                                                                                  │                 │
+│                 │ Logging                                                                          │                 │
+│                 │   Log level                     info                                             │                 │
+│                 │   Rotate log at (MB)            2                                                │                 │
+│                 │   View logs…                    ⏎ open                                           │                 │
+│                 │                                                                                  │                 │
+│                 │ Setup                                                                            │                 │
+│                 │   Run setup again…              ⏎ open                                           │                 │
+│                 │   Reset settings…               ⏎ reset                                          │                 │
+│                 │                                                                                  │                 │
+│                 │                                                                                  │                 │
+│                 │                                                                                  │                 │
+│                 │                                                                                  │                 │
+│                 │                                                                                  │                 │
+│                 │ reviews: open straight to the review page and hide the agent/worktree settings   │                 │
+╰ you + your teams╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯───────── 1 of 3 ╯
+ ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  esc quit

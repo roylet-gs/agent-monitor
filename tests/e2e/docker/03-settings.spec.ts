@@ -25,7 +25,9 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
 
   const before = await resumeValue(tui);
   const after = before === "on" ? "off" : "on";
-  await tui.sendKey("j"); // cursor → "Editor command"
+  await tui.sendKey("j"); // cursor (on "Mode") → "Open in"
+  await tui.waitForText("Which editor/IDE Enter opens worktrees in");
+  await tui.sendKey("j"); // → "Editor command"
   await tui.waitForText("For Open in = custom");
   await tui.sendKey("j"); // → "Resume last session on open"
   await tui.waitForText("Enter also resumes the worktree's most recent agent session");
@@ -41,9 +43,8 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
   await tui.waitForText("esc close");
   expect(await resumeValue(tui)).toBe(after);
 
-  // Restore (Open in → Editor command → Resume last session).
-  await tui.sendKey("j");
-  await tui.sendKey("j");
+  // Restore (Mode → Open in → Editor command → Resume last session).
+  await tui.press("j", 3);
   await tui.sendKey(" ");
   expect(await resumeValue(tui)).toBe(before);
   await tui.sendKey("Escape");
@@ -74,6 +75,7 @@ test("Open in cycles to custom and takes an editor command", async ({ page }) =>
 
   await tui.sendKey("s");
   await tui.waitForText("esc close");
+  await tui.sendKey("j"); // past "Mode"
   await tui.waitForText("Which editor/IDE Enter opens worktrees in");
   expect(await rowValue(tui, OPEN_IN)).toBe("vscode");
   expect(await rowValue(tui, EDITOR_CMD)).toBe("—");

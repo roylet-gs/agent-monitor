@@ -1,0 +1,34 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: help
+---
+╭─Review requests ──────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌Batch the PR queries  @alice ✓ pulled                                                 you           #51✓ review   0s │
+│ Typo in README  @outsider fork                                                        @docs         #48✓ review   0s │
+│gridsight ─────────╭ Keys ────────────────────────────────────────────────────────────────────────╮───────────────────│
+│ Feeder load foreca│    j / k  ↑ / ↓  move                                                        │7 #902✗ review  0s │
+│                   │        home / G  top / bottom                                                │                   │
+│                   │ ctrl-d / ctrl-u  page down / up                                              │                   │
+│                   │               ⏎  pull, or open the pulled one                                │                   │
+│                   │               g  open the PR                                                 │                   │
+│                   │               l  the PR's ticket                                             │                   │
+│                   │               t  pull into Reviewing                                         │                   │
+│                   │               d  remove the pulled worktree                                  │                   │
+│                   │               f  review filters                                              │                   │
+│                   │               r  clear cache and refetch                                     │                   │
+│                   │               s  settings (Mode: full brings the agent dashboard back)       │                   │
+│                   │               h  toggle help                                                 │                   │
+│                   │          q  esc  quit                                                        │                   │
+│                   │             tab  focus the jobs pane (pulls and removals)                    │                   │
+│                   │                                                                              │                   │
+│                   │✓ pulled checked out in a worktree (⏎ opens it, d removes it)  fork from a    │                   │
+│                   │fork: ⏎ opens the PR                                                          │                   │
+│                   │PR approved=CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting        │                   │
+│                   │closed=not merged                                                             │                   │
+│                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+╰ you + your teams ──────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  esc quit

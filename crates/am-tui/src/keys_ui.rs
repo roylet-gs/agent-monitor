@@ -21,11 +21,32 @@ pub struct KeyEditor {
     pub keymap: Keymap,
     /// (ok, text) under the list.
     pub message: Option<(bool, String)>,
+    /// Review-only mode: only the commands that do something on the review
+    /// page are listed.
+    pub reviews_mode: bool,
 }
 
 impl KeyEditor {
     pub fn new(keymap: Keymap) -> KeyEditor {
-        KeyEditor { cursor: 0, capturing: false, keymap, message: None }
+        KeyEditor { cursor: 0, capturing: false, keymap, message: None, reviews_mode: false }
+    }
+
+    /// The editor for review-only mode (see [`KeyEditor::reviews_mode`]).
+    pub fn for_reviews_mode(keymap: Keymap) -> KeyEditor {
+        let mut ed = KeyEditor { reviews_mode: true, ..KeyEditor::new(keymap) };
+        ed.cursor = ed.listed().first().copied().unwrap_or(0);
+        ed
+    }
+
+    /// Indices into `Command::ALL` the page lists.
+    pub fn listed(&self) -> Vec<usize> {
+        (0..Command::ALL.len()).filter(|&i| !self.reviews_mode || Command::ALL[i].in_reviews_mode().is_some()).collect()
+    }
+
+    fn move_by(&mut self, dir: isize) {
+        let listed = self.listed();
+        let pos = listed.iter().position(|&i| i == self.cursor).unwrap_or(0) as isize;
+        self.cursor = listed[(pos + dir).clamp(0, listed.len() as isize - 1) as usize];
     }
 
     pub fn selected(&self) -> Command {
@@ -41,10 +62,10 @@ impl KeyEditor {
         let cmd = self.selected();
         match key {
             Key::Esc | Key::Char('q') => return KeyOutcome::Close,
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(Command::ALL.len() - 1),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
-            Key::Home => self.cursor = 0,
-            Key::End => self.cursor = Command::ALL.len() - 1,
+            Key::Down | Key::Char('j') => self.move_by(1),
+            Key::Up | Key::Char('k') => self.move_by(-1),
+            Key::Home => self.move_by(isize::MIN / 2),
+            Key::End => self.move_by(isize::MAX / 2),
             Key::Enter | Key::Char(' ') => {
                 self.capturing = true;
                 self.message = Some((true, format!("Press the new key for {} · esc cancels", cmd.label())));
@@ -114,6 +135,23 @@ mod tests {
         let mut ed = KeyEditor::new(Keymap::default());
         ed.cursor = Command::ALL.iter().position(|c| *c == cmd).unwrap();
         ed
+    }
+
+    #[test]
+    fn review_mode_lists_only_review_page_commands() {
+        let mut ed = KeyEditor::for_reviews_mode(Keymap::default());
+        let listed: Vec<Command> = ed.listed().into_iter().map(|i| Command::ALL[i]).collect();
+        assert!(listed.contains(&Command::PullToTmpSpace) && listed.contains(&Command::Feedback));
+        for gone in [Command::NewWorktree, Command::AddRepo, Command::ToggleLog, Command::ReviewSplit, Command::ReviewWindow] {
+            assert!(!listed.contains(&gone), "{gone:?}");
+        }
+        // The cursor only lands on listed commands.
+        assert_eq!(ed.selected(), listed[0]);
+        for _ in 0..Command::ALL.len() {
+            ed.on_key(Key::Down);
+            assert!(listed.contains(&ed.selected()));
+        }
+        assert_eq!(ed.selected(), *listed.last().unwrap());
     }
 
     #[test]

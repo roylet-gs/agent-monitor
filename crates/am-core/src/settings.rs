@@ -111,6 +111,9 @@ pub struct Settings {
     pub daily_tokens_mode: String,
     /// Check GitHub Releases for a newer `am` and show it in the dashboard.
     pub check_for_updates: bool,
+    /// What `am` opens to (see [`AppMode`]): `full` (the dashboard) or
+    /// `reviews` (only the review-requests page). Unknown values are `full`.
+    pub app_mode: String,
     /// Where a repo's startup script runs after creating a worktree: `pane`
     /// (default; output streams into the TUI's jobs pane) or `window` (a new
     /// terminal window, falling back to the pane when none can be opened).
@@ -218,6 +221,7 @@ impl Default for Settings {
             daily_tokens_scope: "all".into(),
             daily_tokens_mode: "tokens".into(),
             check_for_updates: true,
+            app_mode: "full".into(),
             startup_script_mode: "pane".into(),
             key_bindings: Default::default(),
             review_requests_enabled: true,
@@ -254,6 +258,16 @@ impl Settings {
 
     pub fn daily_tokens_mode(&self) -> DailyTokensMode {
         DailyTokensMode::parse(&self.daily_tokens_mode).unwrap_or(DailyTokensMode::Tokens)
+    }
+
+    pub fn app_mode(&self) -> AppMode {
+        AppMode::parse(&self.app_mode).unwrap_or(AppMode::Full)
+    }
+
+    /// Review-only mode: `am` opens to the review page alone, and only what
+    /// that page needs is fetched, shown in Settings and asked in setup.
+    pub fn reviews_mode(&self) -> bool {
+        self.app_mode() == AppMode::Reviews
     }
 
     /// Review requests are fetched at all (they ride on the PR integration).
@@ -357,6 +371,34 @@ impl DailyTokensMode {
             "breakdown" => DailyTokensMode::Breakdown,
             _ => return None,
         })
+    }
+}
+
+/// What `am` opens to (`appMode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    /// The worktree dashboard, with the review page on `v`.
+    Full,
+    /// Only the review-requests page.
+    Reviews,
+}
+
+impl AppMode {
+    pub const IDS: [&str; 2] = ["full", "reviews"];
+
+    pub fn parse(s: &str) -> Option<AppMode> {
+        Some(match s {
+            "full" => AppMode::Full,
+            "reviews" => AppMode::Reviews,
+            _ => return None,
+        })
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            AppMode::Full => "full",
+            AppMode::Reviews => "reviews",
+        }
     }
 }
 
@@ -579,6 +621,10 @@ mod tests {
     fn review_requests_default_to_me_and_my_teams() {
         let d = Settings::parse("{}");
         assert!(d.review_requests_on() && d.review_hide_drafts && d.review_hide_reviewed);
+        assert_eq!(d.app_mode(), AppMode::Full);
+        assert!(!d.reviews_mode());
+        assert_eq!(Settings::parse(r#"{"appMode":"bogus"}"#).app_mode(), AppMode::Full);
+        assert!(Settings::parse(r#"{"appMode":"reviews"}"#).reviews_mode());
         assert_eq!(d.review_scope(), ReviewScope::All);
         assert_eq!(Settings::parse(r#"{"reviewRequestsScope":"bogus"}"#).review_scope(), ReviewScope::All);
         assert_eq!(Settings::parse(r#"{"reviewRequestsScope":"teams"}"#).review_scope(), ReviewScope::Teams);
