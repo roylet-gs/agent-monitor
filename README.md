@@ -1,7 +1,7 @@
 <h1 align="center">Agent Monitor</h1>
 
 <p align="center">
-  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent, OpenCode)</strong>
+  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent, OpenCode, Pi)</strong>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent or OpenCode) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
+  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent, OpenCode or Pi) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
 </p>
 
 ---
@@ -66,7 +66,7 @@ On first launch a setup wizard asks whether you want the full dashboard or only 
 
 - **macOS or Linux** (arm64 or x64)
 - **git**
-- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code**, **Factory Droid**, **Qoder CLI**, **CodeBuddy Code**, **Antigravity CLI** (`agy`), **Grok CLI**, **Muse Code**, **Kiro CLI** (as its `agent-monitor` agent), **Rovo Dev CLI** (`acli rovodev`), **Kimi Code**, **Hermes Agent** or **OpenCode**
+- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code**, **Factory Droid**, **Qoder CLI**, **CodeBuddy Code**, **Antigravity CLI** (`agy`), **Grok CLI**, **Muse Code**, **Kiro CLI** (as its `agent-monitor` agent), **Rovo Dev CLI** (`acli rovodev`), **Kimi Code**, **Hermes Agent**, **OpenCode** or **Pi**
 - **gh CLI** (optional), for PR and CI status ([install](https://cli.github.com)); run `gh auth login` once
 - **Linear API key** (optional), for ticket tracking
 - **Node.js >= 18** only if you install through npm (the package is a small launcher for the native binary)
@@ -633,6 +633,7 @@ A harness is the CLI or editor that runs the agent and fires the hooks. `am hook
 | Kimi Code | `kimi` | a marked `[[hooks]]` block in `~/.kimi-code/config.toml` | permission requests, questions | `kimi --session <id>` |
 | Hermes Agent | `hermes` | `~/.hermes/config.yaml` (or `$HERMES_HOME`), plus approvals in `shell-hooks-allowlist.json` | approval, sudo and `clarify` prompts (Hermes from 2026-10-05 on) | `hermes --resume <id>` |
 | OpenCode | `opencode` | `~/.config/opencode/plugins/agent-monitor.js` (a plugin am writes and owns) | permission requests | `opencode --session <id>` |
+| Pi | `pi` | `~/.pi/agent/extensions/agent-monitor.ts` (an extension am writes; `$PI_CODING_AGENT_DIR/extensions/` when set) | confirm/select/input dialogs during a turn | `pi --session <id>` |
 
 Any other CLI whose hooks run a command with a JSON payload on stdin can be added without code as a JSON manifest in `~/.agent-monitor/agents/` (`docs/agent-providers.md`). Not supported yet: Amp (plugins only, no command hooks), Aider (no hooks), Windsurf and Crush (no session or turn-end events), JetBrains Junie (its `Stop` hook carries no session or directory) and Augment Auggie (hook commands must be bare script paths).
 
@@ -702,6 +703,7 @@ am logs a summary every 5 minutes (and when it quits), plus a `[perf]` warning w
 - **Kimi Code:** am's hooks are a block between `# agent-monitor hooks kimi begin` / `end` lines in Kimi's `config.toml`; the rest of the file is never touched, and `am hooks uninstall --agent kimi` removes just the block. `$KIMI_CODE_HOME` moves the file. The older Python Kimi CLI (≤ 1.49, `~/.kimi`) isn't supported: it refuses to start with hook events it doesn't know. Kimi sends no subagent ids, so its sessions never show `delegating`.
 - **Hermes Agent:** am's hooks are a marked block in `config.yaml`, nested under your own `hooks:` key when you have one (an event you already hook there, such as a `pre_tool_call` guard, is left out of am's block, with a warning in the log; am refuses an inline `hooks: {}`, or a `pre_llm_call`/`on_session_end` of your own, rather than merging). Hermes runs a shell hook only once its exact command is approved, so `am hooks install` also adds am's own commands to `shell-hooks-allowlist.json` (and `am hooks uninstall` takes them out); nothing else is approved. The approval also covers the Hermes gateway and cron, which then run am's hooks too; am ignores their turns (only `cli`/`tui` sessions show). Running sessions pick the hooks up when they next open a session.
 - **OpenCode:** OpenCode has no command hooks, so `am hooks install` writes a small plugin, `agent-monitor.js`, into OpenCode's global `plugins/` directory (`$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`, which OpenCode always loads; never `$OPENCODE_CONFIG_DIR`, which it loads as well, so a copy there would run twice) that runs `am-hook` on session, tool and permission events. OpenCode loads plugins at startup, so restart running sessions after installing. Subagent (`task`) sessions show as subagents of the session that started them.
+- **Pi:** Pi has no shell hooks, so am installs a small extension, `~/.pi/agent/extensions/agent-monitor.ts` (`$PI_CODING_AGENT_DIR/extensions/` when set), that reports Pi's events to `am-hook`. Pi loads extensions when a session starts: restart running sessions (or `/reload`) after installing. A file of that name am didn't write is never overwritten. `waiting` shows while an extension dialog (confirm/select/input) is open during a turn.
 - **Copilot CLI / Factory Droid:** both read hooks at startup, so restart running sessions after installing. Copilot's permission events aren't available in the hook format am uses, so only questions show as `waiting`.
 - **Grok CLI:** Grok fires `SessionEnd` after every turn, so am ends the turn on `Stop` and leaves `SessionEnd` alone. Grok also sends a generic "Tool permission requested" notification for every tool step (even in auto-approve mode), which am doesn't count as `waiting`; a specific prompt ("Grok needs permission to run rm") does. Grok reports no tool results, so the turn's `Stop` clears that wait (`done`).
 - **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.

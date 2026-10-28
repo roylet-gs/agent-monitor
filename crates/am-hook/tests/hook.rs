@@ -270,6 +270,40 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
     assert_eq!(env.session("t-1").0, "done");
 }
 
+/// The payloads Pi's generated extension (`am_core::harness::pi`) sends:
+/// Claude-shaped, Pi's tool names, `--worktree ""` (found from `cwd`).
+#[test]
+fn a_pi_session_is_tracked_through_its_extension_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    let pi = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "01a18110-925d", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("pi", event, "", p);
+    };
+    pi("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("pi")));
+    pi("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    pi("PreToolUse", json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } }));
+    // A dialog during the turn (ctx.ui.confirm) waits on the user; its answer resumes.
+    pi("PermissionRequest", json!({ "message": "Allow?" }));
+    assert_eq!(env.status().0, "waiting");
+    pi("PostToolUse", json!({}));
+    assert_eq!(env.status().0, "executing");
+    pi("PostToolUse", json!({ "tool_name": "bash" }));
+    pi("SubagentStart", json!({ "agent_id": "call_2", "agent_type": "subagent", "tool_input": { "description": "scan" } }));
+    assert_eq!(env.running_subagents_of("01a18110-925d"), 1);
+    pi("SubagentStop", json!({ "agent_id": "call_2", "agent_type": "subagent" }));
+    assert_eq!(env.running_subagents_of("01a18110-925d"), 0);
+    pi("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("01a18110-925d"), ("done".to_string(), true));
+    pi("SessionEnd", json!({}));
+    assert!(!env.session("01a18110-925d").1);
+}
+
 #[test]
 fn a_qoder_session_is_tracked_with_its_subagents() {
     let env = Env::new();

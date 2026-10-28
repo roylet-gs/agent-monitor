@@ -1,0 +1,25 @@
+{
+  "id": "pi",
+  "name": "Pi",
+  "program": "pi",
+  "configDir": "~/.pi",
+  "hooks": {
+    "settingsPath": "~/.pi/agent/extensions/agent-monitor.ts",
+    "timeoutMs": 5000
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "PermissionRequest": "PermissionRequest",
+    "SubagentStart": "SubagentStart",
+    "SubagentStop": "SubagentStop",
+    "Stop": "Stop"
+  },
+  "tools": { "bash": "Bash", "read": "Read", "edit": "Edit", "write": "Write", "grep": "Grep", "find": "Glob", "ls": "LS" },
+  "resume": { "session": ["--session", "{id}"], "continue": ["--continue"] },
+  "process": { "names": ["pi"], "argvContains": ["/pi-coding-agent/"] },
+  "notes": "Pi loads extensions when a session starts: restart running sessions (or /reload) after installing"
+}

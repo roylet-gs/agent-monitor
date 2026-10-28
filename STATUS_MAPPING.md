@@ -238,6 +238,19 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 
 Grok fires `SessionEnd` at the end of **every turn**, alongside `Stop`, not when the session closes. Mapped to `SessionEnd` it would close the session each turn, and mapped to `Stop` the second `Stop` would turn a `done` turn `idle`, so am doesn't hook it. The generic "Tool permission requested" prompt arrives for every tool step even in auto-approve mode; so only a specific prompt ("Grok needs permission to run rm") reaches `waiting`. There are no `PostToolUse` or subagent events, so nothing reports that the user answered a prompt (cmux's Feed approval blocks in `PreToolUse`, before it); Grok's `Stop` therefore carries `stop_ends_wait` and takes a `waiting` turn to `done`, where Claude's `Stop` keeps it `waiting`.
 
+**Pi** (`--agent pi`): Pi has no command hooks. am installs an extension (`~/.pi/agent/extensions/agent-monitor.ts`, or under `$PI_CODING_AGENT_DIR`) that turns Pi's events into Claude-shaped payloads (`--worktree ""`, so the directory is the payload's `cwd`):
+
+| Pi event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` / `session_shutdown` | `SessionStart` / `SessionEnd` | `idle` |
+| `before_agent_start`; `agent_start` when no turn is open | `UserPromptSubmit` | `executing` |
+| `tool_execution_start` / `_end` (not calls made by another tool) | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`, `read` → `Read`…) |
+| the same for a subagent tool (`subagent`, `task`, `agent`, `team_spawn`, or a name containing "subagent") | `SubagentStart` / `SubagentStop`, `agent_id` = the tool call id | `executing`; `delegating` if the turn ends first |
+| `ctx.ui.confirm`/`select`/`input` opened during a turn | `PermissionRequest`, then `PostToolUse` when answered | `waiting`, then `executing` |
+| `agent_settled` with `ctx.isIdle()` (Pi ≥ 0.80.5), else `agent_end` | `Stop`, once per turn | `done` |
+
+Stop waits for `agent_settled` because retries, compaction and queued messages start another run after `agent_end`; a second `Stop` would turn `done` into `idle`, so the extension sends one per turn. Pi awaits `session_shutdown` (quit, `/new`, `/resume`, `/fork`, `/reload`), so the extension waits at most one run's timeout (5 s) for `SessionEnd` to reach am-hook; if that runs out, the tool events still queued are dropped.
+
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 
 | Cursor event | Canonical event | Resulting status |
