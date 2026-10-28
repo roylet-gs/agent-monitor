@@ -84,12 +84,8 @@ impl PluginEditor {
         };
         match key {
             Key::Esc | Key::Enter | Key::Char('q') => PluginOutcome::Close,
-            Key::Down | Key::Char('j') => {
-                self.cursor = (self.cursor + 1).min(self.rows.len() - 1);
-                PluginOutcome::Stay
-            }
-            Key::Up | Key::Char('k') => {
-                self.cursor = self.cursor.saturating_sub(1);
+            k if let Some(to) = crate::nav::step(k, true, self.cursor, self.rows.len()) => {
+                self.cursor = to;
                 PluginOutcome::Stay
             }
             Key::Char(' ') => PluginOutcome::SetEnabled(row.id.clone(), !row.enabled),

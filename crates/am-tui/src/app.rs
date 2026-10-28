@@ -103,11 +103,17 @@ pub enum Action {
     /// Job id, worktree, and whether to delete the branch too.
     Delete(u64, Box<WorktreeView>, bool),
     RunScript { job: u64, repo_id: String, worktree_path: String },
+    /// Run the review script of a "pull + run script" job now.
+    RunReviewScript { job: u64, repo_id: String, worktree_path: String },
+    /// "Pull + run script" on a repo without a review script, after `y`:
+    /// make it from the template, open it in the editor, and start the pull
+    /// (the script runs once it's saved).
+    AddReviewScriptAndPull(u64, Box<Repository>, Box<am_core::worktrees::CreateRequest>),
     /// `d` on an "Other sessions" row: stop tracking it.
     RemoveStandalone(String),
     AddRepo(String),
-    /// Settings → Repositories… `s`: open the repo's startup script.
-    EditScript(String),
+    /// Settings → Repositories… `s` / `r`: open the repo's startup or review script.
+    EditScript(String, am_core::worktrees::ScriptKind),
     /// A repository was removed in Settings: refresh the dashboard.
     ReposChanged,
     InstallHooks,
@@ -173,6 +179,9 @@ pub struct App {
     /// Modifier keys held down (only terminals with the kitty keyboard
     /// protocol report them); the key bar names what `v` does with each.
     pub held: Held,
+    /// The terminal reports modifiers on their own (`held` works), so the
+    /// key bar can keep Shift/Ctrl variants out of sight until held.
+    pub modifiers_reported: bool,
     /// What a click does where, recorded by the last `ui::draw` for the
     /// layer on top (so clicks always match what's on screen).
     pub hits: std::cell::RefCell<Vec<crate::ui::Hit>>,
@@ -212,6 +221,7 @@ impl App {
             jobs: Default::default(),
             hover: None,
             held: Held::default(),
+            modifiers_reported: false,
             hits: Default::default(),
             list_scroll: Default::default(),
         }
@@ -529,6 +539,15 @@ impl App {
 
 
     pub fn on_key(&mut self, key: Key) -> Action {
+        // Ctrl+⏎ means "pull + run script" on the review page only; anywhere
+        // else it's a plain ⏎.
+        let page_has_keys = self.review_focused()
+            && self.popup.is_none()
+            && self.setup.is_none()
+            && self.modal.is_none()
+            && self.settings_editor.is_none()
+            && !self.show_help;
+        let key = if key == Key::CtrlEnter && !page_has_keys { Key::Enter } else { key };
         let action = self.handle_key(key);
         self.refresh_group_preview();
         action
@@ -601,6 +620,8 @@ impl App {
                     self.modal = None;
                     let id = view.worktree.id.clone();
                     self.deleting.insert(id.clone(), false);
+                    // Its pull (and review script output) no longer matters.
+                    self.jobs.forget_worktree(&id);
                     let job = self.jobs.start_delete(id, view.worktree.display_name());
                     Action::Delete(job, view, delete_branch)
                 }
@@ -613,6 +634,13 @@ impl App {
                 Effect::ResetSettings => {
                     self.modal = None;
                     Action::ResetSettings
+                }
+                Effect::AddReviewScript(r) => {
+                    self.modal = None;
+                    match self.start_review_pull(&r) {
+                        Some((job, repo, req)) => Action::AddReviewScriptAndPull(job, Box::new(repo), Box::new(req)),
+                        None => Action::None,
+                    }
                 }
             };
         }
@@ -637,6 +665,7 @@ impl App {
                 JobEffect::None => Action::None,
                 JobEffect::Create(job, repo, req) => Action::Create(job, repo, req),
                 JobEffect::RunScript { job, repo_id, worktree_path } => Action::RunScript { job, repo_id, worktree_path },
+                JobEffect::RunReviewScript { job, repo_id, worktree_path } => Action::RunReviewScript { job, repo_id, worktree_path },
             };
         }
         if self.review_focused() {
@@ -685,7 +714,7 @@ impl App {
                 self.modal = Some(self.add_repo_modal());
                 Action::None
             }
-            Outcome::EditScript(id) => Action::EditScript(id),
+            Outcome::EditScript(id, kind) => Action::EditScript(id, kind),
             Outcome::ReposChanged => Action::ReposChanged,
             Outcome::RunSetup => Action::RunSetup,
             Outcome::ViewLogs => Action::ViewLogs,
@@ -765,14 +794,17 @@ impl App {
                 }
             }
             // Only the review page pulls (its selected PR).
-            C::PullToTmpSpace => {}
+            C::PullToTmpSpace | C::PullAndRunScript => {}
             C::Feedback => {
                 self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
             C::AddRepo => self.modal = Some(self.add_repo_modal()),
             C::ReviewRequests => match &mut self.reviews {
                 // From the split: the page takes the whole body.
-                Some(p) => *p = crate::reviews_ui::ReviewPage { cursor: p.cursor, split: false, focused: true },
+                Some(p) => {
+                    p.split = false;
+                    p.focused = true;
+                }
                 None => return self.open_reviews(false),
             },
             C::ReviewSplit => match self.reviews.as_ref().map(|p| p.split) {
@@ -790,8 +822,8 @@ impl App {
             C::Settings => self.open_settings(),
             C::MoveDown => self.move_by(1),
             C::MoveUp => self.move_by(-1),
-            C::PageDown => self.move_by(10),
-            C::PageUp => self.move_by(-10),
+            C::PageDown => self.move_by(crate::nav::PAGE),
+            C::PageUp => self.move_by(-crate::nav::PAGE),
             C::Bottom => self.move_by(isize::MAX / 2),
             C::Top => self.move_by(isize::MIN / 2),
         }
@@ -901,12 +933,19 @@ impl App {
                 let outcome = e.on_key(key);
                 return self.editor_outcome(outcome);
             }
-            L::Sort | L::Plugins | L::Repos | L::Keys | L::ThemeTokens | L::Palette => {
+            L::Sort | L::Plugins | L::Repos | L::RepoScripts | L::Keys | L::ThemeTokens | L::Palette => {
                 let Some(e) = &mut self.settings_editor else { return Action::None };
                 let at = |cursor: &mut usize| std::mem::replace(cursor, i) == i;
                 match list {
                     L::Sort => e.sort.as_mut().and_then(|s| at(&mut s.cursor).then_some(Key::Char(' '))),
                     L::Plugins => e.plugins.as_mut().and_then(|p| at(&mut p.cursor).then_some(Key::Char(' '))),
+                    L::RepoScripts => e.repos.as_mut().and_then(|r| {
+                        r.message = None;
+                        let mut cur = r.scripts?;
+                        let again = at(&mut cur);
+                        r.scripts = Some(cur);
+                        again.then_some(Key::Enter)
+                    }),
                     L::Repos => e.repos.as_mut().and_then(|r| {
                         r.confirm_remove = None;
                         r.message = None;
@@ -1088,7 +1127,7 @@ impl App {
     /// (the page then says how to turn them on), and a fetch.
     pub fn enter_reviews_mode(&mut self) {
         self.jobs.focused = false;
-        self.reviews = Some(crate::reviews_ui::ReviewPage { cursor: 0, split: false, focused: true });
+        self.reviews = Some(crate::reviews_ui::ReviewPage { focused: true, ..Default::default() });
         self.review_fetch_due = self.settings.review_requests_on();
     }
 
@@ -1099,7 +1138,7 @@ impl App {
             return Action::None;
         }
         self.jobs.focused = false;
-        self.reviews = Some(crate::reviews_ui::ReviewPage { cursor: 0, split, focused: true });
+        self.reviews = Some(crate::reviews_ui::ReviewPage { split, focused: true, ..Default::default() });
         Action::RefreshReviews
     }
 
@@ -1125,6 +1164,11 @@ impl App {
                 !r.is_cross_repository
                     && self.review_pull(r).is_none_or(|j| matches!(j.state, crate::jobs::JobState::Failed(_)))
             }),
+            Some(C::PullAndRunScript) => r.is_some_and(|r| {
+                !r.is_cross_repository
+                    && r.worktree_id.is_none()
+                    && self.review_pull(r).is_none_or(|j| matches!(j.state, crate::jobs::JobState::Failed(_)))
+            }),
             _ => true,
         }
     }
@@ -1139,6 +1183,9 @@ impl App {
         }
         if key == Key::Enter {
             return self.review_open();
+        }
+        if key == Key::CtrlEnter {
+            return self.pull_review(true);
         }
         let len = self.review_list().len();
         let cmd = self.keymap.command(key);
@@ -1163,8 +1210,8 @@ impl App {
             Some(C::ReviewWindow) if !reviews_only => return self.run_command(C::ReviewWindow),
             Some(C::MoveDown) => page.move_by(1, len),
             Some(C::MoveUp) => page.move_by(-1, len),
-            Some(C::PageDown) => page.move_by(10, len),
-            Some(C::PageUp) => page.move_by(-10, len),
+            Some(C::PageDown) => page.move_by(crate::nav::PAGE, len),
+            Some(C::PageUp) => page.move_by(-crate::nav::PAGE, len),
             Some(C::Top) => page.move_by(isize::MIN / 2, len),
             Some(C::Bottom) => page.move_by(isize::MAX / 2, len),
             Some(C::Open) => return self.review_open(),
@@ -1176,7 +1223,8 @@ impl App {
                     None => self.notice = Some("No Linear ticket for this PR".into()),
                 }
             }
-            Some(C::PullToTmpSpace) => return self.pull_review(),
+            Some(C::PullToTmpSpace) => return self.pull_review(false),
+            Some(C::PullAndRunScript) => return self.pull_review(true),
             Some(C::Delete) => self.remove_review_worktree(),
             // The feedback key (`f`) filters here.
             Some(C::Feedback) => {
@@ -1222,7 +1270,7 @@ impl App {
             self.notice = Some(format!("{} is already being pulled", r.head_ref_name));
             return Action::None;
         }
-        self.pull_review()
+        self.pull_review(false)
     }
 
     fn review_open_pr(&mut self) -> Action {
@@ -1233,11 +1281,17 @@ impl App {
     }
 
     /// Check the PR's branch out into Reviewing (the tmp space), or jump to
-    /// the worktree that already has it.
-    fn pull_review(&mut self) -> Action {
+    /// the worktree that already has it. With `run_script` ("pull + run
+    /// script") the repo's review script runs in the new worktree; that only
+    /// happens on a fresh pull.
+    fn pull_review(&mut self, run_script: bool) -> Action {
         let Some(r) = self.selected_review().cloned() else { return Action::None };
         if r.is_cross_repository {
             self.notice = Some(format!("#{} is from a fork — its branch isn't on origin", r.pr.number));
+            return Action::None;
+        }
+        if run_script && r.worktree_id.is_some() {
+            self.notice = Some(format!("{} is already pulled — pull + run script only runs on a fresh pull", r.head_ref_name));
             return Action::None;
         }
         if let Some(id) = r.worktree_id {
@@ -1276,16 +1330,42 @@ impl App {
             }
             None => {}
         }
+        // No review script yet: offer to add one first.
+        if run_script && !am_core::worktrees::ScriptKind::Review.exists(&repo.id) {
+            self.modal = Some(crate::modals::Modal::AddReviewScript { review: Box::new(r), repo: repo.name });
+            return Action::None;
+        }
+        if run_script {
+            return match self.start_review_pull(&r) {
+                Some((job, repo, req)) => Action::Create(job, Box::new(repo), Box::new(req)),
+                None => Action::None,
+            };
+        }
         let req = am_core::worktrees::CreateRequest {
             branch: r.head_ref_name.clone(),
             mode: am_core::worktrees::CreateMode::TrackRemote,
             tmp_space: true,
             ..Default::default()
         };
+        self.notice = Some(format!("Pulling {} into Reviewing…", r.head_ref_name));
         let job = self.jobs.start_create(repo.clone(), req.clone());
         self.rebuild_rows();
-        self.notice = Some(format!("Pulling {} into Reviewing…", r.head_ref_name));
         Action::Create(job, Box::new(repo), Box::new(req))
+    }
+
+    /// Start a "pull + run script" job for `r` (checked by `pull_review`).
+    fn start_review_pull(&mut self, r: &ReviewRequest) -> Option<(u64, Repository, am_core::worktrees::CreateRequest)> {
+        let repo = self.snapshot.repos.iter().find(|x| x.id == r.repo_id).cloned()?;
+        let req = am_core::worktrees::CreateRequest {
+            branch: r.head_ref_name.clone(),
+            mode: am_core::worktrees::CreateMode::TrackRemote,
+            tmp_space: true,
+            ..Default::default()
+        };
+        self.notice = Some(format!("Pulling {} into Reviewing, then running its review script…", r.head_ref_name));
+        let job = self.jobs.start_review_pull(repo.clone(), req.clone(), review_script_env(r));
+        self.rebuild_rows();
+        Some((job, repo, req))
     }
 
     /// `d` on a pulled PR: the usual delete dialog for its worktree, over
@@ -1319,6 +1399,17 @@ impl App {
         })
     }
 
+    /// The job running the review script in `r`'s pulled worktree (or whose
+    /// script failed). `review_pull` stops seeing the job once the worktree
+    /// is listed; this picks it up from there.
+    pub fn review_script_job(&self, r: &ReviewRequest) -> Option<&crate::jobs::Job> {
+        let id = r.worktree_id.as_deref()?;
+        self.jobs.list.iter().rev().find(|j| {
+            matches!(&j.kind, crate::jobs::JobKind::Create { worktree_id: Some(w), review_script: Some(_), .. } if w == id)
+                && matches!(j.state, crate::jobs::JobState::Running | crate::jobs::JobState::Waiting | crate::jobs::JobState::Failed(_))
+        })
+    }
+
     fn url_action(&mut self, pick: impl Fn(&WorktreeView, &Settings) -> Option<String>, missing: &str) -> Action {
         match self.selected_view().and_then(|v| pick(v, &self.settings)) {
             Some(url) => Action::OpenUrl(url),
@@ -1339,7 +1430,7 @@ impl App {
         if len == 0 {
             return;
         }
-        self.selected = (self.selected as isize).saturating_add(delta).clamp(0, len as isize - 1) as usize;
+        self.selected = crate::nav::moved(self.selected, delta, len);
         self.mark_selected_seen();
     }
 }
@@ -1402,6 +1493,23 @@ pub fn tree_order(len: usize, parent_of: impl Fn(usize) -> Option<usize>) -> Vec
     out
 }
 
+/// What the review script is told about the PR (`AM_WORKTREE_PATH` is
+/// added once the worktree exists).
+fn review_script_env(r: &ReviewRequest) -> Vec<(String, String)> {
+    [
+        ("AM_PR_NUMBER", r.pr.number.to_string()),
+        ("AM_PR_URL", r.pr.url.clone()),
+        ("AM_PR_TITLE", r.pr.title.clone()),
+        ("AM_PR_AUTHOR", r.author.clone()),
+        ("AM_PR_BRANCH", r.head_ref_name.clone()),
+        ("AM_PR_BASE", r.pr.base_ref_name.clone().unwrap_or_default()),
+        ("AM_REPO", r.repo.clone()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect()
+}
+
 fn linear_url(url: &str, s: &Settings) -> String {
     if s.linear_use_desktop_app {
         url.replacen("https://linear.app/", "linear://", 1)
@@ -1449,6 +1557,9 @@ pub enum Key {
     Tab,
     BackTab,
     Enter,
+    /// Only told apart from Enter where the terminal speaks the kitty
+    /// keyboard protocol; elsewhere it arrives as `Enter`.
+    CtrlEnter,
     Esc,
     CtrlC,
     CtrlD,

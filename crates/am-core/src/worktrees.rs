@@ -1085,7 +1085,7 @@ pub fn remove_worktree_dir(repo_path: &Path, worktree_path: &Path, force: bool) 
 }
 
 // ---------------------------------------------------------------------------
-// Startup scripts (scripts.ts)
+// Startup and review scripts (scripts.ts)
 // ---------------------------------------------------------------------------
 
 const SCRIPT_TEMPLATE: &str = "#!/bin/bash
@@ -1102,6 +1102,81 @@ const SCRIPT_TEMPLATE: &str = "#!/bin/bash
 echo \"Startup script finished.\"
 ";
 
+const REVIEW_SCRIPT_TEMPLATE: &str = "#!/bin/bash
+# Review script for pulled PRs
+# This runs after \"pull + run script\" (T or ctrl-Enter on the review page)
+# checks a PR's branch out into Reviewing. Plain pulls (t, Enter) don't run it.
+# It opens in a new terminal window, in the PR's worktree, so an agent it
+# starts shows its own UI and you can talk to it (where no window can be
+# opened it runs in am's jobs pane instead, with stdin closed).
+#
+# Environment:
+#   AM_PR_NUMBER  AM_PR_URL  AM_PR_TITLE  AM_PR_AUTHOR
+#   AM_PR_BRANCH (head)  AM_PR_BASE (base, may be empty)
+#   AM_REPO (owner/name)  AM_WORKTREE_PATH
+
+# Example: open Claude on the PR. Its hooks show the session on the
+# worktree's row, and Enter on the row resumes the conversation later.
+# claude \"Review PR #$AM_PR_NUMBER ($AM_PR_URL): compare this branch with origin/$AM_PR_BASE and list bugs and risky changes.\" \\
+#   --allowedTools \"Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh pr view:*)\"
+
+echo \"Review script finished for #$AM_PR_NUMBER.\"
+";
+
+/// Which per-repo script: the startup script offered after creating a
+/// worktree, or the review script run by "pull + run script" on the review
+/// page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptKind {
+    Startup,
+    Review,
+}
+
+impl ScriptKind {
+    /// `startup script` / `review script`, for messages.
+    pub fn label(self) -> &'static str {
+        match self {
+            ScriptKind::Startup => "startup script",
+            ScriptKind::Review => "review script",
+        }
+    }
+
+    fn file_name(self, repo_id: &str) -> String {
+        match self {
+            ScriptKind::Startup => format!("{repo_id}.sh"),
+            ScriptKind::Review => format!("{repo_id}.review.sh"),
+        }
+    }
+
+    fn template(self) -> &'static str {
+        match self {
+            ScriptKind::Startup => SCRIPT_TEMPLATE,
+            ScriptKind::Review => REVIEW_SCRIPT_TEMPLATE,
+        }
+    }
+
+    /// `<APP_DIR>/scripts/<repo-id>.sh` or `<repo-id>.review.sh` (the file
+    /// may not exist).
+    pub fn path(self, repo_id: &str) -> PathBuf {
+        script_path_in(&scripts_dir(), self, repo_id)
+    }
+
+    pub fn exists(self, repo_id: &str) -> bool {
+        self.path(repo_id).exists()
+    }
+
+    /// Write the commented template if no script exists yet (an existing
+    /// script is left alone). Returns the path.
+    pub fn create(self, repo_id: &str) -> std::io::Result<PathBuf> {
+        create_script_in(&scripts_dir(), self, repo_id)
+    }
+
+    /// `Ok(false)` when there was none.
+    pub fn remove(self, repo_id: &str) -> std::io::Result<bool> {
+        remove_script_in(&scripts_dir(), self, repo_id)
+    }
+}
+
 /// `<APP_DIR>/scripts`.
 pub fn scripts_dir() -> PathBuf {
     crate::paths::app_dir().join("scripts")
@@ -1109,12 +1184,12 @@ pub fn scripts_dir() -> PathBuf {
 
 /// `<APP_DIR>/scripts/<repo-id>.sh` (the file may not exist).
 pub fn script_path(repo_id: &str) -> PathBuf {
-    script_path_in(&scripts_dir(), repo_id)
+    ScriptKind::Startup.path(repo_id)
 }
 
 /// `hasStartupScript`.
 pub fn has_script(repo_id: &str) -> bool {
-    script_path(repo_id).exists()
+    ScriptKind::Startup.exists(repo_id)
 }
 
 /// The script's contents, or `None` when the repo has none.
@@ -1124,50 +1199,50 @@ pub fn read_script(repo_id: &str) -> Option<String> {
 
 /// Write (create or replace) the script, mode 0755. Returns its path.
 pub fn write_script(repo_id: &str, content: &str) -> std::io::Result<PathBuf> {
-    write_script_in(&scripts_dir(), repo_id, content)
+    write_script_in(&scripts_dir(), ScriptKind::Startup, repo_id, content)
 }
 
 /// `createStartupScript`: write the commented template if no script exists
 /// yet (an existing script is left alone). Returns the path.
 pub fn create_script(repo_id: &str) -> std::io::Result<PathBuf> {
-    create_script_in(&scripts_dir(), repo_id)
+    ScriptKind::Startup.create(repo_id)
 }
 
 /// `removeStartupScript`. `Ok(false)` when there was none.
 pub fn remove_script(repo_id: &str) -> std::io::Result<bool> {
-    remove_script_in(&scripts_dir(), repo_id)
+    ScriptKind::Startup.remove(repo_id)
 }
 
-fn script_path_in(dir: &Path, repo_id: &str) -> PathBuf {
-    dir.join(format!("{repo_id}.sh"))
+fn script_path_in(dir: &Path, kind: ScriptKind, repo_id: &str) -> PathBuf {
+    dir.join(kind.file_name(repo_id))
 }
 
-fn write_script_in(dir: &Path, repo_id: &str, content: &str) -> std::io::Result<PathBuf> {
+fn write_script_in(dir: &Path, kind: ScriptKind, repo_id: &str, content: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let path = script_path_in(dir, repo_id);
+    let path = script_path_in(dir, kind, repo_id);
     std::fs::write(&path, content)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
     }
-    info!("scripts", "Wrote startup script: {}", path.display());
+    info!("scripts", "Wrote {}: {}", kind.label(), path.display());
     Ok(path)
 }
 
-fn create_script_in(dir: &Path, repo_id: &str) -> std::io::Result<PathBuf> {
-    let path = script_path_in(dir, repo_id);
+fn create_script_in(dir: &Path, kind: ScriptKind, repo_id: &str) -> std::io::Result<PathBuf> {
+    let path = script_path_in(dir, kind, repo_id);
     if path.exists() {
         return Ok(path);
     }
-    write_script_in(dir, repo_id, SCRIPT_TEMPLATE)
+    write_script_in(dir, kind, repo_id, kind.template())
 }
 
-fn remove_script_in(dir: &Path, repo_id: &str) -> std::io::Result<bool> {
-    let path = script_path_in(dir, repo_id);
+fn remove_script_in(dir: &Path, kind: ScriptKind, repo_id: &str) -> std::io::Result<bool> {
+    let path = script_path_in(dir, kind, repo_id);
     match std::fs::remove_file(&path) {
         Ok(()) => {
-            info!("scripts", "Removed startup script: {}", path.display());
+            info!("scripts", "Removed {}: {}", kind.label(), path.display());
             Ok(true)
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -1813,22 +1888,41 @@ mod tests {
     fn scripts_round_trip() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("scripts");
-        assert_eq!(script_path_in(&dir, "abc"), dir.join("abc.sh"));
-        assert!(!remove_script_in(&dir, "abc").unwrap());
-        let p = create_script_in(&dir, "abc").unwrap();
+        let k = ScriptKind::Startup;
+        assert_eq!(script_path_in(&dir, k, "abc"), dir.join("abc.sh"));
+        assert!(!remove_script_in(&dir, k, "abc").unwrap());
+        let p = create_script_in(&dir, k, "abc").unwrap();
         assert!(std::fs::read_to_string(&p).unwrap().starts_with("#!/bin/bash\n# Startup script"));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o755);
         }
-        write_script_in(&dir, "abc", "echo hi\n").unwrap();
+        write_script_in(&dir, k, "abc", "echo hi\n").unwrap();
         // create never overwrites an existing script.
-        create_script_in(&dir, "abc").unwrap();
+        create_script_in(&dir, k, "abc").unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "echo hi\n");
-        assert!(remove_script_in(&dir, "abc").unwrap());
+        assert!(remove_script_in(&dir, k, "abc").unwrap());
         assert!(!p.exists());
         assert!(script_path("r1").ends_with("scripts/r1.sh"));
+    }
+
+    #[test]
+    fn review_scripts_sit_beside_startup_scripts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("scripts");
+        let (s, r) = (ScriptKind::Startup, ScriptKind::Review);
+        assert_eq!(script_path_in(&dir, r, "abc"), dir.join("abc.review.sh"));
+        let p = create_script_in(&dir, r, "abc").unwrap();
+        let body = std::fs::read_to_string(&p).unwrap();
+        assert!(body.starts_with("#!/bin/bash\n# Review script"));
+        assert!(body.contains("AM_PR_NUMBER") && body.contains("AM_WORKTREE_PATH"));
+        // Independent of the startup script.
+        assert!(!script_path_in(&dir, s, "abc").exists());
+        create_script_in(&dir, s, "abc").unwrap();
+        assert!(remove_script_in(&dir, r, "abc").unwrap());
+        assert!(script_path_in(&dir, s, "abc").exists());
+        assert!(ScriptKind::Review.path("r1").ends_with("scripts/r1.review.sh"));
     }
 
     #[test]

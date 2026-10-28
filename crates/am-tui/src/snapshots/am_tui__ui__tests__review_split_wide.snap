@@ -4,11 +4,11 @@ expression: wide
 ---
 ╭─Worktrees ────────────────────────────────── 3 to review ╮╭─Review requests ─────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────││agent-monitor ────────────────────────────────────────────│
-│▏◑ feature/refac… ◆2 ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││▌Batch the PR…  @alice ✓ pulled you           #51✓ …   0s │
+│▏◑ feature/refac… ◆2 ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││▌◑ Batch the …  @alice ✓ pulled you           #51✓ …   0s │
 │ ◐ fix/offline-cache                        4m ▓░░░░ 185k ││ Typo in README  @outsider fork @docs         #48✓ …   0s │
 │                                                          ││gridsight ────────────────────────────────────────────────│
 │gridsight ────────────────────────────────────────────────││ Feeder load forecast …  @alice you +1 ENG-77 #902✗ …  0s │
 │ · main                              ↑2 ±3  4m            ││                                                          │
 │                                                          ││                                                          │
 ╰────────────────────────────────────────────────── 1 of 3 ╯╰ you + your teams ──────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  ⇥ list  esc close
+ ⏎ open  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  ⇥ list  esc close

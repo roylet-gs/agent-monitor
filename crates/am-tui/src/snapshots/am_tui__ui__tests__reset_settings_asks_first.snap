@@ -4,24 +4,24 @@ expression: "render(&app, 100, 24)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
-│▌◑ feat│   Ticket refresh (ms)           180000                                           │░ 121k │
-│ ◐ fix/│   Refresh on r                  on                                               │░ 185k │
-│       │   Open in desktop app           off                                              │       │
-│gridsig│   Nickname from ticket          on                                               │───────│
-│ · main│                                                                                  │       │
-│       │ Limits                                                                           │       │
-│       │   Li╭─Reset settings ──────────────────────────────────────────────────────╮     │       │
-│       │   Ma│ Put every setting back to its default, then run setup again?         │     │       │
-│       │     │ Repositories, worktrees, history, themes, startup scripts and agent  │     │       │
-│       │ Logg│ hooks are kept.                                                      │     │       │
-│       │   Lo│                                                                      │     │       │
-│       │   Ro│         y  Reset                                                     │     │       │
-│       │   Vi│   any key  Cancel                                                    │     │       │
-│       │     ╰──────────────────────────────────────────────────────────────────────╯     │       │
+│▌◑ feat│   API key                       not set                                          │░ 121k │
+│ ◐ fix/│   Ticket refresh (ms)           180000                                           │░ 185k │
+│       │   Refresh on r                  on                                               │       │
+│gridsig│   Open in desktop app           off                                              │───────│
+│ · main│   Nickname from ticket          on                                               │       │
+│       │                                                                                  │       │
+│       │ Limi╭─Reset settings ──────────────────────────────────────────────────────╮     │       │
+│       │   Li│ Put every setting back to its default, then run setup again?         │     │       │
+│       │   Ma│ Repositories, worktrees, history, themes, startup scripts and agent  │     │       │
+│       │     │ hooks are kept.                                                      │     │       │
+│       │ Logg│                                                                      │     │       │
+│       │   Lo│         y  Reset                                                     │     │       │
+│       │   Ro│   any key  Cancel                                                    │     │       │
+│       │   Vi╰──────────────────────────────────────────────────────────────────────╯     │       │
+│       │                                                                                  │       │
 │       │ Setup                                                                            │       │
 │       │   Run setup again…              ⏎ open                                           │       │
 │       │▌  Reset settings…               ⏎ reset                                          │       │
-│       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │ Defaults for every setting, then setup (repos, themes, scripts, hooks kept)      │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯

@@ -7,7 +7,7 @@ expression: screen
 │▌Typo in README  @outsider (agent-monitor) fork                                        @docs         #48✓ review   0s │
 │Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │ Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
-│ Batch the PR que╭─Review filters ──────────────────────────────────────────────────────────────────╮#51✓ review   0s │
+│ ◑ Batch the PR q╭─Review filters ──────────────────────────────────────────────────────────────────╮#51✓ review   0s │
 │                 │ Outside — ⏎ change · ←→ adjust · esc back                                        │                 │
 │                 │                                                                                  │                 │
 │                 │   Name                  Outside                                                  │                 │
@@ -31,4 +31,4 @@ expression: screen
 │                 │ ⇥ olga                                                                           │                 │
 │                 ╰───────────────────────────────────────── ⇥ complete  ↑↓ pick  ⏎ save  esc cancel ╯                 │
 ╰ you + your teams · 1 group ────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  esc back
+ ⏎ open PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc back

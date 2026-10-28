@@ -174,10 +174,7 @@ impl ThemeBuilder {
                 self.error = Some("Unsaved changes — esc again to discard, w to save".into());
             }
             Key::Esc | Key::Char('q') => return BuilderOutcome::Close,
-            Key::Down | Key::Char('j') => self.cursor = (self.cursor + 1).min(Token::ALL.len() - 1),
-            Key::Up | Key::Char('k') => self.cursor = self.cursor.saturating_sub(1),
-            Key::Home => self.cursor = 0,
-            Key::End | Key::Char('G') => self.cursor = Token::ALL.len() - 1,
+            k if let Some(to) = crate::nav::step(k, true, self.cursor, Token::ALL.len()) => self.cursor = to,
             Key::Right | Key::Char('l') => self.nudge(1),
             Key::Left | Key::Char('h') => self.nudge(-1),
             Key::Enter | Key::Char(' ') => {

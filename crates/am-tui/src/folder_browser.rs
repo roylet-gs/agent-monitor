@@ -36,6 +36,8 @@ pub struct FolderBrowser {
     /// Path being added (the add runs in the background).
     pub adding: Option<String>,
     tracked: Vec<String>,
+    /// First visible row (`ui::scroll_start`).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 /// Where the browser opens: next to the most recently used repo, else the
@@ -59,7 +61,7 @@ fn expand(path: &str) -> PathBuf {
 impl FolderBrowser {
     /// `tracked`: paths of the repositories already tracked.
     pub fn open(dir: PathBuf, tracked: Vec<String>) -> FolderBrowser {
-        let mut b = FolderBrowser { dir: PathBuf::new(), entries: Vec::new(), filter: String::new(), cursor: 0, error: None, adding: None, tracked };
+        let mut b = FolderBrowser { dir: PathBuf::new(), entries: Vec::new(), filter: String::new(), cursor: 0, error: None, adding: None, tracked, scroll: Default::default() };
         b.go(dir);
         b
     }
@@ -143,10 +145,8 @@ impl FolderBrowser {
         let selected = rows.get(self.cursor).cloned();
         match key {
             Key::Esc => return BrowserOutcome::Cancel,
-            Key::Up => self.cursor = self.cursor.saturating_sub(1),
-            Key::Down => self.cursor = (self.cursor + 1).min(rows.len().saturating_sub(1)),
-            Key::PageUp => self.cursor = self.cursor.saturating_sub(10),
-            Key::PageDown => self.cursor = (self.cursor + 10).min(rows.len().saturating_sub(1)),
+            // Letters filter, so only the non-letter movement keys.
+            k if let Some(to) = crate::nav::step(k, false, self.cursor, rows.len()) => self.cursor = to,
             Key::Left => self.up(),
             Key::Backspace if self.filter.is_empty() => self.up(),
             Key::Backspace => {
@@ -191,7 +191,7 @@ impl FolderBrowser {
     /// A browser over given entries, without reading the disk (UI snapshots).
     #[cfg(test)]
     pub fn fixture(dir: PathBuf, entries: Vec<Entry>) -> FolderBrowser {
-        FolderBrowser { dir, entries, filter: String::new(), cursor: 0, error: None, adding: None, tracked: vec![] }
+        FolderBrowser { dir, entries, filter: String::new(), cursor: 0, error: None, adding: None, tracked: vec![], scroll: Default::default() }
     }
 
     /// The add failed: show why and take keys again.

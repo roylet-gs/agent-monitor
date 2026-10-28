@@ -10,7 +10,7 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-const REPOS_HELP = "Add or stop tracking repositories, edit their startup scripts";
+const REPOS_HELP = "Add or stop tracking repositories, edit their startup and review scripts";
 const HIDE_MAIN_HELP = "Hide the main/master checkout from the list";
 const HIDE_MAIN = /Hide main branch\s+(on|off)/;
 const STANDALONE = /● \/home\/user\/late-repo/;
