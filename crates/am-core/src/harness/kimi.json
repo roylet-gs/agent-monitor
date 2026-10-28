@@ -1,0 +1,27 @@
+{
+  "id": "kimi",
+  "name": "Kimi Code",
+  "shortName": "Kimi",
+  "program": "kimi",
+  "configDir": "~/.kimi-code",
+  "hooks": {
+    "settingsPath": "~/.kimi-code/config.toml",
+    "timeoutMs": 5000
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "PostToolUseFailure": "PostToolUse",
+    "PermissionRequest": "PermissionRequest",
+    "PermissionResult": "PostToolUse",
+    "Stop": "Stop",
+    "StopFailure": "StopFailure",
+    "Interrupt": "StopFailure",
+    "SessionEnd": "SessionEnd"
+  },
+  "resume": { "session": ["--session", "{id}"], "continue": ["--continue"] },
+  "process": { "names": ["kimi"], "argvContains": ["/@moonshot-ai/kimi-code/"] },
+  "notes": "Kimi gives no subagent ids, so it never shows delegating"
+}

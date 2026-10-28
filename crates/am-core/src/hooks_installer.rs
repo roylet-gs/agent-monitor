@@ -5,6 +5,11 @@
 //! come from the providers in `crate::harness`; the rules are shared and ported from the TS
 //! `src/lib/hooks-installer.ts`: replace our entries, keep everyone else's, so
 //! the TS and Rust installers can run against each other's output.
+//!
+//! A CLI whose hook config isn't a JSON file picks another [`HookInstall`]
+//! style: a [`TextBlock`] am owns inside a TOML/YAML file, or an
+//! [`OwnedFile`] (a generated plugin) am owns whole. See "Hook install
+//! styles" in `docs/agent-providers.md`.
 
 use std::path::{Path, PathBuf};
 
@@ -122,8 +127,70 @@ fn native_program(command: &str) -> Option<PathBuf> {
 /// The missing binaries `agent`'s installed hooks point at (deleted worktree,
 /// upgraded-away install). Every hook then fails with "No such file or directory".
 pub fn dangling_hook_binaries(agent: HarnessKind) -> Vec<PathBuf> {
-    let p = agent.provider();
-    dangling_in(&read_settings(&p.settings_path()).unwrap_or_default(), p.hooks_key())
+    dangling_provider(agent.provider())
+}
+
+fn dangling_provider(p: &dyn Harness) -> Vec<PathBuf> {
+    match p.hook_install() {
+        HookInstall::Json => dangling_in(&read_settings(&p.settings_path()).unwrap_or_default(), p.hooks_key()),
+        HookInstall::TextBlock(tb) => {
+            let text = read_text(&p.settings_path()).unwrap_or_default();
+            match find_block(&text, &block_begin(tb.comment, p.id()), &block_end(tb.comment, p.id())) {
+                // Entries that lost their marker lines count too.
+                _ if has_unmarked_hooks(&text, tb.comment, p.id()) => missing_programs(&text),
+                Ok(Some((s, e))) => missing_programs(&text[s..e]),
+                _ => Vec::new(),
+            }
+        }
+        HookInstall::OwnedFile(_) => match read_text(&p.settings_path()) {
+            Ok(text) if text.contains(OWNED_FILE_MARKER) => missing_programs(&text),
+            _ => Vec::new(),
+        },
+    }
+}
+
+/// The missing binaries among the hook programs written in a block of text
+/// (a TOML/YAML block or a generated plugin file).
+fn missing_programs(text: &str) -> Vec<PathBuf> {
+    let mut missing: Vec<PathBuf> = hook_programs_in_text(text).into_iter().filter(|p| !is_executable(p)).collect();
+    missing.sort();
+    missing.dedup();
+    missing
+}
+
+/// Absolute program paths in text am generated: a quoted (or escaped-quoted,
+/// `\"/abs/am-hook\"` inside a TOML/YAML string) absolute path that is named
+/// like an am binary or is followed by `hook-event`, also inside the same
+/// string (`"/abs/am-hook hook-event …"`) or as the next element of an argv
+/// array (`["/abs/my-hook", "hook-event", …]`, a plugin's
+/// [`HookContext::argv`] as JSON, even split across lines). Paths with spaces
+/// work when the path is quoted on its own.
+pub fn hook_programs_in_text(text: &str) -> Vec<PathBuf> {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let mut found = Vec::new();
+    for (i, _) in text.match_indices(['"', '\'']) {
+        let rest = &text[i + 1..];
+        if !rest.starts_with('/') {
+            continue;
+        }
+        let mut end = rest.find(['"', '\'', '\\', '\n']).unwrap_or(rest.len());
+        if let Some(at) = rest[..end].find(" hook-event") {
+            end = at;
+        }
+        let (path, after) = rest.split_at(end);
+        let after = after.trim_start_matches(['"', '\'', '\\']).trim_start_matches([' ', '\t']);
+        // The next element of an argv array: `"/abs/x", "hook-event"`.
+        let after = match after.strip_prefix(',') {
+            Some(next) => next.trim_start_matches([' ', '\t', '\r', '\n']).trim_start_matches(['"', '\'']),
+            None => after,
+        };
+        let named = matches!(path.rsplit('/').next(), Some("am-hook" | "am-rs" | "am"));
+        let runs_hook = after.strip_prefix("hook-event").is_some_and(|r| !r.starts_with(word));
+        if named || runs_hook {
+            found.push(PathBuf::from(path));
+        }
+    }
+    found
 }
 
 fn dangling_in(settings: &Map<String, Value>, key: &str) -> Vec<PathBuf> {
@@ -258,10 +325,17 @@ pub fn install_hooks(agent: HarnessKind) -> std::io::Result<Option<PathBuf>> {
 }
 
 fn install_provider(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> {
+    let native = find_native_hook_binary();
+    match provider.hook_install() {
+        HookInstall::Json => install_json(provider, native),
+        style => install_text(provider, &style, native),
+    }
+}
+
+fn install_json(provider: &dyn Harness, native: Option<PathBuf>) -> std::io::Result<Option<PathBuf>> {
     let path = provider.settings_path();
     let mut settings = read_settings(&path)?;
     let mut hooks = hooks_of(&settings, provider.hooks_key());
-    let native = find_native_hook_binary();
     // Replace (rather than skip) existing am entries so re-running install
     // switches between the TS command and the native binary.
     for event in provider.hook_events() {
@@ -276,6 +350,7 @@ fn install_provider(provider: &dyn Harness) -> std::io::Result<Option<PathBuf>> 
     for (k, v) in provider.hook_file_defaults() {
         settings.entry(k).or_insert(v);
     }
+    provider.hook_companion(Some(&HookContext::new(provider, native.as_deref())))?;
     write_settings(&path, &settings)?;
     info!(
         "hooks",
@@ -292,6 +367,16 @@ pub fn uninstall_hooks(agent: HarnessKind) -> std::io::Result<()> {
 }
 
 fn uninstall_provider(provider: &dyn Harness) -> std::io::Result<()> {
+    match provider.hook_install() {
+        HookInstall::Json => uninstall_json(provider)?,
+        HookInstall::TextBlock(tb) => uninstall_text_block(provider, &tb)?,
+        HookInstall::OwnedFile(of) => uninstall_owned_file(provider, &of)?,
+    }
+    // Once the hooks are gone, also when there were none to remove.
+    provider.hook_companion(None)
+}
+
+fn uninstall_json(provider: &dyn Harness) -> std::io::Result<()> {
     let path = provider.settings_path();
     if !path.exists() {
         return Ok(());
@@ -318,8 +403,483 @@ pub fn is_hooks_installed(agent: HarnessKind) -> bool {
 }
 
 fn is_installed_provider(provider: &dyn Harness) -> bool {
-    let hooks = hooks_of(&read_settings(&provider.settings_path()).unwrap_or_default(), provider.hooks_key());
-    provider.hook_events().iter().any(|e| hooks.get(e.as_str()).and_then(Value::as_array).is_some_and(|ms| ms.iter().any(matcher_is_ours)))
+    match provider.hook_install() {
+        HookInstall::Json => {
+            let hooks = hooks_of(&read_settings(&provider.settings_path()).unwrap_or_default(), provider.hooks_key());
+            provider.hook_events().iter().any(|e| hooks.get(e.as_str()).and_then(Value::as_array).is_some_and(|ms| ms.iter().any(matcher_is_ours)))
+        }
+        HookInstall::TextBlock(tb) => {
+            let text = read_text(&provider.settings_path()).unwrap_or_default();
+            find_block(&text, &block_begin(tb.comment, provider.id()), &block_end(tb.comment, provider.id())).is_ok_and(|b| b.is_some())
+                || has_am_hook_command(&text, provider.id())
+        }
+        HookInstall::OwnedFile(_) => read_text(&provider.settings_path()).is_ok_and(|t| t.contains(OWNED_FILE_MARKER)),
+    }
+}
+
+/// Whether am can read (and so safely edit) `agent`'s hook config: a JSON
+/// file that parses, a text file whose am block (if any) is complete, a
+/// plugin file that is am's (or absent). `am doctor` shows the error.
+pub fn check_hook_config(agent: HarnessKind) -> std::io::Result<()> {
+    check_provider(agent.provider())
+}
+
+fn check_provider(p: &dyn Harness) -> std::io::Result<()> {
+    let path = p.settings_path();
+    match p.hook_install() {
+        HookInstall::Json => read_settings(&path).map(drop),
+        // Placing the block also catches a file the harness can't put it in
+        // (`Harness::place_hook_block` refusing).
+        HookInstall::TextBlock(tb) => place_text_block(p, &tb, &read_text(&path)?, &HookContext::new(p, None)).map(drop),
+        HookInstall::OwnedFile(of) => {
+            if path.exists() && !read_text(&path)?.contains(OWNED_FILE_MARKER) {
+                return Err(not_ours(&path));
+            }
+            match &of.register {
+                Some(r) => read_registration(r).map(drop),
+                None => Ok(()),
+            }
+        }
+    }
+}
+
+// --- Text-block and owned-file styles ----------------------------------------
+
+/// How a harness's hooks get into its CLI's config ([`Harness::hook_install`]).
+/// The file is always [`Harness::settings_path`].
+#[derive(Debug, Clone)]
+pub enum HookInstall {
+    /// Merge entries into a JSON settings file under
+    /// [`Harness::hooks_key`], one [`Harness::hook_entry`] per event,
+    /// replacing only am's entries. Every CLI whose config is JSON.
+    Json,
+    /// A block am owns inside a text config file (TOML, YAML…), between
+    /// `<comment> agent-monitor hooks <id> begin` / `… end` lines.
+    TextBlock(TextBlock),
+    /// A whole file am owns, e.g. a generated JS/TS plugin that spawns
+    /// am-hook. It must contain [`OWNED_FILE_MARKER`].
+    OwnedFile(OwnedFile),
+}
+
+impl HookInstall {
+    /// For log lines: `json`, `text block`, `owned file`.
+    pub fn style(&self) -> &'static str {
+        match self {
+            HookInstall::Json => "json",
+            HookInstall::TextBlock(_) => "text block",
+            HookInstall::OwnedFile(_) => "owned file",
+        }
+    }
+}
+
+/// [`HookInstall::TextBlock`]: am's block in a TOML/YAML file.
+#[derive(Debug, Clone)]
+pub struct TextBlock {
+    /// The format's line-comment prefix (`#` for TOML and YAML).
+    pub comment: &'static str,
+    /// The block's body, between the marker lines: the hooks in the file's
+    /// own syntax. Quote values with [`toml_string`] / [`yaml_string`].
+    /// Where the block goes is [`Harness::place_hook_block`] (default: where
+    /// it already is, else appended).
+    pub render: fn(&HookContext) -> String,
+}
+
+/// [`Harness::place_hook_block`] as a function, for
+/// `Embedded::with_block_placement`: `(text without am's block, am's whole
+/// block, hooks) → Some(new file text) | None (default placement)`.
+pub type PlaceBlock = fn(text: &str, block: &str, ctx: &HookContext) -> std::io::Result<Option<String>>;
+
+/// [`Harness::hook_companion`] as a function, for
+/// `Embedded::with_hook_companion`: `Some(hooks)` on install, `None` on
+/// uninstall.
+pub type HookCompanion = fn(Option<&HookContext>) -> std::io::Result<()>;
+
+/// [`HookInstall::OwnedFile`]: a file am writes whole and deletes on
+/// uninstall (only while it still holds [`OWNED_FILE_MARKER`]).
+#[derive(Debug, Clone)]
+pub struct OwnedFile {
+    /// The file's full text; must contain [`OWNED_FILE_MARKER`] (in a comment).
+    pub render: fn(&HookContext) -> String,
+    /// A JSON registration the CLI also needs (OpenCode's `"plugin": [...]`).
+    pub register: Option<JsonListEntry>,
+}
+
+/// `value` kept in the JSON array at top-level `key` of the JSON file `path`:
+/// added on install when missing, removed on uninstall (the key goes with
+/// its last value). The file is read and written like a JSON hook file
+/// ([`read_settings`]), so one am can't parse is left alone.
+#[derive(Debug, Clone)]
+pub struct JsonListEntry {
+    pub path: PathBuf,
+    pub key: String,
+    pub value: Value,
+}
+
+/// Marker an [`OwnedFile`] must carry; am only overwrites or deletes a file
+/// that holds it.
+pub const OWNED_FILE_MARKER: &str = "agent-monitor-hook-plugin v1";
+
+/// One hook as the text styles render it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookCommand {
+    /// The CLI's native event name.
+    pub event: String,
+    /// The full shell command ([`Harness::hook_command`]): `"/abs/am-hook"
+    /// hook-event --agent <id> --worktree "$VAR"|"" --event <event>`.
+    pub command: String,
+    pub timeout_ms: u64,
+}
+
+impl HookCommand {
+    /// The timeout in whole seconds, rounded up.
+    pub fn timeout_secs(&self) -> u64 {
+        self.timeout_ms.div_ceil(1000)
+    }
+}
+
+/// What a [`TextBlock`] or [`OwnedFile`] render function gets.
+#[derive(Debug, Clone)]
+pub struct HookContext {
+    pub agent_id: String,
+    /// The program hooks run: the native `am-hook`'s absolute path, or `am`
+    /// (the CLI fallback, which also reads the payload on stdin).
+    pub program: String,
+    /// Whether [`program`](HookContext::program) is the native binary.
+    pub native: bool,
+    /// The shell form of the program part: `"/abs/am-hook" hook-event` or
+    /// `cat | am hook-event`.
+    pub invocation: String,
+    /// One per [`Harness::hook_events`], in that order.
+    pub hooks: Vec<HookCommand>,
+}
+
+impl HookContext {
+    pub fn new(provider: &dyn Harness, native: Option<&Path>) -> HookContext {
+        let invocation = invocation(native);
+        let timeout_ms = provider.hook_timeout_ms();
+        HookContext {
+            agent_id: provider.id().to_owned(),
+            program: native.map(|p| p.display().to_string()).unwrap_or_else(|| "am".into()),
+            native: native.is_some(),
+            hooks: provider
+                .hook_events()
+                .into_iter()
+                .map(|event| HookCommand { command: provider.hook_command(&event, &invocation), event, timeout_ms })
+                .collect(),
+            invocation,
+        }
+    }
+
+    /// argv that runs one hook without a shell (a plugin's `spawn`), the
+    /// payload going to its stdin: `[program, "hook-event", "--agent", id,
+    /// "--worktree", worktree, "--event", event]`. An empty `worktree`
+    /// makes am-hook use the payload's `cwd`.
+    pub fn argv(&self, event: &str, worktree: &str) -> Vec<String> {
+        [self.program.as_str(), "hook-event", "--agent", &self.agent_id, "--worktree", worktree, "--event", event]
+            .map(str::to_owned)
+            .to_vec()
+    }
+}
+
+/// The line that opens am's block in a text config file.
+pub fn block_begin(comment: &str, id: &str) -> String {
+    format!("{comment} agent-monitor hooks {id} begin")
+}
+
+/// The line that closes am's block.
+pub fn block_end(comment: &str, id: &str) -> String {
+    format!("{comment} agent-monitor hooks {id} end")
+}
+
+/// A TOML basic string (`"…"`) holding `s`, e.g. a hook command with its own
+/// double quotes.
+pub fn toml_string(s: &str) -> String {
+    double_quoted(s)
+}
+
+/// A YAML double-quoted scalar holding `s` (safe for `#`, `:`, quotes…).
+pub fn yaml_string(s: &str) -> String {
+    double_quoted(s)
+}
+
+/// A JS/TS string literal holding `s` (a JSON string, which JS accepts).
+pub fn js_string(s: &str) -> String {
+    Value::from(s).to_string()
+}
+
+/// `"…"` with the escapes TOML basic strings and YAML double-quoted scalars
+/// share: `\\`, `\"`, `\t`, `\n`, `\r`, and `\uXXXX` for other controls.
+fn double_quoted(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A text file's contents; missing = empty.
+fn read_text(path: &Path) -> std::io::Result<String> {
+    match std::fs::read_to_string(path) {
+        Ok(t) => Ok(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Written in place, like [`write_settings`], so a symlink stays one.
+fn write_text(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, text)
+}
+
+fn not_ours(path: &Path) -> std::io::Error {
+    std::io::Error::other(format!("{} exists but wasn't written by am (no `{OWNED_FILE_MARKER}` marker); not touching it", path.display()))
+}
+
+/// Byte range of am's block (from the start of the `begin` line to just
+/// after the `end` line). A `begin` with no `end` after it, or a second
+/// `begin` (nested, or a second block, e.g. from a dotfile merge), is an
+/// error, so a hand-damaged block is never half-replaced and uninstall never
+/// leaves a live copy behind.
+fn find_block(text: &str, begin: &str, end: &str) -> std::io::Result<Option<(usize, usize)>> {
+    let mut at = 0;
+    let mut start = None;
+    let mut found = None;
+    for line in text.split_inclusive('\n') {
+        let next = at + line.len();
+        let bare = line.trim();
+        if bare == begin && (start.is_some() || found.is_some()) {
+            return Err(std::io::Error::other(format!("`{begin}` appears more than once; keep one am block (or remove them all), then retry")));
+        }
+        match start {
+            None if bare == begin => start = Some(at),
+            Some(s) if bare == end => {
+                found = Some((s, next));
+                start = None;
+            }
+            _ => {}
+        }
+        at = next;
+    }
+    match start {
+        Some(_) => Err(std::io::Error::other(format!("`{begin}` has no matching `{end}` line; fix or remove am's block, then retry"))),
+        None => Ok(found),
+    }
+}
+
+/// `text` with am's block set to `body`: replaced where it is (at the old
+/// `begin` line's indentation, every block line indented by it, so a block
+/// inside a mapping stays there), else appended after a blank line.
+/// Everything outside the block is kept.
+pub fn upsert_block(text: &str, comment: &str, id: &str, body: &str) -> std::io::Result<String> {
+    let block = block_text(comment, id, body);
+    Ok(match find_block(text, &block_begin(comment, id), &block_end(comment, id))? {
+        Some((s, e)) => {
+            let line = &text[s..e];
+            let indent = &line[..line.len() - line.trim_start_matches([' ', '\t']).len()];
+            format!("{}{}{}", &text[..s], indent_lines(&block, indent), &text[e..])
+        }
+        None => append_block(text, &block),
+    })
+}
+
+/// `text` with `indent` before every non-blank line.
+fn indent_lines(text: &str, indent: &str) -> String {
+    if indent.is_empty() {
+        return text.to_owned();
+    }
+    text.split_inclusive('\n').map(|l| if l.trim().is_empty() { l.to_owned() } else { format!("{indent}{l}") }).collect()
+}
+
+/// am's whole block: the [`block_begin`] line, `body`, the [`block_end`]
+/// line, ending in a newline.
+pub fn block_text(comment: &str, id: &str, body: &str) -> String {
+    let nl = if body.is_empty() || body.ends_with('\n') { "" } else { "\n" };
+    format!("{}\n{body}{nl}{}\n", block_begin(comment, id), block_end(comment, id))
+}
+
+/// `text` with `block` appended after a blank line (just `block` when
+/// `text` is empty): the default placement.
+pub fn append_block(text: &str, block: &str) -> String {
+    if text.is_empty() {
+        return block.to_owned();
+    }
+    format!("{text}{}\n{block}", if text.ends_with('\n') { "" } else { "\n" })
+}
+
+/// `text` with am's block set to what `tb` renders for `ctx`: where the
+/// harness puts it ([`Harness::place_hook_block`], given the text without
+/// the old block), else replaced in place or appended ([`upsert_block`]).
+/// A placement that loses the marker lines is refused, so the hooks can
+/// always be found and removed again.
+fn place_text_block(provider: &dyn Harness, tb: &TextBlock, text: &str, ctx: &HookContext) -> std::io::Result<String> {
+    let id = provider.id();
+    let body = (tb.render)(ctx);
+    let without = remove_block(text, tb.comment, id)?;
+    if has_am_hook_command(without.as_deref().unwrap_or(text), id) {
+        return Err(unmarked(provider, ", then install again"));
+    }
+    let Some(placed) = provider.place_hook_block(without.as_deref().unwrap_or(text), &block_text(tb.comment, id, &body), ctx)? else {
+        return upsert_block(text, tb.comment, id, &body);
+    };
+    let (begin, end) = (block_begin(tb.comment, id), block_end(tb.comment, id));
+    if find_block(&placed, &begin, &end)?.is_none() {
+        return Err(std::io::Error::other(format!("{id}: the placed hook block lacks its `{begin}` / `{end}` lines")));
+    }
+    Ok(placed)
+}
+
+/// Whether `text` holds an am hook command for agent `id` (`… hook-event
+/// --agent <id> …`, also the `cat | am hook-event` form). Words are compared
+/// with quotes and backslashes stripped, so a command a YAML dumper folded
+/// across lines (`\` line continuations included) still counts.
+pub fn has_am_hook_command(text: &str, id: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().map(|w| w.trim_matches(['"', '\'', '\\', ',', '[', ']'])).filter(|w| !w.is_empty()).collect();
+    words.windows(3).any(|w| w == ["hook-event", "--agent", id])
+}
+
+/// Whether `text` has am hook commands for `id` outside am's marked block:
+/// its `begin`/`end` lines were deleted or moved, e.g. by the harness
+/// rewriting its own config file.
+fn has_unmarked_hooks(text: &str, comment: &str, id: &str) -> bool {
+    match remove_block(text, comment, id) {
+        Ok(without) => has_am_hook_command(without.as_deref().unwrap_or(text), id),
+        Err(_) => has_am_hook_command(text, id),
+    }
+}
+
+/// `then`: what to do after removing them (`", then install again"`).
+fn unmarked(provider: &dyn Harness, then: &str) -> std::io::Error {
+    let id = provider.id();
+    std::io::Error::other(format!(
+        "{} has am hook commands (`hook-event --agent {id}`) outside am's `agent-monitor hooks {id}` marker lines (perhaps {} rewrote the file); remove those entries by hand{then}",
+        tilde(&provider.settings_path()),
+        provider.name()
+    ))
+}
+
+/// `text` without am's block (`None` when there is none). A block at the end
+/// takes the blank line [`upsert_block`] put before it.
+pub fn remove_block(text: &str, comment: &str, id: &str) -> std::io::Result<Option<String>> {
+    let Some((s, e)) = find_block(text, &block_begin(comment, id), &block_end(comment, id))? else { return Ok(None) };
+    let (mut before, after) = (&text[..s], &text[e..]);
+    if after.is_empty() && before.ends_with("\n\n") {
+        before = &before[..before.len() - 1];
+    }
+    Ok(Some(format!("{before}{after}")))
+}
+
+fn install_text(provider: &dyn Harness, style: &HookInstall, native: Option<PathBuf>) -> std::io::Result<Option<PathBuf>> {
+    let path = provider.settings_path();
+    let ctx = HookContext::new(provider, native.as_deref());
+    match style {
+        HookInstall::Json => unreachable!("JSON hooks go through install_json"),
+        HookInstall::TextBlock(tb) => {
+            let text = place_text_block(provider, tb, &read_text(&path)?, &ctx)?;
+            provider.hook_companion(Some(&ctx))?;
+            write_text(&path, &text)?;
+        }
+        HookInstall::OwnedFile(of) => {
+            if path.exists() && !read_text(&path)?.contains(OWNED_FILE_MARKER) {
+                return Err(not_ours(&path));
+            }
+            let text = (of.render)(&ctx);
+            if !text.contains(OWNED_FILE_MARKER) {
+                return Err(std::io::Error::other(format!("{}'s plugin file lacks the `{OWNED_FILE_MARKER}` marker", provider.id())));
+            }
+            // Read and check the registration first so an unreadable file,
+            // or a `key` that isn't a list, stops the install before
+            // anything is written.
+            let registry = of.register.as_ref().map(|r| read_registration(r).map(|s| (r, s))).transpose()?;
+            provider.hook_companion(Some(&ctx))?;
+            write_text(&path, &text)?;
+            if let Some((r, mut settings)) = registry {
+                let list = settings.entry(r.key.clone()).or_insert_with(|| Value::Array(Vec::new()));
+                let Value::Array(items) = list else { unreachable!("read_registration checked the list") };
+                if !items.contains(&r.value) {
+                    items.push(r.value.clone());
+                    write_settings(&r.path, &settings)?;
+                    info!("hooks", "Registered {} in {} `{}`", r.value, r.path.display(), r.key);
+                }
+            }
+        }
+    }
+    info!(
+        "hooks",
+        "Installed {} hooks into {} ({}) using {}",
+        provider.name(),
+        path.display(),
+        style.style(),
+        native.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "am hook-event".into())
+    );
+    Ok(native)
+}
+
+fn uninstall_text_block(provider: &dyn Harness, tb: &TextBlock) -> std::io::Result<()> {
+    let path = provider.settings_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let text = read_text(&path)?;
+    if has_unmarked_hooks(&text, tb.comment, provider.id()) {
+        return Err(unmarked(provider, ""));
+    }
+    if let Some(text) = remove_block(&text, tb.comment, provider.id())? {
+        write_text(&path, &text)?;
+        info!("hooks", "Uninstalled {} hooks from {} (text block)", provider.name(), path.display());
+    }
+    Ok(())
+}
+
+/// An [`OwnedFile`] registration's JSON file, refused when its `key` holds
+/// something other than a list.
+fn read_registration(r: &JsonListEntry) -> std::io::Result<Map<String, Value>> {
+    let settings = read_settings(&r.path)?;
+    match settings.get(&r.key) {
+        None | Some(Value::Array(_)) => Ok(settings),
+        Some(_) => Err(std::io::Error::other(format!("`{}` in {} is not a list; not modifying it", r.key, r.path.display()))),
+    }
+}
+
+fn uninstall_owned_file(provider: &dyn Harness, of: &OwnedFile) -> std::io::Result<()> {
+    let path = provider.settings_path();
+    // A plugin file that isn't am's keeps its registration too.
+    if path.exists() && !read_text(&path)?.contains(OWNED_FILE_MARKER) {
+        warn!("hooks", "Not deleting {} or its registration: it lacks am's `{OWNED_FILE_MARKER}` marker", path.display());
+        return Ok(());
+    }
+    if let Some(r) = &of.register
+        && r.path.exists()
+    {
+        let mut settings = read_settings(&r.path)?;
+        if let Some(Value::Array(items)) = settings.get_mut(&r.key)
+            && items.contains(&r.value)
+        {
+            items.retain(|v| v != &r.value);
+            if items.is_empty() {
+                settings.shift_remove(&r.key);
+            }
+            write_settings(&r.path, &settings)?;
+        }
+    }
+    if !path.exists() {
+        return Ok(());
+    }
+    std::fs::remove_file(&path)?;
+    info!("hooks", "Uninstalled {} hooks: removed {} (owned file)", provider.name(), path.display());
+    Ok(())
 }
 
 /// Display form of a provider's settings path (`~/.gemini/settings.json`).
@@ -464,5 +1024,471 @@ mod tests {
         let m = read_settings(&p).unwrap();
         write_settings(&p, &m).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "{\n  \"b\": 1,\n  \"a\": 2\n}\n");
+    }
+    // --- Text-block and owned-file styles --------------------------------------
+
+    /// A test-only harness with a chosen install style and hook file.
+    struct Dummy {
+        path: PathBuf,
+        install: HookInstall,
+        place: Option<PlaceBlock>,
+        companion: Option<HookCompanion>,
+    }
+
+    impl Harness for Dummy {
+        fn id(&self) -> &str {
+            "dummy"
+        }
+        fn name(&self) -> &str {
+            "Dummy"
+        }
+        fn short_name(&self) -> &str {
+            "Dummy"
+        }
+        fn program(&self) -> &str {
+            "dummy"
+        }
+        fn is_present(&self) -> bool {
+            true
+        }
+        fn settings_path(&self) -> PathBuf {
+            self.path.clone()
+        }
+        fn hook_events(&self) -> Vec<String> {
+            vec!["session_start".into(), "stop".into()]
+        }
+        fn hook_entry(&self, _event: &str, _invocation: &str, _native: bool) -> Value {
+            Value::Null
+        }
+        fn hook_install(&self) -> HookInstall {
+            self.install.clone()
+        }
+        fn place_hook_block(&self, text: &str, block: &str, ctx: &HookContext) -> std::io::Result<Option<String>> {
+            self.place.map_or(Ok(None), |f| f(text, block, ctx))
+        }
+        fn hook_companion(&self, ctx: Option<&HookContext>) -> std::io::Result<()> {
+            self.companion.map_or(Ok(()), |f| f(ctx))
+        }
+        fn hook_command(&self, event: &str, invocation: &str) -> String {
+            crate::harness::hook_command_line("dummy", Some("DUMMY_DIR"), event, invocation)
+        }
+        fn hook_timeout_ms(&self) -> u64 {
+            1_500
+        }
+        fn normalize(&self, _payload: &Value, _event_override: Option<&str>) -> crate::status::HookEvent {
+            crate::status::HookEvent::from_json(&Value::Null, None)
+        }
+        fn discover_sessions(&self, _root: &Path) -> Vec<crate::launch::Session> {
+            Vec::new()
+        }
+        fn resume_args(&self, _session_id: Option<&str>, _continue_latest: bool) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    /// Kimi-style `[[hooks]]` tables.
+    fn render_toml(ctx: &HookContext) -> String {
+        ctx.hooks
+            .iter()
+            .map(|h| format!("[[hooks]]\nevent = {}\ncommand = {}\ntimeout = {}\n", toml_string(&h.event), toml_string(&h.command), h.timeout_secs()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn render_js(ctx: &HookContext) -> String {
+        format!(
+            "// {OWNED_FILE_MARKER}: generated by agent-monitor; `am hooks uninstall` removes it.\nconst ARGV = {};\nexport default ARGV;\n",
+            js_string(&ctx.argv("stop", "").join(" "))
+        )
+    }
+
+    fn toml_dummy(path: PathBuf) -> Dummy {
+        Dummy { path, install: HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml }), place: None, companion: None }
+    }
+
+    fn js_dummy(path: PathBuf, register: Option<JsonListEntry>) -> Dummy {
+        Dummy { path, install: HookInstall::OwnedFile(OwnedFile { render: render_js, register }), place: None, companion: None }
+    }
+
+    fn executable(dir: &Path, name: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let p = dir.join(name);
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[test]
+    fn quoting_helpers_escape_a_hook_command() {
+        let cmd = "\"/a b/am-hook\" hook-event --agent k --worktree \"$K_DIR\" --event stop";
+        let q = r#""\"/a b/am-hook\" hook-event --agent k --worktree \"$K_DIR\" --event stop""#;
+        assert_eq!(toml_string(cmd), q);
+        assert_eq!(yaml_string(cmd), q);
+        assert_eq!(toml_string("a\\b\tc\nd\u{1}"), r#""a\\b\tc\nd\u0001""#);
+        assert_eq!(js_string(cmd), q);
+    }
+
+    #[test]
+    fn text_block_appends_replaces_and_removes_only_its_block() {
+        let body = "a = 1\n";
+        // Missing / empty file: just the block.
+        let fresh = upsert_block("", "#", "k", body).unwrap();
+        assert_eq!(fresh, "# agent-monitor hooks k begin\na = 1\n# agent-monitor hooks k end\n");
+        assert_eq!(remove_block(&fresh, "#", "k").unwrap().as_deref(), Some(""));
+
+        // Appended after a blank line, even without a trailing newline.
+        let user = "[ui]\ntheme = \"dark\"";
+        let with = upsert_block(user, "#", "k", body).unwrap();
+        assert_eq!(with, "[ui]\ntheme = \"dark\"\n\n# agent-monitor hooks k begin\na = 1\n# agent-monitor hooks k end\n");
+        assert_eq!(remove_block(&with, "#", "k").unwrap().as_deref(), Some("[ui]\ntheme = \"dark\"\n"));
+
+        // Replaced in place, keeping what is around it (and another agent's block).
+        let around = "x = 1\n# agent-monitor hooks k begin\nold = true\n# agent-monitor hooks k end\n# agent-monitor hooks j begin\nj = 1\n# agent-monitor hooks j end\ny = 2\n";
+        let replaced = upsert_block(around, "#", "k", "a = 1").unwrap();
+        assert_eq!(replaced, around.replace("old = true", "a = 1"));
+        assert_eq!(upsert_block(&replaced, "#", "k", "a = 1").unwrap(), replaced, "idempotent");
+        assert_eq!(
+            remove_block(&replaced, "#", "k").unwrap().as_deref(),
+            Some("x = 1\n# agent-monitor hooks j begin\nj = 1\n# agent-monitor hooks j end\ny = 2\n")
+        );
+        assert_eq!(remove_block("x = 1\n", "#", "k").unwrap(), None);
+
+        // A begin with no end is refused rather than half-replaced.
+        let broken = "# agent-monitor hooks k begin\na = 1\n";
+        assert!(upsert_block(broken, "#", "k", body).is_err());
+        assert!(remove_block(broken, "#", "k").is_err());
+    }
+
+    #[test]
+    fn text_block_style_installs_into_a_toml_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kimi/config.toml");
+        let p = toml_dummy(path.clone());
+        assert!(!is_installed_provider(&p));
+        uninstall_provider(&p).unwrap();
+        assert!(!path.exists(), "uninstalling with no file creates nothing");
+
+        // File (and dir) missing: created.
+        let bin = executable(dir.path(), "am-hook");
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let cmd = format!("\"{}\" hook-event --agent dummy --worktree \"$DUMMY_DIR\" --event stop", bin.display());
+        assert!(text.contains(&format!("command = {}\ntimeout = 2\n", toml_string(&cmd))), "{text}");
+        assert!(text.starts_with("# agent-monitor hooks dummy begin\n[[hooks]]\nevent = \"session_start\"\n"), "{text}");
+        assert!(is_installed_provider(&p));
+        assert!(check_provider(&p).is_ok());
+        assert!(dangling_provider(&p).is_empty());
+
+        // The user's settings around it survive a reinstall and the uninstall.
+        let user = format!("model = \"k2\"\n\n{text}\n[ui]\ntheme = \"dark\"\n");
+        std::fs::write(&path, &user).unwrap();
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), user, "reinstalling changes nothing");
+        uninstall_provider(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "model = \"k2\"\n\n\n[ui]\ntheme = \"dark\"\n");
+        assert!(!is_installed_provider(&p));
+
+        // Hooks pointing at a binary that's gone are found inside the block only.
+        std::fs::write(&path, "cmd = \"\\\"/elsewhere/am-hook\\\" hook-event\"\n").unwrap();
+        install_text(&p, &p.hook_install(), Some(PathBuf::from("/gone dir/am-hook"))).unwrap();
+        assert_eq!(dangling_provider(&p), [PathBuf::from("/gone dir/am-hook")]);
+
+        std::fs::write(&path, "# agent-monitor hooks dummy begin\n").unwrap();
+        assert!(check_provider(&p).is_err());
+        assert!(install_text(&p, &p.hook_install(), Some(bin)).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "# agent-monitor hooks dummy begin\n");
+    }
+
+    #[test]
+    fn am_commands_are_matched_across_folds_and_quotes() {
+        assert!(has_am_hook_command("command = \"\\\"/x/am-hook\\\" hook-event --agent dummy --worktree \\\"$D\\\"\"", "dummy"));
+        assert!(has_am_hook_command("- command: 'cat | am hook-event --agent dummy --worktree \"\"\n    --event stop'", "dummy"));
+        // A YAML dumper's fold, `\` continuation included.
+        assert!(has_am_hook_command("- command: \"\\\"/x/am-hook\\\" hook-event\\\n    \\ --agent dummy --event stop\"", "dummy"));
+        assert!(!has_am_hook_command("hook-event --agent dummy2", "dummy"));
+        assert!(!has_am_hook_command("hook-event --agent other --event dummy", "dummy"));
+    }
+
+    /// The harness rewrote its config and dropped am's marker lines: the
+    /// hooks still count as installed, a second set is never added, and
+    /// uninstall says what to remove instead of leaving them silently.
+    #[test]
+    fn text_block_hooks_without_their_markers_are_still_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kimi/config.toml");
+        let p = toml_dummy(path.clone());
+        let bin = executable(dir.path(), "am-hook");
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let stripped: String = text.lines().filter(|l| !l.contains("agent-monitor hooks")).map(|l| format!("{l}\n")).collect();
+        std::fs::write(&path, &stripped).unwrap();
+
+        assert!(is_installed_provider(&p));
+        let err = install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap_err().to_string();
+        assert!(err.contains("outside am's `agent-monitor hooks dummy` marker lines") && err.ends_with("then install again"), "{err}");
+        assert!(check_provider(&p).is_err());
+        assert!(uninstall_provider(&p).unwrap_err().to_string().contains("remove those entries by hand"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), stripped, "nothing written");
+        // Their binary going away is still noticed.
+        std::fs::remove_file(&bin).unwrap();
+        assert_eq!(dangling_provider(&p), std::slice::from_ref(&bin));
+
+        // A marked block plus a stray copy outside it: refused the same way.
+        std::fs::write(&path, format!("{text}{}", stripped.lines().take(4).map(|l| format!("{l}\n")).collect::<String>())).unwrap();
+        assert!(uninstall_provider(&p).is_err());
+        assert!(install_text(&p, &p.hook_install(), Some(bin)).is_err());
+    }
+
+    /// Hermes-style YAML: a top-level `hooks:` map of events.
+    fn render_yaml(ctx: &HookContext) -> String {
+        let mut out = String::from("hooks:\n");
+        for h in &ctx.hooks {
+            out.push_str(&format!("  {}:\n    - command: {}\n", h.event, yaml_string(&h.command)));
+        }
+        out
+    }
+
+    /// Nests am's block (minus its own `hooks:` line) under the user's
+    /// top-level `hooks:`; refuses an inline `hooks: {}`; `None` without one.
+    fn place_under_hooks(text: &str, block: &str, _ctx: &HookContext) -> std::io::Result<Option<String>> {
+        let lines: Vec<&str> = text.split_inclusive('\n').collect();
+        let Some(at) = lines.iter().position(|l| l.starts_with("hooks:")) else { return Ok(None) };
+        if lines[at].trim_end() != "hooks:" {
+            return Err(std::io::Error::other("inline `hooks:` value"));
+        }
+        let nested: String = block.lines().filter(|l| *l != "hooks:").map(|l| if l.starts_with('#') { format!("  {l}\n") } else { format!("{l}\n") }).collect();
+        Ok(Some(format!("{}{nested}{}", lines[..=at].concat(), lines[at + 1..].concat())))
+    }
+
+    /// Calls to [`record_companion`]: the number of hooks, `None` = uninstall.
+    static COMPANION_CALLS: std::sync::Mutex<Vec<Option<usize>>> = std::sync::Mutex::new(Vec::new());
+
+    fn record_companion(ctx: Option<&HookContext>) -> std::io::Result<()> {
+        COMPANION_CALLS.lock().unwrap().push(ctx.map(|c| c.hooks.len()));
+        Ok(())
+    }
+
+    fn companion_calls() -> Vec<Option<usize>> {
+        std::mem::take(&mut *COMPANION_CALLS.lock().unwrap())
+    }
+
+    #[test]
+    fn a_text_block_can_be_placed_inside_the_users_key_with_a_companion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hermes/config.yaml");
+        let p = Dummy {
+            path: path.clone(),
+            install: HookInstall::TextBlock(TextBlock { comment: "#", render: render_yaml }),
+            place: Some(place_under_hooks),
+            companion: Some(record_companion),
+        };
+        let bin = executable(dir.path(), "am-hook");
+        companion_calls();
+
+        // No `hooks:` of the user's: the default placement (appended).
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let alone = std::fs::read_to_string(&path).unwrap();
+        assert!(alone.starts_with("# agent-monitor hooks dummy begin\nhooks:\n  session_start:\n"), "{alone}");
+        uninstall_provider(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+        assert_eq!(companion_calls(), [Some(2), None], "the companion follows install and uninstall");
+
+        // The user's `hooks:` key: am's events go inside it, between indented markers.
+        let user = "model: x\nhooks:\n  mine:\n    - command: echo hi\nui:\n  theme: dark\n";
+        std::fs::write(&path, user).unwrap();
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let cmd = |e: &str| yaml_string(&format!("\"{}\" hook-event --agent dummy --worktree \"$DUMMY_DIR\" --event {e}", bin.display()));
+        assert_eq!(
+            text,
+            format!(
+                "model: x\nhooks:\n  # agent-monitor hooks dummy begin\n  session_start:\n    - command: {}\n  stop:\n    - command: {}\n  # agent-monitor hooks dummy end\n  mine:\n    - command: echo hi\nui:\n  theme: dark\n",
+                cmd("session_start"),
+                cmd("stop")
+            )
+        );
+        assert!(is_installed_provider(&p));
+        assert!(check_provider(&p).is_ok());
+        assert!(dangling_provider(&p).is_empty());
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "reinstalling re-places it identically");
+        uninstall_provider(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), user, "uninstall gives the user's file back");
+        assert_eq!(companion_calls(), [Some(2), Some(2), None]);
+
+        // A placement that refuses stops the install before anything (the companion too) is written.
+        std::fs::write(&path, "hooks: {}\n").unwrap();
+        assert!(install_text(&p, &p.hook_install(), Some(bin.clone())).is_err());
+        assert!(check_provider(&p).is_err(), "am doctor shows the refusal");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hooks: {}\n");
+        assert_eq!(companion_calls(), []);
+
+        // A placement that drops the marker lines is refused (the hooks could never be removed).
+        let lossy = Dummy { place: Some(|t, _, _| Ok(Some(format!("{t}hooks: {{}}\n")))), companion: None, ..p };
+        std::fs::write(&path, "").unwrap();
+        let err = install_text(&lossy, &lossy.hook_install(), Some(bin)).unwrap_err();
+        assert!(err.to_string().contains("lacks its `# agent-monitor hooks dummy begin`"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+    }
+
+    #[test]
+    fn owned_file_style_writes_and_removes_only_its_own_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plugins/agent-monitor.js");
+        let p = js_dummy(path.clone(), None);
+        let bin = executable(dir.path(), "am-hook");
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(OWNED_FILE_MARKER));
+        assert!(text.contains(&format!("\"{} hook-event --agent dummy --worktree  --event stop\"", bin.display())), "{text}");
+        assert!(is_installed_provider(&p));
+        assert!(dangling_provider(&p).is_empty());
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "idempotent");
+
+        uninstall_provider(&p).unwrap();
+        assert!(!path.exists());
+        assert!(!is_installed_provider(&p));
+        uninstall_provider(&p).unwrap();
+
+        // Someone else's file of that name is neither overwritten nor deleted.
+        std::fs::write(&path, "// mine\n").unwrap();
+        assert!(install_text(&p, &p.hook_install(), Some(bin)).is_err());
+        assert!(check_provider(&p).is_err());
+        assert!(!is_installed_provider(&p));
+        uninstall_provider(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "// mine\n");
+    }
+
+    #[test]
+    fn owned_file_finds_a_dangling_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = js_dummy(dir.path().join("am.ts"), None);
+        install_text(&p, &p.hook_install(), Some(PathBuf::from("/gone/target/debug/am-hook"))).unwrap();
+        assert_eq!(dangling_provider(&p), [PathBuf::from("/gone/target/debug/am-hook")]);
+        // The CLI fallback names no binary.
+        install_text(&p, &p.hook_install(), None).unwrap();
+        assert!(dangling_provider(&p).is_empty());
+    }
+
+    #[test]
+    fn owned_file_registers_itself_in_a_json_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plugin/am.js");
+        let config = dir.path().join("opencode.json");
+        std::fs::write(&config, r#"{"theme":"x","plugin":["other"]}"#).unwrap();
+        let entry = || Some(JsonListEntry { path: config.clone(), key: "plugin".into(), value: Value::from(path.display().to_string()) });
+        let p = js_dummy(path.clone(), entry());
+        install_text(&p, &p.hook_install(), None).unwrap();
+        install_text(&p, &p.hook_install(), None).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v, serde_json::json!({"theme": "x", "plugin": ["other", path.display().to_string()]}));
+        uninstall_provider(&p).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v, serde_json::json!({"theme": "x", "plugin": ["other"]}));
+        assert!(!path.exists());
+
+        // A registration file am can't parse stops the install before anything is written.
+        std::fs::write(&config, "{ // jsonc\n}").unwrap();
+        assert!(install_text(&p, &p.hook_install(), None).is_err());
+        assert!(!path.exists());
+        assert!(check_provider(&p).is_err());
+
+        // So does a `plugin` key that isn't a list.
+        std::fs::write(&config, r#"{"plugin":"other"}"#).unwrap();
+        let err = install_text(&p, &p.hook_install(), None).unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
+        assert!(!path.exists());
+        assert!(check_provider(&p).is_err(), "am doctor shows it");
+
+        // Uninstall leaves the registration of a plugin file that isn't am's.
+        std::fs::write(&config, format!(r#"{{"plugin":["{}"]}}"#, path.display())).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "// mine\n").unwrap();
+        uninstall_provider(&p).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v, serde_json::json!({"plugin": [path.display().to_string()]}));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "// mine\n");
+    }
+
+    #[test]
+    fn a_second_am_block_is_refused() {
+        let b = |k: &str| format!("# agent-monitor hooks k {k}\n");
+        // Two blocks (a dotfile merge): every edit refuses, so uninstall
+        // can't report success while a copy stays live.
+        let two = format!("{}a = 1\n{}x = 1\n{}a = 1\n{}", b("begin"), b("end"), b("begin"), b("end"));
+        for err in [upsert_block(&two, "#", "k", "a = 2").unwrap_err(), remove_block(&two, "#", "k").unwrap_err()] {
+            assert!(err.to_string().contains("appears more than once"), "{err}");
+        }
+        // A second begin before the end.
+        let nested = format!("{}{}a = 1\n{}", b("begin"), b("begin"), b("end"));
+        assert!(remove_block(&nested, "#", "k").unwrap_err().to_string().contains("appears more than once"));
+        assert!(find_block(&two, "# agent-monitor hooks k begin", "# agent-monitor hooks k end").is_err());
+    }
+
+    #[test]
+    fn an_indented_block_keeps_its_indentation_when_replaced() {
+        let text = "a:\n  # agent-monitor hooks k begin\n  x: 1\n  # agent-monitor hooks k end\nb: 2\n";
+        let replaced = upsert_block(text, "#", "k", "x: 2\n\ny: 3").unwrap();
+        assert_eq!(replaced, "a:\n  # agent-monitor hooks k begin\n  x: 2\n\n  y: 3\n  # agent-monitor hooks k end\nb: 2\n");
+        assert_eq!(upsert_block(&replaced, "#", "k", "x: 2\n\ny: 3").unwrap(), replaced, "idempotent");
+        assert_eq!(remove_block(&replaced, "#", "k").unwrap().as_deref(), Some("a:\nb: 2\n"));
+    }
+
+    #[test]
+    fn programs_are_read_from_generated_text() {
+        let text = "a = \"\\\"/x y/am-hook\\\" hook-event --event s\"\nconst BIN = '/opt/am';\nb: \"/opt/custom\" hook-event\nc = \"/usr/bin/other\"\n";
+        assert_eq!(hook_programs_in_text(text), [PathBuf::from("/x y/am-hook"), PathBuf::from("/opt/am"), PathBuf::from("/opt/custom")]);
+        // An argv array (`HookContext::argv` as JSON) names any program; a
+        // word that only starts with `hook-event` doesn't count.
+        let argv = r#"const ARGV = ["/opt/my-hook", "hook-event", "--agent", "pi"]; const X = ["/usr/bin/env", "hook-events"];"#;
+        assert_eq!(hook_programs_in_text(argv), [PathBuf::from("/opt/my-hook")]);
+        // Spaces in the path, single quotes, the next element on its own line.
+        let text = "a: [\"/opt/my hook\", \"hook-event\", \"--event\", \"x\"],\nb: [\"/usr/bin/other\", \"run\"],\nc: ['/opt/h2',\n  'hook-event'],\n";
+        assert_eq!(hook_programs_in_text(text), [PathBuf::from("/opt/my hook"), PathBuf::from("/opt/h2")]);
+        // The real thing: what `ctx.argv` renders through `js_string`.
+        let ctx = HookContext {
+            agent_id: "pi".into(),
+            program: "/w x/am-hook-copy".into(),
+            native: true,
+            invocation: String::new(),
+            hooks: Vec::new(),
+        };
+        let js = format!("const HOOK = [{}];", ctx.argv("x", "").iter().map(|a| js_string(a)).collect::<Vec<_>>().join(", "));
+        assert_eq!(hook_programs_in_text(&js), [PathBuf::from("/w x/am-hook-copy")]);
+    }
+
+    /// The way a built-in harness branch declares a text-block style.
+    static TOMLCLI: crate::harness::embedded::Embedded = crate::harness::embedded::Embedded::new(
+        || {
+            crate::harness::manifest::Manifest::builtin(
+                r#"{"id":"tomlcli","name":"TOML CLI","program":"tomlcli",
+                    "hooks":{"settingsPath":"~/.tomlcli/config.toml","timeoutMs":30000},
+                    "events":{"Stop":"Stop"}}"#,
+            )
+        },
+        None,
+    )
+    .with_hook_install(|| HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml }));
+
+    #[test]
+    fn an_embedded_harness_picks_its_style() {
+        let ctx = HookContext::new(&TOMLCLI, Some(Path::new("/b/am-hook")));
+        assert!(matches!(TOMLCLI.hook_install(), HookInstall::TextBlock(_)));
+        assert_eq!(
+            ctx.hooks,
+            [HookCommand {
+                event: "Stop".into(),
+                command: "\"/b/am-hook\" hook-event --agent tomlcli --worktree \"\" --event Stop".into(),
+                timeout_ms: 30_000
+            }]
+        );
+        assert_eq!(ctx.argv("Stop", "/w"), ["/b/am-hook", "hook-event", "--agent", "tomlcli", "--worktree", "/w", "--event", "Stop"]);
+    }
+
+    #[test]
+    fn json_is_the_default_style() {
+        assert!(matches!(crate::harness::HarnessKind::GEMINI.provider().hook_install(), HookInstall::Json));
+        assert!(matches!(crate::harness::HarnessKind::CLAUDE.provider().hook_install(), HookInstall::Json));
     }
 }

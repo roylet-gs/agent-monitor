@@ -21,7 +21,9 @@ pub fn attach(target: &str, repo_path: Option<&str>) {
     let default_agent = am_core::settings::load().default_agent();
     let resume = launch::resume_for(Path::new(&wt.path), known.as_ref().map(|a| a.agent), default_agent);
     if resume.session_id.is_none() && !resume.continue_session {
-        let program = default_agent.provider().program();
+        // The fresh-start command, e.g. `acli rovodev run` (`resume.start`).
+        let p = default_agent.provider();
+        let program = [p.program().to_owned()].into_iter().chain(p.resume_args(None, false)).collect::<Vec<_>>().join(" ");
         fail(&format!("No agent session found for {}. Start one with: cd {} && {program}", wt.branch, wt.path));
     }
     let provider = resume.agent.provider();

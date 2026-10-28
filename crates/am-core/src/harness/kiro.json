@@ -1,0 +1,40 @@
+{
+  "id": "kiro",
+  "name": "Kiro CLI",
+  "shortName": "Kiro",
+  "program": "kiro-cli",
+  "hooks": {
+    "settingsPath": "~/.kiro/agents/agent-monitor.json",
+    "layout": "flat",
+    "file": {
+      "name": "agent-monitor",
+      "description": "Kiro's tools, with agent-monitor (am) hooks that report this session's status to the am dashboard.",
+      "tools": ["*"],
+      "includeMcpJson": true
+    },
+    "timeoutKey": "timeout_ms",
+    "timeoutMs": 5000,
+    "timeoutUnit": "ms"
+  },
+  "events": {
+    "agentSpawn": "SessionStart",
+    "userPromptSubmit": "UserPromptSubmit",
+    "preToolUse": "PreToolUse",
+    "postToolUse": "PostToolUse",
+    "stop": "Stop"
+  },
+  "tools": {
+    "execute_bash": "Bash", "shell": "Bash",
+    "fs_read": "Read", "read": "Read",
+    "fs_write": "Write", "write": "Write",
+    "web_fetch": "WebFetch", "web_search": "WebSearch",
+    "use_subagent": "Agent", "delegate": "Agent"
+  },
+  "resume": {
+    "session": ["chat", "--agent", "agent-monitor", "--resume-id", "{id}"],
+    "continue": ["chat", "--agent", "agent-monitor", "--resume"],
+    "start": ["chat", "--agent", "agent-monitor"]
+  },
+  "process": { "names": ["kiro-cli", "kiro-cli-chat"] },
+  "notes": "Kiro runs these hooks only in its agent-monitor agent: start it with `kiro-cli chat --agent agent-monitor` (am does when it starts or resumes Kiro), or make it the default with `kiro-cli settings chat.defaultAgent agent-monitor`. Kiro has no permission hook, so it never shows waiting"
+}

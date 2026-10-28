@@ -32,6 +32,26 @@ impl Out {
     }
 }
 
+/// Environment variables that move an agent CLI's config or data dir.
+/// Cleared for every `am` run so a developer's own setting can't leak in.
+const AGENT_ENV: &[&str] = &[
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "GROK_HOME",
+    "HERMES_HOME",
+    "KIMI_CODE_HOME",
+    "KIMI_SHARE_DIR",
+    "KIRO_HOME",
+    "OPENCODE_CONFIG_DIR",
+    "OPENCODE_DB",
+    "PI_CODING_AGENT_DIR",
+    "PI_CONFIG_DIR",
+    "PI_CODING_AGENT_SESSION_DIR",
+    "OMP_AGENT_DIR",
+    "CAMPFIRE_CODING_AGENT_DIR",
+    "CODEBUDDY_CONFIG_DIR",
+];
+
 impl Env {
     fn new() -> Env {
         let tmp = tempfile::tempdir().unwrap();
@@ -85,6 +105,11 @@ impl Env {
             .env_remove("AM_LINEAR_API_URL")
             .current_dir(cwd.unwrap_or(&self.root()))
             .stdin(Stdio::null());
+        // Whatever the machine running the tests has: agent config dirs come
+        // from $HOME unless a test sets one through `extra_env`.
+        for var in AGENT_ENV {
+            c.env_remove(var);
+        }
         for (k, v) in &self.extra_env {
             c.env(k, v);
         }
@@ -376,7 +401,7 @@ fn hooks_install_status_uninstall() {
     assert_eq!(again, v);
     assert_eq!(
         env.ok(&["hooks", "status", "--json"]).json(),
-        json!({"installed": true, "agents": {"claude": true, "gemini": false, "codex": false, "qwen": false, "droid": false, "copilot": false, "cursor": false}})
+        json!({"installed": true, "agents": hooks_installed(&["claude"])})
     );
 
     // Opting out of the native binary falls back to the TS command.
@@ -468,7 +493,7 @@ fn hooks_for_gemini() {
         before[1]["hooks"][0]["command"],
         format!("\"{}\" hook-event --agent gemini --worktree \"$GEMINI_PROJECT_DIR\" --event BeforeTool", fake_hook.display())
     );
-    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"], json!({"claude": true, "gemini": true, "codex": false, "qwen": false, "droid": false, "copilot": false, "cursor": false}));
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"], hooks_installed(&["claude", "gemini"]));
 
     // --agent narrows uninstall; the user's own Gemini hook stays.
     assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "gemini"]).stdout, "Hooks removed from ~/.gemini/settings.json\n");
@@ -486,7 +511,810 @@ fn hooks_for_gemini() {
 
     let o = env.run(&["hooks", "install", "--agent", "aider"]);
     assert_eq!(o.code, 1);
-    assert!(o.stderr.contains("Unknown agent: aider. Valid agents: claude, gemini, codex, qwen, droid, copilot, cursor"), "{}", o.stderr);
+    assert!(o.stderr.contains(&format!("Unknown agent: aider. Valid agents: {}", builtin_ids().join(", "))), "{}", o.stderr);
+}
+
+/// Rovo Dev's hooks are a marked block of list items in
+/// `~/.rovodev/config.yml`'s `eventHooks.events` (the keys are added outside
+/// it when missing, never a second `eventHooks:`). Reinstalling is a no-op
+/// and uninstalling restores the file; a user's hook for one of am's events,
+/// and am's entries without their marker lines, are refused.
+#[test]
+fn hooks_for_rovodev() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let config = env.home().join(".rovodev/config.yml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let cmd = |event: &str| format!("\"\\\"{}\\\" hook-event --agent rovodev --worktree \\\"$PWD\\\" --event {event}\"", fake_hook.display());
+
+    // No eventHooks: the keys, then the block, go at the end.
+    let user = "agent:\n  streaming: true\nsessions:\n  auto_restore: false\n";
+    std::fs::write(&config, user).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "rovodev"]).stdout, "Hooks installed into ~/.rovodev/config.yml\n");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let head = format!(
+        "{user}\neventHooks:\n  events:\n    # agent-monitor hooks rovodev begin\n    - name: on_session_start\n      commands:\n        - command: {}\n",
+        cmd("on_session_start")
+    );
+    assert!(text.starts_with(&head), "{text}");
+    assert!(text.ends_with(&format!("    - name: on_session_end\n      commands:\n        - command: {}\n    # agent-monitor hooks rovodev end\n", cmd("on_session_end"))), "{text}");
+    assert_eq!(text.matches("- name: ").count(), 8);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["rovodev"], true);
+    env.ok(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text, "reinstalling changes nothing");
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "rovodev"]).stdout, "Hooks removed from ~/.rovodev/config.yml\n");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user, "the empty keys go too");
+
+    // An item the user adds after am's keeps its keys on uninstall.
+    env.ok(&["hooks", "install", "--agent", "rovodev"]);
+    let theirs = "    - name: on_custom\n      commands:\n        - command: say hi\n";
+    std::fs::write(&config, format!("{}{theirs}", std::fs::read_to_string(&config).unwrap())).unwrap();
+    env.ok(&["hooks", "uninstall", "--agent", "rovodev"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), format!("{user}\neventHooks:\n  events:\n{theirs}"));
+
+    // The user's own eventHooks: am's events go inside their list.
+    let user = "eventHooks:\n  logFile: ~/.rovodev/event_hooks.log\n  events:\n    - name: on_custom\n      commands:\n        - command: afplay /System/Library/Sounds/Glass.aiff\nsessions:\n  auto_restore: false\n";
+    std::fs::write(&config, user).unwrap();
+    env.ok(&["hooks", "install", "--agent", "rovodev"]);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(
+        text.starts_with(&format!(
+            "eventHooks:\n  logFile: ~/.rovodev/event_hooks.log\n  events:\n    # agent-monitor hooks rovodev begin\n    - name: on_session_start\n      commands:\n        - command: {}\n",
+            cmd("on_session_start")
+        )),
+        "{text}"
+    );
+    assert!(text.ends_with("    # agent-monitor hooks rovodev end\n    - name: on_custom\n      commands:\n        - command: afplay /System/Library/Sounds/Glass.aiff\nsessions:\n  auto_restore: false\n"), "{text}");
+    assert_eq!(text.matches("eventHooks:").count(), 1);
+    env.ok(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text, "reinstalling changes nothing");
+    assert!(env.ok(&["doctor"]).stdout.contains("Rovo Dev hooks: Installed in ~/.rovodev/config.yml"));
+    // Rovo Dev rewrote the file and dropped the marker comments: still
+    // installed, never installed twice, and uninstall says what to remove.
+    let stripped: String = text.lines().filter(|l| !l.contains("agent-monitor hooks")).map(|l| format!("{l}\n")).collect();
+    std::fs::write(&config, &stripped).unwrap();
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["rovodev"], true);
+    let o = env.run(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("outside am's `agent-monitor hooks rovodev` marker lines"), "{}", o.stderr);
+    assert_eq!(env.run(&["hooks", "uninstall", "--agent", "rovodev"]).code, 1);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), stripped);
+    std::fs::write(&config, &text).unwrap();
+    env.ok(&["hooks", "uninstall", "--agent", "rovodev"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+
+    // A hook of the user's for one of am's events: Rovo Dev would run only one.
+    let user = "eventHooks:\n  events:\n    - name: on_complete\n      commands:\n        - command: afplay /System/Library/Sounds/Glass.aiff\n";
+    std::fs::write(&config, user).unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("already has hooks for on_complete;"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+
+    // An inline list am can't extend without editing the user's line: refused, file untouched.
+    let user = "eventHooks:\n  events: []\n";
+    std::fs::write(&config, user).unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "rovodev"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("inline `eventHooks.events` value"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+}
+
+/// Kimi Code keeps its hooks in TOML: am owns a marked block of `[[hooks]]`
+/// tables and never touches the rest of the file.
+#[test]
+fn hooks_for_kimi() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // The user's config ends inside a table; `[[hooks]]` after it is still top level.
+    let config = env.home().join(".kimi-code/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let user = "default_model = \"kimi-k2\"\n\n[[hooks]]\nevent = \"Notification\"\nmatcher = \"task\\\\.completed\"\ncommand = \"notify\"\n\n[ui]\ntheme = \"dark\"\n";
+    std::fs::write(&config, user).unwrap();
+    assert!(env.ok(&["hooks", "status"]).stdout.contains("Kimi hooks: not installed\n"));
+
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "kimi"]).stdout, "Hooks installed into ~/.kimi-code/config.toml\n");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let block = text.strip_prefix(user).expect("the user's text stays as it was, block appended");
+    let cmd = |event: &str| format!("\"\\\"{}\\\" hook-event --agent kimi --worktree \\\"\\\" --event {event}\"", fake_hook.display());
+    assert!(block.starts_with(&format!("\n# agent-monitor hooks kimi begin\n[[hooks]]\nevent = \"SessionStart\"\ncommand = {}\ntimeout = 5\n\n[[hooks]]\n", cmd("SessionStart"))), "{block}");
+    assert!(block.ends_with(&format!("event = \"SessionEnd\"\ncommand = {}\ntimeout = 5\n# agent-monitor hooks kimi end\n", cmd("SessionEnd"))), "{block}");
+    assert_eq!(block.matches("[[hooks]]").count(), 11);
+    assert!(env.ok(&["hooks", "status"]).stdout.contains("Kimi hooks: installed\n"));
+
+    // Reinstalling is byte-for-byte the same; uninstall gives the user's file back.
+    env.ok(&["hooks", "install", "--agent", "kimi"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "kimi"]).stdout, "Hooks removed from ~/.kimi-code/config.toml\n");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+
+    // The legacy Kimi CLI (≤ 1.49, ~/.kimi) rejects these events at startup:
+    // its config is never written, and it alone doesn't make Kimi detected.
+    let tmp = Env::new();
+    let legacy = tmp.home().join(".kimi/config.toml");
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::write(&legacy, "").unwrap();
+    assert_eq!(tmp.ok(&["hooks", "install"]).stdout, "Hooks installed into ~/.claude/settings.json\n");
+    assert_eq!(tmp.ok(&["hooks", "install", "--agent", "kimi"]).stdout, "Hooks installed into ~/.kimi-code/config.toml\n");
+    assert_eq!(std::fs::read_to_string(&legacy).unwrap(), "");
+}
+
+/// Hermes Agent: a YAML block in config.yaml plus approvals in its
+/// shell-hook allowlist, both undone by the uninstall.
+#[test]
+fn hooks_for_hermes() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let config = env.home().join(".hermes/config.yaml");
+    let allowlist = env.home().join(".hermes/shell-hooks-allowlist.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let cmd = |e: &str| format!("\"{}\" hook-event --agent hermes --worktree \"\" --event {e}", fake_hook.display());
+
+    // No hooks key yet: the block (with its own `hooks:`) is appended.
+    let user = "model:\n  default: anthropic/claude-sonnet\n";
+    std::fs::write(&config, user).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "hermes"]).stdout, "Hooks installed into ~/.hermes/config.yaml\n");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let quoted = serde_json::to_string(&cmd("on_session_end")).unwrap();
+    assert!(text.starts_with(&format!("{user}\n# agent-monitor hooks hermes begin\nhooks:\n  on_session_start:\n")), "{text}");
+    assert!(text.contains(&format!("  on_session_end:\n    - command: {quoted}\n      timeout: 5\n")), "{text}");
+    let approvals: Value = serde_json::from_str(&std::fs::read_to_string(&allowlist).unwrap()).unwrap();
+    let pairs: Vec<(&str, &str)> =
+        approvals["approvals"].as_array().unwrap().iter().map(|a| (a["event"].as_str().unwrap(), a["command"].as_str().unwrap())).collect();
+    assert_eq!(pairs.len(), 9);
+    assert!(pairs.contains(&("on_session_end", cmd("on_session_end").as_str())), "{pairs:?}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["hermes"], true);
+
+    // Reinstalling changes neither file.
+    let allow_text = std::fs::read_to_string(&allowlist).unwrap();
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
+    assert_eq!(std::fs::read_to_string(&allowlist).unwrap(), allow_text);
+
+    // Uninstall restores the config and removes am's approvals.
+    env.ok(&["hooks", "uninstall", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+    assert!(!allowlist.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["hermes"], false);
+
+    // The user's own `hooks:` key: am's block goes inside it, and comes out again.
+    let mine = "hooks:\n  subagent_stop:\n    - command: ~/.hermes/agent-hooks/log.sh\nhooks_auto_accept: false\n";
+    std::fs::write(&config, mine).unwrap();
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.starts_with("hooks:\n  # agent-monitor hooks hermes begin\n  on_session_start:\n    - command: "), "{text}");
+    assert_eq!(text.matches("hooks:\n").count(), 1, "{text}");
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text, "reinstalling changes nothing");
+    env.ok(&["hooks", "uninstall", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), mine);
+
+    // A user's `pre_tool_call` guard stays; am's block leaves that event out.
+    let guard = "hooks:\n  pre_tool_call:\n    - command: ~/.hermes/agent-hooks/guard.sh\n";
+    std::fs::write(&config, guard).unwrap();
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert_eq!(text.matches("pre_tool_call:").count(), 1, "{text}");
+    assert!(text.contains("--event on_session_end"), "{text}");
+    env.ok(&["hooks", "uninstall", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), guard);
+
+    // `hooks: {}` is refused before either file is written.
+    std::fs::write(&config, "hooks: {}\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "hermes"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("sets `hooks: {}` on one line"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "hooks: {}\n");
+    assert!(!allowlist.exists());
+
+    // $HERMES_HOME moves both files.
+    let other = env.root().join("hermes-home");
+    env.extra_env.push(("HERMES_HOME".into(), other.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    assert!(std::fs::read_to_string(other.join("config.yaml")).unwrap().contains("--event pre_llm_call"));
+    assert!(other.join("shell-hooks-allowlist.json").exists());
+}
+
+/// `$HERMES_HOME` without `~/.hermes` still counts as Hermes being there,
+/// so a bare `am hooks install` (every detected agent) includes it.
+#[test]
+fn hermes_is_detected_from_hermes_home() {
+    let mut env = Env::new();
+    let home = env.root().join("hermes-home");
+    std::fs::create_dir_all(&home).unwrap();
+    env.extra_env.push(("HERMES_HOME".into(), home.display().to_string()));
+    env.ok(&["hooks", "install"]);
+    assert!(std::fs::read_to_string(home.join("config.yaml")).unwrap().contains("--event pre_llm_call"));
+    assert!(!env.home().join(".hermes").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["hermes"], true);
+}
+
+/// OpenCode has no hooks: am writes (and owns) a plugin file it auto-loads.
+#[test]
+fn hooks_for_opencode_are_a_plugin_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    let plugin = env.home().join(".config/opencode/plugins/agent-monitor.js");
+    assert_eq!(
+        env.ok(&["hooks", "install", "--agent", "opencode"]).stdout,
+        "Hooks installed into ~/.config/opencode/plugins/agent-monitor.js\n"
+    );
+    let text = std::fs::read_to_string(&plugin).unwrap();
+    assert!(text.contains(am_core::hooks_installer::OWNED_FILE_MARKER));
+    let argv = format!("const HOOK = [\"{}\", \"hook-event\", \"--agent\", \"opencode\", \"--worktree\", \"\", \"--event\"];", fake_hook.display());
+    assert!(text.contains(&argv), "{text}");
+    // Nothing to register: OpenCode loads everything in plugins/.
+    assert!(!env.home().join(".config/opencode/opencode.json").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
+    env.ok(&["hooks", "install", "--agent", "opencode"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), text, "reinstalling changes nothing");
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("OpenCode hooks: Installed in ~/.config/opencode/plugins/agent-monitor.js"), "{doctor}");
+
+    // A binary that's gone is found in the plugin.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains(&format!("run a missing {}", fake_hook.display())), "{doctor}");
+
+    env.ok(&["hooks", "uninstall", "--agent", "opencode"]);
+    assert!(!plugin.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], false);
+
+    // A file of that name that isn't am's is left alone.
+    std::fs::write(&plugin, "export const Mine = async () => ({});\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "opencode"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    env.ok(&["hooks", "uninstall", "--agent", "opencode"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), "export const Mine = async () => ({});\n");
+
+    // OpenCode's config dir overrides.
+    let xdg = env.root().join("xdg");
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "opencode"]);
+    assert!(xdg.join("opencode/plugins/agent-monitor.js").exists());
+    // $OPENCODE_CONFIG_DIR is never written: OpenCode loads it beside the
+    // global dir, so a second copy there would run every hook twice.
+    let own = env.root().join("oc");
+    env.extra_env.push(("OPENCODE_CONFIG_DIR".into(), own.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "opencode"]);
+    assert!(!own.join("plugins/agent-monitor.js").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
+}
+
+/// OpenCode under `$XDG_CONFIG_HOME` (no `~/.config/opencode`) is detected,
+/// so a default `am hooks install` covers it.
+#[test]
+fn opencode_in_an_xdg_config_dir_is_detected() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let xdg = env.root().join("xdg");
+    std::fs::create_dir_all(xdg.join("opencode")).unwrap();
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    assert!(!env.home().join(".config/opencode").exists());
+    env.ok(&["hooks", "install"]);
+    assert!(xdg.join("opencode/plugins/agent-monitor.js").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
+}
+
+/// Pi has no hook config: am owns a generated extension in Pi's agent dir.
+#[test]
+fn hooks_for_pi_write_an_owned_extension() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // ~/.pi: Pi is detected and a default install covers it.
+    let ext_dir = env.home().join(".pi/agent/extensions");
+    std::fs::create_dir_all(&ext_dir).unwrap();
+    std::fs::write(ext_dir.join("mine.ts"), "export default function () {}\n").unwrap();
+    assert_eq!(
+        env.ok(&["hooks", "install"]).stdout,
+        "Hooks installed into ~/.claude/settings.json\nHooks installed into ~/.pi/agent/extensions/agent-monitor.ts\n"
+    );
+    let ext = ext_dir.join("agent-monitor.ts");
+    let text = std::fs::read_to_string(&ext).unwrap();
+    assert!(text.contains("agent-monitor-hook-plugin v1"), "{text}");
+    let argv = json!([fake_hook.display().to_string(), "hook-event", "--agent", "pi", "--worktree", "", "--event"]);
+    assert!(text.contains(&format!("const ARGV = {};", argv.to_string().replace(",", ", "))), "{text}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"], hooks_installed(&["claude", "pi"]));
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("Pi hooks: Installed in ~/.pi/agent/extensions/agent-monitor.ts"), "{doctor}");
+
+    // Reinstalling is idempotent; uninstalling removes only am's file.
+    env.ok(&["hooks", "install", "--agent", "pi"]);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), text);
+    assert_eq!(
+        env.ok(&["hooks", "uninstall", "--agent", "pi"]).stdout,
+        "Hooks removed from ~/.pi/agent/extensions/agent-monitor.ts\n"
+    );
+    assert!(!ext.exists());
+    assert_eq!(std::fs::read_to_string(ext_dir.join("mine.ts")).unwrap(), "export default function () {}\n");
+
+    // A file of that name am didn't write is left alone.
+    std::fs::write(&ext, "// my own\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "pi"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("wasn't written by am"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), "// my own\n");
+    std::fs::remove_file(&ext).unwrap();
+
+    // $PI_CODING_AGENT_DIR moves the agent dir, extensions with it.
+    let agent_dir = env.root().join("pi-agent");
+    env.extra_env.push(("PI_CODING_AGENT_DIR".into(), agent_dir.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "pi"]);
+    let moved = agent_dir.join("extensions/agent-monitor.ts");
+    assert!(std::fs::read_to_string(&moved).unwrap().contains("agent-monitor-hook-plugin v1"));
+    assert!(!ext.exists());
+
+    // A deleted am-hook is reported by doctor.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(
+        doctor.contains(&format!("[WARN]  Pi hooks: Hooks in {} run a missing {}", moved.display(), fake_hook.display())),
+        "{doctor}"
+    );
+    env.ok(&["hooks", "uninstall", "--agent", "pi"]);
+    assert!(!moved.exists());
+}
+
+/// OMP's hooks are an extension file am owns in `<agent dir>/extensions/`.
+#[test]
+fn hooks_for_omp_are_an_owned_extension_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // No ~/.omp: not installed by default, not listed.
+    assert_eq!(env.ok(&["hooks", "install"]).stdout, "Hooks installed into ~/.claude/settings.json\n");
+    assert!(!env.home().join(".omp").exists());
+
+    let ext_dir = env.home().join(".omp/agent/extensions");
+    std::fs::create_dir_all(&ext_dir).unwrap();
+    std::fs::write(ext_dir.join("mine.ts"), "export default function () {}\n").unwrap();
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\nOMP hooks: not installed\n");
+    assert_eq!(
+        env.ok(&["hooks", "install", "--agent", "omp"]).stdout,
+        "Hooks installed into ~/.omp/agent/extensions/agent-monitor-omp.ts\n"
+    );
+    let file = ext_dir.join("agent-monitor-omp.ts");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("agent-monitor-hook-plugin v1"));
+    let argv = json!([fake_hook.display().to_string(), "hook-event", "--agent", "omp", "--worktree", "", "--event", "agent_end"]);
+    assert!(text.contains(&format!("\"agent_end\": {},", argv.to_string().replace(',', ", "))), "{text}");
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\nOMP hooks: installed\n");
+    env.ok(&["hooks", "install", "--agent", "omp"]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text, "reinstalling is idempotent");
+
+    // A hook binary that's gone is flagged.
+    std::fs::rename(&fake_hook, env.bin().join("moved")).unwrap();
+    let out = env.ok(&["doctor"]).stdout;
+    assert!(out.contains(&format!("OMP hooks: Hooks in ~/.omp/agent/extensions/agent-monitor-omp.ts run a missing {}", fake_hook.display())), "{out}");
+    std::fs::rename(env.bin().join("moved"), &fake_hook).unwrap();
+
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "omp"]).stdout, "Hooks removed from ~/.omp/agent/extensions/agent-monitor-omp.ts\n");
+    assert!(!file.exists());
+    assert_eq!(std::fs::read_to_string(ext_dir.join("mine.ts")).unwrap(), "export default function () {}\n", "other extensions stay");
+
+    // A file of that name am didn't write is refused, not overwritten.
+    std::fs::write(&file, "// someone else's\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "omp"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "// someone else's\n");
+    std::fs::remove_file(&file).unwrap();
+
+    // The agent dir follows OMP's environment: PI_CODING_AGENT_DIR moves it;
+    // OMP_AGENT_DIR (cmux's, never read by omp) doesn't.
+    let pi_dir = env.root().join("pi-agent");
+    env.extra_env.push(("PI_CODING_AGENT_DIR".into(), pi_dir.display().to_string()));
+    let omp_dir = env.root().join("omp-agent");
+    env.extra_env.push(("OMP_AGENT_DIR".into(), omp_dir.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "omp"]);
+    assert!(pi_dir.join("extensions/agent-monitor-omp.ts").exists());
+    assert!(!omp_dir.exists(), "OMP_AGENT_DIR is ignored");
+    env.ok(&["hooks", "uninstall", "--agent", "omp"]);
+    assert!(!pi_dir.join("extensions/agent-monitor-omp.ts").exists());
+}
+
+/// Campfire has no hooks: am writes (and owns) an extension it loads from
+/// `${CAMPFIRE_CODING_AGENT_DIR:-~/.campfire/agent}/extensions/`.
+#[test]
+fn hooks_for_campfire_are_an_extension_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Not detected until Campfire has been used.
+    assert!(!env.ok(&["hooks", "install"]).stdout.contains("campfire"));
+    let ext_dir = env.home().join(".campfire/agent/extensions");
+    std::fs::create_dir_all(&ext_dir).unwrap();
+    std::fs::write(ext_dir.join("mine.ts"), "export default function () {}\n").unwrap();
+    let ext = ext_dir.join("agent-monitor-campfire.ts");
+    assert!(env.ok(&["hooks", "install"]).stdout.contains("Hooks installed into ~/.campfire/agent/extensions/agent-monitor-campfire.ts\n"));
+    let text = std::fs::read_to_string(&ext).unwrap();
+    assert!(text.contains(am_core::hooks_installer::OWNED_FILE_MARKER));
+    let argv = format!("const HOOK = [\"{}\", \"hook-event\", \"--agent\", \"campfire\", \"--worktree\", \"\", \"--event\"];", fake_hook.display());
+    assert!(text.contains(&argv), "{text}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["campfire"], true);
+    env.ok(&["hooks", "install", "--agent", "campfire"]);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), text, "reinstalling changes nothing");
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("Campfire hooks: Installed in ~/.campfire/agent/extensions/agent-monitor-campfire.ts"), "{doctor}");
+
+    // A binary that's gone is found in the extension.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains(&format!("run a missing {}", fake_hook.display())), "{doctor}");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+
+    env.ok(&["hooks", "uninstall", "--agent", "campfire"]);
+    assert!(!ext.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["campfire"], false);
+    assert_eq!(std::fs::read_to_string(ext_dir.join("mine.ts")).unwrap(), "export default function () {}\n");
+
+    // A file of that name that isn't am's is left alone.
+    std::fs::write(&ext, "export default function () {}\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "campfire"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    env.ok(&["hooks", "uninstall", "--agent", "campfire"]);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), "export default function () {}\n");
+    std::fs::remove_file(&ext).unwrap();
+
+    // $CAMPFIRE_CODING_AGENT_DIR moves it (and counts as Campfire being there).
+    let own = env.root().join("cf-agent");
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::remove_dir_all(env.home().join(".campfire")).unwrap();
+    env.extra_env.push(("CAMPFIRE_CODING_AGENT_DIR".into(), own.display().to_string()));
+    assert!(env.ok(&["hooks", "install"]).stdout.contains("agent-monitor-campfire.ts"));
+    assert!(own.join("extensions/agent-monitor-campfire.ts").is_file());
+    env.ok(&["hooks", "uninstall", "--agent", "campfire"]);
+    assert!(!own.join("extensions/agent-monitor-campfire.ts").exists());
+}
+
+/// Amp has no hooks: am writes (and owns) a plugin file in its plugins dir.
+#[test]
+fn hooks_for_amp_are_a_plugin_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let plugins = env.home().join(".config/amp/plugins");
+    std::fs::create_dir_all(&plugins).unwrap();
+    let theirs = plugins.join("other.ts");
+    std::fs::write(&theirs, "export default function (amp) {}\n").unwrap();
+    let plugin = plugins.join("agent-monitor.ts");
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "amp"]).stdout, "Hooks installed into ~/.config/amp/plugins/agent-monitor.ts\n");
+    let text = std::fs::read_to_string(&plugin).unwrap();
+    assert!(text.starts_with("// @i-know-the-amp-plugin-api-is-wip-and-very-experimental-right-now\n"), "{text}");
+    assert!(text.contains(am_core::hooks_installer::OWNED_FILE_MARKER));
+    let argv = format!("const HOOK = [\"{}\", \"hook-event\", \"--agent\", \"amp\", \"--worktree\", \"\", \"--event\"];", fake_hook.display());
+    assert!(text.contains(&argv), "{text}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["amp"], true);
+    env.ok(&["hooks", "install", "--agent", "amp"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), text, "reinstalling changes nothing");
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("Amp hooks: Installed in ~/.config/amp/plugins/agent-monitor.ts"), "{doctor}");
+
+    // A binary that's gone is found in the plugin.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains(&format!("run a missing {}", fake_hook.display())), "{doctor}");
+
+    env.ok(&["hooks", "uninstall", "--agent", "amp"]);
+    assert!(!plugin.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["amp"], false);
+    assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "export default function (amp) {}\n", "other plugins untouched");
+
+    // A file of that name that isn't am's is left alone.
+    std::fs::write(&plugin, "export default function (amp) {}\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "amp"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    env.ok(&["hooks", "uninstall", "--agent", "amp"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), "export default function (amp) {}\n");
+
+    // $XDG_CONFIG_HOME doesn't move it: Amp is detected by ~/.config/amp.
+    std::fs::remove_file(&plugin).unwrap();
+    let xdg = env.root().join("xdg");
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "amp"]);
+    assert!(plugin.exists() && !xdg.join("amp").exists());
+    env.ok(&["hooks", "uninstall", "--agent", "amp"]);
+}
+
+/// Built-in harness ids in registry order, so adding a harness doesn't
+/// touch these tests.
+fn builtin_ids() -> Vec<&'static str> {
+    am_core::harness::BUILTIN.iter().map(|k| k.id()).collect()
+}
+
+/// `hooks status --json`'s `agents` map: every built-in, `true` for `on`.
+fn hooks_installed(on: &[&str]) -> Value {
+    Value::Object(builtin_ids().into_iter().map(|id| (id.to_string(), Value::Bool(on.contains(&id)))).collect())
+}
+
+#[test]
+fn hooks_for_qoder() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Qoder CLI: Claude-style nested entries in ~/.qoder/settings.json, timeout in seconds.
+    let qoder_settings = env.home().join(".qoder/settings.json");
+    std::fs::create_dir_all(qoder_settings.parent().unwrap()).unwrap();
+    std::fs::write(&qoder_settings, json!({"model": "auto"}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "qoder"]).stdout, "Hooks installed into ~/.qoder/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&qoder_settings).unwrap()).unwrap();
+    assert_eq!(v["model"], "auto");
+    assert_eq!(v["hooks"].as_object().unwrap().len(), 11);
+    let stop = &v["hooks"]["Stop"][0]["hooks"][0];
+    assert_eq!((stop["type"].as_str(), stop["timeout"].as_u64()), (Some("command"), Some(5)));
+    assert_eq!(
+        stop["command"],
+        format!("\"{}\" hook-event --agent qoder --worktree \"$QODER_PROJECT_DIR\" --event Stop", fake_hook.display())
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["qoder"], true);
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "qoder"]).stdout, "Hooks removed from ~/.qoder/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&qoder_settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"model": "auto"}));
+}
+
+/// With nothing to resume, `am agent attach` suggests the default agent's
+/// fresh-start command, `resume.start` included (`acli rovodev run`).
+#[test]
+fn agent_attach_suggests_the_fresh_start_command() {
+    let env = Env::new();
+    let (_, wt) = env.seed_repo();
+    std::fs::create_dir_all(env.data().join("agents")).unwrap();
+    std::fs::write(
+        env.data().join("agents/mycli.json"),
+        json!({
+            "id": "mycli", "name": "My CLI", "program": "mycli",
+            "hooks": {"settingsPath": "~/.mycli/hooks.json"},
+            "events": {"Done": "Stop"},
+            "resume": {"session": ["--resume", "{id}"], "start": ["chat", "--agent", "am"]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    env.ok(&["settings", "set", "defaultAgent", "mycli"]);
+    let o = env.run(&["agent", "attach", "feature/login"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    assert!(o.stderr.contains(&format!("Start one with: cd {} && mycli chat --agent am", wt.display())), "{}", o.stderr);
+}
+
+#[test]
+fn hooks_for_codebuddy() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // CodeBuddy keeps Claude's nested layout in ~/.codebuddy/settings.json, timeout in seconds.
+    let settings = env.home().join(".codebuddy/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let mine = json!({"matcher": "Bash", "hooks": [{"type": "command", "command": "./guard.sh"}]});
+    std::fs::write(&settings, json!({"model": "x", "hooks": {"PreToolUse": [mine]}}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "codebuddy"]).stdout, "Hooks installed into ~/.codebuddy/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v["model"], "x");
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(
+        hooks.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["PreToolUse", "SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Notification", "SubagentStart", "SubagentStop", "Stop", "StopFailure"]
+    );
+    let pre = hooks["PreToolUse"].as_array().unwrap();
+    assert_eq!(pre[0], mine);
+    let entry = &pre[1]["hooks"][0];
+    assert_eq!(entry["timeout"], 5);
+    assert_eq!(
+        entry["command"],
+        format!("\"{}\" hook-event --agent codebuddy --worktree \"$CODEBUDDY_PROJECT_DIR\" --event PreToolUse", fake_hook.display())
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], true);
+
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "codebuddy"]).stdout, "Hooks removed from ~/.codebuddy/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"model": "x", "hooks": {"PreToolUse": [mine]}}));
+
+    // $CODEBUDDY_CONFIG_DIR moves CodeBuddy's config, and the hooks with it:
+    // installed there (detected from it alone), never into ~/.codebuddy.
+    std::fs::remove_dir_all(env.home().join(".codebuddy")).unwrap();
+    let moved = env.root().join("cb-config");
+    std::fs::create_dir_all(&moved).unwrap();
+    env.extra_env.push(("CODEBUDDY_CONFIG_DIR".into(), moved.display().to_string()));
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], false);
+    env.ok(&["hooks", "install"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(moved.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(v["hooks"].as_object().unwrap().len(), 11);
+    assert!(!env.home().join(".codebuddy").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], true);
+}
+
+/// Antigravity's hook file holds named groups; am owns `agent-monitor` and
+/// leaves the others (cmux's) alone.
+#[test]
+fn hooks_for_antigravity() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Gemini CLI's dir alone doesn't make Antigravity detected.
+    std::fs::create_dir_all(env.home().join(".gemini")).unwrap();
+    assert!(!env.ok(&["hooks", "install"]).stdout.contains("config/hooks.json"));
+
+    let file = env.home().join(".gemini/config/hooks.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let cmux = json!({"Stop": [{"type": "command", "command": "cmux hooks antigravity stop", "timeout": 10}]});
+    std::fs::write(&file, json!({"cmux": cmux}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "antigravity"]).stdout, "Hooks installed into ~/.gemini/config/hooks.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v["cmux"], cmux);
+    let ours = v["agent-monitor"].as_object().unwrap();
+    assert_eq!(ours.keys().map(String::as_str).collect::<Vec<_>>(), ["SessionStart", "PreInvocation", "Stop"]);
+    assert_eq!(
+        ours["Stop"],
+        json!([{"type": "command", "command": format!("\"{}\" hook-event --agent antigravity --worktree \"\" --event Stop", fake_hook.display()), "timeout": 10}])
+    );
+    // Idempotent.
+    env.ok(&["hooks", "install", "--agent", "antigravity"]);
+    assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap(), v);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["antigravity"], true);
+
+    // Uninstall drops our group and keeps cmux's.
+    env.ok(&["hooks", "uninstall", "--agent", "antigravity"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v, json!({"cmux": cmux}));
+
+    // Once agy has run here, a default install covers it.
+    std::fs::create_dir_all(env.home().join(".gemini/antigravity-cli")).unwrap();
+    assert!(env.ok(&["hooks", "install"]).stdout.contains("Hooks installed into ~/.gemini/config/hooks.json"));
+}
+
+#[test]
+fn hooks_for_grok_go_in_an_owned_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Grok reads every file in ~/.grok/hooks/: am's own sits beside the user's.
+    let hooks_dir = env.home().join(".grok/hooks");
+    std::fs::create_dir_all(&hooks_dir).unwrap();
+    std::fs::write(hooks_dir.join("mine.json"), "{}").unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "grok"]).stdout, "Hooks installed into ~/.grok/hooks/agent-monitor.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(hooks_dir.join("agent-monitor.json")).unwrap()).unwrap();
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(hooks.keys().map(String::as_str).collect::<Vec<_>>(), ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop"]);
+    assert_eq!(
+        hooks["Stop"],
+        json!([{"hooks": [{"type": "command", "command": format!("\"{}\" hook-event --agent grok --worktree \"\" --event Stop", fake_hook.display()), "timeout": 5}]}])
+    );
+    assert_eq!(std::fs::read_to_string(hooks_dir.join("mine.json")).unwrap(), "{}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["grok"], true);
+    // Installed by default now that ~/.grok exists, and idempotent.
+    env.ok(&["hooks", "install"]);
+    let again: Value = serde_json::from_str(&std::fs::read_to_string(hooks_dir.join("agent-monitor.json")).unwrap()).unwrap();
+    assert_eq!(again, v);
+
+    env.ok(&["hooks", "uninstall", "--agent", "grok"]);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["grok"], false);
+}
+
+/// Muse Code: hooks in `$XDG_CONFIG_HOME/muse/settings.json` (else
+/// `~/.config/muse/`), seconds timeouts, and the `schema_version` Muse needs.
+#[test]
+fn hooks_for_muse() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // A fresh install creates the file with the schema version Muse requires.
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "muse"]).stdout, "Hooks installed into ~/.config/muse/settings.json\n");
+    let fresh = env.home().join(".config/muse/settings.json");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&fresh).unwrap()).unwrap();
+    assert_eq!(v["schema_version"], 1);
+    let stop = &v["hooks"]["Stop"][0]["hooks"][0];
+    assert_eq!(stop["timeout"], 10);
+    assert_eq!(stop["command"], format!("\"{}\" hook-event --agent muse --worktree \"\" --event Stop", fake_hook.display()));
+    assert_eq!(
+        v["hooks"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(),
+        ["SessionStart", "SessionEnd", "UserPromptSubmit", "Notification", "Stop", "StopFailure"]
+    );
+
+    // With $XDG_CONFIG_HOME, that's where Muse reads; its other keys, its own
+    // schema version and the user's hooks stay.
+    let xdg = env.root().join("xdg");
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    let settings = xdg.join("muse/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let mine = json!({"hooks": [{"type": "command", "command": "./notify.sh"}]});
+    std::fs::write(&settings, json!({"schema_version": 2, "model": "m", "hooks": {"Stop": [mine]}}).to_string()).unwrap();
+    // Detected through the XDG directory, so a plain install covers it.
+    let out = env.ok(&["hooks", "install"]).stdout;
+    assert!(out.contains(&format!("Hooks installed into {}\n", settings.display())), "{out}");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!((v["schema_version"].as_u64(), v["model"].as_str()), (Some(2), Some("m")));
+    assert_eq!(v["hooks"]["Stop"][0], mine);
+    assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["muse"], true);
+
+    env.ok(&["hooks", "uninstall", "--agent", "muse"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"schema_version": 2, "model": "m", "hooks": {"Stop": [mine]}}));
+}
+
+/// Kiro keeps hooks in an agent file: am writes a whole `agent-monitor`
+/// agent (with every tool, or the tool hooks never fire), and keeps it.
+#[test]
+fn hooks_for_kiro() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // A fresh ~/.kiro (no agents dir yet): install creates the agent file.
+    std::fs::create_dir_all(env.home().join(".kiro")).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "kiro"]).stdout, "Hooks installed into ~/.kiro/agents/agent-monitor.json\n");
+    let file = env.home().join(".kiro/agents/agent-monitor.json");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!((&v["name"], &v["tools"]), (&json!("agent-monitor"), &json!(["*"])));
+    assert!(v["description"].is_string());
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(hooks.keys().map(String::as_str).collect::<Vec<_>>(), ["agentSpawn", "userPromptSubmit", "preToolUse", "postToolUse", "stop"]);
+    assert_eq!(
+        hooks["stop"],
+        json!([{"command": format!("\"{}\" hook-event --agent kiro --worktree \"\" --event stop", fake_hook.display()), "timeout_ms": 5000}])
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["kiro"], true);
+
+    // The user's own edits to the agent survive a reinstall.
+    let mut edited = v.clone();
+    edited["tools"] = json!(["read", "shell"]);
+    edited["hooks"]["stop"].as_array_mut().unwrap().insert(0, json!({"command": "./notify.sh"}));
+    std::fs::write(&file, edited.to_string()).unwrap();
+    env.ok(&["hooks", "install", "--agent", "kiro"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v["tools"], json!(["read", "shell"]));
+    assert_eq!(v["hooks"]["stop"].as_array().unwrap().len(), 2);
+    assert_eq!(v["hooks"]["stop"][0]["command"], "./notify.sh");
+
+    // Uninstall takes only am's hooks out.
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "kiro"]).stdout, "Hooks removed from ~/.kiro/agents/agent-monitor.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(v["hooks"], json!({"stop": [{"command": "./notify.sh"}]}));
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["kiro"], false);
 }
 
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
@@ -525,7 +1353,7 @@ fn manifest_plugins_need_no_code() {
     env.ok(&["settings", "set", "defaultAgent", "mycli"]);
     let o = env.run(&["settings", "set", "defaultAgent", "nope"]);
     assert_eq!(o.code, 1);
-    assert!(o.stderr.contains("Available: claude, gemini, codex, qwen, droid, copilot, cursor, mycli"), "{}", o.stderr);
+    assert!(o.stderr.contains(&format!("Available: {}, mycli", builtin_ids().join(", "))), "{}", o.stderr);
 
     // Doctor reports the plugin's hooks and the file it skipped.
     let doctor = env.ok(&["doctor"]).stdout;

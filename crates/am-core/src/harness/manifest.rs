@@ -41,6 +41,10 @@
 //!   `hooksKey: ""` puts events at the top level of the file. Without
 //!   `projectDirVar` the command passes `--worktree ""` and am-hook uses the
 //!   payload's `cwd`.
+//! - `resume.start` (optional) holds the arguments a fresh session needs
+//!   when the program alone doesn't start one (`["rovodev", "run"]` for
+//!   `acli`, `["chat", "--agent", "agent-monitor"]` for Kiro), also used
+//!   to continue when `resume.continue` is empty. Default: none.
 //! - `sessions.command` (optional) prints a JSON array of
 //!   `{"id", "cwd", "modified"}` (modified = unix seconds) for `{root}`;
 //!   without it, resuming falls back to `resume.continue`. Built-ins without
@@ -213,11 +217,15 @@ pub struct ResumeSpec {
     pub session: Vec<String>,
     #[serde(default, rename = "continue")]
     pub continue_latest: Vec<String>,
+    /// Arguments that start a fresh session, for a CLI whose program alone
+    /// doesn't (`acli` needs `rovodev run`). Default: none.
+    #[serde(default)]
+    pub start: Vec<String>,
 }
 
 impl Default for ResumeSpec {
     fn default() -> Self {
-        ResumeSpec { session: default_resume_session(), continue_latest: Vec::new() }
+        ResumeSpec { session: default_resume_session(), continue_latest: Vec::new(), start: Vec::new() }
     }
 }
 
@@ -319,6 +327,8 @@ impl Manifest {
             agent_id: s("agent_id"),
             agent_type: self.lookup(v, "agent_type").and_then(Value::as_str).map(str::to_owned),
             agent_transcript_path: s("agent_transcript_path"),
+            stop_ends_wait: false,
+            turn_bound: false,
         }
     }
 
@@ -326,10 +336,20 @@ impl Manifest {
         self.events.keys().cloned().collect()
     }
 
+    /// The full hook command line for `event`:
+    /// `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`.
+    pub fn hook_command(&self, event: &str, invocation: &str) -> String {
+        super::hook_command_line(&self.id, self.hooks.project_dir_var.as_deref(), event, invocation)
+    }
+
+    /// Whether any registered event maps to `SessionEnd`.
+    pub fn ends_sessions(&self) -> bool {
+        self.events.values().any(|v| v.as_str() == Some("SessionEnd"))
+    }
+
     pub fn hook_entry(&self, event: &str, invocation: &str) -> Value {
         let h = &self.hooks;
-        let worktree = h.project_dir_var.as_deref().map(|v| format!("\"${v}\"")).unwrap_or_else(|| "\"\"".into());
-        let command = format!("{invocation} --agent {} --worktree {worktree} --event {event}", self.id);
+        let command = self.hook_command(event, invocation);
         let timeout = match h.timeout_unit {
             TimeoutUnit::Ms => h.timeout_ms,
             TimeoutUnit::S => h.timeout_ms.div_ceil(1000),
@@ -357,8 +377,10 @@ impl Manifest {
     pub fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String> {
         match (session_id, continue_latest) {
             (Some(id), _) => self.resume.session.iter().map(|a| a.replace("{id}", id)).collect(),
-            (None, true) => self.resume.continue_latest.clone(),
-            (None, false) => Vec::new(),
+            // A CLI with no continue arguments starts a fresh session
+            // instead, which may need `start` too.
+            (None, true) if !self.resume.continue_latest.is_empty() => self.resume.continue_latest.clone(),
+            (None, _) => self.resume.start.clone(),
         }
     }
 
@@ -448,8 +470,17 @@ impl Harness for ManifestProvider {
     fn hook_events(&self) -> Vec<String> {
         self.manifest.hook_events()
     }
+    fn ends_sessions(&self) -> bool {
+        self.manifest.ends_sessions()
+    }
     fn hook_entry(&self, event: &str, invocation: &str, _native: bool) -> Value {
         self.manifest.hook_entry(event, invocation)
+    }
+    fn hook_command(&self, event: &str, invocation: &str) -> String {
+        self.manifest.hook_command(event, invocation)
+    }
+    fn hook_timeout_ms(&self) -> u64 {
+        self.manifest.hooks.timeout_ms
     }
     fn hook_file_defaults(&self) -> Map<String, Value> {
         self.manifest.hooks.file.clone()
@@ -559,10 +590,25 @@ mod tests {
         assert!(crate::hooks_installer::is_am_hook_command(cmd));
         assert_eq!(m.resume_args(Some("x1"), true), ["resume", "x1"]);
         assert_eq!(m.resume_args(None, true), ["resume", "--last"]);
-        assert!(m.resume_args(None, false).is_empty());
+        assert!(m.resume_args(None, false).is_empty(), "no `resume.start`: the bare program starts a session");
         assert!(m.process.matches("mycli", &[]));
         assert!(m.process.matches("node", &["node".into(), "/x/bin/mycli".into()]));
         assert!(!m.process.matches("node", &["node".into(), "server.js".into()]));
+    }
+
+    #[test]
+    fn resume_start_gives_the_fresh_session_arguments() {
+        let mut v: Value = serde_json::from_str(EXAMPLE).unwrap();
+        v["resume"]["start"] = json!(["chat", "--agent", "agent-monitor"]);
+        let m = Manifest::parse(&v.to_string()).unwrap();
+        assert_eq!(m.resume_args(None, false), ["chat", "--agent", "agent-monitor"]);
+        // Resuming and continuing don't add it.
+        assert_eq!(m.resume_args(Some("x1"), false), ["resume", "x1"]);
+        assert_eq!(m.resume_args(None, true), ["resume", "--last"]);
+        // Without continue arguments, continuing starts a fresh session.
+        v["resume"]["continue"] = json!([]);
+        let m = Manifest::parse(&v.to_string()).unwrap();
+        assert_eq!(m.resume_args(None, true), ["chat", "--agent", "agent-monitor"]);
     }
 
     #[test]

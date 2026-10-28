@@ -15,14 +15,28 @@
 //! ([`manifest`]). Plugins can be disabled with the `disabledAgents`
 //! setting. See `docs/agent-providers.md`.
 
+pub mod antigravity;
+pub mod campfire;
+pub mod amp;
 pub mod claude;
+pub mod codebuddy;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod droid;
 pub mod embedded;
 pub mod gemini;
+pub mod qoder;
+pub mod grok;
+pub mod muse;
+pub mod kiro;
+pub mod kimi;
+pub mod hermes;
+pub mod opencode;
+pub mod pi;
+pub mod omp;
 pub mod qwen;
+pub mod rovodev;
 pub mod manifest;
 
 use std::path::{Path, PathBuf};
@@ -81,6 +95,13 @@ pub trait Harness: Sync + Send {
     /// Native event names am registers a hook for.
     fn hook_events(&self) -> Vec<String>;
 
+    /// Whether a hook marks a session closed (`SessionEnd`). Without one,
+    /// am-hook closes the owner's other settled sessions of this harness when
+    /// a new one starts, so finished conversations don't pile up.
+    fn ends_sessions(&self) -> bool {
+        true
+    }
+
     /// The key holding `event → entries` in the settings file; empty when the
     /// file is that map itself.
     fn hooks_key(&self) -> &str {
@@ -96,6 +117,56 @@ pub trait Harness: Sync + Send {
     /// One entry for `hooks.<event>` in the settings file.
     /// `invocation` is the program part (`"/path/am-hook" hook-event`).
     fn hook_entry(&self, event: &str, invocation: &str, native: bool) -> Value;
+
+    /// How am's hooks get into the CLI's config: merged into a JSON settings
+    /// file (the default, driven by [`hooks_key`](Harness::hooks_key) and
+    /// [`hook_entry`](Harness::hook_entry)), a block am owns in a TOML/YAML
+    /// file, or a whole generated plugin file. See
+    /// [`HookInstall`](crate::hooks_installer::HookInstall).
+    fn hook_install(&self) -> crate::hooks_installer::HookInstall {
+        crate::hooks_installer::HookInstall::Json
+    }
+
+    /// [`HookInstall::TextBlock`](crate::hooks_installer::HookInstall::TextBlock)
+    /// only: where am's block goes when it can't simply stay where it is or
+    /// be appended, e.g. nested under a YAML key the user's file already has
+    /// (a second top-level key of that name would be a duplicate). `text` is
+    /// the file without am's block; `block` is am's whole block as
+    /// [`block_text`](crate::hooks_installer::block_text) renders it (marker
+    /// lines included). Return the whole new file text, which must still hold
+    /// the [`block_begin`](crate::hooks_installer::block_begin) /
+    /// [`block_end`](crate::hooks_installer::block_end) lines (they may be
+    /// indented, and the body re-indented or re-rendered from `ctx`), or
+    /// `None` for the default (replaced in place, else
+    /// [`append_block`](crate::hooks_installer::append_block)). An error
+    /// refuses the install before anything is written, and `am doctor` shows
+    /// it.
+    fn place_hook_block(&self, _text: &str, _block: &str, _ctx: &crate::hooks_installer::HookContext) -> std::io::Result<Option<String>> {
+        Ok(None)
+    }
+
+    /// State the CLI keeps beside its hook config, kept in step with the
+    /// hooks in every install style: called with `Some(hooks)` on install,
+    /// after the new config is worked out and just before it is written (an
+    /// error stops the install with nothing written), and with `None` after
+    /// uninstall (also when there was nothing to remove). Hermes's shell-hook
+    /// allowlist. Default: nothing.
+    fn hook_companion(&self, _ctx: Option<&crate::hooks_installer::HookContext>) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    /// The full shell command one hook runs for native `event`, given the
+    /// program part (`"/path/am-hook" hook-event`). Used by the text-block
+    /// and owned-file install styles; JSON entries come from
+    /// [`hook_entry`](Harness::hook_entry).
+    fn hook_command(&self, event: &str, invocation: &str) -> String {
+        hook_command_line(self.id(), None, event, invocation)
+    }
+
+    /// How long the CLI should let one hook run, in milliseconds.
+    fn hook_timeout_ms(&self) -> u64 {
+        5_000
+    }
 
     /// Translate a native hook payload into the canonical event.
     /// `event_override` is the `--event` flag (a native event name).
@@ -211,6 +282,20 @@ impl HarnessKind {
     pub const DROID: HarnessKind = HarnessKind(&droid::DROID);
     pub const COPILOT: HarnessKind = HarnessKind(&copilot::COPILOT);
     pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
+    pub const QODER: HarnessKind = HarnessKind(&qoder::QODER);
+    pub const CODEBUDDY: HarnessKind = HarnessKind(&codebuddy::CODEBUDDY);
+    pub const ANTIGRAVITY: HarnessKind = HarnessKind(&antigravity::ANTIGRAVITY);
+    pub const GROK: HarnessKind = HarnessKind(&grok::GROK);
+    pub const MUSE: HarnessKind = HarnessKind(&muse::MUSE);
+    pub const KIRO: HarnessKind = HarnessKind(&kiro::KIRO);
+    pub const ROVODEV: HarnessKind = HarnessKind(&rovodev::ROVODEV);
+    pub const KIMI: HarnessKind = HarnessKind(&kimi::KIMI);
+    pub const HERMES: HarnessKind = HarnessKind(&hermes::HERMES);
+    pub const OPENCODE: HarnessKind = HarnessKind(&opencode::OPENCODE);
+    pub const PI: HarnessKind = HarnessKind(&pi::PI);
+    pub const OMP: HarnessKind = HarnessKind(&omp::OMP);
+    pub const CAMPFIRE: HarnessKind = HarnessKind(&campfire::CAMPFIRE);
+    pub const AMP: HarnessKind = HarnessKind(&amp::AMP);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -265,7 +350,7 @@ impl std::fmt::Debug for HarnessKind {
 
 /// Compiled-in providers, in display order. To add one: a module here and
 /// one entry in this list.
-pub const BUILTIN: [HarnessKind; 7] = [
+pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::CLAUDE,
     HarnessKind::GEMINI,
     HarnessKind::CODEX,
@@ -273,6 +358,20 @@ pub const BUILTIN: [HarnessKind; 7] = [
     HarnessKind::DROID,
     HarnessKind::COPILOT,
     HarnessKind::CURSOR,
+    HarnessKind::QODER,
+    HarnessKind::CODEBUDDY,
+    HarnessKind::ANTIGRAVITY,
+    HarnessKind::GROK,
+    HarnessKind::MUSE,
+    HarnessKind::KIRO,
+    HarnessKind::ROVODEV,
+    HarnessKind::KIMI,
+    HarnessKind::HERMES,
+    HarnessKind::OPENCODE,
+    HarnessKind::PI,
+    HarnessKind::OMP,
+    HarnessKind::CAMPFIRE,
+    HarnessKind::AMP,
 ];
 
 struct Registry {
@@ -370,6 +469,14 @@ pub fn detected(settings: &Settings) -> Vec<HarnessKind> {
     enabled(settings).into_iter().filter(|k| *k == HarnessKind::CLAUDE || k.provider().is_present()).collect()
 }
 
+/// `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`: the
+/// command line every non-Claude hook runs. Without a project-dir variable,
+/// `--worktree ""` makes am-hook use the payload's `cwd`.
+pub fn hook_command_line(id: &str, project_dir_var: Option<&str>, event: &str, invocation: &str) -> String {
+    let worktree = project_dir_var.map(|v| format!("\"${v}\"")).unwrap_or_else(|| "\"\"".into());
+    format!("{invocation} --agent {id} --worktree {worktree} --event {event}")
+}
+
 pub(crate) fn home_join(rel: &str) -> PathBuf {
     paths::home_dir().join(rel)
 }
@@ -385,7 +492,7 @@ mod tests {
 
     #[test]
     fn builtins_are_registered_and_resolvable() {
-        for k in BUILTIN {
+        for &k in BUILTIN {
             assert_eq!(HarnessKind::get(k.id()), Some(k));
             assert!(k.is_builtin());
         }

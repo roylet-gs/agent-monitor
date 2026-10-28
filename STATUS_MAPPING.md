@@ -22,7 +22,7 @@ The rules are written against Claude Code's event vocabulary, which is am's **ca
 2. **Subagent bookkeeping** (always, even if the status won't change; see [Subagent Tracking](#subagent-tracking)).
 3. **Count running subagents** for the owner *after* step 2. This `running` count is an input to the rules below, and is mirrored into `active_subagents` for 1.x compatibility.
 4. **Map the event** with `map_event_to_status(event, current, running)`. `None` means "leave the status alone".
-5. **Write.** If the status, `is_open` and `session_id` are unchanged and there's no new message, only `updated_at` is touched. Otherwise the row is upserted. `is_open` is false only after `SessionEnd`. `last_response` comes from `last_assistant_message` (main-agent events only, not subagent lifecycle) or a `Notification`'s `message`. Events from inside a subagent never write `session_id` or `last_response`.
+5. **Write.** If the status, `is_open` and `session_id` are unchanged and there's no new message, only `updated_at` is touched. Otherwise the row is upserted. `is_open` is false only after `SessionEnd` (or, for a harness with no session-end hook such as Antigravity, once another session of it starts at the same owner while this one is `done`/`idle`; see Antigravity below); a `SessionEnd` for a session with no row is skipped (nothing to close). `last_response` comes from `last_assistant_message` (main-agent events only, not subagent lifecycle) or a `Notification`'s `message`. Events from inside a subagent never write `session_id` or `last_response`.
 
 ## Event Origin
 
@@ -78,7 +78,7 @@ Applied in this order; the first match wins.
 | --------- | ------ |
 | `stop_hook_active: true` | `waiting` |
 | `running > 0` | `delegating` |
-| current status is `waiting` | `waiting` |
+| current status is `waiting` | `waiting`, or `done` when the harness's `Stop` ends a wait (`stop_ends_wait`: Grok, Muse) |
 | `permission_mode == "plan"` or current status is `planning` | `waiting` |
 | current status is `executing` | `done` |
 | Fallback | `idle` |
@@ -217,11 +217,53 @@ Set `AM_HOOK_CAPTURE=1` in Claude Code's environment to save the latest raw payl
 
 Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gemini sessions never reach `delegating` and record nothing in `subagents`.
 
-**Codex CLI** (`--agent codex`), **Qwen Code** (`--agent qwen`), **Factory Droid** (`--agent droid`) and **GitHub Copilot CLI** (`--agent copilot`) send Claude Code's event names and payload keys, so the rules above apply unchanged once tool names are mapped (Codex `apply_patch` → `Edit`; Qwen `run_shell_command` → `Bash`…; Droid `Execute` → `Bash`, `Create` → `Write`). Differences:
+**Codex CLI** (`--agent codex`), **Qwen Code** (`--agent qwen`), **Factory Droid** (`--agent droid`), **GitHub Copilot CLI** (`--agent copilot`), **Qoder CLI** (`--agent qoder`, Claude's tool names too) and **CodeBuddy Code** (`--agent codebuddy`) send Claude Code's event names and payload keys, so the rules above apply unchanged once tool names are mapped (Codex `apply_patch` → `Edit`; Qwen `run_shell_command` → `Bash`…; Droid `Execute` → `Bash`, `Create` → `Write`). Differences:
 
 - Codex: `Interrupt` (the user stopped the turn) → `Stop`. No `Notification`; `waiting` comes from `PermissionRequest`. Subagent events carry `agent_id`, so `delegating` works.
 - Droid: a cancelled turn sends `Notification` (`idle_prompt`) rather than `Stop`. No `SubagentStart`, so its subagents aren't tracked.
 - Copilot: registered with PascalCase names, which select its Claude-shaped payload. Its permission and notification hooks only exist in the camelCase format, so only `AskUserQuestion` reaches `waiting`.
+- CodeBuddy: Claude's tool names too (no mapping), and Claude's subagent shape: `SubagentStart`, a subagent's tool events and its `SubagentStop` carry its `agent_id`/`agent_type` under the parent's `session_id`, and `Stop` fires only for the main session, so a turn that ends with subagents running is `delegating`, then `done` when the last one stops.
+
+**Grok CLI** (`--agent grok`, hooks in `~/.grok/hooks/agent-monitor.json`): Claude Code's event names with camelCase payload keys (`sessionId`, `notificationType`, `toolName`), which `grok.rs` also reads as snake_case.
+
+| Grok event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` | same | `idle` |
+| `UserPromptSubmit` | same | `executing` |
+| `PreToolUse` | same | `executing` |
+| `Notification` (`permission_prompt`, specific message) | same | `waiting` |
+| `Notification` (generic "Tool permission requested", completion text, "waiting for input") | `Notification` without a type | no change |
+| `Stop` | same (`stop_ends_wait`) | `done` after work or a wait, else `idle` |
+| `SessionEnd` | not hooked | — |
+
+Grok fires `SessionEnd` at the end of **every turn**, alongside `Stop`, not when the session closes. Mapped to `SessionEnd` it would close the session each turn, and mapped to `Stop` the second `Stop` would turn a `done` turn `idle`, so am doesn't hook it. The generic "Tool permission requested" prompt arrives for every tool step even in auto-approve mode; so only a specific prompt ("Grok needs permission to run rm") reaches `waiting`. There are no `PostToolUse` or subagent events, so nothing reports that the user answered a prompt (cmux's Feed approval blocks in `PreToolUse`, before it); Grok's `Stop` therefore carries `stop_ends_wait` and takes a `waiting` turn to `done`, where Claude's `Stop` keeps it `waiting`.
+
+**Pi** (`--agent pi`): Pi has no command hooks. am installs an extension (`~/.pi/agent/extensions/agent-monitor.ts`, or under `$PI_CODING_AGENT_DIR`) that turns Pi's events into Claude-shaped payloads (`--worktree ""`, so the directory is the payload's `cwd`):
+
+| Pi event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` / `session_shutdown` | `SessionStart` / `SessionEnd` | `idle` |
+| `before_agent_start`; `agent_start` when no turn is open | `UserPromptSubmit` | `executing` |
+| `tool_execution_start` / `_end` (not calls made by another tool) | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`, `read` → `Read`…) |
+| the same for a subagent tool (`subagent`, `task`, `agent`, `team_spawn`, or a name containing "subagent") | `SubagentStart` / `SubagentStop`, `agent_id` = the tool call id | `executing`; `delegating` if the turn ends first |
+| `ctx.ui.confirm`/`select`/`input` opened during a turn | `PermissionRequest`, then `PostToolUse` when answered | `waiting`, then `executing` |
+| `agent_settled` with `ctx.isIdle()` (Pi ≥ 0.80.5), else `agent_end` | `Stop`, once per turn | `done` |
+
+Stop waits for `agent_settled` because retries, compaction and queued messages start another run after `agent_end`; a second `Stop` would turn `done` into `idle`, so the extension sends one per turn. Pi awaits `session_shutdown` (quit, `/new`, `/resume`, `/fork`, `/reload`), so the extension waits at most one run's timeout (5 s) for `SessionEnd` to reach am-hook; if that runs out, the tool events still queued are dropped.
+
+**Amp** (`--agent amp`): Amp has no command hooks. am's plugin (`~/.config/amp/plugins/agent-monitor.ts`) sends canonical event names itself, with `--worktree ""`, the thread id as `session_id` and the workspace root as `cwd`:
+
+| Amp event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session.start`, first time this Amp process sees the thread | `SessionStart` | `idle` |
+| `agent.start`, or `state` → `running` outside a turn | `UserPromptSubmit` (once per turn) | `executing` |
+| `tool.call` / `tool.result` | `PreToolUse` / `PostToolUse` | `executing` (`edit_file` → `Edit`, `create_file` → `Write`…) |
+| thread `state` `awaiting-approval` / `awaiting-input` | `PermissionRequest` | `waiting` |
+| thread `state` back to `running` | `PostToolUse` | `executing` |
+| `agent.end` (`done`/`cancelled`) once `state` is `idle`, or `state` → `idle` in a turn no `agent.start` opened | `Stop` (once per turn) | `done` after work |
+| `agent.end` `error`, or `state` `error` | `StopFailure` | `idle` |
+
+The plugin sends one `Stop` per turn, since a second would turn `done` into `idle`, and waits for the thread's `state` to reach `idle` (another plugin can continue a turn from `agent.end`); a turn a `state` change opened (another plugin's `thread.append`, another Amp client) ends on `idle`, since its `agent.end` may never reach this process. `session.start` also fires when the user switches to a thread, so a thread the process already knows gets no second `SessionStart`, which would show a running or `done` thread as `idle`; without a `state` observable (older Amp) `agent.end` ends the turn. A turn that ends while waiting sends `PostToolUse` first, since `Stop` keeps `waiting`. Amp has no session-end event.
 
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 
@@ -233,3 +275,122 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**Antigravity CLI** (`--agent antigravity`, hooks in the `agent-monitor` group of `~/.gemini/config/hooks.json`):
+
+| Antigravity event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` (new conversations only, agy ≥ 1.1.1) | `SessionStart` | `idle` |
+| `PreInvocation` (before every model invocation, `invocationNum` 0, 1, …) | `UserPromptSubmit` | `executing` |
+| `Stop` with `fullyIdle: false` (background work still running) | `PostToolUse` | stays `executing` |
+| `Stop` with `fullyIdle: true` | `Stop` | `done` after work, else `idle` |
+
+The session is `conversationId`, the directory `workspacePaths[0]` (`--worktree ""`). There is no permission or notification hook, so it never shows `waiting`, and no session-end hook. Instead, when a new conversation starts (`SessionStart`) am-hook closes the worktree's (or standalone directory's) other Antigravity sessions that have settled (`done` or `idle`); one still `executing` stays open, and a closed conversation that is resumed (`agy --conversation`) opens again on its next event. The latest conversation therefore stays open after `agy` exits: a `done` one keeps the row from `hideIdleDoneAgents`/`hideMergedClosedPrs` until the next conversation starts there (an `idle` one stops counting after 10 minutes, as for every harness). The process scan matches both `agy` and `antigravity` (the release tarball's binary name). am doesn't register the `Notification`, `turn-completion` or per-turn `SessionEnd` events cmux uses (they aren't in Antigravity's documented hook list, and each would be a second `Stop` for the same turn, turning `done` into `idle`).
+
+**Muse Code** (`--agent muse`, hooks in `$XDG_CONFIG_HOME/muse/settings.json`, else `~/.config/muse/settings.json`) sends Claude Code's event names with a Claude-style payload. Only session and turn events are installed:
+
+| Muse event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` | ignored (a session opens with its first prompt) | — |
+| `SessionEnd` | same | `idle`, closed (skipped for a session am never saw) |
+| `UserPromptSubmit` | same | `executing` |
+| `Notification` | same | `waiting` when `notification_type` is `permission_prompt`/`elicitation_dialog`, `idle_prompt` as for Claude, otherwise no change |
+| `Stop` | same | `done` after work or a permission prompt, else `idle` |
+| `StopFailure` | same | `idle` |
+
+There are no tool hooks, so a Muse turn shows `executing` without tool detail, and nothing says when a permission prompt was answered: Muse events are marked `stop_ends_wait` (as Grok's `Stop` is), and for those `Stop` after `waiting` gives `done` (for other harnesses it stays `waiting`). Muse's internal child sessions (reminders, delegated subagents) fire the same hooks with `turn_id == session_id`; they are ignored, so they never show up as extra sessions or move the status, except a child's permission prompt/elicitation, which is kept without its session id so the owner's row reads `waiting` (until the top-level session's next event rewrites the headline). Lifecycle events carry no `turn_id`, so a child's `SessionStart` couldn't be told from a top-level one; Muse's `SessionStart` is therefore ignored, and a child's `SessionEnd` finds no session to close. No project-dir variable: the directory is the payload's `cwd`.
+
+**Kiro CLI** (`--agent kiro`, hooks in the `agent-monitor` agent, `~/.kiro/agents/agent-monitor.json`):
+
+| Kiro event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `agentSpawn` | `SessionStart` | `idle` |
+| `userPromptSubmit` | `UserPromptSubmit` | `executing` |
+| `preToolUse` / `postToolUse` | `PreToolUse` / `PostToolUse` | `executing` (`execute_bash`/`shell` → `Bash`, `fs_read` → `Read`, `fs_write` → `Write`, `use_subagent`/`delegate` → `Agent`) |
+| `stop` | `Stop` | `done` after work, else `idle` |
+
+Payloads carry Claude's keys (`session_id`, `cwd`, `tool_name`, `tool_input`); the hook passes `--worktree ""`, so the directory is the payload's `cwd`. The `--event` flag names the event, so Kiro v3's PascalCase `hook_event_name` doesn't matter. Kiro has no permission or notification hook and no session-end event (2.x) or subagent ids, so it never shows `waiting` or `delegating`. Its hooks only run while the `agent-monitor` agent is in use (`kiro-cli chat --agent agent-monitor`).
+
+**Rovo Dev CLI** (`--agent rovodev`, hooks in `~/.rovodev/config.yml` under `eventHooks`, `--worktree "$PWD"`):
+
+| Rovo Dev event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `on_session_start` / `on_session_end` | `SessionStart` / `SessionEnd` | `idle` |
+| `on_user_prompt` | `UserPromptSubmit` | `executing` |
+| `on_tool_start` / `on_tool_end` | `PreToolUse` / `PostToolUse` | `executing` (tool from `attributes.tool_input.tool_name`, a flat `attributes.tool_name` or the first of `attributes.tool_calls[]`; `bash` → `Bash`) |
+| `on_tool_permission` | `PermissionRequest` | `waiting` |
+| `on_complete` | `Stop` | `done` after work, else `idle` |
+| `on_error` | `StopFailure` | `idle` |
+
+Current Rovo Dev releases send `{session_id, transcript_path, cwd, timestamp, hook_event_name, attributes}`, so each session gets its own `sessions` row and the worktree's headline follows the most urgent one, like any harness (`on_session_end` closes it). A release whose payload has no `session_id` updates the worktree's `agent_status` row directly; one without `cwd` is still placed by `--worktree "$PWD"`. It has no subagent events, so no `delegating`. `on_tool_permission` maps to `waiting` (cmux shows it as running): the user has to answer. Older Rovo Dev releases only fire `on_complete`, `on_error` and `on_tool_permission`; there a session never shows `executing`, and an `on_complete` after `waiting` leaves it `waiting` (the rules keep `waiting` through a `Stop`).
+
+**Kimi Code** (`--agent kimi`, a `[[hooks]]` block in Kimi's `config.toml`) sends Claude Code's event names, payload keys (`session_id`, `cwd`, `tool_name`, `tool_input`) and tool names. It has events Claude doesn't, mapped as follows:
+
+| Kimi event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` / `SessionEnd` | same | `idle` |
+| `UserPromptSubmit` | same | `executing` |
+| `PreToolUse` / `PostToolUse` | same | `executing` (`AskUserQuestion`/`ExitPlanMode` → `waiting`) |
+| `PostToolUseFailure` | `PostToolUse` | `executing` |
+| `PermissionRequest` | same | `waiting` |
+| `PermissionResult` (the approval was answered) | `PostToolUse` | `executing` |
+| `Stop` | same | `done` after work, else `idle` |
+| `StopFailure` (the turn errored) | same | `idle` |
+| `Interrupt` (Esc; fires instead of `Stop`) | `StopFailure` | `idle` |
+
+There is no project-dir variable, so the hook passes `--worktree ""` and the payload's `cwd` decides the worktree. Kimi's `Notification` only reports background tasks (`task.completed`…), never an approval, so it isn't hooked. `SubagentStart`/`SubagentStop` carry a name but no id, so Kimi sessions never reach `delegating`.
+
+**Hermes Agent** (`--agent hermes`, shell hooks in `$HERMES_HOME/config.yaml`, default `~/.hermes`):
+
+| Hermes event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `on_session_start` / `on_session_reset` | `SessionStart` | `idle` |
+| `pre_llm_call` | `UserPromptSubmit` | `executing` |
+| `pre_tool_call` / `post_tool_call` | `PreToolUse` / `PostToolUse` | `executing` (`terminal` → `Bash`; `clarify` → `AskUserQuestion`, so `waiting`) |
+| `on_human_input_request` | `PermissionRequest` | `waiting` (approval, sudo password, `clarify`) |
+| `on_human_input_resolved` | `PostToolUse` | `executing` |
+| `on_session_end` | `Stop` | `done` after work, else `idle` |
+| `on_session_finalize` | `SessionEnd` | `idle` (closed) |
+
+Despite its name, `on_session_end` fires at the end of every turn (completed, failed or interrupted), so it is the turn's `Stop`. `post_llm_call` (successful turns only) isn't installed: a second `Stop` in the same turn would turn `done` into `idle`. The human-input events (Hermes from 2026-10-05 on; older builds log them as unknown and show no approval waits) carry the session id and fire only when a person is actually needed, so automatic ("smart") approvals don't flash `waiting`. Every Hermes turn opens with `pre_llm_call`, so tool and human-input events are **turn-bound** (`HookEvent::turn_bound`): with the session outside a turn (no status yet, `idle` or `done`) they change nothing. That keeps a finished turn `done` while Hermes's background memory/skill review fork, which shares the session id but skips `pre_llm_call` and `on_session_end`, runs its tool calls after the `Stop`. Events whose `extra.platform` is anything but `cli`/`tui` (the gateway's Telegram/Discord/… turns, cron) are dropped: installing approves am's hooks for the gateway and cron too, and their `cwd` is the gateway process's, not a project. The directory is the payload's `cwd`.
+
+**OpenCode** (`--agent opencode`): OpenCode has no command hooks. am's plugin (`<config dir>/plugins/agent-monitor.js`) sends canonical event names itself, with `--worktree ""` and the session's directory as `cwd`:
+
+| OpenCode event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session.created` | `SessionStart` | `idle` |
+| `session.status` busy (V2 `session.next.prompted` / `session.execution.started`) | `UserPromptSubmit` (once per turn) | `executing` |
+| `tool.execute.before` / `tool.execute.after` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`, `question` → `AskUserQuestion` → `waiting`…) |
+| `permission.asked` | `PermissionRequest` | `waiting` |
+| last `permission.replied` | `PostToolUse` | `executing` |
+| `session.status` idle / `session.idle` (V2 `session.execution.succeeded`) | `Stop` (once per turn) | `done` after work |
+| `session.error` / `session.execution.failed` | `StopFailure` | `idle` |
+| archived / `session.deleted` | `SessionEnd` | `idle` |
+
+OpenCode reports idle twice (`session.status` and `session.idle`); the plugin sends one `Stop` per turn, since a second would turn `done` into `idle`. `MessageAbortedError` (Esc) and `ContextOverflowError` (compaction) don't end the turn; the idle after them does. A turn that ends while a permission request is open sends `PostToolUse` first, since `Stop` keeps `waiting`. A child session (`parentID`, the `task` tool) is reported as a subagent of its parent: `SubagentStart`/`SubagentStop` and its tool and permission events carry `agent_id` = the child, so its tool calls don't move the parent and its permission prompts make it `waiting`.
+
+**OMP / oh-my-pi** (`--agent omp`, no command hooks: am's extension `agent-monitor-omp.ts` in OMP's agent dir sends these):
+
+| OMP event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` / `session_shutdown` | `SessionStart` / `SessionEnd` | `idle` |
+| `before_agent_start` | `UserPromptSubmit` | `executing` |
+| `tool_execution_start` / `tool_execution_end` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`…; `ask` → `AskUserQuestion` → `waiting` on start; its end is sent without the tool name, so answering is `executing` again) |
+| `tool_approval_requested` | `PermissionRequest` | `waiting` |
+| `tool_approval_resolved` | `PostToolUse` | `executing` |
+| `plan_review_requested` | `PreToolUse` of `ExitPlanMode` | `waiting` (also after `done`: the review opens as the planning turn ends) |
+| `agent_end` | `Stop` | `done` after work, else `idle` |
+
+The extension skips an `agent_end` with `willContinue: true` (an automatic continuation follows) and sends one `Stop` per turn, since a second `Stop` would turn `done` into `idle`. Hooks run one at a time in the order OMP fired them, so a `PreToolUse` can't land after its `PermissionRequest` or a `PostToolUse` after the `Stop`. A switch to another session (`/new`, resume, fork) is `SessionEnd` for the old id then `SessionStart` for the new one. Other sessions in the same omp process are task subagents: they report as `SubagentStart`/`SubagentStop` (and tool events with `agent_id`) under the owner session, so `delegating` and subagent rows work, and a subagent's approval prompt shows `waiting`.
+
+**Campfire** (`--agent campfire`): Campfire has no command hooks. am's extension (`${CAMPFIRE_CODING_AGENT_DIR:-~/.campfire/agent}/extensions/agent-monitor-campfire.ts`) sends canonical event names itself, with `--worktree ""` and the session's directory as `cwd`, and only for the session's host (`CAMPFIRE_SESSION_ROLE=host`):
+
+| Campfire event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` | `SessionStart` | `idle` |
+| `before_agent_start` / `agent_start` | `UserPromptSubmit` (once per run) | `executing` |
+| observer `join.requested` / `permission.asked` | `PreToolUse` with `permission_prompt: true` and the ask as `message` | `waiting` (also after a finished turn: the `done` guard drops a `Notification`, not a `PreToolUse`) |
+| `agent_end` | `Stop` (once per run; `PostToolUse` first when the run saw an ask) | `done` after work |
+| `session_end` / `session_shutdown` | `SessionEnd` | `idle` |
+
+`agent_end` isn't the end of the work: after a retry, a compaction retry or a queued follow-up message Pi starts another run with `agent_start` and no `before_agent_start`, so that run reports `UserPromptSubmit` again (the row goes `done` → `executing` → `done`). There is no event for the host answering a join request or capability ask, so a `waiting` row from an ask between turns stays until the next prompt. am-hook stores a needs-user `PreToolUse`'s `message` as the row's last message, as it does a `Notification`'s.

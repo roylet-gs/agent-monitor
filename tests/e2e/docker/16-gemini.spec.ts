@@ -54,13 +54,13 @@ test("Settings → Harness plugins lists the plugins and toggles one", async ({ 
   const tui = new RustTui(page);
   await tui.open();
   await tui.openSetting("Turn harnesses on/off, install their hooks, pick the default");
-  await tui.waitForMatch(/Harness plugins…\s+7 of 7 on · default claude/);
+  await tui.waitForMatch(/Harness plugins…\s+21 of 21 on · default claude/);
   await tui.sendKey("Enter");
   await tui.waitForText("Harness plugins — space on/off · i install hooks · d default · esc back");
   await tui.waitForMatch(/\[x\] Claude Code\s+built-in/);
   await tui.waitForMatch(/\[x\] Gemini CLI\s+built-in/);
   // Every built-in harness is listed.
-  for (const name of ["Codex CLI", "Qwen Code", "Factory Droid", "GitHub Copilot CLI", "Cursor"]) {
+  for (const name of ["Codex CLI", "Qwen Code", "Factory Droid", "GitHub Copilot CLI", "Cursor", "Qoder CLI", "CodeBuddy Code", "Antigravity CLI", "Grok CLI", "Muse Code", "Kiro CLI", "Rovo Dev CLI", "Kimi Code", "Hermes Agent", "OpenCode", "Pi", "OMP", "Campfire", "Amp"]) {
     await tui.waitForMatch(new RegExp(`\\[x\\] ${name}\\s+built-in`));
   }
   await tui.screenshot("harness-plugins");
@@ -74,7 +74,7 @@ test("Settings → Harness plugins lists the plugins and toggles one", async ({ 
   await tui.sendKey(" ");
   await tui.waitForMatch(/\[x\] Gemini CLI/);
   await tui.sendKey("Escape");
-  await tui.waitForMatch(/Harness plugins…\s+7 of 7 on · default claude/);
+  await tui.waitForMatch(/Harness plugins…\s+21 of 21 on · default claude/);
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
 });

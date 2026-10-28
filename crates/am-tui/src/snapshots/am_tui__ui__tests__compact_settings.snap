@@ -1,6 +1,6 @@
 ---
 source: crates/am-tui/src/ui.rs
-expression: screen
+expression: fixed_plugin_count(&screen)
 ---
 ╭─Settings ────────────────────────────────────────────────╮
 │ General                                                  │
@@ -9,7 +9,7 @@ expression: screen
 │   Editor command                —                        │
 │   Resume last session on open   on                       │
 │   Repositories…                 0 tracked                │
-│   Harness plugins…              7 of 7 on · default cla… │
+│   Harness plugins…              N of N on · default cla… │
 │   Key bindings…                 defaults                 │
 │   Mouse                         on                       │
 │   Run startup script in         pane                     │

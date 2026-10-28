@@ -615,6 +615,21 @@ pub fn upsert_session(
     Ok(())
 }
 
+/// Close `owner`'s other open sessions of `agent` that have settled (`done`
+/// or `idle`), for a harness with no session-end hook when a new session
+/// starts. A closed session that sends another event opens again. Returns how
+/// many were closed.
+pub fn close_settled_sessions(conn: &Connection, owner: &Owner, agent: HarnessKind, except: &str) -> rusqlite::Result<usize> {
+    let (owner_sql, key) = owner_where(owner);
+    conn.execute(
+        &format!(
+            "UPDATE sessions SET is_open = 0, ended_at = COALESCE(ended_at, datetime('now'))
+             WHERE {owner_sql} AND agent = ?2 AND session_id <> ?3 AND is_open = 1 AND status IN ('done', 'idle')"
+        ),
+        params![key, agent.id(), except],
+    )
+}
+
 /// Bump a session's `updated_at` and move it to `owner` (a session follows
 /// its latest event, e.g. onto a worktree whose repo was added mid-session).
 pub fn touch_session(conn: &Connection, owner: &Owner, agent: HarnessKind, session_id: &str) -> rusqlite::Result<()> {

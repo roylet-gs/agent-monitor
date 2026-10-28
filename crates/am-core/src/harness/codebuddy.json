@@ -1,0 +1,29 @@
+{
+  "id": "codebuddy",
+  "name": "CodeBuddy Code",
+  "shortName": "CodeBuddy",
+  "program": "codebuddy",
+  "configDir": "~/.codebuddy",
+  "hooks": {
+    "settingsPath": "~/.codebuddy/settings.json",
+    "projectDirVar": "CODEBUDDY_PROJECT_DIR",
+    "timeoutMs": 5000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "PermissionRequest": "PermissionRequest",
+    "Notification": "Notification",
+    "SubagentStart": "SubagentStart",
+    "SubagentStop": "SubagentStop",
+    "Stop": "Stop",
+    "StopFailure": "StopFailure"
+  },
+  "resume": { "session": ["--resume", "{id}"], "continue": ["--continue"] },
+  "process": { "names": ["codebuddy", "cbc", "codebuddy-code"], "argvContains": ["/@tencent-ai/codebuddy-code/"] },
+  "notes": "CodeBuddy asks you to review hook changes in /hooks before they take effect"
+}

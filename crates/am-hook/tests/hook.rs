@@ -270,6 +270,462 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
     assert_eq!(env.session("t-1").0, "done");
 }
 
+/// The payloads Pi's generated extension (`am_core::harness::pi`) sends:
+/// Claude-shaped, Pi's tool names, `--worktree ""` (found from `cwd`).
+#[test]
+fn a_pi_session_is_tracked_through_its_extension_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    let pi = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "01a18110-925d", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("pi", event, "", p);
+    };
+    pi("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("pi")));
+    pi("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    pi("PreToolUse", json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } }));
+    // A dialog during the turn (ctx.ui.confirm) waits on the user; its answer resumes.
+    pi("PermissionRequest", json!({ "message": "Allow?" }));
+    assert_eq!(env.status().0, "waiting");
+    pi("PostToolUse", json!({}));
+    assert_eq!(env.status().0, "executing");
+    pi("PostToolUse", json!({ "tool_name": "bash" }));
+    pi("SubagentStart", json!({ "agent_id": "call_2", "agent_type": "subagent", "tool_input": { "description": "scan" } }));
+    assert_eq!(env.running_subagents_of("01a18110-925d"), 1);
+    pi("SubagentStop", json!({ "agent_id": "call_2", "agent_type": "subagent" }));
+    assert_eq!(env.running_subagents_of("01a18110-925d"), 0);
+    pi("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("01a18110-925d"), ("done".to_string(), true));
+    pi("SessionEnd", json!({}));
+    assert!(!env.session("01a18110-925d").1);
+}
+
+#[test]
+fn a_qoder_session_is_tracked_with_its_subagents() {
+    let env = Env::new();
+    let qoder = |event: &str, payload: Value| env.send_as(Some("qoder"), event, with_session("q-1", payload));
+    qoder("SessionStart", json!({ "source": "startup", "model": "auto" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("qoder")));
+    qoder("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!(env.status().0, "executing");
+    qoder("PermissionRequest", json!({ "tool_name": "Bash", "tool_input": { "command": "rm -rf target" } }));
+    assert_eq!(env.status().0, "waiting");
+    qoder("PostToolUse", json!({ "tool_name": "Bash", "tool_use_id": "t1" }));
+    qoder("SubagentStart", sub("qa1", json!({})));
+    qoder("Stop", json!({ "last_assistant_message": "Started a helper.", "stop_hook_active": false }));
+    assert_eq!(env.status(), ("delegating".into(), 1));
+    qoder("SubagentStop", sub("qa1", json!({ "last_assistant_message": "report" })));
+    assert_eq!(env.status(), ("done".into(), 0));
+    assert_eq!(env.session("q-1").0, "done");
+}
+
+#[test]
+fn a_qoder_ide_turn_is_found_from_the_payload_cwd() {
+    // The Qoder IDE runs the same hooks without `$QODER_PROJECT_DIR`, so the
+    // hook passes `--worktree ""` and the payload `cwd` places the session.
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    let ide = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "ide-1", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("qoder", event, "", p);
+    };
+    ide("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("qoder")));
+    ide("PermissionRequest", json!({ "tool_name": "Bash", "tool_input": { "command": "rm -rf target" } }));
+    assert_eq!(env.status().0, "waiting");
+    ide("PostToolUse", json!({ "tool_name": "Bash" }));
+    ide("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("ide-1").0, "done");
+}
+
+#[test]
+fn a_codebuddy_turn_is_tracked() {
+    let env = Env::new();
+    let root = env.root();
+    let transcript = format!("{root}/.codebuddy/projects/w/cb-1.jsonl");
+    let cb = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "cb-1", "cwd": root,
+                            "transcript_path": transcript, "permission_mode": "default" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("codebuddy", event, &root, p);
+    };
+    cb("SessionStart", json!({ "source": "startup" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("codebuddy")));
+    cb("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!(env.status().0, "executing");
+    cb("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" } }));
+    cb("Notification", json!({ "notification_type": "permission_prompt", "message": "CodeBuddy needs your permission to use Bash" }));
+    assert_eq!(env.status().0, "waiting");
+    cb("PostToolUse", json!({ "tool_name": "Bash", "tool_response": {} }));
+    assert_eq!(env.status().0, "executing");
+    cb("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("cb-1").0, "done");
+}
+
+/// CodeBuddy's subagent hooks carry `agent_id`/`agent_type` (its
+/// `buildAgentTrigger`) with the parent's `session_id`, and `Stop` fires for
+/// the main session only, so a turn that hands off is `delegating`.
+#[test]
+fn a_codebuddy_subagent_keeps_the_turn_delegating() {
+    let env = Env::new();
+    let root = env.root();
+    let cb = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "cb-2", "cwd": root });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("codebuddy", event, &root, p);
+    };
+    let agent = json!({ "agent_id": "store-1", "agent_type": "general-purpose" });
+    cb("UserPromptSubmit", json!({ "prompt": "split it up" }));
+    cb("SubagentStart", agent.clone());
+    let mut tool = agent.clone();
+    tool.as_object_mut().unwrap().extend(json!({ "tool_name": "Read", "tool_input": { "file_path": "/w/a.rs" } }).as_object().unwrap().clone());
+    cb("PreToolUse", tool);
+    assert_eq!(env.status(), ("executing".into(), 1), "a subagent's tool doesn't move the parent");
+    cb("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status(), ("delegating".into(), 1));
+    cb("SubagentStop", agent);
+    assert_eq!(env.status(), ("done".into(), 0));
+}
+
+#[test]
+fn a_muse_session_is_tracked_and_its_child_sessions_are_ignored() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Muse has no project-dir variable (`--worktree ""`); `turn_id` marks a turn.
+    let muse = |event: &str, sid: &str, turn: Option<&str>, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": sid, "cwd": cwd });
+        if let Some(t) = turn {
+            p["turn_id"] = t.into();
+        }
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("muse", event, "", p);
+    };
+    muse("SessionStart", "m-1", None, json!({}));
+    muse("UserPromptSubmit", "m-1", Some("t-1"), json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("muse")));
+    // An internal child session (turn id = its own session id; lifecycle
+    // events carry no turn id) adds nothing.
+    muse("SessionStart", "c-1", None, json!({}));
+    muse("UserPromptSubmit", "c-1", Some("c-1"), json!({}));
+    muse("Stop", "c-1", Some("c-1"), json!({}));
+    muse("SessionEnd", "c-1", None, json!({}));
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 1);
+    assert_eq!(env.status().0, "executing");
+    // ...unless it's blocked on the user: the owner reads waiting until the
+    // top-level session's next event.
+    muse("Notification", "c-2", Some("c-2"), json!({ "notification_type": "permission_prompt", "message": "Allow?" }));
+    assert_eq!(env.status().0, "waiting");
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 1);
+    muse("Stop", "m-1", Some("t-1"), json!({ "last_assistant_message": "Done." }));
+    assert_eq!(env.session("m-1"), ("done".into(), true));
+    assert_eq!(env.status().0, "done");
+    // A permission prompt, then the turn ends: done (no tool hooks say it was answered).
+    muse("UserPromptSubmit", "m-1", Some("t-2"), json!({}));
+    muse("Notification", "m-1", Some("t-2"), json!({ "notification_type": "permission_prompt", "message": "Allow?" }));
+    assert_eq!(env.status().0, "waiting");
+    muse("Stop", "m-1", Some("t-2"), json!({}));
+    assert_eq!((env.status().0.as_str(), env.session("m-1").0.as_str()), ("done", "done"));
+    muse("SessionEnd", "m-1", None, json!({}));
+    assert!(!env.session("m-1").1);
+}
+
+#[test]
+fn a_kiro_session_is_tracked_through_its_agent_hooks() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Kiro has no project-dir variable: the hook passes `--worktree ""`.
+    let kiro = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "cwd": cwd, "session_id": "k-1" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("kiro", event, "", p);
+    };
+    kiro("agentSpawn", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("kiro")));
+    kiro("userPromptSubmit", json!({ "prompt": "fix the bug" }));
+    assert_eq!(env.status().0, "executing");
+    kiro("preToolUse", json!({ "tool_name": "execute_bash", "tool_input": { "command": "cargo test" } }));
+    kiro("postToolUse", json!({ "tool_name": "execute_bash", "tool_response": { "success": true } }));
+    assert_eq!(env.status().0, "executing");
+    kiro("stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("k-1").0, "done");
+}
+
+#[test]
+fn a_rovodev_session_without_session_ids_updates_the_worktree_row() {
+    let env = Env::new();
+    // The hook passes `--worktree "$PWD"`: where `acli rovodev run` started.
+    let pwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&pwd).unwrap();
+    let rovo = |event: &str, payload: Value| env.send_raw("rovodev", event, &pwd, payload);
+    rovo("on_session_start", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("rovodev")));
+    rovo("on_user_prompt", json!({}));
+    assert_eq!(env.status().0, "executing");
+    let tool = json!({ "attributes": { "tool_input": { "tool_name": "bash", "args": { "command": "cargo test" } } } });
+    rovo("on_tool_permission", tool.clone());
+    assert_eq!(env.status().0, "waiting");
+    rovo("on_tool_start", tool.clone());
+    rovo("on_tool_end", tool);
+    assert_eq!(env.status().0, "executing");
+    rovo("on_complete", json!({ "transcript_path": "/tmp/gone.json" }));
+    assert_eq!(env.status().0, "done");
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 0, "no session id, so no session rows");
+    rovo("on_user_prompt", json!({}));
+    rovo("on_error", json!({}));
+    assert_eq!(env.status().0, "idle");
+}
+
+/// Current Rovo Dev (202608.25.1) sends `{session_id, transcript_path, cwd,
+/// timestamp, hook_event_name, attributes}`: the session gets its own row,
+/// headlines the worktree, and `on_session_end` closes it.
+#[test]
+fn a_rovodev_session_with_the_real_envelope_gets_a_session_row() {
+    let env = Env::new();
+    let pwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&pwd).unwrap();
+    let rovo = |event: &str, attributes: Value| {
+        let payload = json!({ "session_id": "rs-1", "transcript_path": "/tmp/rs-1.json", "cwd": pwd, "timestamp": "2026-10-28T05:00:00Z",
+                              "hook_event_name": event, "attributes": attributes });
+        env.send_raw("rovodev", event, &pwd, payload);
+    };
+    rovo("on_session_start", json!({}));
+    assert_eq!(env.session("rs-1"), ("idle".into(), true));
+    rovo("on_user_prompt", json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref(), env.headline().as_str()), ("executing", Some("rovodev"), "rs-1"));
+    rovo("on_tool_permission", json!({ "tool_name": "bash", "args": { "command": "cargo test" } }));
+    assert_eq!(env.session("rs-1").0, "waiting");
+    rovo("on_tool_start", json!({ "tool_calls": [{ "tool_name": "bash", "args": { "command": "cargo test" } }] }));
+    assert_eq!(env.status().0, "executing");
+    rovo("on_complete", json!({}));
+    assert_eq!((env.status().0.as_str(), env.session("rs-1").0.as_str()), ("done", "done"));
+    rovo("on_session_end", json!({}));
+    assert!(!env.session("rs-1").1, "on_session_end closes the session");
+}
+
+#[test]
+fn a_kimi_session_is_tracked_through_its_native_events() {
+    let env = Env::new();
+    let cwd = format!("{}/src", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Kimi has no project-dir variable either: `--worktree ""`, payload `cwd`.
+    let kimi = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "k-1", "session_title": "Fix", "client_type": "kimi_code_cli", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("kimi", event, "", p);
+    };
+    kimi("SessionStart", json!({ "source": "startup", "model": "kimi-k2", "profile": "default" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("kimi")));
+    kimi("UserPromptSubmit", json!({ "prompt": "fix it", "is_steer": false }));
+    assert_eq!(env.status().0, "executing");
+    kimi("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" }, "tool_call_id": "c1" }));
+    kimi("PermissionRequest", json!({ "tool_name": "Bash" }));
+    assert_eq!(env.status().0, "waiting");
+    kimi("PermissionResult", json!({ "tool_name": "Bash" }));
+    assert_eq!(env.status().0, "executing");
+    kimi("PostToolUseFailure", json!({ "tool_name": "Bash", "tool_call_id": "c1", "error": { "message": "exit 1" } }));
+    kimi("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("k-1").0, "done");
+    // Esc mid-turn fires Interrupt, not Stop.
+    kimi("UserPromptSubmit", json!({ "prompt": "again" }));
+    kimi("Interrupt", json!({ "turn_id": 2, "reason": "cancelled" }));
+    assert_eq!(env.status().0, "idle");
+    kimi("SessionEnd", json!({ "reason": "exit" }));
+    assert_eq!(env.session("k-1"), ("idle".into(), false));
+}
+
+#[test]
+fn a_hermes_session_is_tracked_through_its_shell_hooks() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Hermes's stdin payload; no project-dir variable, so `--worktree ""`.
+    let hermes = |event: &str, session: &str, top: Value, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "tool_name": null, "tool_input": null, "session_id": session,
+                            "cwd": cwd, "profile": "default", "extra": extra });
+        p.as_object_mut().unwrap().extend(top.as_object().unwrap().clone());
+        env.send_raw("hermes", event, "", p);
+    };
+    let sid = "20261028_101500_ab12cd";
+    hermes("on_session_start", sid, json!({}), json!({ "model": "anthropic/claude-sonnet", "platform": "cli" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("hermes")));
+    hermes("pre_llm_call", sid, json!({}), json!({ "user_message": "fix the bug", "is_first_turn": true }));
+    assert_eq!(env.status().0, "executing");
+    let turn = json!({ "turn_id": format!("{sid}:task-1:aa11") });
+    hermes("pre_tool_call", sid, json!({ "tool_name": "terminal", "tool_input": { "command": "rm -rf target" } }), turn.clone());
+    // A person is needed: approval, sudo password or clarify.
+    hermes("on_human_input_request", sid, json!({}), json!({ "kind": "approval", "request_id": "r1", "session_key": "k", "platform": "cli" }));
+    assert_eq!(env.status().0, "waiting");
+    hermes("on_human_input_resolved", sid, json!({}), json!({ "kind": "approval", "request_id": "r1", "outcome": "approved", "platform": "cli" }));
+    assert_eq!(env.status().0, "executing");
+    hermes("post_tool_call", sid, json!({ "tool_name": "terminal" }), json!({ "status": "ok", "turn_id": turn["turn_id"] }));
+    hermes("on_session_end", sid, json!({}), json!({ "completed": true, "interrupted": false, "turn_id": turn["turn_id"], "platform": "cli" }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session(sid).0, "done");
+
+    // The background memory/skill review fork after the turn: same session
+    // id, its own turn, tool events only. The turn stays done.
+    let fork = json!({ "turn_id": format!("{sid}:task-2:bb22") });
+    hermes("pre_tool_call", sid, json!({ "tool_name": "memory", "tool_input": { "action": "add" } }), fork.clone());
+    hermes("post_tool_call", sid, json!({ "tool_name": "memory" }), fork.clone());
+    hermes("pre_tool_call", sid, json!({ "tool_name": "read_file", "tool_input": { "path": "x" } }), fork);
+    assert_eq!(env.session(sid).0, "done");
+    assert_eq!(env.status().0, "done");
+
+    // A gateway (Telegram) turn in the same directory is left out entirely.
+    let chat = "20261028_120000_cc33";
+    hermes("pre_llm_call", chat, json!({}), json!({ "user_message": "hi", "platform": "telegram" }));
+    hermes("pre_tool_call", chat, json!({ "tool_name": "terminal" }), json!({ "turn_id": "c" }));
+    hermes("on_session_end", chat, json!({}), json!({ "completed": true, "platform": "telegram" }));
+    let chats: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions WHERE session_id = ?1", [chat], |r| r.get(0)).unwrap();
+    assert_eq!(chats, 0);
+    assert_eq!(env.status().0, "done");
+
+    hermes("on_session_finalize", sid, json!({}), json!({ "platform": "cli" }));
+    assert_eq!(env.session(sid), ("idle".into(), false));
+}
+
+#[test]
+fn an_opencode_session_is_tracked_through_its_plugins_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Exactly what am's OpenCode plugin sends: `--worktree ""`, canonical
+    // event names, a child session reported as a subagent of its parent.
+    let opencode = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "ses_1", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("opencode", event, "", p);
+    };
+    opencode("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("opencode")));
+    opencode("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    opencode("PreToolUse", json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } }));
+    opencode("PermissionRequest", json!({ "tool_name": "bash" }));
+    assert_eq!(env.status().0, "waiting");
+    opencode("PostToolUse", json!({}));
+    assert_eq!(env.status().0, "executing");
+
+    let child = json!({ "agent_id": "ses_2", "agent_type": "explore" });
+    opencode("SubagentStart", child.clone());
+    assert_eq!(env.status(), ("executing".into(), 1));
+    let mut read = child.clone();
+    read.as_object_mut().unwrap().extend(json!({ "tool_name": "read", "tool_input": { "file_path": "src/a.rs" } }).as_object().unwrap().clone());
+    opencode("PreToolUse", read);
+    let (tool, input): (String, String) = env
+        .db()
+        .query_row("SELECT last_tool, last_tool_input FROM subagents WHERE agent_id = 'ses_2'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((tool.as_str(), input.as_str()), ("Read", "src/a.rs"));
+    let mut ask = child.clone();
+    ask["tool_name"] = "edit".into();
+    opencode("PermissionRequest", ask);
+    assert_eq!(env.status().0, "waiting");
+    opencode("PostToolUse", json!({}));
+    opencode("SubagentStop", child);
+    assert_eq!(env.status(), ("executing".into(), 0));
+
+    opencode("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("ses_1").0, "done");
+    // The child never became a session of its own.
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 1);
+
+    opencode("UserPromptSubmit", json!({}));
+    opencode("StopFailure", json!({}));
+    assert_eq!(env.status().0, "idle");
+    opencode("SessionEnd", json!({}));
+    assert!(!env.session("ses_1").1);
+}
+
+#[test]
+fn a_campfire_session_is_tracked_through_its_extensions_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Exactly what am's Campfire extension sends: `--worktree ""`, canonical
+    // event names, a collaborator's ask as a PreToolUse permission prompt.
+    let campfire = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "cf-1", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("campfire", event, "", p);
+    };
+    let ask = json!({ "permission_prompt": true, "message": "Ana is waiting to join the Campfire session" });
+    campfire("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("campfire")));
+    campfire("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    campfire("PreToolUse", ask.clone());
+    assert_eq!(env.status().0, "waiting");
+    // The ask is the row's message, as a Notification's would be.
+    let last: Option<String> = env.db().query_row("SELECT last_response FROM agent_status WHERE worktree_id = 'w'", [], |r| r.get(0)).unwrap();
+    assert_eq!(last.as_deref(), Some("Ana is waiting to join the Campfire session"));
+    campfire("PostToolUse", json!({}));
+    campfire("Stop", json!({ "last_assistant_message": "All done." }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("cf-1").0, "done");
+    // An ask after the turn still needs the host.
+    campfire("PreToolUse", ask.clone());
+    assert_eq!(env.status().0, "waiting");
+    campfire("UserPromptSubmit", json!({}));
+    campfire("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    campfire("SessionEnd", json!({}));
+    assert!(!env.session("cf-1").1);
+}
+
+#[test]
+fn an_amp_thread_is_tracked_through_its_plugins_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Exactly what am's Amp plugin sends: `--worktree ""`, canonical event
+    // names, the thread id as the session.
+    let amp = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "T-1", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("amp", event, "", p);
+    };
+    amp("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("amp")));
+    amp("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    amp("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" } }));
+    amp("PermissionRequest", json!({ "tool_name": "Bash" }));
+    assert_eq!(env.status().0, "waiting");
+    amp("PostToolUse", json!({}));
+    assert_eq!(env.status().0, "executing");
+    amp("PreToolUse", json!({ "tool_name": "edit_file", "tool_input": { "file_path": "src/a.rs" } }));
+    amp("PostToolUse", json!({ "tool_name": "edit_file" }));
+    amp("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("T-1").0, "done");
+
+    amp("UserPromptSubmit", json!({}));
+    amp("PermissionRequest", json!({}));
+    amp("PostToolUse", json!({}));
+    amp("StopFailure", json!({}));
+    assert_eq!(env.status().0, "idle");
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 1);
+}
+
 #[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
@@ -287,6 +743,150 @@ fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     env.send_raw("cursor", "stop", &root, payload("stop"));
     assert_eq!(env.status().0, "done");
     assert_eq!(env.session("conv-1").0, "done");
+}
+
+/// The payloads OMP's generated extension (`harness/omp.ts`) sends: OMP event
+/// names, Claude-shaped keys, `--worktree ""`, subagents as other sessions of
+/// the same omp process reported under the owner.
+#[test]
+fn an_omp_session_is_tracked_through_its_extension() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    let omp = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "omp-1", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        p["hook_event_name"] = event.into();
+        env.send_raw("omp", event, "", p);
+    };
+    let task = |extra: Value| {
+        let mut v = json!({ "agent_id": "omp-sub-1", "agent_type": "task" });
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        v
+    };
+    omp("session_start", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("omp")));
+    omp("before_agent_start", json!({ "prompt": "fix it" }));
+    assert_eq!(env.status().0, "executing");
+    omp("tool_execution_start", json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } }));
+    omp("tool_approval_requested", json!({ "tool_name": "bash", "message": "outside the sandbox" }));
+    assert_eq!(env.status().0, "waiting");
+    omp("tool_approval_resolved", json!({ "tool_name": "bash" }));
+    assert_eq!(env.status().0, "executing");
+    omp("tool_execution_end", json!({ "tool_name": "bash" }));
+
+    // A task subagent: its own tools don't move the session, its approval does.
+    omp("subagent_start", task(json!({})));
+    assert_eq!(env.running_subagents_of("omp-1"), 1);
+    omp("tool_execution_start", task(json!({ "tool_name": "read", "tool_input": { "path": "src/lib.rs" } })));
+    assert_eq!(env.status().0, "executing");
+    omp("tool_approval_requested", task(json!({ "tool_name": "bash" })));
+    assert_eq!(env.status().0, "waiting");
+    omp("tool_approval_resolved", task(json!({ "tool_name": "bash" })));
+    omp("subagent_stop", task(json!({ "last_assistant_message": "found it" })));
+    assert_eq!(env.running_subagents_of("omp-1"), 0);
+
+    omp("agent_end", json!({ "last_assistant_message": "Fixed." }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("omp-1").0, "done");
+    // The plan review opens after the planning turn ended.
+    omp("plan_review_requested", json!({ "tool_name": "plan_review", "tool_input": { "title": "Plan" } }));
+    assert_eq!(env.status().0, "waiting");
+    omp("before_agent_start", json!({ "prompt": "execute the plan" }));
+    omp("agent_end", json!({}));
+    assert_eq!(env.status().0, "done");
+    omp("session_shutdown", json!({}));
+    assert!(!env.session("omp-1").1, "the session is closed");
+}
+
+#[test]
+fn an_antigravity_conversation_is_tracked_from_its_payload() {
+    let env = Env::new();
+    let root = env.root();
+    let agy = |event: &str, extra: Value| {
+        let mut p = json!({ "conversationId": "ec33ebf9", "workspacePaths": [root],
+                            "transcriptPath": "/h/.gemini/antigravity-cli/brain/ec33ebf9/t.jsonl", "modelName": "gemini" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        // No project-dir variable: the command passes --worktree "".
+        env.send_raw("antigravity", event, "", p);
+    };
+    agy("SessionStart", json!({}));
+    agy("PreInvocation", json!({ "invocationNum": 0, "initialNumSteps": 1 }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("antigravity")));
+    agy("PreInvocation", json!({ "invocationNum": 1, "initialNumSteps": 3 }));
+    agy("Stop", json!({ "executionNum": 1, "terminationReason": "model_stop", "fullyIdle": false }));
+    assert_eq!(env.status().0, "executing", "background work still running");
+    agy("Stop", json!({ "executionNum": 1, "terminationReason": "model_stop", "fullyIdle": true }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("ec33ebf9").0, "done");
+}
+
+#[test]
+fn a_new_antigravity_conversation_closes_the_settled_ones() {
+    // Antigravity has no session-end hook, so a new conversation closes the
+    // owner's done/idle ones; a still-running one stays open.
+    let env = Env::new();
+    let root = env.root();
+    let agy = |sid: &str, event: &str, extra: Value| {
+        let mut p = json!({ "conversationId": sid, "workspacePaths": [root] });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("antigravity", event, "", p);
+    };
+    agy("old", "SessionStart", json!({}));
+    agy("old", "PreInvocation", json!({ "invocationNum": 0 }));
+    agy("old", "Stop", json!({ "fullyIdle": true }));
+    agy("busy", "SessionStart", json!({}));
+    agy("busy", "PreInvocation", json!({ "invocationNum": 0 }));
+    assert_eq!(env.session("old"), ("done".into(), false), "closed by busy's start");
+    agy("new", "SessionStart", json!({}));
+    assert_eq!(env.session("busy"), ("executing".into(), true), "a running conversation is left open");
+    assert_eq!(env.session("new"), ("idle".into(), true));
+    // A Claude session in the same worktree is another harness's: untouched.
+    env.send("SessionStart", with_session("c", json!({ "source": "startup" })));
+    env.send("Stop", with_session("c", json!({})));
+    agy("newer", "SessionStart", json!({}));
+    assert!(env.session("c").1, "only Antigravity's own sessions close");
+    assert!(!env.session("new").1);
+    // A closed conversation that is resumed opens again.
+    agy("old", "PreInvocation", json!({ "invocationNum": 0 }));
+    assert_eq!(env.session("old"), ("executing".into(), true));
+}
+
+#[test]
+fn a_grok_session_is_tracked_from_camel_case_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Grok strips the hook's env: `--worktree ""` and the payload's `cwd`.
+    let grok = |event: &str, extra: Value| {
+        let mut p = json!({ "hookEventName": event, "sessionId": "g-1", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("grok", event, "", p);
+    };
+    grok("SessionStart", json!({}));
+    grok("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("grok")));
+    grok("PreToolUse", json!({ "toolName": "bash", "toolInput": { "command": "ls" } }));
+    // Sent for every tool step, even when nothing waits on the user.
+    grok("Notification", json!({ "notificationType": "permission_prompt", "message": "Tool permission requested" }));
+    assert_eq!(env.status().0, "executing");
+    grok("Notification", json!({ "notificationType": "permission_prompt", "message": "Grok needs permission to run rm" }));
+    assert_eq!(env.status().0, "waiting");
+    grok("PreToolUse", json!({ "toolName": "bash" }));
+    grok("Notification", json!({ "message": "Turn complete in 1.2s." }));
+    grok("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("g-1"), ("done".into(), true));
+
+    // A specific prompt the user answers, then the turn ends with no
+    // `PreToolUse` in between: `Stop` still takes it to done.
+    grok("UserPromptSubmit", json!({ "prompt": "clean up" }));
+    grok("PreToolUse", json!({ "toolName": "bash", "toolInput": { "command": "rm -r build" } }));
+    grok("Notification", json!({ "notificationType": "permission_prompt", "message": "Grok needs permission to run rm" }));
+    assert_eq!(env.status().0, "waiting");
+    grok("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("g-1"), ("done".into(), true));
 }
 
 #[test]
