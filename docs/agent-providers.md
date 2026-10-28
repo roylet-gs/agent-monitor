@@ -272,6 +272,25 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+| OMP / oh-my-pi (`omp`) | No command hooks: am owns the TypeScript extension `<agent dir>/extensions/agent-monitor-omp.ts` (`HookInstall::OwnedFile`; agent dir `$OMP_AGENT_DIR` → `$PI_CODING_AGENT_DIR` → `~/${PI_CONFIG_DIR:-.omp}/agent`) | The extension builds Claude-shaped payloads (`session_id`, `cwd`, `tool_name`…) and passes `--worktree ""`; OMP tool names (`bash`, `read`, `ask`, `task`…) are mapped; other sessions in the same omp process (task subagents) report as subagents | `tool_approval_requested`, the `ask` tool, the plan review | `omp --session <id>` / `--continue` |
+
+### OMP (oh-my-pi)
+
+Researched against `@oh-my-pi/pi-coding-agent` 18.13.2 (`src/extensibility/extensions/types.ts`, `src/discovery/builtin.ts`, `@oh-my-pi/pi-utils` `dirs.ts`) and cmux's OMP bridge (`CLI/CMUXCLI+OmpExtension.swift`). OMP loads every `*.ts` in `<agent dir>/extensions/`; `omp.rs` renders `omp.ts` into `agent-monitor-omp.ts` there. The extension imports only `node:child_process`, `node:fs` and `node:path`, runs `[am-hook, "hook-event", "--agent", "omp", "--worktree", "", "--event", <event>]` detached with the payload on stdin (closed at once, killed after 5 s), never throws into OMP, and waits (up to 1 s) only at `session_shutdown`.
+
+| OMP event | Sent as | Canonical |
+|---|---|---|
+| `session_start` (first top-level session in the process) | `session_start` | `SessionStart` |
+| `session_switch` / `session_branch` to another session id | `session_shutdown` (old id) + `session_start` (new id) | `SessionEnd` + `SessionStart` |
+| `before_agent_start` | `before_agent_start` (with `prompt`) | `UserPromptSubmit` |
+| `tool_execution_start` / `tool_execution_end` | same (`tool_name`, `tool_input`) | `PreToolUse` / `PostToolUse` |
+| `tool_approval_requested` / `tool_approval_resolved` | same | `PermissionRequest` / `PostToolUse` |
+| `plan_review_requested` | same, `tool_name: plan_review` | `PreToolUse` of `ExitPlanMode` (shows `waiting` after `done` too) |
+| `agent_end` without `willContinue` (once per turn) | `agent_end` (with `last_assistant_message`) | `Stop` |
+| `session_shutdown` | `session_shutdown` | `SessionEnd` |
+| a later session's `session_start` / `before_agent_start` / `agent_end` / `session_shutdown` | `subagent_start` / `subagent_start` / `subagent_stop` / `subagent_stop` with `agent_id` = its session id, `agent_type: task` | `SubagentStart` / `SubagentStop` |
+
+OMP loads a fresh copy of an extension module per session, so the owner session lives on `globalThis`. A session whose file sits in a directory named after another session file (`<parent>/<child>.jsonl`) is never taken as the owner. Pi also reads `PI_CODING_AGENT_DIR`, so with it set Pi may load the file; it reports only when it is running inside omp (`ctx.resolvePlanReview` exists, or `oh-my-pi`/`omp` in the process's argv). A named profile (`OMP_PROFILE`) has its own agent dir (`~/.omp/profiles/<name>/agent`) that am can't see from outside omp; install with `PI_CODING_AGENT_DIR` set to it. Resume offers the sessions am's hooks recorded. `AM_OMP_HOOKS_DISABLED=1` in omp's environment silences the extension.
 
 Not built in, and why:
 

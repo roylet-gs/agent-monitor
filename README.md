@@ -1,7 +1,7 @@
 <h1 align="center">Agent Monitor</h1>
 
 <p align="center">
-  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid)</strong>
+  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, OMP)</strong>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code or Factory Droid) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
+  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid or OMP) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
 </p>
 
 ---
@@ -66,7 +66,7 @@ On first launch a setup wizard asks whether you want the full dashboard or only 
 
 - **macOS or Linux** (arm64 or x64)
 - **git**
-- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code** or **Factory Droid**
+- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code**, **Factory Droid** or **OMP** (oh-my-pi)
 - **gh CLI** (optional), for PR and CI status ([install](https://cli.github.com)); run `gh auth login` once
 - **Linear API key** (optional), for ticket tracking
 - **Node.js >= 18** only if you install through npm (the package is a small launcher for the native binary)
@@ -623,6 +623,7 @@ A harness is the CLI or editor that runs the agent and fires the hooks. `am hook
 | Factory Droid | `droid` | `~/.factory/hooks.json` (or `settings.json` when that's the one Droid reads) | permission prompts | `droid --resume <id>` |
 | GitHub Copilot CLI | `copilot` | `~/.copilot/hooks/agent-monitor.json` | questions | `copilot --resume <id>` |
 | Cursor (editor agent, `cursor-agent`) | `cursor` | `~/.cursor/hooks.json` | — (no permission hook) | `cursor-agent --resume <id>` |
+| OMP (oh-my-pi) | `omp` | the extension `~/.omp/agent/extensions/agent-monitor-omp.ts` (or under `$PI_CODING_AGENT_DIR`) | tool approvals, questions, plan review | `omp --session <id>` |
 
 Any other CLI whose hooks run a command with a JSON payload on stdin can be added without code as a JSON manifest in `~/.agent-monitor/agents/` (`docs/agent-providers.md`). Not supported yet: OpenCode and Amp (plugins only, no command hooks), Aider (no hooks), Windsurf and Crush (no session or turn-end events), JetBrains Junie (its `Stop` hook carries no session or directory) and Augment Auggie (hook commands must be bare script paths).
 
@@ -685,6 +686,7 @@ am logs a summary every 5 minutes (and when it quits), plus a `[perf]` warning w
 - **Harness plugins:** `s` → **Harness plugins…** lists every harness plugin (the built-ins below, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
 - **Codex CLI:** Codex runs a user hook only after you trust it in `/hooks`, and again after `am hooks install` rewrites it.
 - **Cursor:** Cursor also runs Claude Code's hooks by default; am ignores those for Cursor sessions and tracks them through Cursor's own `~/.cursor/hooks.json`. Cursor has no permission hook, so its sessions never show `waiting`, and the `cursor-agent` CLI may not fire every hook the editor does.
+- **OMP (oh-my-pi):** OMP has no command hooks, so am installs a small extension, `agent-monitor-omp.ts`, in OMP's agent dir (`$OMP_AGENT_DIR`, else `$PI_CODING_AGENT_DIR`, else `~/.omp/agent`) that runs `am-hook` on OMP's events; restart running `omp` sessions after installing. With a named profile (`OMP_PROFILE`), set `PI_CODING_AGENT_DIR` to that profile's agent dir when running `am hooks install`. OMP's task subagents show as subagents of the session.
 - **Copilot CLI / Factory Droid:** both read hooks at startup, so restart running sessions after installing. Copilot's permission events aren't available in the hook format am uses, so only questions show as `waiting`.
 - **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.
 - Check `am logs --module hook-event` while the agent is working. No lines means the hooks aren't firing; for more detail, `am settings set logLevel debug`.

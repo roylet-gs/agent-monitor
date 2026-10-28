@@ -289,6 +289,60 @@ fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     assert_eq!(env.session("conv-1").0, "done");
 }
 
+/// The payloads OMP's generated extension (`harness/omp.ts`) sends: OMP event
+/// names, Claude-shaped keys, `--worktree ""`, subagents as other sessions of
+/// the same omp process reported under the owner.
+#[test]
+fn an_omp_session_is_tracked_through_its_extension() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    let omp = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "omp-1", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        p["hook_event_name"] = event.into();
+        env.send_raw("omp", event, "", p);
+    };
+    let task = |extra: Value| {
+        let mut v = json!({ "agent_id": "omp-sub-1", "agent_type": "task" });
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        v
+    };
+    omp("session_start", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("omp")));
+    omp("before_agent_start", json!({ "prompt": "fix it" }));
+    assert_eq!(env.status().0, "executing");
+    omp("tool_execution_start", json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } }));
+    omp("tool_approval_requested", json!({ "tool_name": "bash", "message": "outside the sandbox" }));
+    assert_eq!(env.status().0, "waiting");
+    omp("tool_approval_resolved", json!({ "tool_name": "bash" }));
+    assert_eq!(env.status().0, "executing");
+    omp("tool_execution_end", json!({ "tool_name": "bash" }));
+
+    // A task subagent: its own tools don't move the session, its approval does.
+    omp("subagent_start", task(json!({})));
+    assert_eq!(env.running_subagents_of("omp-1"), 1);
+    omp("tool_execution_start", task(json!({ "tool_name": "read", "tool_input": { "path": "src/lib.rs" } })));
+    assert_eq!(env.status().0, "executing");
+    omp("tool_approval_requested", task(json!({ "tool_name": "bash" })));
+    assert_eq!(env.status().0, "waiting");
+    omp("tool_approval_resolved", task(json!({ "tool_name": "bash" })));
+    omp("subagent_stop", task(json!({ "last_assistant_message": "found it" })));
+    assert_eq!(env.running_subagents_of("omp-1"), 0);
+
+    omp("agent_end", json!({ "last_assistant_message": "Fixed." }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("omp-1").0, "done");
+    // The plan review opens after the planning turn ended.
+    omp("plan_review_requested", json!({ "tool_name": "plan_review", "tool_input": { "title": "Plan" } }));
+    assert_eq!(env.status().0, "waiting");
+    omp("before_agent_start", json!({ "prompt": "execute the plan" }));
+    omp("agent_end", json!({}));
+    assert_eq!(env.status().0, "done");
+    omp("session_shutdown", json!({}));
+    assert!(!env.session("omp-1").1, "the session is closed");
+}
+
 #[test]
 fn main_agent_activity_while_delegating_is_executing() {
     let env = Env::new();

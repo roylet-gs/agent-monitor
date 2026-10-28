@@ -233,3 +233,17 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**OMP / oh-my-pi** (`--agent omp`, no command hooks: am's extension `agent-monitor-omp.ts` in OMP's agent dir sends these):
+
+| OMP event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` / `session_shutdown` | `SessionStart` / `SessionEnd` | `idle` |
+| `before_agent_start` | `UserPromptSubmit` | `executing` |
+| `tool_execution_start` / `tool_execution_end` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`…; `ask` → `AskUserQuestion` → `waiting`) |
+| `tool_approval_requested` | `PermissionRequest` | `waiting` |
+| `tool_approval_resolved` | `PostToolUse` | `executing` |
+| `plan_review_requested` | `PreToolUse` of `ExitPlanMode` | `waiting` (also after `done`: the review opens as the planning turn ends) |
+| `agent_end` | `Stop` | `done` after work, else `idle` |
+
+The extension skips an `agent_end` with `willContinue: true` (an automatic continuation follows) and sends one `Stop` per turn, since a second `Stop` would turn `done` into `idle`. A switch to another session (`/new`, resume, fork) is `SessionEnd` for the old id then `SessionStart` for the new one. Other sessions in the same omp process are task subagents: they report as `SubagentStart`/`SubagentStop` (and tool events with `agent_id`) under the owner session, so `delegating` and subagent rows work, and a subagent's approval prompt shows `waiting`.

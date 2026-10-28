@@ -513,6 +513,67 @@ fn hooks_for_gemini() {
     assert!(o.stderr.contains(&format!("Unknown agent: aider. Valid agents: {}", builtin_ids().join(", "))), "{}", o.stderr);
 }
 
+/// OMP's hooks are an extension file am owns in `<agent dir>/extensions/`.
+#[test]
+fn hooks_for_omp_are_an_owned_extension_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // No ~/.omp: not installed by default, not listed.
+    assert_eq!(env.ok(&["hooks", "install"]).stdout, "Hooks installed into ~/.claude/settings.json\n");
+    assert!(!env.home().join(".omp").exists());
+
+    let ext_dir = env.home().join(".omp/agent/extensions");
+    std::fs::create_dir_all(&ext_dir).unwrap();
+    std::fs::write(ext_dir.join("mine.ts"), "export default function () {}\n").unwrap();
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\nOMP hooks: not installed\n");
+    assert_eq!(
+        env.ok(&["hooks", "install", "--agent", "omp"]).stdout,
+        "Hooks installed into ~/.omp/agent/extensions/agent-monitor-omp.ts\n"
+    );
+    let file = ext_dir.join("agent-monitor-omp.ts");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("agent-monitor-hook-plugin v1"));
+    let argv = json!([fake_hook.display().to_string(), "hook-event", "--agent", "omp", "--worktree", "", "--event", "agent_end"]);
+    assert!(text.contains(&format!("\"agent_end\": {},", argv.to_string().replace(',', ", "))), "{text}");
+    assert_eq!(env.ok(&["hooks", "status"]).stdout, "Claude hooks: installed\nOMP hooks: installed\n");
+    env.ok(&["hooks", "install", "--agent", "omp"]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text, "reinstalling is idempotent");
+
+    // A hook binary that's gone is flagged.
+    std::fs::rename(&fake_hook, env.bin().join("moved")).unwrap();
+    let out = env.ok(&["doctor"]).stdout;
+    assert!(out.contains(&format!("OMP hooks: Hooks in ~/.omp/agent/extensions/agent-monitor-omp.ts run a missing {}", fake_hook.display())), "{out}");
+    std::fs::rename(env.bin().join("moved"), &fake_hook).unwrap();
+
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "omp"]).stdout, "Hooks removed from ~/.omp/agent/extensions/agent-monitor-omp.ts\n");
+    assert!(!file.exists());
+    assert_eq!(std::fs::read_to_string(ext_dir.join("mine.ts")).unwrap(), "export default function () {}\n", "other extensions stay");
+
+    // A file of that name am didn't write is refused, not overwritten.
+    std::fs::write(&file, "// someone else's\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "omp"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "// someone else's\n");
+    std::fs::remove_file(&file).unwrap();
+
+    // The agent dir follows OMP's environment: PI_CODING_AGENT_DIR, then OMP_AGENT_DIR over it.
+    let pi_dir = env.root().join("pi-agent");
+    env.extra_env.push(("PI_CODING_AGENT_DIR".into(), pi_dir.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "omp"]);
+    assert!(pi_dir.join("extensions/agent-monitor-omp.ts").exists());
+    let omp_dir = env.root().join("omp-agent");
+    env.extra_env.push(("OMP_AGENT_DIR".into(), omp_dir.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "omp"]);
+    assert!(omp_dir.join("extensions/agent-monitor-omp.ts").exists());
+    env.ok(&["hooks", "uninstall", "--agent", "omp"]);
+    assert!(!omp_dir.join("extensions/agent-monitor-omp.ts").exists());
+    assert!(pi_dir.join("extensions/agent-monitor-omp.ts").exists(), "only the active agent dir is touched");
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {
