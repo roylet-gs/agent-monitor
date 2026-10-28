@@ -133,7 +133,7 @@ fn review_fields() -> String {
     format!(
         "{} createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
          reviewRequests(first: 20) {{ nodes {{ requestedReviewer {{ ... on User {{ login }} \
-         ... on Team {{ combinedSlug }} ... on Bot {{ login }} ... on Mannequin {{ login }} }} }} }} }}",
+         ... on Team {{ combinedSlug }} ... on Bot {{ login }} ... on Mannequin {{ login }} }} }} }}",
         pr_selection_counts()
     )
 }
@@ -574,6 +574,38 @@ pub(crate) mod tests {
         assert!(args[9].contains("total: search(query: $all, type: ISSUE, first: 1) { issueCount }"));
         assert!(args[9].contains("g0: search(query: $g0, type: ISSUE, first: 100) { nodes { ... on PullRequest { url } } }"));
         assert!(!search_args("q", None, Extras::default())[5].contains("issueCount"));
+    }
+
+    /// Whether `{`/`}` nest properly and all close: GitHub rejects the whole
+    /// query over one stray brace (`Expected one of SCHEMA, … actual: RCURLY`).
+    fn balanced(query: &str) -> bool {
+        let mut depth = 0i32;
+        for c in query.chars() {
+            match c {
+                '{' => depth += 1,
+                '}' => depth -= 1,
+                _ => {}
+            }
+            if depth < 0 {
+                return false;
+            }
+        }
+        depth == 0
+    }
+
+    #[test]
+    fn every_query_has_balanced_braces() {
+        let queries = vec!["label:urgent".to_string(), "author:carol".to_string()];
+        for extras in [Extras::default(), Extras { total: true, queries: &queries }] {
+            let args = search_args("q", None, extras);
+            assert!(balanced(args.last().unwrap()), "{}", args.last().unwrap());
+        }
+        let pulled = vec![
+            Pulled { repo_id: "r1".into(), slug: "acme/web".into(), branch: "feat/a".into() },
+            Pulled { repo_id: "r2".into(), slug: "acme/api".into(), branch: "fix/b".into() },
+        ];
+        assert!(balanced(pulled_args(&pulled).last().unwrap()));
+        assert!(balanced(people_args(&["acme/web".to_string()]).last().unwrap()));
     }
 
     #[test]
