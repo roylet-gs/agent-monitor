@@ -189,6 +189,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 | `30-compact-view.spec.ts` | Settings → Compact view on: `─Worktrees … N of M` is the top line and no `│`/`╰` side or bottom borders remain; a create's `─Jobs` pane (waiting on the startup-script question) sits under the list; `V` stacks the review page under the list on a wide window; then compact off restores the borders and the worktree is deleted |
 | `31-jobs-pane-persists.spec.ts` | A create waiting on the startup-script question keeps its `─Jobs` pane beside the full review page (a job with no question doesn't open it there) (`v`; `⇥ answer`, Tab → `back to reviews` and back), and in view under Settings and help; then declined and deleted |
 | `32-review-mode.spec.ts` | Review-only mode: on a fresh dir (7682) Mode → Review requests only (crumbs `Mode › Editor › Repos › GitHub › Reviews`), an empty Repos step refused, `✓ gh found`, no on/off row; lands on `─Review requests` alone (`esc quit`, no `─Worktrees`), `h` shows the page's help, `s` has no Sort order/Harness plugins; `t` pulls #61 and `d` removes it; Settings → Mode `full` brings Fetch PRs back and `esc` shows the dashboard. On the seeded dashboard, Mode `reviews` in Settings opens the page and `full` + `esc` restores it |
+| `33-program-status.spec.ts` | Settings → Notifications → Report status to terminal (`programStatus`) reads `off` by default, toggles on, survives a restart, then restored (the OSC 7501 write itself is covered by `tests/hook.rs`) |
 
 **Writing a spec:**
 ```typescript

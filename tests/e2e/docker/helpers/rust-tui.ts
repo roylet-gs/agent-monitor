@@ -239,12 +239,16 @@ export class RustTui extends TuiPage {
    * `s` → walk down the settings list until the field whose help line
    * contains `help` is selected (only the selected field shows its help).
    * Robust to fields being added above it, unlike a fixed `j` count.
+   * `fromEnd` starts at the last field and walks up (`End`, then `k`), for
+   * the fields at the bottom of the list.
    */
-  async openSetting(help: string, max = 40): Promise<void> {
+  async openSetting(help: string, max = 40, opts: { fromEnd?: boolean } = {}): Promise<void> {
     await this.sendKey("s");
     await this.waitForText("esc close");
+    if (opts.fromEnd) await this.sendKey("End");
+    const step = opts.fromEnd ? "k" : "j";
     for (let i = 0; i < max && !(await this.getScreenText()).includes(help); i++) {
-      await this.sendKey("j");
+      await this.sendKey(step);
     }
     await this.waitForText(help);
   }

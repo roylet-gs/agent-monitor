@@ -95,7 +95,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only show processes and agent commands whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
-    Field { key: "programStatus", label: "Report status to terminal", help: "Tell the terminal (OSC 7501, e.g. Ghostty) when an agent is working, waiting or done; for agents that don't", section: "Notifications", kind: Kind::Bool },
+    Field { key: "programStatus", label: "Report status to terminal", help: "Tell the terminal (OSC 7501) what agents are doing, e.g. for Ghostty", section: "Notifications", kind: Kind::Bool },
     Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
     Field { key: "audioWaitingSound", label: "Waiting sound", help: "Played when an agent needs you", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "audioDoneSound", label: "Done sound", help: "Played when an agent finishes", section: "Notifications", kind: Kind::Choice(SOUNDS) },
