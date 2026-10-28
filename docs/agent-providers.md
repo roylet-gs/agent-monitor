@@ -263,7 +263,7 @@ Most CLIs read hooks from a JSON file, but not all. A built-in picks how am's ho
 
 ## Built-in harnesses and the survey behind them (Oct 2026)
 
-Most coding-agent CLIs now copy Claude Code's hook design: a command per event, JSON on stdin, Claude-style event names and `session_id`/`cwd`/`tool_name` keys. That's why the canonical event stays Claude's vocabulary, and why each built-in below is a manifest (plus Rust discovery for Codex). The details come from each tool's official hook docs.
+Most coding-agent CLIs now copy Claude Code's hook design: a command per event, JSON on stdin, Claude-style event names and `session_id`/`cwd`/`tool_name` keys. That's why the canonical event stays Claude's vocabulary, and why each built-in below is a manifest (plus Rust discovery for Codex, and a runtime hook-file choice and child-session filter for Muse). The details come from each tool's official hook docs.
 
 | Harness | Hook file and shape | Payload notes | Waiting | Resume |
 |---|---|---|---|---|
@@ -272,6 +272,7 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+| Muse Code (`muse`) | `$XDG_CONFIG_HOME/muse/settings.json` or `~/.config/muse/settings.json` (picked at runtime), nested, s, `schema_version: 1` added when missing (Muse won't start without it) | Claude event names and keys; only `SessionStart`, `UserPromptSubmit`, `Notification`, `Stop`, `StopFailure`, `SessionEnd` (no tool hooks); no project-dir variable (payload `cwd`); internal child sessions (`turn_id == session_id`) are ignored; hooks run through the login `$SHELL -c` with a scrubbed environment | `Notification` `permission_prompt` (unverified) | `muse resume <id>`; sessions am recorded (Muse's `session-index.db` schema isn't documented) |
 
 Not built in, and why:
 
@@ -287,3 +288,12 @@ Not built in, and why:
 - **Mistral Vibe**: TOML config with tool and `post_agent` events only.
 
 Any of these can still be added as a manifest where its hooks fit the format above.
+
+### Muse Code notes
+
+Sources: cmux's Muse integration (`manaflow-ai/cmux`: `CLI/CMUXCLI+AgentHookCatalog.swift`, `CLI/cmux.swift`, `docs/agent-hooks.md`, `AgentResumeArgv.swift`) and the third-party `develate/musecode-cli-php` SDK (settings path, `schema_version`). No official Muse hook reference was found, so:
+
+- **Notification types are unverified.** am assumes Claude's `notification_type` values; anything else leaves the status unchanged. Capture real payloads with `AM_HOOK_CAPTURE=1` (in the environment Muse passes to hooks) and add a `notificationTypes` map if they differ.
+- **Child sessions.** Muse runs reminders and delegated subagents as internal child sessions whose hooks reuse the session id as the turn id (cmux ignores them). am ignores them too (a `with_normalize` pass turns them into an `ignored` event): they'd otherwise be counted as extra sessions in the worktree and, being newest, could displace the real one when the collector caps sessions at the number of running `muse` processes. Muse gives no parent id, so they can't be shown as subagents.
+- **Shell.** Muse runs hooks through the user's login `$SHELL -c` with a scrubbed environment. am's command is `"/abs/am-hook" hook-event --agent muse --worktree "" --event X`, which sh, bash, zsh and fish run unchanged; nushell needs `^"/abs/am-hook" …`, so nushell users edit the entries by hand. cmux writes `#!/bin/sh` wrapper scripts instead; am doesn't, to keep one install path for every harness. am-hook falls back to the passwd entry for its home directory if `$HOME` is missing.
+- **No tool hooks.** cmux installs none for Muse, so am doesn't either. Without `PreToolUse`/`PostToolUse`, a `waiting` set by a permission prompt stays until the next prompt.

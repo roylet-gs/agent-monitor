@@ -548,6 +548,51 @@ fn agent_attach_suggests_the_fresh_start_command() {
     assert!(o.stderr.contains(&format!("Start one with: cd {} && mycli chat --agent am", wt.display())), "{}", o.stderr);
 }
 
+/// Muse Code: hooks in `$XDG_CONFIG_HOME/muse/settings.json` (else
+/// `~/.config/muse/`), seconds timeouts, and the `schema_version` Muse needs.
+#[test]
+fn hooks_for_muse() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // A fresh install creates the file with the schema version Muse requires.
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "muse"]).stdout, "Hooks installed into ~/.config/muse/settings.json\n");
+    let fresh = env.home().join(".config/muse/settings.json");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&fresh).unwrap()).unwrap();
+    assert_eq!(v["schema_version"], 1);
+    let stop = &v["hooks"]["Stop"][0]["hooks"][0];
+    assert_eq!(stop["timeout"], 10);
+    assert_eq!(stop["command"], format!("\"{}\" hook-event --agent muse --worktree \"\" --event Stop", fake_hook.display()));
+    assert_eq!(
+        v["hooks"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(),
+        ["SessionStart", "SessionEnd", "UserPromptSubmit", "Notification", "Stop", "StopFailure"]
+    );
+
+    // With $XDG_CONFIG_HOME, that's where Muse reads; its other keys, its own
+    // schema version and the user's hooks stay.
+    let xdg = env.root().join("xdg");
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    let settings = xdg.join("muse/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let mine = json!({"hooks": [{"type": "command", "command": "./notify.sh"}]});
+    std::fs::write(&settings, json!({"schema_version": 2, "model": "m", "hooks": {"Stop": [mine]}}).to_string()).unwrap();
+    // Detected through the XDG directory, so a plain install covers it.
+    let out = env.ok(&["hooks", "install"]).stdout;
+    assert!(out.contains(&format!("Hooks installed into {}\n", settings.display())), "{out}");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!((v["schema_version"].as_u64(), v["model"].as_str()), (Some(2), Some("m")));
+    assert_eq!(v["hooks"]["Stop"][0], mine);
+    assert_eq!(v["hooks"]["Stop"].as_array().unwrap().len(), 2);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["muse"], true);
+
+    env.ok(&["hooks", "uninstall", "--agent", "muse"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"schema_version": 2, "model": "m", "hooks": {"Stop": [mine]}}));
+}
+
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
 #[test]
 fn manifest_plugins_need_no_code() {

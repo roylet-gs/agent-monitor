@@ -233,3 +233,15 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**Muse Code** (`--agent muse`, hooks in `$XDG_CONFIG_HOME/muse/settings.json`, else `~/.config/muse/settings.json`) sends Claude Code's event names with a Claude-style payload. Only session and turn events are installed:
+
+| Muse event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` / `SessionEnd` | same | `idle` |
+| `UserPromptSubmit` | same | `executing` |
+| `Notification` | same | `waiting` when `notification_type` is `permission_prompt`/`elicitation_dialog`, `idle_prompt` as for Claude, otherwise no change |
+| `Stop` | same | `done` after work, else `idle` (stays `waiting` after a prompt, since no tool event moves it back) |
+| `StopFailure` | same | `idle` |
+
+There are no tool hooks, so a Muse turn shows `executing` without tool detail, and a `waiting` set by a permission prompt lasts until the next prompt. Muse's internal child sessions (reminders, delegated subagents) fire the same hooks with `turn_id == session_id`; they are ignored, so they never show up as extra sessions or move the status. No project-dir variable: the directory is the payload's `cwd`.

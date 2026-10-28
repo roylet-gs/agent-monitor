@@ -271,6 +271,39 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn a_muse_session_is_tracked_and_its_child_sessions_are_ignored() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Muse has no project-dir variable (`--worktree ""`); `turn_id` marks a turn.
+    let muse = |event: &str, sid: &str, turn: Option<&str>, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": sid, "cwd": cwd });
+        if let Some(t) = turn {
+            p["turn_id"] = t.into();
+        }
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("muse", event, "", p);
+    };
+    muse("SessionStart", "m-1", None, json!({}));
+    muse("UserPromptSubmit", "m-1", Some("t-1"), json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("muse")));
+    // An internal child session (turn id = its own session id) adds nothing.
+    muse("SessionStart", "c-1", Some("c-1"), json!({}));
+    muse("UserPromptSubmit", "c-1", Some("c-1"), json!({}));
+    muse("Stop", "c-1", Some("c-1"), json!({}));
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 1);
+    assert_eq!(env.status().0, "executing");
+    muse("Stop", "m-1", Some("t-1"), json!({ "last_assistant_message": "Done." }));
+    assert_eq!(env.session("m-1"), ("done".into(), true));
+    muse("UserPromptSubmit", "m-1", Some("t-2"), json!({}));
+    muse("Notification", "m-1", Some("t-2"), json!({ "notification_type": "permission_prompt", "message": "Allow?" }));
+    assert_eq!(env.status().0, "waiting");
+    muse("SessionEnd", "m-1", None, json!({}));
+    assert!(!env.session("m-1").1);
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();
