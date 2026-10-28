@@ -127,6 +127,14 @@ pub trait Harness: Sync + Send {
         None
     }
 
+    /// One line of the CLI's machine-readable output (e.g. a headless run's
+    /// JSON event stream, as a review script prints it) as lines to show in
+    /// the jobs pane: `Some(vec![])` drops it, `None` = not this CLI's.
+    /// `cwd` is the script's directory (paths under it read relative).
+    fn readable_output(&self, _line: &str, _cwd: Option<&str>) -> Option<Vec<String>> {
+        None
+    }
+
     /// Whether a process (name + argv) is this CLI. Its processes, and tools
     /// it spawns directly, are not shown as a worktree's running processes.
     fn matches_process(&self, _name: &str, _argv: &[String]) -> bool {
@@ -326,6 +334,15 @@ pub fn plugins_dir() -> PathBuf {
 /// are read once per process.
 pub fn all() -> &'static [HarnessKind] {
     &registry().agents
+}
+
+/// A script's output line as the first plugin that recognises it renders it
+/// ([`Harness::readable_output`]); `None` shows the line as it is.
+pub fn readable_output(line: &str, cwd: Option<&str>) -> Option<Vec<String>> {
+    if !line.trim_start().starts_with('{') {
+        return None;
+    }
+    all().iter().find_map(|k| k.provider().readable_output(line, cwd))
 }
 
 /// Plugin files that couldn't be loaded, as `file: reason`.

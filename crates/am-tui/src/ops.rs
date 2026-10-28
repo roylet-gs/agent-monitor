@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 
 use am_core::model::{Repository, WorktreeView};
 use am_core::settings::Settings;
-use am_core::worktrees::{self, CreateRequest, DeleteOptions};
+use am_core::worktrees::{self, CreateRequest, DeleteOptions, ScriptKind};
 use am_core::{db, info, launch};
 
 use crate::launcher::Msg;
@@ -52,42 +52,62 @@ pub fn delete(view: WorktreeView, delete_branch: bool, job: u64, tx: Sender<Msg>
     });
 }
 
-/// Run a repo's startup script for a new worktree. By default (and when no
-/// terminal window can be opened) it runs here with its output streamed to
-/// the job; with `in_window` (`startupScriptMode: window`) it opens in a new
-/// terminal window.
-pub fn run_script(repo_id: String, cwd: String, in_window: bool, job: u64, tx: Sender<Msg>) {
+/// Run a repo's startup script for a new worktree, or its review script for
+/// a pulled PR (with `env` describing the PR). With `in_window` (always for
+/// a review script; `startupScriptMode: window` for the startup script) it
+/// opens in a new terminal window, the env set on its command line; otherwise
+/// (and when no window can be opened) it runs here with its output streamed
+/// to the job.
+pub fn run_script(kind: ScriptKind, repo_id: String, cwd: String, in_window: bool, env: Vec<(String, String)>, job: u64, tx: Sender<Msg>) {
     std::thread::spawn(move || {
-        let script = worktrees::script_path(&repo_id);
+        let script = kind.path(&repo_id);
         if in_window {
-            let cmd = format!("/bin/sh {}", launch::sh_quote(&script.to_string_lossy()));
-            let _ = tx.send(Msg::JobStep(job, "Opening a terminal for the startup script…".into()));
+            let vars: String = env.iter().map(|(k, v)| format!("{k}={} ", launch::sh_quote(v))).collect();
+            let cmd = format!("{vars}/bin/sh {}", launch::sh_quote(&script.to_string_lossy()));
+            let _ = tx.send(Msg::JobStep(job, format!("Opening a terminal for the {}…", kind.label())));
             match launch::open_terminal(Path::new(&cwd), Some(&cmd)) {
                 Ok(()) => {
                     let app = if cfg!(target_os = "macos") { launch::terminal_app() } else { "x-terminal-emulator" };
                     let _ = tx.send(Msg::JobStep(job, format!("Running in a new {app} window")));
+                    if kind == ScriptKind::Review {
+                        let _ = tx.send(Msg::Popup(format!("✓ The review script{} is running in a new {app} window", pr_label(&env))));
+                    }
                     let _ = tx.send(Msg::ScriptDone(job, Ok(())));
                     return;
                 }
-                Err(e) => am_core::debug!("tui", "No terminal window for the startup script ({e}); running it in the jobs pane"),
+                Err(e) => {
+                    am_core::debug!("tui", "No terminal window for the {} ({e}); running it in the jobs pane", kind.label());
+                    if kind == ScriptKind::Review {
+                        let _ = tx.send(Msg::Popup(format!(
+                            "Couldn't open a terminal window, so the review script{} runs in the jobs pane (⇥)\n\n{e}",
+                            pr_label(&env)
+                        )));
+                    }
+                }
             }
         }
         let _ = tx.send(Msg::JobStep(job, format!("Running {}", script.display())));
-        let result = run_script_piped(&script, &cwd, job, &tx);
+        let result = run_script_piped(&script, &cwd, &env, job, &tx);
         match &result {
-            Ok(()) => info!("tui", "Startup script for {repo_id} finished in {cwd}"),
-            Err(e) => am_core::warn!("tui", "Startup script for {repo_id} in {cwd}: {e}"),
+            Ok(()) => info!("tui", "{kind:?} script for {repo_id} finished in {cwd}"),
+            Err(e) => am_core::warn!("tui", "{kind:?} script for {repo_id} in {cwd}: {e}"),
         }
         let _ = tx.send(Msg::ScriptDone(job, result));
     });
 }
 
-fn run_script_piped(script: &Path, cwd: &str, job: u64, tx: &Sender<Msg>) -> Result<(), String> {
+/// ` for #61`, from the review script's environment.
+fn pr_label(env: &[(String, String)]) -> String {
+    env.iter().find(|(k, _)| k == "AM_PR_NUMBER").map(|(_, n)| format!(" for #{n}")).unwrap_or_default()
+}
+
+fn run_script_piped(script: &Path, cwd: &str, env: &[(String, String)], job: u64, tx: &Sender<Msg>) -> Result<(), String> {
     use std::io::{BufRead, BufReader, Read};
     use std::process::{Command, Stdio};
     let mut child = Command::new("/bin/sh")
         .arg(script)
         .current_dir(cwd)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -95,9 +115,20 @@ fn run_script_piped(script: &Path, cwd: &str, job: u64, tx: &Sender<Msg>) -> Res
         .map_err(|e| format!("Couldn't run script: {e}"))?;
     let pump = |r: Box<dyn Read + Send>| {
         let tx = tx.clone();
+        let cwd = cwd.to_string();
         std::thread::spawn(move || {
             for line in BufReader::new(r).lines().map_while(Result::ok) {
-                let _ = tx.send(Msg::JobLog(job, crate::jobs::strip_ansi(&line)));
+                let line = crate::jobs::strip_ansi(&line);
+                // An agent's JSON event stream (`claude -p --output-format
+                // stream-json`) reads as text and tool calls.
+                match am_core::harness::readable_output(&line, Some(&cwd)) {
+                    Some(lines) => lines.into_iter().for_each(|l| {
+                        let _ = tx.send(Msg::JobLog(job, l));
+                    }),
+                    None => {
+                        let _ = tx.send(Msg::JobLog(job, line));
+                    }
+                }
             }
         })
     };

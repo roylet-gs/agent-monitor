@@ -30,6 +30,7 @@ mod ui;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+use am_core::worktrees::ScriptKind;
 use am_core::{info, settings};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -101,6 +102,7 @@ fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
         KeyCode::End => Key::End,
         KeyCode::Tab => Key::Tab,
         KeyCode::BackTab => Key::BackTab,
+        KeyCode::Enter if ctrl => Key::CtrlEnter,
         KeyCode::Enter => Key::Enter,
         KeyCode::Esc => Key::Esc,
         _ => return None,
@@ -166,6 +168,7 @@ fn main() -> io::Result<()> {
     let enhanced = matches!(ratatui::crossterm::terminal::supports_keyboard_enhancement(), Ok(true));
     info!("tui", "Kitty keyboard protocol {}", if enhanced { "supported: modifier keys update the key bar" } else { "not supported" });
     KEYBOARD_ENHANCED.store(enhanced, Ordering::Relaxed);
+    app.modifiers_reported = enhanced;
     set_keyboard(true);
     let result = run(&mut terminal, &mut app, &collector);
     set_keyboard(false);
@@ -265,9 +268,19 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             app.pending_select = Some(w.id.clone());
                             app.jobs.set_worktree(job, w.id.clone());
                             let repo_id = w.repo_id.clone();
-                            // A tmp-space worktree is only there to look at:
-                            // no startup script.
-                            if !w.tmp_space && am_core::worktrees::has_script(&repo_id) {
+                            let review = app.jobs.get(job).is_some_and(|j| j.review_script().is_some());
+                            // "Pull + run script": the review script runs at
+                            // once, here in the pane (one just made from the
+                            // template waits until it's been saved).
+                            // Otherwise a tmp-space worktree is only there to
+                            // look at: no startup script.
+                            let unsaved = app.jobs.get(job).and_then(|j| j.await_save.clone()).is_some_and(|(p, at)| modified(&p) == Some(at));
+                            if review && unsaved {
+                                info!("tui", "Pulled {}; waiting for its review script to be saved", w.branch);
+                                app.jobs.ask(job, jobs::Question::SaveReviewScript { repo_id, worktree_path: w.path.clone() });
+                            } else if review {
+                                run_review_script(app, job, repo_id, w.path.clone(), &launch_tx);
+                            } else if !w.tmp_space && am_core::worktrees::has_script(&repo_id) {
                                 app.jobs.ask(job, jobs::Question::RunScript { repo_id, worktree_path: w.path.clone() });
                             } else {
                                 app.jobs.finish(job, Ok(()), Instant::now());
@@ -302,7 +315,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     app.rebuild_rows();
                 }
-                launcher::Msg::ScriptDone(job, result) => app.jobs.finish(job, result, Instant::now()),
+                launcher::Msg::ScriptDone(job, result) => {
+                    // The review page hides the jobs pane: say why here.
+                    if let Err(e) = &result
+                        && app.reviews.is_some()
+                        && app.jobs.get(job).is_some_and(|j| j.review_script().is_some())
+                    {
+                        app.notice = Some(format!("Review script failed: {e}"));
+                    }
+                    app.jobs.finish(job, result, Instant::now());
+                }
                 launcher::Msg::RepoAdded(path, result) if app.setup.is_some() => {
                     app.modal = None;
                     if result.is_ok() {
@@ -390,6 +412,19 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             }
             if app.jobs.tick(Instant::now()) {
                 app.rebuild_rows();
+            }
+            // Review scripts made from the template run once they're saved.
+            for (job, repo_id, worktree_path, path, at) in app.jobs.awaiting_save() {
+                match modified(&path) {
+                    Some(m) if m == at => {}
+                    Some(_) => {
+                        info!("tui", "Review script {} saved; running it in {worktree_path}", path.display());
+                        run_review_script(app, job, repo_id, worktree_path, &launch_tx);
+                    }
+                    None => {
+                        app.jobs.finish(job, Err(format!("{} was removed", path.display())), Instant::now());
+                    }
+                }
             }
             if app.show_log {
                 // Only re-read once something was appended (or it rotated).
@@ -539,16 +574,16 @@ fn dispatch(
         Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),
         Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
         Action::ReposChanged => collector.refresh(false),
-        Action::EditScript(repo_id) => {
-            let path = match am_core::worktrees::create_script(&repo_id) {
+        Action::EditScript(repo_id, kind) => {
+            let path = match kind.create(&repo_id) {
                 Ok(p) => p,
                 Err(e) => {
-                    am_core::warn!("scripts", "Couldn't create the startup script for {repo_id}: {e}");
-                    app.popup = Some(format!("✗ Couldn't create the startup script: {e}"));
+                    am_core::warn!("scripts", "Couldn't create the {} for {repo_id}: {e}", kind.label());
+                    app.popup = Some(format!("✗ Couldn't create the {}: {e}", kind.label()));
                     return Ok(false);
                 }
             };
-            am_core::info!("scripts", "Editing startup script {}", path.display());
+            am_core::info!("scripts", "Editing {} {}", kind.label(), path.display());
             let shown = am_core::hooks_installer::tilde(&path);
             let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
             if ide != am_core::launch::IdeChoice::Terminal {
@@ -557,7 +592,9 @@ fn dispatch(
                 edit_file(terminal, mouse_before, &path)?;
             }
             if let Some(e) = &mut app.settings_editor {
-                e.refresh_repos(Some((true, format!("Startup script: {shown}"))));
+                let label = kind.label();
+                let label = format!("{}{}", label[..1].to_uppercase(), &label[1..]);
+                e.refresh_repos(Some((true, format!("{label}: {shown}"))));
             }
         }
         Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
@@ -585,8 +622,28 @@ fn dispatch(
             app.notice = Some("Stopped tracking session".into());
             collector.refresh(false);
         }
+        Action::RunReviewScript { job, repo_id, worktree_path } => run_review_script(app, job, repo_id, worktree_path, launch_tx),
+        Action::AddReviewScriptAndPull(job, repo, req) => {
+            let repo_id = repo.id.clone();
+            ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone());
+            match ScriptKind::Review.create(&repo_id) {
+                Ok(path) => {
+                    if let Some(at) = modified(&path) {
+                        app.jobs.await_save(job, path, at);
+                    }
+                }
+                Err(e) => {
+                    am_core::warn!("scripts", "Couldn't create the review script for {repo_id}: {e}");
+                    app.jobs.finish(job, Err(format!("Couldn't create the review script: {e}")), Instant::now());
+                    app.notice = Some(format!("Couldn't create the review script: {e}"));
+                    return Ok(false);
+                }
+            }
+            return dispatch(Action::EditScript(repo_id, ScriptKind::Review), terminal, app, collector, theme, launch_tx);
+        }
         Action::RunScript { job, repo_id, worktree_path } => {
-            ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
+            let in_window = app.settings.startup_script_in_window();
+            ops::run_script(ScriptKind::Startup, repo_id, worktree_path, in_window, Vec::new(), job, launch_tx.clone());
         }
         Action::EditSettingsFile => {
             let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
@@ -687,6 +744,22 @@ fn tail_log(n: usize) -> Vec<String> {
     let buf = String::from_utf8_lossy(&bytes);
     let lines: Vec<String> = buf.lines().map(str::to_owned).collect();
     lines[lines.len().saturating_sub(n)..].to_vec()
+}
+
+/// Run a "pull + run script" job's review script in its worktree, with the
+/// PR's environment plus `AM_WORKTREE_PATH`, in a new terminal window (so an
+/// agent it starts shows its own UI and can be talked to), or in the jobs
+/// pane when no window can be opened.
+fn run_review_script(app: &mut App, job: u64, repo_id: String, worktree_path: String, tx: &std::sync::mpsc::Sender<launcher::Msg>) {
+    let mut env = app.jobs.get(job).and_then(|j| j.review_script()).map(<[_]>::to_vec).unwrap_or_default();
+    env.push(("AM_WORKTREE_PATH".into(), worktree_path.clone()));
+    app.jobs.resume(job);
+    info!("tui", "Running the review script for {repo_id} in {worktree_path}");
+    ops::run_script(ScriptKind::Review, repo_id, worktree_path, true, env, job, tx.clone());
+}
+
+fn modified(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 fn settings_file_mtime() -> Option<std::time::SystemTime> {

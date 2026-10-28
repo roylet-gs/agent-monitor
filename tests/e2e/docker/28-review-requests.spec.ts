@@ -3,7 +3,8 @@ import { RustTui, resetMock, setupMock } from "./helpers/rust-tui";
 
 // PRs waiting on your review: the `N to review` badge on the ─Worktrees
 // border, the `v` page (`V` beside the list, `ctrl-v` in a new window), and
-// `t` pulling one into Reviewing. The mock answers
+// `t` pulling one into Reviewing (`T` also running the repo's review script,
+// added from its template on the way). The mock answers
 // the review search with gh-review-requests.json: three acme/work PRs. In the
 // default order (`reviewSort: direct`) the ones asking you by name come first,
 // newest first — #61 (head feature/on-origin, ticket ENG-123), #63 (from a
@@ -40,7 +41,7 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   expect(await lineOf(/Asked you ─/)).toBeLessThan(await lineOf(/Add retry to the sync job/));
   expect(await lineOf(/Fix typo in README/)).toBeLessThan(await lineOf(/Asked your team ─/));
   expect(await lineOf(/Asked your team ─/)).toBeLessThan(await lineOf(/Update onboarding copy/));
-  expect(await tui.keyBar()).toContain("t pull into Reviewing");
+  expect(await tui.keyBar()).toContain("⏎ pull");
   // The bottom border sums up who's asked and the groups' filters.
   expect(screen).toMatch(/╰ you \+ your teams ─/);
   await tui.screenshot("review-page");
@@ -127,6 +128,82 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.waitForGone("to review", 5_000);
 });
 
+test("T pulls a PR and runs the repo's review script, offering to add one first", async ({ page }) => {
+  await setupMock({ reviews: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
+  const tui = new RustTui(page);
+  await tui.open();
+  const branch = "feature/on-origin";
+  await tui.sendKey("v");
+  await tui.waitForText("Add retry to the sync job", 20_000);
+  await tui.waitForText("1 of 3");
+  // T is on the bar, or behind Shift where the terminal reports held keys.
+  expect(await tui.keyBar()).toMatch(/T pull \+ script|⇧\/ctrl more/);
+
+  // /work has no review script: T asks to add one, and n cancels.
+  await tui.sendKey("T");
+  await tui.waitForText("has no review script yet. Add one?");
+  await tui.screenshot("review-add-script");
+  await tui.sendKey("n");
+  await tui.waitForGone("has no review script yet");
+  expect(await tui.getScreenText()).not.toContain("pulling…");
+
+  // y makes it from the template and opens it in the editor (no VS Code in
+  // the container: the opener's error pops up) while the PR is pulled.
+  await tui.sendKey("T");
+  await tui.waitForText("has no review script yet. Add one?");
+  await tui.sendKey("y");
+  await tui.waitForText("Couldn't open", 10_000);
+  await tui.sendKey("x"); // any key closes the popup
+  await tui.waitForGone("Couldn't open");
+  // Pulled, the job waits for the script to be saved…
+  await tui.waitForText("save the review script to run it", 20_000);
+  await tui.screenshot("review-script-waiting");
+
+  // …or runs now from the dashboard's jobs pane. It would open in a new
+  // terminal window; the container has none, so a popup says it runs in the
+  // jobs pane instead, where its output (with the PR from its environment) shows.
+  await tui.sendKey("Escape");
+  await tui.waitForText("Runs the review script once you save it", 10_000);
+  await tui.sendKey("Tab");
+  await tui.sendKey("Enter");
+  await tui.waitForText("Couldn't open a terminal window", 10_000);
+  await tui.screenshot("review-script-no-window");
+  await tui.sendKey("x"); // any key closes the popup
+  await tui.waitForGone("Couldn't open a terminal window");
+  await tui.waitForText("Review script finished for #61.", 20_000);
+  await tui.screenshot("review-script-output");
+
+  // Already pulled: T refuses instead of running the script again.
+  await tui.sendKey("v");
+  await tui.waitForText("✓ pulled");
+  await tui.sendKey("T");
+  await tui.waitForText(`${branch} is already pulled`);
+
+  // Restore: remove the worktree with its local branch, the review script,
+  // and the cached list.
+  await tui.sendKey("d");
+  await tui.waitForText(`Delete worktree "${branch}"`);
+  await tui.sendKey("y");
+  await tui.waitForText(`Also delete local branch ${branch}?`);
+  await tui.sendKey("y");
+  await tui.waitForGone("✓ pulled", 20_000);
+  await tui.sendKey("Escape");
+  await tui.openSetting("Add or stop tracking repositories, edit their startup and review scripts");
+  await tui.sendKey("Enter");
+  await tui.waitForText("Repositories — a add · x remove");
+  await tui.sendKey("s");
+  await tui.waitForMatch(/Review script\s+✓ added/);
+  await tui.sendKey("ArrowDown");
+  await tui.sendKey("x");
+  await tui.waitForText("Removed the review script for work");
+  await tui.press("Escape", 3); // the chooser, the repositories page, Settings
+  await tui.waitForGone("esc close");
+  await setupMock({ reviews: false });
+  await tui.sendKey("v");
+  await tui.sendKey("r");
+  await tui.waitForText("Nothing waiting on your review", 20_000);
+});
+
 test("review groups: a group takes its PRs first, with autocomplete and a badge", async ({ page }) => {
   await setupMock({ reviews: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
   const tui = new RustTui(page);
@@ -208,7 +285,7 @@ test("V puts the review page beside the list; ctrl-v opens it in a new window", 
   const top = (await tui.lines())[0];
   expect(top).toMatch(/─Worktrees .*─Review requests/);
   expect(await tui.keyBar()).toContain("⇥ list");
-  expect(await tui.keyBar()).toContain("t pull into Reviewing");
+  expect(await tui.keyBar()).toContain("l ticket");
   await tui.screenshot("review-split");
 
   // ⇥ hands the keys to the list: j moves the worktree selection.

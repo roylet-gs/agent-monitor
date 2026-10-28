@@ -22,8 +22,10 @@ const LOG_CAP: usize = 500;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JobKind {
-    /// `worktree_id` is set once the worktree exists.
-    Create { repo: Repository, req: CreateRequest, worktree_id: Option<String> },
+    /// `worktree_id` is set once the worktree exists. `review_script`: the
+    /// environment for the repo's review script, run once the worktree
+    /// exists ("pull + run script" on the review page).
+    Create { repo: Repository, req: CreateRequest, worktree_id: Option<String>, review_script: Option<Vec<(String, String)>> },
     Delete { worktree_id: String },
 }
 
@@ -45,6 +47,9 @@ pub struct Step {
 pub enum Question {
     BranchExists { local: bool, remote: bool },
     RunScript { repo_id: String, worktree_path: String },
+    /// "Pull + run script" made the review script from its template: it
+    /// runs once the file is saved (main.rs watches `saved_after`), or now.
+    SaveReviewScript { repo_id: String, worktree_path: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +62,9 @@ pub struct Job {
     pub question: Option<Question>,
     pub state: JobState,
     pub finished_at: Option<Instant>,
+    /// The review script this job made from the template, and its mtime
+    /// then: it waits until the file changes (is saved) before running.
+    pub await_save: Option<(std::path::PathBuf, std::time::SystemTime)>,
 }
 
 impl Job {
@@ -66,9 +74,17 @@ impl Job {
 
     /// A create that hasn't failed: the list shows a placeholder row for it
     /// until the snapshot has the worktree (`worktree_id`, once known).
+    /// The review script's environment when this create runs one after it.
+    pub fn review_script(&self) -> Option<&[(String, String)]> {
+        match &self.kind {
+            JobKind::Create { review_script, .. } => review_script.as_deref(),
+            _ => None,
+        }
+    }
+
     pub fn pending_create(&self) -> Option<(&Repository, &CreateRequest, Option<&str>)> {
         match &self.kind {
-            JobKind::Create { repo, req, worktree_id } if !matches!(self.state, JobState::Failed(_)) => {
+            JobKind::Create { repo, req, worktree_id, .. } if !matches!(self.state, JobState::Failed(_)) => {
                 Some((repo, req, worktree_id.as_deref()))
             }
             _ => None,
@@ -82,6 +98,8 @@ pub enum JobEffect {
     /// Re-run a create job with the mode the user picked.
     Create(u64, Box<Repository>, Box<CreateRequest>),
     RunScript { job: u64, repo_id: String, worktree_path: String },
+    /// Run the review script now (answer to `SaveReviewScript`).
+    RunReviewScript { job: u64, repo_id: String, worktree_path: String },
 }
 
 #[derive(Debug, Default)]
@@ -98,13 +116,20 @@ impl Jobs {
     fn push(&mut self, kind: JobKind, label: String) -> u64 {
         self.next_id += 1;
         let id = self.next_id;
-        self.list.push(Job { id, kind, label, steps: Vec::new(), log: Vec::new(), question: None, state: JobState::Running, finished_at: None });
+        self.list.push(Job { id, kind, label, steps: Vec::new(), log: Vec::new(), question: None, state: JobState::Running, finished_at: None, await_save: None });
         id
     }
 
     pub fn start_create(&mut self, repo: Repository, req: CreateRequest) -> u64 {
         let label = format!("Create {}", req.branch);
-        self.push(JobKind::Create { repo, req, worktree_id: None }, label)
+        self.push(JobKind::Create { repo, req, worktree_id: None, review_script: None }, label)
+    }
+
+    /// A review-page pull that runs the repo's review script (with `env`)
+    /// once the worktree exists.
+    pub fn start_review_pull(&mut self, repo: Repository, req: CreateRequest, env: Vec<(String, String)>) -> u64 {
+        let label = format!("Pull {} + run script", req.branch);
+        self.push(JobKind::Create { repo, req, worktree_id: None, review_script: Some(env) }, label)
     }
 
     pub fn start_delete(&mut self, worktree_id: String, name: &str) -> u64 {
@@ -123,10 +148,10 @@ impl Jobs {
     /// exists", or the tmp space's automatic one).
     pub fn rerun_create(&mut self, id: u64, mode: CreateMode) -> JobEffect {
         let Some(job) = self.get_mut(id) else { return JobEffect::None };
-        let JobKind::Create { repo, req, .. } = &job.kind else { return JobEffect::None };
+        let JobKind::Create { repo, req, review_script, .. } = &job.kind else { return JobEffect::None };
         let req = CreateRequest { mode, ..req.clone() };
         let repo = repo.clone();
-        job.kind = JobKind::Create { repo: repo.clone(), req: req.clone(), worktree_id: None };
+        job.kind = JobKind::Create { repo: repo.clone(), req: req.clone(), worktree_id: None, review_script: review_script.clone() };
         job.question = None;
         job.state = JobState::Running;
         JobEffect::Create(id, Box::new(repo), Box::new(req))
@@ -139,6 +164,35 @@ impl Jobs {
                 last.done = true;
             }
             j.steps.push(Step { text, done: false });
+        }
+    }
+
+    /// Wait for the review script at `path` (mtime `at`) to be saved.
+    pub fn await_save(&mut self, id: u64, path: std::path::PathBuf, at: std::time::SystemTime) {
+        if let Some(j) = self.get_mut(id) {
+            j.await_save = Some((path, at));
+        }
+    }
+
+    /// Jobs waiting for their review script to be saved:
+    /// (job, repo id, worktree path, script path, mtime when made).
+    pub fn awaiting_save(&self) -> Vec<(u64, String, String, std::path::PathBuf, std::time::SystemTime)> {
+        self.list
+            .iter()
+            .filter_map(|j| match (&j.question, &j.await_save) {
+                (Some(Question::SaveReviewScript { repo_id, worktree_path }), Some((path, at))) => {
+                    Some((j.id, repo_id.clone(), worktree_path.clone(), path.clone(), *at))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The question's answered (or the file was saved): back to running.
+    pub fn resume(&mut self, id: u64) {
+        if let Some(j) = self.get_mut(id) {
+            j.question = None;
+            j.state = JobState::Running;
         }
     }
 
@@ -183,6 +237,13 @@ impl Jobs {
             };
             j.finished_at = Some(now);
         }
+    }
+
+    /// The worktree is being deleted: drop the job(s) that created it (a
+    /// review pull's panel and script output with them).
+    pub fn forget_worktree(&mut self, worktree: &str) {
+        self.list.retain(|j| !matches!(&j.kind, JobKind::Create { worktree_id: Some(w), .. } if w == worktree));
+        self.clamp();
     }
 
     pub fn dismiss(&mut self, id: u64) {
@@ -267,6 +328,21 @@ impl Jobs {
             (Some(Question::RunScript { repo_id, worktree_path }), _) => match key {
                 Key::Enter | Key::Char('y') => {
                     let effect = JobEffect::RunScript { job: id, repo_id: repo_id.clone(), worktree_path: worktree_path.clone() };
+                    job.question = None;
+                    job.state = JobState::Running;
+                    self.focused = false;
+                    effect
+                }
+                Key::Char('n') => {
+                    self.finish(id, Ok(()), Instant::now());
+                    self.focused = false;
+                    JobEffect::None
+                }
+                _ => JobEffect::None,
+            },
+            (Some(Question::SaveReviewScript { repo_id, worktree_path }), _) => match key {
+                Key::Enter | Key::Char('y') => {
+                    let effect = JobEffect::RunReviewScript { job: id, repo_id: repo_id.clone(), worktree_path: worktree_path.clone() };
                     job.question = None;
                     job.state = JobState::Running;
                     self.focused = false;
@@ -399,6 +475,49 @@ mod tests {
         assert!(matches!(&j.kind, JobKind::Create { req, .. } if req.mode == CreateMode::TrackRemote));
         assert_eq!(jobs.list.len(), 1);
         assert_eq!(jobs.rerun_create(99, CreateMode::TrackRemote), JobEffect::None);
+    }
+
+    #[test]
+    fn a_review_script_waiting_to_be_saved_runs_now_or_is_skipped() {
+        let mut jobs = Jobs::default();
+        let id = jobs.start_review_pull(repo(), CreateRequest { tmp_space: true, ..req() }, vec![]);
+        let at = std::time::SystemTime::UNIX_EPOCH;
+        jobs.await_save(id, "/s/r.review.sh".into(), at);
+        assert!(jobs.awaiting_save().is_empty(), "nothing to run until the worktree exists");
+        jobs.ask(id, Question::SaveReviewScript { repo_id: "r".into(), worktree_path: "/r/w".into() });
+        assert_eq!(jobs.awaiting_save(), vec![(id, "r".into(), "/r/w".into(), "/s/r.review.sh".into(), at)]);
+        jobs.focus();
+        assert_eq!(jobs.on_key(Key::Enter), JobEffect::RunReviewScript { job: id, repo_id: "r".into(), worktree_path: "/r/w".into() });
+        assert!(jobs.awaiting_save().is_empty());
+        assert_eq!(jobs.get(id).unwrap().state, JobState::Running);
+        // n skips it: the pull is done.
+        jobs.ask(id, Question::SaveReviewScript { repo_id: "r".into(), worktree_path: "/r/w".into() });
+        jobs.focus();
+        assert_eq!(jobs.on_key(Key::Char('n')), JobEffect::None);
+        assert_eq!(jobs.get(id).unwrap().state, JobState::Done);
+    }
+
+    #[test]
+    fn deleting_a_worktree_forgets_the_job_that_made_it() {
+        let mut jobs = Jobs::default();
+        let made = jobs.start_review_pull(repo(), req(), vec![]);
+        jobs.set_worktree(made, "w1".into());
+        let other = jobs.start_create(repo(), req());
+        jobs.forget_worktree("w1");
+        assert!(jobs.get(made).is_none());
+        assert!(jobs.get(other).is_some());
+    }
+
+    #[test]
+    fn a_review_pull_keeps_its_script_across_reruns() {
+        let mut jobs = Jobs::default();
+        let env = vec![("AM_PR_NUMBER".to_string(), "61".to_string())];
+        let id = jobs.start_review_pull(repo(), CreateRequest { tmp_space: true, ..req() }, env.clone());
+        assert_eq!(jobs.get(id).unwrap().label, "Pull feat + run script");
+        jobs.rerun_create(id, CreateMode::ReuseLocal);
+        assert_eq!(jobs.get(id).unwrap().review_script(), Some(env.as_slice()));
+        let plain = jobs.start_create(repo(), req());
+        assert_eq!(jobs.get(plain).unwrap().review_script(), None);
     }
 
     #[test]

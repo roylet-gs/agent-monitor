@@ -67,7 +67,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
-    Field { key: "repositories", label: "Repositories…", help: "Add or stop tracking repositories, edit their startup scripts", section: "General", kind: Kind::Repos },
+    Field { key: "repositories", label: "Repositories…", help: "Add or stop tracking repositories, edit their startup and review scripts", section: "General", kind: Kind::Repos },
     Field { key: "agentPlugins", label: "Harness plugins…", help: "Turn harnesses on/off, install their hooks, pick the default", section: "General", kind: Kind::Plugins },
     Field { key: "keyBindings", label: "Key bindings…", help: "Choose the dashboard's keys (the review page uses them too)", section: "General", kind: Kind::KeyBindings },
     Field { key: "mouseEnabled", label: "Mouse", help: "Click, double-click and scroll; off restores the terminal's own text selection", section: "General", kind: Kind::Bool },
@@ -166,8 +166,8 @@ pub enum Outcome {
     EditFile,
     /// Open the folder browser to add a repository.
     AddRepo,
-    /// Open this repo's startup script (created from the template if missing).
-    EditScript(String),
+    /// Open this repo's startup or review script (created from the template if missing).
+    EditScript(String, am_core::worktrees::ScriptKind),
     /// A repository was removed: the dashboard should refresh.
     ReposChanged,
     /// Run setup again: close the editor and open the wizard.
@@ -611,7 +611,7 @@ impl SettingsEditor {
                 return Outcome::None;
             }
             RepoOutcome::Add => return Outcome::AddRepo,
-            RepoOutcome::EditScript(id) => return Outcome::EditScript(id),
+            RepoOutcome::EditScript(id, kind) => return Outcome::EditScript(id, kind),
             RepoOutcome::Remove(id) => {
                 let name = self.repos.as_ref().map(|ed| name(ed, &id)).unwrap_or_default();
                 let result = am_core::db::open().map_err(|e| e.to_string()).and_then(|c| am_core::worktrees::remove_repository(&c, &id));
@@ -620,12 +620,12 @@ impl SettingsEditor {
                     Err(e) => ((false, format!("Couldn't remove {name}: {e}")), Outcome::None),
                 }
             }
-            RepoOutcome::RemoveScript(id) => {
+            RepoOutcome::RemoveScript(id, kind) => {
                 let name = self.repos.as_ref().map(|ed| name(ed, &id)).unwrap_or_default();
-                match am_core::worktrees::remove_script(&id) {
+                match kind.remove(&id) {
                     Ok(_) => {
-                        am_core::info!("scripts", "Removed startup script for {name} via settings");
-                        ((true, format!("Removed the startup script for {name}")), Outcome::None)
+                        am_core::info!("scripts", "Removed {} for {name} via settings", kind.label());
+                        ((true, format!("Removed the {} for {name}", kind.label())), Outcome::None)
                     }
                     Err(e) => ((false, format!("Couldn't remove the script: {e}")), Outcome::None),
                 }
@@ -800,12 +800,13 @@ impl SortEditor {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// All editor tests share one temp AM_DATA_DIR (env is process-global),
-    /// so they hold a lock while they touch settings.json.
-    fn data_dir() -> (std::sync::MutexGuard<'static, ()>, &'static std::path::Path) {
+    /// so they hold a lock while they touch settings.json (other modules'
+    /// tests that touch the data dir take it too).
+    pub(crate) fn data_dir() -> (std::sync::MutexGuard<'static, ()>, &'static std::path::Path) {
         static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -844,6 +845,7 @@ mod tests {
 
     #[test]
     fn repositories_page_removes_scripts_and_repos() {
+        use am_core::worktrees::ScriptKind;
         let (_g, dir) = data_dir();
         let conn = am_core::db::open().unwrap();
         let repo = am_core::db::add_repository(&conn, &dir.join("proj").display().to_string(), "proj").unwrap();
@@ -857,10 +859,23 @@ mod tests {
         assert_eq!(ed.repo_count, 0, "set by the app, not by opening the page");
 
         assert!(matches!(ed.on_key(Key::Char('a')), Outcome::AddRepo));
-        assert!(matches!(ed.on_key(Key::Char('s')), Outcome::EditScript(id) if id == repo.id));
-        assert!(matches!(ed.on_key(Key::Char('S')), Outcome::None));
+        // s asks which script; ⏎ edits the startup one, x removes it.
+        assert!(matches!(ed.on_key(Key::Char('s')), Outcome::None));
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::EditScript(id, ScriptKind::Startup) if id == repo.id));
+        assert!(matches!(ed.on_key(Key::Char('x')), Outcome::None));
         assert!(!am_core::worktrees::has_script(&repo.id));
         assert!(!ed.repos.as_ref().unwrap().rows[0].script);
+
+        // The review script is the chooser's second row.
+        ed.on_key(Key::Down);
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::EditScript(id, ScriptKind::Review) if id == repo.id));
+        ScriptKind::Review.create(&repo.id).unwrap();
+        ed.refresh_repos(None);
+        assert!(ed.repos.as_ref().unwrap().rows[0].review_script);
+        assert!(matches!(ed.on_key(Key::Char('x')), Outcome::None));
+        assert!(!ScriptKind::Review.exists(&repo.id));
+        assert!(ed.repos.as_ref().unwrap().message.as_ref().is_some_and(|(ok, m)| *ok && m.contains("review script")));
+        ed.on_key(Key::Esc); // the chooser
 
         ed.on_key(Key::Char('x'));
         assert!(matches!(ed.on_key(Key::Char('y')), Outcome::ReposChanged));

@@ -1,10 +1,11 @@
 ---
 source: crates/am-tui/src/ui.rs
+assertion_line: 4639
 expression: settings
 ---
 ╭─Review requests ──────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
 │agent-monitor ───╭─Settings ────────────────────────────────────────────────────────────────────────╮─────────────────│
-│▌Batch the PR que│ ⬆ am v2.2.0 is available (you have v2.1.1)                                       │#51✓ review   0s │
+│▌◑ Batch the PR q│ ⬆ am v2.2.0 is available (you have v2.1.1)                                       │#51✓ review   0s │
 │ Typo in README  │ Update: brew update && brew upgrade agent-monitor                                │#48✓ review   0s │
 │gridsight ───────│                                                                                  │─────────────────│
 │ Feeder load fore│ General                                                                          │#902✗ review  0s │
@@ -51,4 +52,4 @@ expression: settings
 │                 │                                                                                  │                 │
 │                 │ reviews: open straight to the review page and hide the agent/worktree settings   │                 │
 ╰ you + your teams╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯───────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  esc quit
+ ⏎ open  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc quit

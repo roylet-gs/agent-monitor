@@ -123,7 +123,7 @@ test("settings scroll like the worktree list", async ({ page }) => {
   // Home goes back to the first field.
   await tui.sendKey("Home");
   await tui.waitForMatch(/│ General/);
-  expect((await settingsRows(tui)).find((l) => l.startsWith("│▌"))).toContain("Open in");
+  expect((await settingsRows(tui)).find((l) => l.startsWith("│▌"))).toContain("Mode");
   await tui.sendKey("Escape");
   await tui.waitForGone("─Settings");
 });

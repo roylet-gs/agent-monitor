@@ -322,16 +322,25 @@ enum TargetSub {
     },
 }
 
+#[derive(Args, Clone)]
+struct ScriptOpt {
+    #[command(flatten)]
+    repo: RepoOpt,
+    /// The review script (run by "pull + run script" on the review page) instead of the startup script
+    #[arg(long)]
+    review: bool,
+}
+
 #[derive(Subcommand)]
 enum ScriptCmd {
     /// Create/open startup script in IDE
-    Edit(RepoOpt),
+    Edit(ScriptOpt),
     /// Remove startup script
-    Remove(RepoOpt),
+    Remove(ScriptOpt),
     /// Print startup script contents
     Show {
         #[command(flatten)]
-        repo: RepoOpt,
+        script: ScriptOpt,
         #[command(flatten)]
         json: JsonOpt,
     },
@@ -477,9 +486,9 @@ fn main() {
             Some(TargetSub::Open { target, repo }) => linear::open(target.as_deref(), repo.repo.as_deref()),
         },
         Some(Cmd::Script(c)) => match c {
-            ScriptCmd::Edit(r) => script::edit(r.repo.as_deref()),
-            ScriptCmd::Remove(r) => script::remove(r.repo.as_deref()),
-            ScriptCmd::Show { repo, json } => script::show(repo.repo.as_deref(), json.json),
+            ScriptCmd::Edit(s) => script::edit(s.repo.repo.as_deref(), script::kind(s.review)),
+            ScriptCmd::Remove(s) => script::remove(s.repo.repo.as_deref(), script::kind(s.review)),
+            ScriptCmd::Show { script: s, json } => script::show(s.repo.repo.as_deref(), script::kind(s.review), json.json),
         },
         Some(Cmd::Theme(c)) => match c {
             ThemeCmd::List(j) => theme::list(j.json),

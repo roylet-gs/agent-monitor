@@ -1,0 +1,34 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 30)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+│agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
+│▌◑ feat│ Scripts for beta — ⏎ add/edit · x remove · esc back                              │░ 121k │
+│ ◐ fix/│                                                                                  │░ 185k │
+│       │   Startup script  — not added yet                                                │       │
+│gridsig│     Runs after you create a worktree from the dashboard (am asks first), in the  │───────│
+│ · main│     new worktree; output in the jobs pane (a new terminal window with            │       │
+│       │     startupScriptMode: window). For installing dependencies, copying .env files… │       │
+│       │     scripts/beta.sh                                                              │       │
+│       │                                                                                  │       │
+│       │▌  Review script   — not added yet                                                │       │
+│       │     Runs after pull + run script (T or ctrl-⏎ on the review page) pulls a PR     │       │
+│       │     into Reviewing, in that PR's worktree, headless in the jobs pane, with the   │       │
+│       │     PR in AM_PR_* variables. For an automatic review, e.g. claude -p "review     │       │
+│       │     this PR".                                                                    │       │
+│       │     scripts/beta.review.sh                                                       │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │                                                                                  │       │
+│       │ ⏎ creates it from a template and opens it in your editor                         │       │
+╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
+ ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
