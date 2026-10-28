@@ -548,6 +548,42 @@ fn agent_attach_suggests_the_fresh_start_command() {
     assert!(o.stderr.contains(&format!("Start one with: cd {} && mycli chat --agent am", wt.display())), "{}", o.stderr);
 }
 
+#[test]
+fn hooks_for_codebuddy() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // CodeBuddy keeps Claude's nested layout in ~/.codebuddy/settings.json, timeout in seconds.
+    let settings = env.home().join(".codebuddy/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let mine = json!({"matcher": "Bash", "hooks": [{"type": "command", "command": "./guard.sh"}]});
+    std::fs::write(&settings, json!({"model": "x", "hooks": {"PreToolUse": [mine]}}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "codebuddy"]).stdout, "Hooks installed into ~/.codebuddy/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v["model"], "x");
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(
+        hooks.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["PreToolUse", "SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Notification", "SubagentStart", "SubagentStop", "Stop", "StopFailure"]
+    );
+    let pre = hooks["PreToolUse"].as_array().unwrap();
+    assert_eq!(pre[0], mine);
+    let entry = &pre[1]["hooks"][0];
+    assert_eq!(entry["timeout"], 5);
+    assert_eq!(
+        entry["command"],
+        format!("\"{}\" hook-event --agent codebuddy --worktree \"$CODEBUDDY_PROJECT_DIR\" --event PreToolUse", fake_hook.display())
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], true);
+
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "codebuddy"]).stdout, "Hooks removed from ~/.codebuddy/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"model": "x", "hooks": {"PreToolUse": [mine]}}));
+}
+
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
 #[test]
 fn manifest_plugins_need_no_code() {

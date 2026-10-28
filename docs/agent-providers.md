@@ -272,6 +272,7 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+| CodeBuddy Code (`codebuddy`) | `~/.codebuddy/settings.json`, nested, s, `$CODEBUDDY_PROJECT_DIR` | Claude keys, event names and tool names; subagent events document no `agent_id`; hook edits are reviewed in `/hooks` before they apply | `Notification` `permission_prompt`, `PermissionRequest` | `codebuddy --resume <id>` / `--continue` |
 
 Not built in, and why:
 
