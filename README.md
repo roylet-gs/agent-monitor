@@ -623,7 +623,7 @@ A harness is the CLI or editor that runs the agent and fires the hooks. `am hook
 | Factory Droid | `droid` | `~/.factory/hooks.json` (or `settings.json` when that's the one Droid reads) | permission prompts | `droid --resume <id>` |
 | GitHub Copilot CLI | `copilot` | `~/.copilot/hooks/agent-monitor.json` | questions | `copilot --resume <id>` |
 | Cursor (editor agent, `cursor-agent`) | `cursor` | `~/.cursor/hooks.json` | — (no permission hook) | `cursor-agent --resume <id>` |
-| CodeBuddy Code | `codebuddy` | `~/.codebuddy/settings.json` (review it in `/hooks`) | permission prompts | `codebuddy --resume <id>` |
+| CodeBuddy Code | `codebuddy` | `~/.codebuddy/settings.json`, or `$CODEBUDDY_CONFIG_DIR/settings.json` (review it in `/hooks`) | permission prompts | `codebuddy --resume <id>` |
 
 Any other CLI whose hooks run a command with a JSON payload on stdin can be added without code as a JSON manifest in `~/.agent-monitor/agents/` (`docs/agent-providers.md`). Not supported yet: OpenCode and Amp (plugins only, no command hooks), Aider (no hooks), Windsurf and Crush (no session or turn-end events), JetBrains Junie (its `Stop` hook carries no session or directory) and Augment Auggie (hook commands must be bare script paths).
 

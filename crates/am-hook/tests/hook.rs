@@ -295,6 +295,31 @@ fn a_codebuddy_turn_is_tracked() {
     assert_eq!(env.session("cb-1").0, "done");
 }
 
+/// CodeBuddy's subagent hooks carry `agent_id`/`agent_type` (its
+/// `buildAgentTrigger`) with the parent's `session_id`, and `Stop` fires for
+/// the main session only, so a turn that hands off is `delegating`.
+#[test]
+fn a_codebuddy_subagent_keeps_the_turn_delegating() {
+    let env = Env::new();
+    let root = env.root();
+    let cb = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "cb-2", "cwd": root });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("codebuddy", event, &root, p);
+    };
+    let agent = json!({ "agent_id": "store-1", "agent_type": "general-purpose" });
+    cb("UserPromptSubmit", json!({ "prompt": "split it up" }));
+    cb("SubagentStart", agent.clone());
+    let mut tool = agent.clone();
+    tool.as_object_mut().unwrap().extend(json!({ "tool_name": "Read", "tool_input": { "file_path": "/w/a.rs" } }).as_object().unwrap().clone());
+    cb("PreToolUse", tool);
+    assert_eq!(env.status(), ("executing".into(), 1), "a subagent's tool doesn't move the parent");
+    cb("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status(), ("delegating".into(), 1));
+    cb("SubagentStop", agent);
+    assert_eq!(env.status(), ("done".into(), 0));
+}
+
 #[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();

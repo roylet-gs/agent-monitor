@@ -1,22 +1,44 @@
-//! CodeBuddy Code (Tencent, `codebuddy`) as a built-in plugin, entirely the
-//! manifest `codebuddy.json`.
+//! CodeBuddy Code (Tencent, `codebuddy`) as a built-in plugin: the manifest
+//! `codebuddy.json`, with its config dir picked at runtime.
 //!
 //! CodeBuddy's hooks copy Claude Code's: the nested `hooks` key of
-//! `~/.codebuddy/settings.json`, Claude's event names, payload keys
+//! `<config dir>/settings.json`, Claude's event names, payload keys
 //! (`session_id`, `cwd`, `tool_name`, `notification_type`…) and tool names,
 //! `$CODEBUDDY_PROJECT_DIR` for the project root, and `timeout` in seconds.
-//! Quirks: its `SubagentStart`/`SubagentStop` payloads document no
-//! `agent_id`, so subagents may not be tracked one by one (the events still
-//! keep the session executing); hook edits are reviewed in its `/hooks` panel
-//! before they take effect; CodeBuddy also honours a `$CODEBUDDY_CONFIG_DIR`
-//! override, which am doesn't follow (it writes `~/.codebuddy`). Transcripts
-//! live under `~/.codebuddy/projects/`, but their layout isn't documented, so
-//! resume offers the sessions am's hooks recorded.
+//! The config dir is `$CODEBUDDY_CONFIG_DIR` when set (and not blank),
+//! else `~/.codebuddy`, as CodeBuddy itself decides; am installs the hooks
+//! and detects the CLI there. Subagents are Claude's too: `SubagentStart`
+//! carries `agent_id`/`agent_type`, a subagent's tool events and its
+//! `SubagentStop` carry its `agent_id` with the parent's `session_id`, and
+//! `Stop` fires only for the main session, so a turn that ends with
+//! subagents running is `delegating`. Quirk: hook edits are reviewed in its
+//! `/hooks` panel before they take effect. Transcripts live under
+//! `<config dir>/projects/`, but their layout isn't documented, so resume
+//! offers the sessions am's hooks recorded.
+
+use std::ffi::OsString;
+use std::path::PathBuf;
 
 use super::embedded::Embedded;
+use super::home_join;
 use super::manifest::Manifest;
 
-pub static CODEBUDDY: Embedded = Embedded::new(|| Manifest::builtin(include_str!("codebuddy.json")), None);
+pub static CODEBUDDY: Embedded = Embedded::new(|| Manifest::builtin(include_str!("codebuddy.json")), None)
+    .with_hook_file(|| (config_dir().join("settings.json"), "hooks"))
+    .with_presence(|| config_dir().is_dir());
+
+/// `$CODEBUDDY_CONFIG_DIR`, else `~/.codebuddy`.
+fn config_dir() -> PathBuf {
+    config_dir_from(std::env::var_os("CODEBUDDY_CONFIG_DIR"))
+}
+
+fn config_dir_from(var: Option<OsString>) -> PathBuf {
+    // CodeBuddy: `env.CODEBUDDY_CONFIG_DIR?.trim() ? env.CODEBUDDY_CONFIG_DIR : join(homedir(), ".codebuddy")`.
+    match var {
+        Some(v) if !v.to_string_lossy().trim().is_empty() => PathBuf::from(v),
+        _ => home_join(".codebuddy"),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -38,6 +60,13 @@ mod tests {
         assert_eq!(step(s, json!({"hook_event_name":"PermissionRequest","tool_name":"Bash"})), Some(Waiting));
         assert_eq!(step(s, json!({"hook_event_name":"Stop","stop_hook_active":false})), Some(Done));
         assert_eq!(step(Some(Done), json!({"hook_event_name":"SessionEnd","reason":"exit"})), Some(Idle));
+    }
+
+    #[test]
+    fn the_config_dir_follows_codebuddy_config_dir() {
+        assert_eq!(config_dir_from(Some("/cb/conf".into())), PathBuf::from("/cb/conf"));
+        assert_eq!(config_dir_from(Some("  ".into())), home_join(".codebuddy"));
+        assert_eq!(config_dir_from(None), home_join(".codebuddy"));
     }
 
     #[test]

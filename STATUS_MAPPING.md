@@ -222,7 +222,7 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 - Codex: `Interrupt` (the user stopped the turn) → `Stop`. No `Notification`; `waiting` comes from `PermissionRequest`. Subagent events carry `agent_id`, so `delegating` works.
 - Droid: a cancelled turn sends `Notification` (`idle_prompt`) rather than `Stop`. No `SubagentStart`, so its subagents aren't tracked.
 - Copilot: registered with PascalCase names, which select its Claude-shaped payload. Its permission and notification hooks only exist in the camelCase format, so only `AskUserQuestion` reaches `waiting`.
-- CodeBuddy: Claude's tool names too (no mapping). Its documented `SubagentStart`/`SubagentStop` payloads carry no `agent_id`, so unless it sends one its subagents aren't tracked and it doesn't reach `delegating`; the events still count as work.
+- CodeBuddy: Claude's tool names too (no mapping), and Claude's subagent shape: `SubagentStart`, a subagent's tool events and its `SubagentStop` carry its `agent_id`/`agent_type` under the parent's `session_id`, and `Stop` fires only for the main session, so a turn that ends with subagents running is `delegating`, then `done` when the last one stops.
 
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 

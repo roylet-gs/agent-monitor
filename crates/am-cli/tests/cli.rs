@@ -49,6 +49,7 @@ const AGENT_ENV: &[&str] = &[
     "PI_CODING_AGENT_SESSION_DIR",
     "OMP_AGENT_DIR",
     "CAMPFIRE_CODING_AGENT_DIR",
+    "CODEBUDDY_CONFIG_DIR",
 ];
 
 impl Env {
@@ -582,6 +583,19 @@ fn hooks_for_codebuddy() {
     assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "codebuddy"]).stdout, "Hooks removed from ~/.codebuddy/settings.json\n");
     let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
     assert_eq!(v, json!({"model": "x", "hooks": {"PreToolUse": [mine]}}));
+
+    // $CODEBUDDY_CONFIG_DIR moves CodeBuddy's config, and the hooks with it:
+    // installed there (detected from it alone), never into ~/.codebuddy.
+    std::fs::remove_dir_all(env.home().join(".codebuddy")).unwrap();
+    let moved = env.root().join("cb-config");
+    std::fs::create_dir_all(&moved).unwrap();
+    env.extra_env.push(("CODEBUDDY_CONFIG_DIR".into(), moved.display().to_string()));
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], false);
+    env.ok(&["hooks", "install"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(moved.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(v["hooks"].as_object().unwrap().len(), 11);
+    assert!(!env.home().join(".codebuddy").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], true);
 }
 
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
