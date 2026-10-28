@@ -271,6 +271,39 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn a_campfire_session_is_tracked_through_its_extensions_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Exactly what am's Campfire extension sends: `--worktree ""`, canonical
+    // event names, a collaborator's ask as a permission_prompt notification.
+    let campfire = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "cf-1", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("campfire", event, "", p);
+    };
+    let ask = json!({ "notification_type": "permission_prompt", "message": "Ana is waiting to join the Campfire session" });
+    campfire("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("campfire")));
+    campfire("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    campfire("Notification", ask.clone());
+    assert_eq!(env.status().0, "waiting");
+    campfire("PostToolUse", json!({}));
+    campfire("Stop", json!({ "last_assistant_message": "All done." }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("cf-1").0, "done");
+    // An ask after the turn leaves a finished session alone.
+    campfire("Notification", ask.clone());
+    assert_eq!(env.status().0, "done");
+    campfire("UserPromptSubmit", json!({}));
+    campfire("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    campfire("SessionEnd", json!({}));
+    assert!(!env.session("cf-1").1);
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

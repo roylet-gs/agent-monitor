@@ -233,3 +233,15 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**Campfire** (`--agent campfire`): Campfire has no command hooks. am's extension (`${CAMPFIRE_CODING_AGENT_DIR:-~/.campfire/agent}/extensions/agent-monitor-campfire.ts`) sends canonical event names itself, with `--worktree ""` and the session's directory as `cwd`, and only for the session's host (`CAMPFIRE_SESSION_ROLE=host`):
+
+| Campfire event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` | `SessionStart` | `idle` |
+| `before_agent_start` | `UserPromptSubmit` (once per turn) | `executing` |
+| observer `join.requested` / `permission.asked` | `Notification` `permission_prompt` | `waiting` (a `done` session is left alone) |
+| `agent_end` | `Stop` (once per turn; `PostToolUse` first when the turn saw an ask) | `done` after work |
+| `session_end` / `session_shutdown` | `SessionEnd` | `idle` |
+
+There is no event for the host answering a join request or capability ask, so a `waiting` row from an ask between turns stays until the next prompt.

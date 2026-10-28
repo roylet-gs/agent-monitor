@@ -513,6 +513,63 @@ fn hooks_for_gemini() {
     assert!(o.stderr.contains(&format!("Unknown agent: aider. Valid agents: {}", builtin_ids().join(", "))), "{}", o.stderr);
 }
 
+/// Campfire has no hooks: am writes (and owns) an extension it loads from
+/// `${CAMPFIRE_CODING_AGENT_DIR:-~/.campfire/agent}/extensions/`.
+#[test]
+fn hooks_for_campfire_are_an_extension_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Not detected until Campfire has been used.
+    assert!(!env.ok(&["hooks", "install"]).stdout.contains("campfire"));
+    let ext_dir = env.home().join(".campfire/agent/extensions");
+    std::fs::create_dir_all(&ext_dir).unwrap();
+    std::fs::write(ext_dir.join("mine.ts"), "export default function () {}\n").unwrap();
+    let ext = ext_dir.join("agent-monitor-campfire.ts");
+    assert!(env.ok(&["hooks", "install"]).stdout.contains("Hooks installed into ~/.campfire/agent/extensions/agent-monitor-campfire.ts\n"));
+    let text = std::fs::read_to_string(&ext).unwrap();
+    assert!(text.contains(am_core::hooks_installer::OWNED_FILE_MARKER));
+    let argv = format!("const HOOK = [\"{}\", \"hook-event\", \"--agent\", \"campfire\", \"--worktree\", \"\", \"--event\"];", fake_hook.display());
+    assert!(text.contains(&argv), "{text}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["campfire"], true);
+    env.ok(&["hooks", "install", "--agent", "campfire"]);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), text, "reinstalling changes nothing");
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("Campfire hooks: Installed in ~/.campfire/agent/extensions/agent-monitor-campfire.ts"), "{doctor}");
+
+    // A binary that's gone is found in the extension.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains(&format!("run a missing {}", fake_hook.display())), "{doctor}");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+
+    env.ok(&["hooks", "uninstall", "--agent", "campfire"]);
+    assert!(!ext.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["campfire"], false);
+    assert_eq!(std::fs::read_to_string(ext_dir.join("mine.ts")).unwrap(), "export default function () {}\n");
+
+    // A file of that name that isn't am's is left alone.
+    std::fs::write(&ext, "export default function () {}\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "campfire"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    env.ok(&["hooks", "uninstall", "--agent", "campfire"]);
+    assert_eq!(std::fs::read_to_string(&ext).unwrap(), "export default function () {}\n");
+    std::fs::remove_file(&ext).unwrap();
+
+    // $CAMPFIRE_CODING_AGENT_DIR moves it (and counts as Campfire being there).
+    let own = env.root().join("cf-agent");
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::remove_dir_all(env.home().join(".campfire")).unwrap();
+    env.extra_env.push(("CAMPFIRE_CODING_AGENT_DIR".into(), own.display().to_string()));
+    assert!(env.ok(&["hooks", "install"]).stdout.contains("agent-monitor-campfire.ts"));
+    assert!(own.join("extensions/agent-monitor-campfire.ts").is_file());
+    env.ok(&["hooks", "uninstall", "--agent", "campfire"]);
+    assert!(!own.join("extensions/agent-monitor-campfire.ts").exists());
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {

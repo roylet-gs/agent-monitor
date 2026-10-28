@@ -272,6 +272,7 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+| Campfire (`campfire`) | No hooks: an `OwnedFile` extension, `extensions/agent-monitor-campfire.ts` in `$CAMPFIRE_CODING_AGENT_DIR` (else `~/.campfire/agent`), which Campfire loads at startup | A white-label of Pi: the extension subscribes to Pi's extension events and Campfire's collaborative observer bridge and runs am-hook with a Claude-shaped payload and canonical event names ([below](#campfires-bridge-extension)); `--worktree ""`, payload `cwd`; host only | `join.requested` / `permission.asked` → `Notification` `permission_prompt` | `campfire --session <id>`; sessions am's hooks recorded |
 
 Not built in, and why:
 
@@ -282,8 +283,23 @@ Not built in, and why:
 - **Windsurf / Devin Desktop**: no session, stop or permission events; the only turn end is the async `post_cascade_response`.
 - **Crush**: `PreToolUse` only.
 - **Cline**: one executable file per hook, and current docs point to in-process SDK plugins.
-- **OpenCode, Amp**: JS/TS plugins only; supporting them means shipping a small bridge plugin that runs `am-hook`.
+- **OpenCode, Amp**: JS/TS plugins only; supporting them means shipping a small bridge plugin that runs `am-hook`, as am does for Campfire.
 - **Aider**: no hooks, only a `--notifications-command` with no payload.
 - **Mistral Vibe**: TOML config with tool and `post_agent` events only.
 
 Any of these can still be added as a manifest where its hooks fit the format above.
+
+### Campfire's bridge extension
+
+Campfire (a white-label of the Pi coding agent with collaborative sessions) has no command hooks; it loads TypeScript extensions from `${CAMPFIRE_CODING_AGENT_DIR:-~/.campfire/agent}/extensions/` and hands each one Pi's extension API (`api.on(event, (event, ctx) => …)`). `am hooks install --agent campfire` writes `extensions/agent-monitor-campfire.ts` (`harness/campfire-extension.ts` with am-hook's argv filled in; `HookInstall::OwnedFile`, no registration). It is plain JavaScript in a `.ts` file with only `node:child_process` imported, so it needs nothing installed. It runs `am-hook hook-event --agent campfire --worktree "" --event <E>` with `{session_id, cwd, hook_event_name, last_assistant_message?, notification_type?, message?}` on stdin (`session_id` from `ctx.sessionManager.getSessionId()`, `cwd` from `ctx.cwd`): detached, one at a time in order, killed after 5 s, never throwing and never making Campfire wait, except for up to 1.5 s at shutdown so `SessionEnd` gets out. The manifest's `events` map is the identity.
+
+| Campfire | Sent |
+|---|---|
+| `session_start` | `SessionStart` |
+| `before_agent_start` | `UserPromptSubmit`, once per turn (the prompt itself is never sent) |
+| `agent_end` | `Stop` with the last assistant text, once per turn (a second `Stop` would turn `done` into `idle`); a turn that saw a collaborator's ask sends `PostToolUse` first, since `Stop` keeps `waiting` |
+| `session_end`, or Pi's `session_shutdown` | `SessionEnd`, once |
+| observer bridge (`globalThis[Symbol.for("campfire.observer.v1")].listeners`): `join.requested`, `permission.asked` | `Notification` `permission_prompt` with `<name> is waiting to join…` / `<name> asked for permission: <capability>` (`waiting`; a `done` session is left alone). There is no event for the host's answer; the next prompt moves the row on |
+| `relay.error`, anything else | nothing |
+
+Only the host is reported: unless `CAMPFIRE_SESSION_ROLE=host` the extension registers nothing, because a joiner is an ephemeral view of someone else's session whose command line carries the invite token (the extension never reads `process.argv`). It keeps one observer listener per process (in `globalThis[Symbol.for("agent-monitor.campfire.observer")]`), so a reload replaces it. Unlike cmux's Campfire extension it doesn't step aside for Campfire's built-in cmux bridge; that bridge reports to cmux, not am. No tool events are sent, so a turn is `executing` from prompt to `agent_end`.

@@ -1,0 +1,21 @@
+{
+  "id": "campfire",
+  "name": "Campfire",
+  "program": "campfire",
+  "configDir": "~/.campfire",
+  "hooks": {
+    "settingsPath": "~/.campfire/agent/extensions/agent-monitor-campfire.ts",
+    "timeoutMs": 5000
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PostToolUse": "PostToolUse",
+    "Notification": "Notification",
+    "Stop": "Stop"
+  },
+  "resume": { "session": ["--session", "{id}"] },
+  "process": { "names": ["campfire", "campfire.js", "campfire.ts"] },
+  "notes": "Reported by an extension am writes into Campfire's extensions directory; Campfire loads it at startup, so restart open sessions after installing. Only the host of a session is shown"
+}
