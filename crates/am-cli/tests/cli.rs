@@ -376,7 +376,7 @@ fn hooks_install_status_uninstall() {
     assert_eq!(again, v);
     assert_eq!(
         env.ok(&["hooks", "status", "--json"]).json(),
-        json!({"installed": true, "agents": {"claude": true, "gemini": false, "codex": false, "qwen": false, "droid": false, "copilot": false, "cursor": false}})
+        json!({"installed": true, "agents": {"claude": true, "gemini": false, "codex": false, "qwen": false, "droid": false, "copilot": false, "cursor": false, "codebuddy": false}})
     );
 
     // Opting out of the native binary falls back to the TS command.
@@ -468,7 +468,7 @@ fn hooks_for_gemini() {
         before[1]["hooks"][0]["command"],
         format!("\"{}\" hook-event --agent gemini --worktree \"$GEMINI_PROJECT_DIR\" --event BeforeTool", fake_hook.display())
     );
-    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"], json!({"claude": true, "gemini": true, "codex": false, "qwen": false, "droid": false, "copilot": false, "cursor": false}));
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"], json!({"claude": true, "gemini": true, "codex": false, "qwen": false, "droid": false, "copilot": false, "cursor": false, "codebuddy": false}));
 
     // --agent narrows uninstall; the user's own Gemini hook stays.
     assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "gemini"]).stdout, "Hooks removed from ~/.gemini/settings.json\n");
@@ -486,7 +486,43 @@ fn hooks_for_gemini() {
 
     let o = env.run(&["hooks", "install", "--agent", "aider"]);
     assert_eq!(o.code, 1);
-    assert!(o.stderr.contains("Unknown agent: aider. Valid agents: claude, gemini, codex, qwen, droid, copilot, cursor"), "{}", o.stderr);
+    assert!(o.stderr.contains("Unknown agent: aider. Valid agents: claude, gemini, codex, qwen, droid, copilot, cursor, codebuddy"), "{}", o.stderr);
+}
+
+#[test]
+fn hooks_for_codebuddy() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // CodeBuddy keeps Claude's nested layout in ~/.codebuddy/settings.json, timeout in seconds.
+    let settings = env.home().join(".codebuddy/settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let mine = json!({"matcher": "Bash", "hooks": [{"type": "command", "command": "./guard.sh"}]});
+    std::fs::write(&settings, json!({"model": "x", "hooks": {"PreToolUse": [mine]}}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "codebuddy"]).stdout, "Hooks installed into ~/.codebuddy/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v["model"], "x");
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(
+        hooks.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["PreToolUse", "SessionStart", "SessionEnd", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Notification", "SubagentStart", "SubagentStop", "Stop", "StopFailure"]
+    );
+    let pre = hooks["PreToolUse"].as_array().unwrap();
+    assert_eq!(pre[0], mine);
+    let entry = &pre[1]["hooks"][0];
+    assert_eq!(entry["timeout"], 5);
+    assert_eq!(
+        entry["command"],
+        format!("\"{}\" hook-event --agent codebuddy --worktree \"$CODEBUDDY_PROJECT_DIR\" --event PreToolUse", fake_hook.display())
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["codebuddy"], true);
+
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "codebuddy"]).stdout, "Hooks removed from ~/.codebuddy/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"model": "x", "hooks": {"PreToolUse": [mine]}}));
 }
 
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
@@ -525,7 +561,7 @@ fn manifest_plugins_need_no_code() {
     env.ok(&["settings", "set", "defaultAgent", "mycli"]);
     let o = env.run(&["settings", "set", "defaultAgent", "nope"]);
     assert_eq!(o.code, 1);
-    assert!(o.stderr.contains("Available: claude, gemini, codex, qwen, droid, copilot, cursor, mycli"), "{}", o.stderr);
+    assert!(o.stderr.contains("Available: claude, gemini, codex, qwen, droid, copilot, cursor, codebuddy, mycli"), "{}", o.stderr);
 
     // Doctor reports the plugin's hooks and the file it skipped.
     let doctor = env.ok(&["doctor"]).stdout;

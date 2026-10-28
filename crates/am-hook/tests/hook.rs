@@ -271,6 +271,31 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn a_codebuddy_turn_is_tracked() {
+    let env = Env::new();
+    let root = env.root();
+    let transcript = format!("{root}/.codebuddy/projects/w/cb-1.jsonl");
+    let cb = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "cb-1", "cwd": root,
+                            "transcript_path": transcript, "permission_mode": "default" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("codebuddy", event, &root, p);
+    };
+    cb("SessionStart", json!({ "source": "startup" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("codebuddy")));
+    cb("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!(env.status().0, "executing");
+    cb("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" } }));
+    cb("Notification", json!({ "notification_type": "permission_prompt", "message": "CodeBuddy needs your permission to use Bash" }));
+    assert_eq!(env.status().0, "waiting");
+    cb("PostToolUse", json!({ "tool_name": "Bash", "tool_response": {} }));
+    assert_eq!(env.status().0, "executing");
+    cb("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("cb-1").0, "done");
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

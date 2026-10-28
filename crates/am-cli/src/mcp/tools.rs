@@ -131,7 +131,7 @@ const TARGET_OPT: Param = opt("target", Kind::Str, "Worktree branch name or path
 const AGENTS: Param = opt(
     "agents",
     Kind::StrList,
-    "Agent ids (claude, gemini, codex, qwen, droid, copilot, cursor, …); default: every detected agent",
+    "Agent ids (claude, gemini, codex, qwen, droid, copilot, cursor, codebuddy, …); default: every detected agent",
 );
 const STATUSES: &[&str] = &["idle", "executing", "planning", "waiting", "delegating", "done"];
 const MODES: &[&str] = &["fresh", "reuse", "track", "no_track"];
