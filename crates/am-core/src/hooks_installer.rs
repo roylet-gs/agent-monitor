@@ -159,8 +159,10 @@ fn missing_programs(text: &str) -> Vec<PathBuf> {
 /// Absolute program paths in text am generated: a quoted (or escaped-quoted,
 /// `\"/abs/am-hook\"` inside a TOML/YAML string) absolute path that is named
 /// like an am binary or is followed by `hook-event`, also inside the same
-/// string (`"/abs/am-hook hook-event …"`). Paths with spaces work when the
-/// path is quoted on its own.
+/// string (`"/abs/am-hook hook-event …"`) or as the next element of an argv
+/// array (`["/abs/my-hook", "hook-event", …]`, a plugin's
+/// [`HookContext::argv`] as JSON, even split across lines). Paths with spaces
+/// work when the path is quoted on its own.
 pub fn hook_programs_in_text(text: &str) -> Vec<PathBuf> {
     let word = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
     let mut found = Vec::new();
@@ -175,6 +177,11 @@ pub fn hook_programs_in_text(text: &str) -> Vec<PathBuf> {
         }
         let (path, after) = rest.split_at(end);
         let after = after.trim_start_matches(['"', '\'', '\\']).trim_start_matches([' ', '\t']);
+        // The next element of an argv array: `"/abs/x", "hook-event"`.
+        let after = match after.strip_prefix(',') {
+            Some(next) => next.trim_start_matches([' ', '\t', '\r', '\n']).trim_start_matches(['"', '\'']),
+            None => after,
+        };
         let named = matches!(path.rsplit('/').next(), Some("am-hook" | "am-rs" | "am"));
         let runs_hook = after.strip_prefix("hook-event").is_some_and(|r| !r.starts_with(word));
         if named || runs_hook {
@@ -341,6 +348,7 @@ fn install_json(provider: &dyn Harness, native: Option<PathBuf>) -> std::io::Res
     for (k, v) in provider.hook_file_defaults() {
         settings.entry(k).or_insert(v);
     }
+    provider.hook_companion(Some(&HookContext::new(provider, native.as_deref())))?;
     write_settings(&path, &settings)?;
     info!(
         "hooks",
@@ -358,10 +366,12 @@ pub fn uninstall_hooks(agent: HarnessKind) -> std::io::Result<()> {
 
 fn uninstall_provider(provider: &dyn Harness) -> std::io::Result<()> {
     match provider.hook_install() {
-        HookInstall::Json => uninstall_json(provider),
-        HookInstall::TextBlock(tb) => uninstall_text_block(provider, &tb),
-        HookInstall::OwnedFile(of) => uninstall_owned_file(provider, &of),
+        HookInstall::Json => uninstall_json(provider)?,
+        HookInstall::TextBlock(tb) => uninstall_text_block(provider, &tb)?,
+        HookInstall::OwnedFile(of) => uninstall_owned_file(provider, &of)?,
     }
+    // Once the hooks are gone, also when there were none to remove.
+    provider.hook_companion(None)
 }
 
 fn uninstall_json(provider: &dyn Harness) -> std::io::Result<()> {
@@ -415,9 +425,9 @@ fn check_provider(p: &dyn Harness) -> std::io::Result<()> {
     let path = p.settings_path();
     match p.hook_install() {
         HookInstall::Json => read_settings(&path).map(drop),
-        HookInstall::TextBlock(tb) => {
-            find_block(&read_text(&path)?, &block_begin(tb.comment, p.id()), &block_end(tb.comment, p.id())).map(drop)
-        }
+        // Placing the block also catches a file the harness can't put it in
+        // (`Harness::place_hook_block` refusing).
+        HookInstall::TextBlock(tb) => place_text_block(p, &tb, &read_text(&path)?, &HookContext::new(p, None)).map(drop),
         HookInstall::OwnedFile(of) => {
             if path.exists() && !read_text(&path)?.contains(OWNED_FILE_MARKER) {
                 return Err(not_ours(&path));
@@ -466,8 +476,20 @@ pub struct TextBlock {
     pub comment: &'static str,
     /// The block's body, between the marker lines: the hooks in the file's
     /// own syntax. Quote values with [`toml_string`] / [`yaml_string`].
+    /// Where the block goes is [`Harness::place_hook_block`] (default: where
+    /// it already is, else appended).
     pub render: fn(&HookContext) -> String,
 }
+
+/// [`Harness::place_hook_block`] as a function, for
+/// `Embedded::with_block_placement`: `(text without am's block, am's whole
+/// block, hooks) → Some(new file text) | None (default placement)`.
+pub type PlaceBlock = fn(text: &str, block: &str, ctx: &HookContext) -> std::io::Result<Option<String>>;
+
+/// [`Harness::hook_companion`] as a function, for
+/// `Embedded::with_hook_companion`: `Some(hooks)` on install, `None` on
+/// uninstall.
+pub type HookCompanion = fn(Option<&HookContext>) -> std::io::Result<()>;
 
 /// [`HookInstall::OwnedFile`]: a file am writes whole and deletes on
 /// uninstall (only while it still holds [`OWNED_FILE_MARKER`]).
@@ -648,14 +670,46 @@ fn find_block(text: &str, begin: &str, end: &str) -> std::io::Result<Option<(usi
 /// `text` with am's block set to `body`: replaced where it is, else
 /// appended after a blank line. Everything outside the block is kept.
 pub fn upsert_block(text: &str, comment: &str, id: &str, body: &str) -> std::io::Result<String> {
-    let (begin, end) = (block_begin(comment, id), block_end(comment, id));
-    let nl = if body.is_empty() || body.ends_with('\n') { "" } else { "\n" };
-    let block = format!("{begin}\n{body}{nl}{end}\n");
-    Ok(match find_block(text, &begin, &end)? {
+    let block = block_text(comment, id, body);
+    Ok(match find_block(text, &block_begin(comment, id), &block_end(comment, id))? {
         Some((s, e)) => format!("{}{block}{}", &text[..s], &text[e..]),
-        None if text.is_empty() => block,
-        None => format!("{text}{}\n{block}", if text.ends_with('\n') { "" } else { "\n" }),
+        None => append_block(text, &block),
     })
+}
+
+/// am's whole block: the [`block_begin`] line, `body`, the [`block_end`]
+/// line, ending in a newline.
+pub fn block_text(comment: &str, id: &str, body: &str) -> String {
+    let nl = if body.is_empty() || body.ends_with('\n') { "" } else { "\n" };
+    format!("{}\n{body}{nl}{}\n", block_begin(comment, id), block_end(comment, id))
+}
+
+/// `text` with `block` appended after a blank line (just `block` when
+/// `text` is empty): the default placement.
+pub fn append_block(text: &str, block: &str) -> String {
+    if text.is_empty() {
+        return block.to_owned();
+    }
+    format!("{text}{}\n{block}", if text.ends_with('\n') { "" } else { "\n" })
+}
+
+/// `text` with am's block set to what `tb` renders for `ctx`: where the
+/// harness puts it ([`Harness::place_hook_block`], given the text without
+/// the old block), else replaced in place or appended ([`upsert_block`]).
+/// A placement that loses the marker lines is refused, so the hooks can
+/// always be found and removed again.
+fn place_text_block(provider: &dyn Harness, tb: &TextBlock, text: &str, ctx: &HookContext) -> std::io::Result<String> {
+    let id = provider.id();
+    let body = (tb.render)(ctx);
+    let without = remove_block(text, tb.comment, id)?;
+    let Some(placed) = provider.place_hook_block(without.as_deref().unwrap_or(text), &block_text(tb.comment, id, &body), ctx)? else {
+        return upsert_block(text, tb.comment, id, &body);
+    };
+    let (begin, end) = (block_begin(tb.comment, id), block_end(tb.comment, id));
+    if find_block(&placed, &begin, &end)?.is_none() {
+        return Err(std::io::Error::other(format!("{id}: the placed hook block lacks its `{begin}` / `{end}` lines")));
+    }
+    Ok(placed)
 }
 
 /// `text` without am's block (`None` when there is none). A block at the end
@@ -675,7 +729,8 @@ fn install_text(provider: &dyn Harness, style: &HookInstall, native: Option<Path
     match style {
         HookInstall::Json => unreachable!("JSON hooks go through install_json"),
         HookInstall::TextBlock(tb) => {
-            let text = upsert_block(&read_text(&path)?, tb.comment, provider.id(), &(tb.render)(&ctx))?;
+            let text = place_text_block(provider, tb, &read_text(&path)?, &ctx)?;
+            provider.hook_companion(Some(&ctx))?;
             write_text(&path, &text)?;
         }
         HookInstall::OwnedFile(of) => {
@@ -689,6 +744,7 @@ fn install_text(provider: &dyn Harness, style: &HookInstall, native: Option<Path
             // Read the registration first so an unreadable file stops the
             // install before anything is written.
             let registry = of.register.as_ref().map(|r| read_settings(&r.path).map(|s| (r, s))).transpose()?;
+            provider.hook_companion(Some(&ctx))?;
             write_text(&path, &text)?;
             if let Some((r, mut settings)) = registry {
                 let list = settings.entry(r.key.clone()).or_insert_with(|| Value::Array(Vec::new()));
@@ -903,6 +959,8 @@ mod tests {
     struct Dummy {
         path: PathBuf,
         install: HookInstall,
+        place: Option<PlaceBlock>,
+        companion: Option<HookCompanion>,
     }
 
     impl Harness for Dummy {
@@ -932,6 +990,12 @@ mod tests {
         }
         fn hook_install(&self) -> HookInstall {
             self.install.clone()
+        }
+        fn place_hook_block(&self, text: &str, block: &str, ctx: &HookContext) -> std::io::Result<Option<String>> {
+            self.place.map_or(Ok(None), |f| f(text, block, ctx))
+        }
+        fn hook_companion(&self, ctx: Option<&HookContext>) -> std::io::Result<()> {
+            self.companion.map_or(Ok(()), |f| f(ctx))
         }
         fn hook_command(&self, event: &str, invocation: &str) -> String {
             crate::harness::hook_command_line("dummy", Some("DUMMY_DIR"), event, invocation)
@@ -967,11 +1031,11 @@ mod tests {
     }
 
     fn toml_dummy(path: PathBuf) -> Dummy {
-        Dummy { path, install: HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml }) }
+        Dummy { path, install: HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml }), place: None, companion: None }
     }
 
     fn js_dummy(path: PathBuf, register: Option<JsonListEntry>) -> Dummy {
-        Dummy { path, install: HookInstall::OwnedFile(OwnedFile { render: render_js, register }) }
+        Dummy { path, install: HookInstall::OwnedFile(OwnedFile { render: render_js, register }), place: None, companion: None }
     }
 
     fn executable(dir: &Path, name: &str) -> PathBuf {
@@ -1063,6 +1127,98 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# agent-monitor hooks dummy begin\n");
     }
 
+    /// Hermes-style YAML: a top-level `hooks:` map of events.
+    fn render_yaml(ctx: &HookContext) -> String {
+        let mut out = String::from("hooks:\n");
+        for h in &ctx.hooks {
+            out.push_str(&format!("  {}:\n    - command: {}\n", h.event, yaml_string(&h.command)));
+        }
+        out
+    }
+
+    /// Nests am's block (minus its own `hooks:` line) under the user's
+    /// top-level `hooks:`; refuses an inline `hooks: {}`; `None` without one.
+    fn place_under_hooks(text: &str, block: &str, _ctx: &HookContext) -> std::io::Result<Option<String>> {
+        let lines: Vec<&str> = text.split_inclusive('\n').collect();
+        let Some(at) = lines.iter().position(|l| l.starts_with("hooks:")) else { return Ok(None) };
+        if lines[at].trim_end() != "hooks:" {
+            return Err(std::io::Error::other("inline `hooks:` value"));
+        }
+        let nested: String = block.lines().filter(|l| *l != "hooks:").map(|l| if l.starts_with('#') { format!("  {l}\n") } else { format!("{l}\n") }).collect();
+        Ok(Some(format!("{}{nested}{}", lines[..=at].concat(), lines[at + 1..].concat())))
+    }
+
+    /// Calls to [`record_companion`]: the number of hooks, `None` = uninstall.
+    static COMPANION_CALLS: std::sync::Mutex<Vec<Option<usize>>> = std::sync::Mutex::new(Vec::new());
+
+    fn record_companion(ctx: Option<&HookContext>) -> std::io::Result<()> {
+        COMPANION_CALLS.lock().unwrap().push(ctx.map(|c| c.hooks.len()));
+        Ok(())
+    }
+
+    fn companion_calls() -> Vec<Option<usize>> {
+        std::mem::take(&mut *COMPANION_CALLS.lock().unwrap())
+    }
+
+    #[test]
+    fn a_text_block_can_be_placed_inside_the_users_key_with_a_companion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hermes/config.yaml");
+        let p = Dummy {
+            path: path.clone(),
+            install: HookInstall::TextBlock(TextBlock { comment: "#", render: render_yaml }),
+            place: Some(place_under_hooks),
+            companion: Some(record_companion),
+        };
+        let bin = executable(dir.path(), "am-hook");
+        companion_calls();
+
+        // No `hooks:` of the user's: the default placement (appended).
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let alone = std::fs::read_to_string(&path).unwrap();
+        assert!(alone.starts_with("# agent-monitor hooks dummy begin\nhooks:\n  session_start:\n"), "{alone}");
+        uninstall_provider(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+        assert_eq!(companion_calls(), [Some(2), None], "the companion follows install and uninstall");
+
+        // The user's `hooks:` key: am's events go inside it, between indented markers.
+        let user = "model: x\nhooks:\n  mine:\n    - command: echo hi\nui:\n  theme: dark\n";
+        std::fs::write(&path, user).unwrap();
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let cmd = |e: &str| yaml_string(&format!("\"{}\" hook-event --agent dummy --worktree \"$DUMMY_DIR\" --event {e}", bin.display()));
+        assert_eq!(
+            text,
+            format!(
+                "model: x\nhooks:\n  # agent-monitor hooks dummy begin\n  session_start:\n    - command: {}\n  stop:\n    - command: {}\n  # agent-monitor hooks dummy end\n  mine:\n    - command: echo hi\nui:\n  theme: dark\n",
+                cmd("session_start"),
+                cmd("stop")
+            )
+        );
+        assert!(is_installed_provider(&p));
+        assert!(check_provider(&p).is_ok());
+        assert!(dangling_provider(&p).is_empty());
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "reinstalling re-places it identically");
+        uninstall_provider(&p).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), user, "uninstall gives the user's file back");
+        assert_eq!(companion_calls(), [Some(2), Some(2), None]);
+
+        // A placement that refuses stops the install before anything (the companion too) is written.
+        std::fs::write(&path, "hooks: {}\n").unwrap();
+        assert!(install_text(&p, &p.hook_install(), Some(bin.clone())).is_err());
+        assert!(check_provider(&p).is_err(), "am doctor shows the refusal");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hooks: {}\n");
+        assert_eq!(companion_calls(), []);
+
+        // A placement that drops the marker lines is refused (the hooks could never be removed).
+        let lossy = Dummy { place: Some(|t, _, _| Ok(Some(format!("{t}hooks: {{}}\n")))), companion: None, ..p };
+        std::fs::write(&path, "").unwrap();
+        let err = install_text(&lossy, &lossy.hook_install(), Some(bin)).unwrap_err();
+        assert!(err.to_string().contains("lacks its `# agent-monitor hooks dummy begin`"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
+    }
+
     #[test]
     fn owned_file_style_writes_and_removes_only_its_own_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -1131,6 +1287,23 @@ mod tests {
     fn programs_are_read_from_generated_text() {
         let text = "a = \"\\\"/x y/am-hook\\\" hook-event --event s\"\nconst BIN = '/opt/am';\nb: \"/opt/custom\" hook-event\nc = \"/usr/bin/other\"\n";
         assert_eq!(hook_programs_in_text(text), [PathBuf::from("/x y/am-hook"), PathBuf::from("/opt/am"), PathBuf::from("/opt/custom")]);
+        // An argv array (`HookContext::argv` as JSON) names any program; a
+        // word that only starts with `hook-event` doesn't count.
+        let argv = r#"const ARGV = ["/opt/my-hook", "hook-event", "--agent", "pi"]; const X = ["/usr/bin/env", "hook-events"];"#;
+        assert_eq!(hook_programs_in_text(argv), [PathBuf::from("/opt/my-hook")]);
+        // Spaces in the path, single quotes, the next element on its own line.
+        let text = "a: [\"/opt/my hook\", \"hook-event\", \"--event\", \"x\"],\nb: [\"/usr/bin/other\", \"run\"],\nc: ['/opt/h2',\n  'hook-event'],\n";
+        assert_eq!(hook_programs_in_text(text), [PathBuf::from("/opt/my hook"), PathBuf::from("/opt/h2")]);
+        // The real thing: what `ctx.argv` renders through `js_string`.
+        let ctx = HookContext {
+            agent_id: "pi".into(),
+            program: "/w x/am-hook-copy".into(),
+            native: true,
+            invocation: String::new(),
+            hooks: Vec::new(),
+        };
+        let js = format!("const HOOK = [{}];", ctx.argv("x", "").iter().map(|a| js_string(a)).collect::<Vec<_>>().join(", "));
+        assert_eq!(hook_programs_in_text(&js), [PathBuf::from("/w x/am-hook-copy")]);
     }
 
     /// The way a built-in harness branch declares a text-block style.
