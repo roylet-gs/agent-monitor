@@ -1,14 +1,15 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 4426
+assertion_line: 4583
 expression: screen
 ---
 ╭─Review requests ──────────────────────────────────────────────── 3 to review ╮╭─Jobs ────────────────────────────────╮
-│agent-monitor ────────────────────────────────────────────────────────────────││ ◐ Create feature/902                 │
-│ ◑ Batch the PR queries  @alice ✓ pulled            you           #51✓ …   0s ││                                      │
-│ Typo in README  @outsider fork                     @docs         #48✓ …   0s ││                                      │
-│gridsight ────────────────────────────────────────────────────────────────────││                                      │
-│▌Feeder load forecast v2  @alice ◐ pulling…         you +1 ENG-77 #902✗ …  0s ││                                      │
+│agent-monitor ────────────────────────────────────────────────────────────────││ ? Create feature/902                 │
+│ ◑ Batch the PR queries  @alice ✓ pulled            you           #51✓ …   0s ││   Branch "feature/902" exists locally│
+│ Typo in README  @outsider fork                     @docs         #48✓ …   0s ││   and on origin                      │
+│gridsight ────────────────────────────────────────────────────────────────────││   ⏎ / p Pull remote (reset local to  │
+│▌Feeder load forec…  @alice ? waiting — ⇥ to answer you +1 ENG-77 #902✗ …  0s ││         origin)                      │
+│                                                                              ││   n     Cancel                       │
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 │                                                                              ││                                      │
@@ -16,6 +17,5 @@ expression: screen
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 │                                                                              ││                                      │
-│                                                                              ││                                      │
-╰ you + your teams ──────────────────────────────────────────────────── 3 of 3 ╯╰──────────────────────────────────────╯
- ⏎ pull  g PR  l ticket  d remove  f filter  │ r refresh  h help  ⇥ jobs  esc back  Pulling feature/902 into Reviewing…
+╰ you + your teams ──────────────────────────────────────────────────── 3 of 3 ╯╰──────────────────────────── ⇥ answer ╯
+ ⏎ pull  g PR  l ticket  │ r refresh  ⇥ answer  esc back                            Pulling feature/902 into Reviewing…

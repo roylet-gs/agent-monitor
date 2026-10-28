@@ -85,8 +85,11 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.waitForText("1 of 3");
   await tui.sendKey("Enter");
   await tui.waitForMatch(/pulling…|✓ pulled/, 10_000);
+  // The pull shows on its row; no jobs pane opens beside the page.
+  expect(await tui.getScreenText()).not.toContain("─Jobs");
   await tui.waitForText("✓ pulled", 20_000);
   expect(await tui.getScreenText()).toContain("─Review requests");
+  expect(await tui.getScreenText()).not.toContain("─Jobs");
   expect(await tui.getScreenText()).not.toContain("Run the repo's startup script?");
   await tui.screenshot("review-pulled");
 

@@ -306,13 +306,13 @@ fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
         }
         return DashAreas { list, jobs: None, reviews: Some(side), log, keys };
     }
-    if app.jobs.visible() && compact() {
+    if app.jobs_pane_shown() && compact() {
         // Under the list rather than beside it.
         let jobs_h = (body.height * 2 / 5).clamp(5, 14);
         let [list, jobs] = Layout::vertical([Constraint::Min(4), Constraint::Length(jobs_h)]).areas(body);
         return DashAreas { list, jobs: Some(jobs), reviews: None, log, keys };
     }
-    if app.jobs.visible() {
+    if app.jobs_pane_shown() {
         let pane_w = (body.width / 3).clamp(34, 60).min(body.width.saturating_sub(40));
         let [list, jobs] = Layout::horizontal([Constraint::Min(40), Constraint::Length(pane_w)]).areas(body);
         DashAreas { list, jobs: Some(jobs), reviews: None, log, keys }
@@ -3059,8 +3059,9 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             keys.push(raw("⇥", if app.jobs.visible() { "jobs" } else { "list" }, Some(Key::Tab), 0));
             keys.push(raw("esc", "close", Some(Key::Esc), 0));
         } else {
-            if app.jobs.visible() {
-                keys.push(raw("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, Some(Key::Tab), 0));
+            // The pane only shows here while a job waits for an answer.
+            if app.jobs.waiting() {
+                keys.push(raw("⇥", "answer", Some(Key::Tab), 0));
             }
             keys.push(raw("esc", if app.reviews_only() { "quit" } else { "back" }, Some(Key::Esc), 0));
         }
@@ -4563,14 +4564,22 @@ mod tests {
     }
 
     #[test]
-    fn jobs_pane_stays_beside_the_full_review_page_and_overlays() {
+    fn the_full_review_page_shows_the_jobs_pane_only_for_a_question() {
         let mut app = by_repo();
         app.on_key(Key::Char('v'));
         app.on_key(Key::Down);
         app.on_key(Key::Down);
-        assert!(matches!(app.on_key(Key::Enter), crate::app::Action::Create(..)));
+        let crate::app::Action::Create(job, ..) = app.on_key(Key::Enter) else { panic!("expected a create") };
+        // Pulling (or removing) shows on the row, not in a pane.
         let screen = render(&app, 120, 16);
-        assert!(screen.contains("─Review requests") && screen.contains("─Jobs"), "{screen}");
+        assert!(screen.contains("─Review requests") && screen.contains("pulling…") && !screen.contains("─Jobs"), "{screen}");
+        assert!(!screen.lines().last().unwrap().contains("⇥"), "{screen}");
+        app.on_key(Key::Tab);
+        assert!(!app.jobs.focused && app.review_focused(), "nothing to tab to");
+        // A question can only be answered in the pane, so then it shows.
+        app.jobs.ask(job, crate::jobs::Question::BranchExists { local: true, remote: true });
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("─Jobs") && screen.lines().last().unwrap().contains("⇥ answer"), "{screen}");
         insta::assert_snapshot!("review_page_jobs", screen);
         // ⇥: page → jobs → page.
         app.on_key(Key::Tab);
@@ -4578,7 +4587,7 @@ mod tests {
         assert!(render(&app, 120, 16).contains("back to reviews"));
         app.on_key(Key::Tab);
         assert!(!app.jobs.focused && app.review_focused());
-        // Help and Settings leave the pane in view.
+        // Help and Settings leave it in view.
         app.on_key(Key::Char('h'));
         assert!(render(&app, 120, 30).contains("─Jobs"));
         app.on_key(Key::Esc);
@@ -4586,6 +4595,16 @@ mod tests {
         assert!(app.settings_editor.is_some());
         let screen = render(&app, 120, 30);
         assert!(screen.contains("Settings") && screen.contains("─Jobs"), "{screen}");
+        app.on_key(Key::Esc);
+        // Answered: the pane goes, and the keys come back to the page.
+        app.on_key(Key::Tab);
+        assert!(app.jobs.focused);
+        assert!(matches!(app.on_key(Key::Char('p')), crate::app::Action::Create(..)));
+        assert!(!app.jobs.focused && app.review_focused());
+        assert!(!render(&app, 120, 16).contains("─Jobs"));
+        // On the dashboard the running job still shows its pane.
+        app.on_key(Key::Esc);
+        assert!(render(&app, 120, 16).contains("─Jobs"));
     }
 
     #[test]
