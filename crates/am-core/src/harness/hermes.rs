@@ -13,23 +13,37 @@
 //! - YAML can't repeat a key (Hermes parses with ruamel, which rejects
 //!   duplicates), so am's block can't simply be appended when the user has a
 //!   top-level `hooks:` of their own: it then goes inside that mapping
-//!   ([`place`]). An inline `hooks: {}`, or one of am's events already under
-//!   the user's `hooks:`, is refused with a message rather than merged.
+//!   ([`place`]). An event the user's `hooks:` already has (a `pre_tool_call`
+//!   guard, a `post_tool_call` formatter) is left out of am's block with a
+//!   WARN; only `pre_llm_call` and `on_session_end`, without which no turn
+//!   shows, are refused, as is an inline `hooks: {}`.
 //! - Hermes only runs a shell hook whose exact `(event, command)` pair is in
 //!   `shell-hooks-allowlist.json` beside the config (a foreground `hermes
 //!   chat` asks once per pair; the gateway, TUI and cron just skip it).
 //!   Installing writes those approvals for am's own commands and drops stale
 //!   ones; uninstalling removes them ([`update_allowlist`]). Nothing else in
-//!   the file is touched.
+//!   the file is touched. The gateway and cron then run am's hooks too, with
+//!   the gateway's own directory as `cwd`: [`normalize`] drops every event
+//!   whose `extra.platform` isn't `cli`/`tui` (Telegram, Discord, cron…).
 //! - `on_session_end` fires after every turn (completed, failed or
 //!   interrupted), so it is the turn's `Stop`; `post_llm_call` (successful
 //!   turns only) isn't installed, since a second `Stop` would turn `done`
 //!   into `idle`. `on_session_finalize` is the real session end.
-//! - `pre_approval_request`/`post_approval_response` carry no `session_id`
-//!   (only `extra.session_key`), so they status the worktree directly;
-//!   automatic ("smart") approvals flash `waiting` briefly.
+//! - After the turn, Hermes may start a background memory/skill review: a
+//!   forked agent sharing the session id whose `pre_llm_call` and
+//!   `on_session_end` are skipped but whose tool calls still fire
+//!   `pre_tool_call`/`post_tool_call` (and carry no `platform`). Every turn
+//!   opens with `pre_llm_call`, so tool and human-input events are
+//!   [`turn_bound`](crate::status::HookEvent::turn_bound): outside a turn
+//!   (`done`, `idle`, no status yet) they change nothing.
+//! - Waiting comes from `on_human_input_request`/`_resolved` (Hermes from
+//!   2026-10-05 on): they carry the session id and fire only when a person
+//!   is needed (approval, sudo password, clarify), so automatic ("smart")
+//!   approvals don't flash `waiting`. Older Hermes logs them as unknown
+//!   events and shows no approval waits (a `clarify` question still waits).
 //! - Profiles (`~/.hermes/profiles/<name>/`) each have their own config;
-//!   only `$HERMES_HOME` (default `~/.hermes`) gets am's hooks.
+//!   only `$HERMES_HOME` (default `~/.hermes`) gets am's hooks, and it is
+//!   what detection looks for.
 //!
 //! Resume: `hermes --resume <id>` / `--continue`. Session discovery uses the
 //! sessions am's hooks recorded.
@@ -40,9 +54,12 @@ use serde_json::{Value, json};
 
 use super::embedded::Embedded;
 use super::manifest::Manifest;
+use crate::status::HookEvent;
 use crate::hooks_installer::{HookContext, HookInstall, TextBlock, append_block, is_am_hook_command, read_settings, write_settings, yaml_string};
 
 pub static HERMES: Embedded = Embedded::new(|| Manifest::builtin(include_str!("hermes.json")), None)
+    .with_presence(|| hermes_home().is_dir())
+    .with_normalize(normalize)
     .with_hook_file(|| (hermes_home().join("config.yaml"), "hooks"))
     .with_hook_install(|| HookInstall::TextBlock(TextBlock { comment: "#", render }))
     .with_block_placement(|text, block, _| place(text, block).map(Some))
@@ -58,6 +75,25 @@ pub fn hermes_home() -> PathBuf {
         None => super::home_join(".hermes"),
     }
 }
+
+/// The surfaces whose turns are shown: the terminal ones, whose `cwd` is
+/// where Hermes works. A payload without a `platform` (tool events) passes.
+const SHOWN_PLATFORMS: [&str; 3] = ["", "cli", "tui"];
+
+/// The manifest's mapping, minus gateway/cron turns, with the events that
+/// only make sense inside a turn marked `turn_bound` (see the module docs).
+pub fn normalize(m: &Manifest, payload: &Value, event: Option<&str>) -> HookEvent {
+    let platform = payload.pointer("/extra/platform").and_then(Value::as_str).unwrap_or("");
+    if !SHOWN_PLATFORMS.contains(&platform) {
+        return HookEvent { event: "ignored".into(), ..HookEvent::default() };
+    }
+    let mut ev = m.normalize(payload, event);
+    ev.turn_bound = matches!(ev.event.as_str(), "PreToolUse" | "PostToolUse" | "PermissionRequest");
+    ev
+}
+
+/// Events am's block can't do without: the turn's start and end.
+const REQUIRED: [&str; 2] = ["pre_llm_call", "on_session_end"];
 
 /// `(event, command)` per hook, exactly as written to the config and the
 /// allowlist (Hermes matches the command string).
@@ -119,8 +155,9 @@ fn key_of(line: &str) -> Option<&str> {
 
 /// Block placement (`Harness::place_hook_block`) for `config.yaml`: appended when the file has no
 /// top-level `hooks:` key, else nested under it (re-indented to its
-/// children, right below the key) so the key isn't repeated. Refuses an
-/// inline value (`hooks: {}`) and events the user's `hooks:` already has.
+/// children, right below the key) so the key isn't repeated, leaving out
+/// the events the user's `hooks:` already has. Refuses an inline value
+/// (`hooks: {}`) and a clash on a [`REQUIRED`] event.
 pub fn place(text: &str, block: &str) -> std::io::Result<String> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let Some(at) = lines.iter().position(|l| top_level_hooks(l).is_some()) else {
@@ -149,12 +186,30 @@ pub fn place(text: &str, block: &str) -> std::io::Result<String> {
     }
     let ours: Vec<&str> = inner.iter().filter(|l| l.starts_with("  ") && !l.starts_with("   ")).filter_map(|l| key_of(l)).collect();
     let clash: Vec<&str> = ours.iter().copied().filter(|e| taken.contains(e)).collect();
-    if !clash.is_empty() {
+    let list = |events: &[&str]| events.iter().map(|e| format!("`{e}`")).collect::<Vec<_>>().join(", ");
+    let required: Vec<&str> = clash.iter().copied().filter(|e| REQUIRED.contains(e)).collect();
+    if !required.is_empty() {
         return Err(other(format!(
-            "config.yaml's `hooks:` already has {}; YAML can't repeat a key and am won't merge into your entries. Move them out (or remove them), then retry",
-            clash.iter().map(|e| format!("`{e}`")).collect::<Vec<_>>().join(", ")
+            "config.yaml's `hooks:` already has {}, which am needs for its own hook too, and YAML can't repeat a key. Move your entries for it into a script that also runs am's hook command, or remove them, then retry",
+            list(&required)
         )));
     }
+    if !clash.is_empty() {
+        crate::warn!("hooks", "Hermes: config.yaml's `hooks:` already has {}; am's hooks for them are left out", list(&clash));
+    }
+    // am's entries, less the events the user's `hooks:` has: each event's
+    // key line and the indented lines under it.
+    let mut keep = true;
+    let inner: Vec<&str> = inner
+        .iter()
+        .copied()
+        .filter(|l| {
+            if l.starts_with("  ") && !l.starts_with("   ") {
+                keep = !key_of(l).is_some_and(|k| clash.contains(&k));
+            }
+            keep || !l.starts_with("  ")
+        })
+        .collect();
 
     let mut nested = format!("{indent}{begin}\n");
     for l in &inner[1..] {
@@ -276,12 +331,12 @@ mod tests {
         assert_eq!(ev(tool.clone()).cwd.as_deref(), Some("/w"));
         let s = step(s, tool);
         assert_eq!(s, Some(Executing));
-        // Approvals carry no session id.
-        let ask = json!({"hook_event_name": "pre_approval_request", "session_id": "", "cwd": "/w", "extra": {"command": "rm -rf target", "session_key": "k", "surface": "cli"}});
-        assert_eq!(ev(ask.clone()).session_id, None);
+        // A person is needed (approval, sudo, clarify): the session's own event.
+        let ask = base("on_human_input_request", json!({"extra": {"kind": "sudo", "request_id": "r1", "platform": "cli"}}));
+        assert_eq!(ev(ask.clone()).session_id.as_deref(), Some("20261028_1"));
         let s = step(s, ask);
         assert_eq!(s, Some(Waiting));
-        let s = step(s, json!({"hook_event_name": "post_approval_response", "session_id": "", "extra": {"choice": "once"}}));
+        let s = step(s, base("on_human_input_resolved", json!({"extra": {"kind": "sudo", "outcome": "answered"}})));
         assert_eq!(s, Some(Executing));
         let s = step(s, base("post_tool_call", json!({"tool_name": "terminal"})));
         assert_eq!(s, Some(Executing));
@@ -296,6 +351,36 @@ mod tests {
         let stops: Vec<String> = HERMES.hook_events().into_iter().filter(|e| ev(json!({"hook_event_name": e})).event == "Stop").collect();
         assert_eq!(stops, ["on_session_end"]);
         assert!(!HERMES.hook_events().contains(&"post_llm_call".to_string()));
+        // After the turn, the background review fork's tool calls (same
+        // session id, no pre_llm_call) leave it done; so does a human-input
+        // request the fork auto-denies.
+        assert_eq!(step(s, base("pre_tool_call", json!({"tool_name": "memory", "extra": {"turn_id": "fork"}}))), None);
+        assert_eq!(step(s, base("post_tool_call", json!({"tool_name": "read_file"}))), None);
+        assert_eq!(step(s, base("on_human_input_request", json!({}))), None);
+        assert_eq!(step(None, base("pre_tool_call", json!({"tool_name": "terminal"}))), None);
+    }
+
+    #[test]
+    fn gateway_and_cron_turns_are_ignored() {
+        let ev = |event: &str, platform: &str| HERMES.normalize(&json!({"hook_event_name": event, "session_id": "s", "cwd": "/srv", "extra": {"platform": platform}}), None).event;
+        for p in ["telegram", "discord", "cron", "api_server"] {
+            assert_eq!(ev("pre_llm_call", p), "ignored", "{p}");
+            assert_eq!(ev("on_human_input_request", p), "ignored", "{p}");
+        }
+        for p in ["cli", "tui", ""] {
+            assert_eq!(ev("pre_llm_call", p), "UserPromptSubmit", "{p}");
+        }
+        // Tool events carry no platform; they're turn-bound instead.
+        let tool = HERMES.normalize(&json!({"hook_event_name": "pre_tool_call", "session_id": "s", "cwd": "/srv", "extra": {}}), None);
+        assert!(tool.turn_bound);
+        assert!(!HERMES.normalize(&json!({"hook_event_name": "pre_llm_call", "session_id": "s"}), None).turn_bound);
+    }
+
+    #[test]
+    fn detection_follows_hermes_home() {
+        // `with_presence` checks `$HERMES_HOME` (the hook file's directory).
+        assert_eq!(HERMES.is_present(), hermes_home().is_dir() || super::super::home_join(".hermes").is_dir());
+        assert_eq!(HERMES.settings_path().parent(), Some(hermes_home().as_path()));
     }
 
     #[test]
@@ -347,12 +432,22 @@ mod tests {
         let placed = place(empty, &b).unwrap();
         assert!(placed.starts_with("model: x\nhooks:\n  # agent-monitor hooks hermes begin\n  on_session_start:\n    - command: "), "{placed}");
 
-        // Refused: an inline value, a list, and an event am also uses.
+        // An event the user already hooks is left out of am's block.
+        let guard = "hooks:\n  pre_tool_call:\n    - command: ./guard.sh\n  post_tool_call: []\n";
+        let placed = place(guard, &b).unwrap();
+        assert_eq!(placed.matches("pre_tool_call:").count(), 1, "{placed}");
+        assert_eq!(placed.matches("post_tool_call:").count(), 1, "{placed}");
+        assert!(placed.contains("  pre_llm_call:\n    - command: ") && placed.contains("  on_session_end:\n"), "{placed}");
+        assert!(placed.ends_with("  # agent-monitor hooks hermes end\n  pre_tool_call:\n    - command: ./guard.sh\n  post_tool_call: []\n"), "{placed}");
+        assert_eq!(crate::hooks_installer::remove_block(&placed, "#", "hermes").unwrap().as_deref(), Some(guard));
+
+        // Refused: an inline value, a list, and the turn's start or end.
         for (text, says) in [
             ("hooks: {}\n", "`hooks: {}` on one line"),
             ("hooks: null\n", "`hooks: null`"),
             ("hooks:\n  - command: x\n", "is a list"),
-            ("hooks:\n  pre_tool_call:\n    - command: ./guard.sh\n  on_session_end: []\n", "already has `pre_tool_call`, `on_session_end`"),
+            ("hooks:\n  pre_tool_call:\n    - command: ./guard.sh\n  on_session_end: []\n", "already has `on_session_end`, which am needs"),
+            ("hooks:\n  pre_llm_call: []\n", "already has `pre_llm_call`"),
         ] {
             let e = place(text, &b).unwrap_err().to_string();
             assert!(e.contains(says), "{text:?}: {e}");

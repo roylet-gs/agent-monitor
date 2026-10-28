@@ -68,6 +68,13 @@ pub struct HookEvent {
     pub agent_id: Option<String>,
     pub agent_type: Option<String>,
     pub agent_transcript_path: Option<String>,
+    /// Only meaningful inside a turn (set by a harness's normalisation, never
+    /// read from the payload): outside one (no status yet, `idle`, `done`)
+    /// the event changes nothing. For a harness whose turns always open with
+    /// `UserPromptSubmit`, where a tool event after the turn's `Stop` comes
+    /// from something else sharing the session id (Hermes's background
+    /// memory/skill review fork).
+    pub turn_bound: bool,
 }
 
 impl HookEvent {
@@ -97,6 +104,7 @@ impl HookEvent {
             agent_id: s("agent_id").filter(|a| !a.is_empty()),
             agent_type: s("agent_type"),
             agent_transcript_path: s("agent_transcript_path"),
+            turn_bound: false,
         }
     }
 
@@ -179,6 +187,11 @@ pub fn map_event_to_status(
     // subagent is blocked on the user (permission prompt) — that needs eyes.
     if event.from_subagent() {
         return if event.needs_user() { Some(Waiting) } else { None };
+    }
+
+    // A turn-bound event outside a turn belongs to no turn of this session.
+    if event.turn_bound && !matches!(current, Some(Executing | Waiting | Planning | Delegating)) {
+        return None;
     }
 
     // Protect "done" from late subagent lifecycle and informational events.
@@ -359,6 +372,21 @@ mod tests {
             e.agent_id = Some("a1".into());
             e.agent_type = Some("Explore".into());
         })
+    }
+
+    #[test]
+    fn turn_bound_events_only_move_a_session_inside_a_turn() {
+        let bound = |e: HookEvent| with(e, |e| e.turn_bound = true);
+        for cur in [None, Some(Idle), Some(Done)] {
+            assert_eq!(map(&bound(tool("PreToolUse", "Read")), cur), None, "{cur:?}");
+            assert_eq!(map(&bound(ev("PostToolUse")), cur), None, "{cur:?}");
+            assert_eq!(map(&bound(ev("PermissionRequest")), cur), None, "{cur:?}");
+        }
+        assert_eq!(map(&bound(ev("PermissionRequest")), Some(Executing)), Some(Waiting));
+        assert_eq!(map(&bound(ev("PostToolUse")), Some(Waiting)), Some(Executing));
+        assert_eq!(map(&bound(tool("PreToolUse", "AskUserQuestion")), Some(Executing)), Some(Waiting));
+        // Unbound (Claude Code): a tool event still reopens a finished turn.
+        assert_eq!(map(&tool("PreToolUse", "Read"), Some(Done)), Some(Executing));
     }
 
     // --- Ported from tests/commands/hook-event.test.ts ---

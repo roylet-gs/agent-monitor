@@ -241,9 +241,9 @@ The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has
 | `on_session_start` / `on_session_reset` | `SessionStart` | `idle` |
 | `pre_llm_call` | `UserPromptSubmit` | `executing` |
 | `pre_tool_call` / `post_tool_call` | `PreToolUse` / `PostToolUse` | `executing` (`terminal` → `Bash`; `clarify` → `AskUserQuestion`, so `waiting`) |
-| `pre_approval_request` | `PermissionRequest` | `waiting` |
-| `post_approval_response` | `PostToolUse` | `executing` |
+| `on_human_input_request` | `PermissionRequest` | `waiting` (approval, sudo password, `clarify`) |
+| `on_human_input_resolved` | `PostToolUse` | `executing` |
 | `on_session_end` | `Stop` | `done` after work, else `idle` |
 | `on_session_finalize` | `SessionEnd` | `idle` (closed) |
 
-Despite its name, `on_session_end` fires at the end of every turn (completed, failed or interrupted), so it is the turn's `Stop`. `post_llm_call` (successful turns only) isn't installed: a second `Stop` in the same turn would turn `done` into `idle`. The approval events carry no `session_id` (only `extra.session_key`), so they set the worktree's headline row directly, as session-less events always have; the next event with a session id puts the per-session headline back. Automatic ("smart") approvals also fire them, so they can show `waiting` briefly. The directory is the payload's `cwd`.
+Despite its name, `on_session_end` fires at the end of every turn (completed, failed or interrupted), so it is the turn's `Stop`. `post_llm_call` (successful turns only) isn't installed: a second `Stop` in the same turn would turn `done` into `idle`. The human-input events (Hermes from 2026-10-05 on; older builds log them as unknown and show no approval waits) carry the session id and fire only when a person is actually needed, so automatic ("smart") approvals don't flash `waiting`. Every Hermes turn opens with `pre_llm_call`, so tool and human-input events are **turn-bound** (`HookEvent::turn_bound`): with the session outside a turn (no status yet, `idle` or `done`) they change nothing. That keeps a finished turn `done` while Hermes's background memory/skill review fork, which shares the session id but skips `pre_llm_call` and `on_session_end`, runs its tool calls after the `Stop`. Events whose `extra.platform` is anything but `cli`/`tui` (the gateway's Telegram/Discord/… turns, cron) are dropped: installing approves am's hooks for the gateway and cron too, and their `cwd` is the gateway process's, not a project. The directory is the payload's `cwd`.

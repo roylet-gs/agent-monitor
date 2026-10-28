@@ -566,6 +566,16 @@ fn hooks_for_hermes() {
     env.ok(&["hooks", "uninstall", "--agent", "hermes"]);
     assert_eq!(std::fs::read_to_string(&config).unwrap(), mine);
 
+    // A user's `pre_tool_call` guard stays; am's block leaves that event out.
+    let guard = "hooks:\n  pre_tool_call:\n    - command: ~/.hermes/agent-hooks/guard.sh\n";
+    std::fs::write(&config, guard).unwrap();
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert_eq!(text.matches("pre_tool_call:").count(), 1, "{text}");
+    assert!(text.contains("--event on_session_end"), "{text}");
+    env.ok(&["hooks", "uninstall", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), guard);
+
     // `hooks: {}` is refused before either file is written.
     std::fs::write(&config, "hooks: {}\n").unwrap();
     let o = env.run(&["hooks", "install", "--agent", "hermes"]);
@@ -580,6 +590,20 @@ fn hooks_for_hermes() {
     env.ok(&["hooks", "install", "--agent", "hermes"]);
     assert!(std::fs::read_to_string(other.join("config.yaml")).unwrap().contains("--event pre_llm_call"));
     assert!(other.join("shell-hooks-allowlist.json").exists());
+}
+
+/// `$HERMES_HOME` without `~/.hermes` still counts as Hermes being there,
+/// so a bare `am hooks install` (every detected agent) includes it.
+#[test]
+fn hermes_is_detected_from_hermes_home() {
+    let mut env = Env::new();
+    let home = env.root().join("hermes-home");
+    std::fs::create_dir_all(&home).unwrap();
+    env.extra_env.push(("HERMES_HOME".into(), home.display().to_string()));
+    env.ok(&["hooks", "install"]);
+    assert!(std::fs::read_to_string(home.join("config.yaml")).unwrap().contains("--event pre_llm_call"));
+    assert!(!env.home().join(".hermes").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["hermes"], true);
 }
 
 /// Built-in harness ids in registry order, so adding a harness doesn't

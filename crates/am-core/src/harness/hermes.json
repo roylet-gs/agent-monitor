@@ -15,8 +15,8 @@
     "pre_llm_call": "UserPromptSubmit",
     "pre_tool_call": "PreToolUse",
     "post_tool_call": "PostToolUse",
-    "pre_approval_request": "PermissionRequest",
-    "post_approval_response": "PostToolUse",
+    "on_human_input_request": "PermissionRequest",
+    "on_human_input_resolved": "PostToolUse",
     "on_session_end": "Stop",
     "on_session_finalize": "SessionEnd"
   },
@@ -26,5 +26,5 @@
   },
   "resume": { "session": ["--resume", "{id}"], "continue": ["--continue"] },
   "process": { "names": ["hermes"] },
-  "notes": "Installing also approves am's hook commands in Hermes's shell-hooks-allowlist.json, so Hermes runs them without asking"
+  "notes": "Waiting needs Hermes from 2026-10-05 on (its on_human_input_* hooks). Installing also approves am's hook commands in shell-hooks-allowlist.json, for the gateway and cron too (am ignores their turns)"
 }

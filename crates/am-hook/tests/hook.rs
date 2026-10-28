@@ -287,16 +287,36 @@ fn a_hermes_session_is_tracked_through_its_shell_hooks() {
     assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("hermes")));
     hermes("pre_llm_call", sid, json!({}), json!({ "user_message": "fix the bug", "is_first_turn": true }));
     assert_eq!(env.status().0, "executing");
-    hermes("pre_tool_call", sid, json!({ "tool_name": "terminal", "tool_input": { "command": "rm -rf target" } }), json!({}));
-    // Approval events carry only `extra.session_key`.
-    hermes("pre_approval_request", "", json!({}), json!({ "command": "rm -rf target", "session_key": sid, "surface": "cli" }));
+    let turn = json!({ "turn_id": format!("{sid}:task-1:aa11") });
+    hermes("pre_tool_call", sid, json!({ "tool_name": "terminal", "tool_input": { "command": "rm -rf target" } }), turn.clone());
+    // A person is needed: approval, sudo password or clarify.
+    hermes("on_human_input_request", sid, json!({}), json!({ "kind": "approval", "request_id": "r1", "session_key": "k", "platform": "cli" }));
     assert_eq!(env.status().0, "waiting");
-    hermes("post_approval_response", "", json!({}), json!({ "choice": "once", "session_key": sid, "surface": "cli" }));
+    hermes("on_human_input_resolved", sid, json!({}), json!({ "kind": "approval", "request_id": "r1", "outcome": "approved", "platform": "cli" }));
     assert_eq!(env.status().0, "executing");
-    hermes("post_tool_call", sid, json!({ "tool_name": "terminal" }), json!({ "status": "ok" }));
-    hermes("on_session_end", sid, json!({}), json!({ "completed": true, "interrupted": false, "turn_id": "t1" }));
+    hermes("post_tool_call", sid, json!({ "tool_name": "terminal" }), json!({ "status": "ok", "turn_id": turn["turn_id"] }));
+    hermes("on_session_end", sid, json!({}), json!({ "completed": true, "interrupted": false, "turn_id": turn["turn_id"], "platform": "cli" }));
     assert_eq!(env.status().0, "done");
     assert_eq!(env.session(sid).0, "done");
+
+    // The background memory/skill review fork after the turn: same session
+    // id, its own turn, tool events only. The turn stays done.
+    let fork = json!({ "turn_id": format!("{sid}:task-2:bb22") });
+    hermes("pre_tool_call", sid, json!({ "tool_name": "memory", "tool_input": { "action": "add" } }), fork.clone());
+    hermes("post_tool_call", sid, json!({ "tool_name": "memory" }), fork.clone());
+    hermes("pre_tool_call", sid, json!({ "tool_name": "read_file", "tool_input": { "path": "x" } }), fork);
+    assert_eq!(env.session(sid).0, "done");
+    assert_eq!(env.status().0, "done");
+
+    // A gateway (Telegram) turn in the same directory is left out entirely.
+    let chat = "20261028_120000_cc33";
+    hermes("pre_llm_call", chat, json!({}), json!({ "user_message": "hi", "platform": "telegram" }));
+    hermes("pre_tool_call", chat, json!({ "tool_name": "terminal" }), json!({ "turn_id": "c" }));
+    hermes("on_session_end", chat, json!({}), json!({ "completed": true, "platform": "telegram" }));
+    let chats: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions WHERE session_id = ?1", [chat], |r| r.get(0)).unwrap();
+    assert_eq!(chats, 0);
+    assert_eq!(env.status().0, "done");
+
     hermes("on_session_finalize", sid, json!({}), json!({ "platform": "cli" }));
     assert_eq!(env.session(sid), ("idle".into(), false));
 }
