@@ -70,8 +70,8 @@ pub struct HookEvent {
     pub agent_transcript_path: Option<String>,
     /// Set by a harness whose `Stop` also ends a wait: one with no
     /// `PostToolUse` to clear a permission prompt once the user answers
-    /// (Grok). Such a `Stop` takes a `waiting` session to `done`; Claude's
-    /// keeps it `waiting`.
+    /// (Grok), or one that fires only session/turn hooks (Muse). Such a
+    /// `Stop` takes a `waiting` session to `done`; Claude's keeps it `waiting`.
     pub stop_ends_wait: bool,
 }
 

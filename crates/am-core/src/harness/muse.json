@@ -1,0 +1,23 @@
+{
+  "id": "muse",
+  "name": "Muse Code",
+  "shortName": "Muse",
+  "program": "muse",
+  "configDir": "~/.config/muse",
+  "hooks": {
+    "settingsPath": "~/.config/muse/settings.json",
+    "timeoutMs": 10000,
+    "timeoutUnit": "s",
+    "file": { "schema_version": 1 }
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "Notification": "Notification",
+    "Stop": "Stop",
+    "StopFailure": "StopFailure"
+  },
+  "resume": { "session": ["resume", "{id}"] },
+  "process": { "names": ["muse"] }
+}
