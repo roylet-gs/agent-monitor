@@ -45,6 +45,9 @@
 //!   `{"id", "cwd", "modified"}` (modified = unix seconds) for `{root}`;
 //!   without it, resuming falls back to `resume.continue`. Built-ins without
 //!   their own discovery offer the sessions am's hooks recorded instead.
+//! - `programStatus: true` says the CLI reports its own status to the
+//!   terminal (OSC 7501); otherwise am-hook does it for it when the
+//!   `programStatus` setting is on (`crate::program_status`).
 //! - `mcp` (optional) is where the CLI reads MCP servers: a JSON `file` with a
 //!   `name → {command, args}` map under `key` (default `mcpServers`), plus
 //!   `entry` keys for am's server. `am mcp install` registers `am mcp` there.
@@ -108,6 +111,10 @@ pub struct Manifest {
     /// Where the CLI reads MCP servers, for `am mcp install`.
     #[serde(default)]
     pub mcp: Option<McpSpec>,
+    /// The CLI reports its own status to the terminal (OSC 7501), so
+    /// am-hook doesn't.
+    #[serde(default)]
+    pub program_status: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -474,6 +481,9 @@ impl Harness for ManifestProvider {
     }
     fn mcp_config(&self) -> Option<super::McpConfig> {
         self.manifest.mcp.as_ref().map(McpSpec::config)
+    }
+    fn reports_program_status(&self) -> bool {
+        self.manifest.program_status
     }
 }
 

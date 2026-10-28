@@ -409,6 +409,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |
 | `runningProcessFilter` | `""` | Only count processes whose command line contains this text (case-insensitive) |
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
+| `programStatus` | `false` | Report each agent's status to the terminal it runs in (OSC 7501), for agents that don't do it themselves; see [Terminal status](#terminal-status-osc-7501) |
 | `audioWaitingSound` | `"Glass"` | Sound for waiting |
 | `audioDoneSound` | `"Funk"` | Sound for done |
 | `appMode` | `"full"` | `full` (the dashboard) or `reviews` ([review-only mode](#review-only-mode): `am` opens to the review page alone) |
@@ -609,6 +610,10 @@ Everything is local: the database, settings and logs live in `~/.agent-monitor/`
 | `scripts/<repo-id>.sh`, `scripts/<repo-id>.review.sh` | Per-repo startup and review scripts |
 
 See [CLAUDE.md](./CLAUDE.md) for the full architecture.
+
+### Terminal status (OSC 7501)
+
+Terminals that implement the [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) (OSC 7501, e.g. Ghostty) can show whether the program in each tab is working, waiting on you or done. Claude Code reports it itself. With `programStatus` on (`am settings set programStatus true`, or `s` → Notifications → Report status to terminal), `am-hook` reports it for the other harnesses: when a session's status changes it writes one report to the agent's terminal (`/dev/tty`). `executing`/`planning`/`delegating` become `working`, `waiting` becomes `blocked` (`permission`, with the prompt as the message, or `question`), `done` becomes `done`, `idle` becomes `idle`, and the end of a session clears it. Inside tmux the report is wrapped for passthrough, which needs `set -g allow-passthrough on`. A hook with no terminal (one an editor runs) skips it. It is off by default because the report is written to the same terminal the agent is drawing on.
 
 ### Supported harnesses
 

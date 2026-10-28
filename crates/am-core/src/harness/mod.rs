@@ -101,6 +101,12 @@ pub trait Harness: Sync + Send {
     /// `event_override` is the `--event` flag (a native event name).
     fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent;
 
+    /// Whether the CLI reports its own status to the terminal (OSC 7501,
+    /// `crate::program_status`); am-hook only reports for those that don't.
+    fn reports_program_status(&self) -> bool {
+        false
+    }
+
     // --- Sessions & processes --------------------------------------------------
 
     /// Sessions started at `root` or any subdirectory, newest first.

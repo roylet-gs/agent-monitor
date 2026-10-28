@@ -18,7 +18,7 @@ test("run setup again starts from the current settings and esc cancels", async (
   await tui.open();
   await tui.waitForText("ENG-123", 15_000);
 
-  await tui.openSetting(RERUN_HELP, 60);
+  await tui.openSetting(RERUN_HELP, 60, { fromEnd: true });
   await tui.waitForText("Run setup again…");
   await tui.sendKey("Enter");
   await tui.waitForText(WELCOME);
@@ -32,7 +32,7 @@ test("run setup again starts from the current settings and esc cancels", async (
 
   // Walk it to the end: the repo is listed as added, and the Linear key
   // survives (the ticket column stays).
-  await tui.openSetting(RERUN_HELP, 60);
+  await tui.openSetting(RERUN_HELP, 60, { fromEnd: true });
   await tui.sendKey("Enter");
   await tui.waitForText("What do you want am for?");
   await tui.sendKey("Enter");
@@ -95,7 +95,7 @@ test("reset settings asks first, then reopens setup", async ({ page }) => {
   await tui.sendKey("Enter");
   await tui.waitForGone(WELCOME);
 
-  await tui.openSetting(RESET_HELP, 60);
+  await tui.openSetting(RESET_HELP, 60, { fromEnd: true });
   await tui.sendKey("Enter");
   await tui.waitForText("Put every setting back to its default");
   await tui.screenshot("reset-settings-confirm");

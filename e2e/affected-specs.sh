@@ -49,7 +49,7 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 28 32 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 ;;
     crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/reviews_ui.rs | crates/am-tui/src/review_groups_ui.rs) echo 28 31 32 ;;    # the review-requests page and its groups
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
@@ -89,10 +89,11 @@ specs_for() {
     crates/am-core/src/launch.rs) echo 21 ;; # open_in_editor's failure path (no IDE in the container)
     crates/am-core/src/procscan.rs) echo 25 26 ;; # the seeded agent shell command, the editor-spawned dev server
     crates/am-core/src/stacks.rs) echo - ;; # unit / snapshot tests only
+    crates/am-core/src/program_status.rs) echo 07 08 16 18 24 33 ;; # OSC 7501 from am-hook; 33 = its Settings row
 
     # --- am-hook: seeds the delegating main, feature/pair and the standalone sessions
     # (24: a standalone session promoted when its repo is added)
-    crates/am-hook/src/*) echo 07 08 16 18 24 ;;
+    crates/am-hook/src/*) echo 07 08 16 18 24 33 ;;
 
     # --- am-cli: the entrypoint runs `repo add/list`, `hook-event`, `status` ---
     crates/am-cli/src/main.rs | crates/am-cli/src/commands/mod.rs | \

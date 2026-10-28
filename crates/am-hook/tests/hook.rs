@@ -22,6 +22,7 @@ impl Env {
         let worktree = tempfile::tempdir().unwrap();
         std::fs::write(worktree.path().join(".git"), "gitdir: /elsewhere\n").unwrap();
         let env = Env { data, worktree };
+        std::fs::write(env.tty(), "").unwrap();
         let conn = env.db();
         conn.execute("INSERT INTO repositories (id, path, name) VALUES ('r', '/repo', 'repo')", []).unwrap();
         conn.execute(
@@ -59,6 +60,7 @@ impl Env {
         let mut child = cmd
             .args(["--worktree", sub.to_str().unwrap(), "--event", event])
             .env("AM_DATA_DIR", self.data.path())
+            .env("AM_PROGRAM_STATUS_TTY", self.tty())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -69,6 +71,18 @@ impl Env {
         assert!(out.status.success());
         // Gemini shows any hook output to the user, so the hook must be silent.
         assert!(out.stdout.is_empty() && out.stderr.is_empty(), "hook printed: {out:?}");
+    }
+
+    /// Where the hook writes OSC 7501 reports instead of `/dev/tty`, so a
+    /// test run from a terminal never writes to it.
+    fn tty(&self) -> std::path::PathBuf {
+        self.data.path().join("tty")
+    }
+
+    /// The OSC 7501 report bodies written so far, oldest first.
+    fn reports(&self) -> Vec<String> {
+        let out = std::fs::read_to_string(self.tty()).unwrap_or_default();
+        out.split("\x1b]7501;").skip(1).map(|r| r.trim_end_matches("\x1b\\").to_owned()).collect()
     }
 
     /// A hook exactly as a harness sends it: no added keys, any `--worktree`.
@@ -419,4 +433,39 @@ fn a_new_session_keeps_another_live_sessions_subagents() {
     env.send("SessionEnd", with_session("A", json!({})));
     env.send("SessionStart", with_session("C", json!({ "source": "startup" })));
     assert_eq!(env.running_subagents_of("A"), 0);
+}
+
+#[test]
+fn status_changes_are_reported_to_the_terminal_for_agents_that_dont() {
+    let env = Env::new();
+    // Off by default: nothing is written.
+    let gemini = |event: &str, payload: Value| env.send_as(Some("gemini"), event, payload);
+    gemini("BeforeAgent", json!({ "prompt": "fix the bug" }));
+    assert!(env.reports().is_empty());
+
+    std::fs::write(env.data.path().join("settings.json"), r#"{"programStatus":true}"#).unwrap();
+    gemini("SessionEnd", json!({}));
+    gemini("BeforeAgent", json!({ "prompt": "fix the bug" }));
+    // Still executing: no second report.
+    gemini("BeforeTool", json!({ "tool_name": "replace", "tool_input": { "file_path": "src/a.rs" } }));
+    gemini("Notification", json!({ "notification_type": "ToolPermission", "message": "Allow replace?", "details": {} }));
+    gemini("AfterTool", json!({ "tool_name": "replace" }));
+    gemini("AfterAgent", json!({ "prompt_response": "Fixed." }));
+    gemini("SessionEnd", json!({}));
+    assert_eq!(
+        env.reports(),
+        [
+            "state=clear",
+            "state=working:app=gemini",
+            "state=blocked:kind=permission:app=gemini:msg=QWxsb3cgcmVwbGFjZT8=",
+            "state=working:app=gemini",
+            "state=done:app=gemini",
+            "state=clear",
+        ]
+    );
+
+    // Claude Code reports it itself.
+    env.send("UserPromptSubmit", with_session("c1", json!({ "prompt": "go" })));
+    env.send("Stop", with_session("c1", json!({})));
+    assert_eq!(env.reports().len(), 6);
 }

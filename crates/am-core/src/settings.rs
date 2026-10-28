@@ -52,6 +52,9 @@ pub struct Settings {
     pub compact_view: bool,
     pub hide_main_branch: bool,
     pub audio_notifications: bool,
+    /// am-hook reports an agent's status to the terminal it runs in (OSC
+    /// 7501, `crate::program_status`) for agents that don't do it themselves.
+    pub program_status: bool,
     pub audio_waiting_sound: String,
     pub audio_done_sound: String,
     pub gh_pr_status: bool,
@@ -171,6 +174,7 @@ impl Default for Settings {
             compact_view: false,
             hide_main_branch: true,
             audio_notifications: false,
+            program_status: false,
             audio_waiting_sound: "Glass".into(),
             audio_done_sound: "Funk".into(),
             gh_pr_status: true,
