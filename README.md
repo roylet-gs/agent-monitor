@@ -165,7 +165,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `v` | Review requests: the PRs waiting on your review, in place of the list (see [Review Requests](#review-requests)) |
 | `V` | Review requests beside the list (in terminals with the kitty keyboard protocol — kitty, Ghostty, WezTerm, recent iTerm2 — holding Shift shows this on the key bar, and holding Ctrl shows `Ctrl+V`'s); `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
 | `Ctrl+V` | Review requests in a new terminal window (`am-tui --reviews`; leaving the page there closes it) |
-| `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list. With the review page beside the list, `Tab` goes list → review page → Jobs pane. The Jobs pane stays in view on every page (review page, Settings, help, dialogs) while it has jobs |
+| `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list. With the review page beside the list, `Tab` goes list → review page → Jobs pane. The Jobs pane stays in view on every page (Settings, help, dialogs) while it has jobs; on the review page only while a job needs an answer |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
@@ -316,7 +316,7 @@ Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking o
 | `f` | Filters: who's asked, the groups (each with its own order and filters), the badge's GitHub total, **Reset filters…** (who's asked, the default group's filters and the GitHub total back to defaults; groups kept) and **Reset groups…** (removes every group), both asking `y` first, in a small box over the page (changes save at once). The page's bottom border sums up what's in force; clicking it opens the box too |
 | `r` | Clear the review caches (the list, group matches, GitHub total, autocomplete people) and search again now |
 | `Esc` / `q` / `v` | Back to the dashboard (beside the list: `Esc`/`q`/`V` close the page and `v` gives it the whole screen) |
-| `Tab` | Beside the list: hand the keys to the list (or the Jobs pane). On the full page: to the Jobs pane and back |
+| `Tab` | Beside the list: hand the keys to the list (or the Jobs pane). On the full page: to the Jobs pane and back, while it shows. Pulls and removals show on their rows, so it only opens there when a job needs an answer (a branch that already exists locally, a review script waiting to be saved) |
 
 Once you approve a PR you pulled, GitHub stops asking for your review, but the worktree is still there. While it is, the PR stays on the page, in an **Approved, still pulled** section at the bottom (merged or closed too, until you remove the worktree with `d`). A group of yours whose rules match it (say, *reviewed by you: yes*) still takes it; the default group never does. These PRs don't count toward the `to review` badge. am finds them by looking up the PRs of the branches in **Reviewing** that the search no longer lists (one extra GraphQL request, only when there are any).
 
@@ -324,7 +324,7 @@ Once you approve a PR you pulled, GitHub stops asking for your review, but the w
 
 If you only want the review page, pick **Review requests only** on the setup wizard's first step, or set **Settings → Mode** to `reviews` (`am settings set appMode reviews`). `am` then opens straight to the review page, full screen, and nothing else:
 
-- `Esc`/`q` quits; there's no worktree list to go back to, so `V` and `Ctrl+V` do nothing and `t` on an already-pulled PR just says so (`⏎` opens it, `d` removes it). Pulls and removals still run in the Jobs pane beside the page.
+- `Esc`/`q` quits; there's no worktree list to go back to, so `V` and `Ctrl+V` do nothing and `t` on an already-pulled PR just says so (`⏎` opens it, `d` removes it). Pulls and removals show on their rows; the Jobs pane opens beside the page only when one needs an answer.
 - Settings lists only what the page uses: mode, editor, repositories, key bindings, mouse, appearance, update check, the review-request settings, Linear (for each PR's ticket), logging and setup. Everything else keeps its value for when you switch back. Key bindings lists only the page's keys, and `h` shows the page's own help.
 - am does no dashboard work in the background: no agent hooks are needed (`am doctor` doesn't warn about them), and there's no git status, process scan, context or token usage, or PR/ticket fetching for worktrees. It still lists worktrees, so it knows which PRs you've pulled.
 - The `⬆ vX.Y.Z available` notice sits on the page's top border.

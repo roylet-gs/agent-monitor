@@ -539,6 +539,11 @@ impl App {
 
 
     pub fn on_key(&mut self, key: Key) -> Action {
+        // The pane went away (its question was answered elsewhere, e.g. the
+        // review script was saved): the keys go back to the page.
+        if self.jobs.focused && !self.jobs_pane_shown() {
+            self.jobs.focused = false;
+        }
         // Ctrl+⏎ means "pull + run script" on the review page only; anywhere
         // else it's a plain ⏎.
         let page_has_keys = self.review_focused()
@@ -672,6 +677,16 @@ impl App {
             return self.review_key(key);
         }
         self.dashboard_key(key)
+    }
+
+    /// Whether the jobs pane is on screen. The full review page keeps it out
+    /// of the way (pulls and removals show on their rows) unless a job waits
+    /// for an answer, which can only be given there.
+    pub fn jobs_pane_shown(&self) -> bool {
+        match &self.reviews {
+            Some(p) if !p.split => self.jobs.waiting(),
+            _ => self.jobs.visible(),
+        }
     }
 
     /// Whether the review page takes the keys: a full page, or the review
@@ -1192,10 +1207,15 @@ impl App {
         let reviews_only = self.reviews_only();
         let Some(page) = &mut self.reviews else { return Action::None };
         // Tab in a split: on to the jobs pane when it's open, else the list.
-        // On the full page: to the jobs pane, and back with its own Tab.
-        if key == Key::Tab && (page.split || self.jobs.visible()) {
+        // On the full page: to the jobs pane while it shows (a question
+        // waits), and back with its own Tab.
+        let pane = match page.split {
+            true => self.jobs.visible(),
+            false => self.jobs.waiting(),
+        };
+        if key == Key::Tab && (page.split || pane) {
             page.focused = false;
-            if self.jobs.visible() {
+            if pane {
                 self.jobs.focus();
             }
             return Action::None;
