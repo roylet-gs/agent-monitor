@@ -23,6 +23,6 @@
     "transcript_path": "transcriptPath"
   },
   "resume": { "session": ["--conversation", "{id}"] },
-  "process": { "names": ["agy"] },
+  "process": { "names": ["agy", "antigravity"] },
   "notes": "Antigravity has no permission or notification hook, so it never shows waiting"
 }

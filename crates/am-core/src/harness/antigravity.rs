@@ -18,7 +18,10 @@
 //! is read as activity (`PostToolUse`) and the session stays executing until
 //! the idle `Stop`. `SessionStart` (agy ≥ 1.1.1) fires once per new
 //! conversation, not on `agy --conversation` resumes. There is no permission
-//! or notification hook, so a session never shows `waiting`.
+//! or notification hook, so a session never shows `waiting`, and no session-end
+//! hook (`ends_sessions` is false), so am-hook closes the owner's settled
+//! (`done`/`idle`) Antigravity sessions when a new one starts. The process
+//! is `agy`, or `antigravity` as the release tarball names it.
 //!
 //! cmux also registers undocumented `Notification`, `turn-completion` and a
 //! per-turn `SessionEnd`; am doesn't, since each would be a second `Stop` for
@@ -74,6 +77,10 @@ impl Harness for Antigravity {
 
     fn hook_events(&self) -> Vec<String> {
         INNER.hook_events()
+    }
+
+    fn ends_sessions(&self) -> bool {
+        INNER.ends_sessions()
     }
 
     fn hooks_key(&self) -> &str {
@@ -178,6 +185,12 @@ mod tests {
     }
 
     #[test]
+    fn has_no_session_end_hook() {
+        assert!(!ANTIGRAVITY.ends_sessions(), "am-hook closes settled conversations on SessionStart instead");
+        assert!(crate::harness::gemini::GEMINI.ends_sessions());
+    }
+
+    #[test]
     fn resumes_a_conversation_and_recognises_agy() {
         assert_eq!(ANTIGRAVITY.program(), "agy");
         assert_eq!(ANTIGRAVITY.resume_args(Some("ec33ebf9"), false), ["--conversation", "ec33ebf9"]);
@@ -185,6 +198,9 @@ mod tests {
         let argv = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
         assert!(ANTIGRAVITY.matches_process("agy", &argv("agy")));
         assert!(ANTIGRAVITY.matches_process("node", &argv("/usr/local/bin/agy --conversation ec33ebf9")));
+        // The release tarball ships the binary as `antigravity`.
+        assert!(ANTIGRAVITY.matches_process("antigravity", &argv("antigravity")));
+        assert!(ANTIGRAVITY.matches_process("node", &argv("/opt/agy/bin/antigravity --conversation ec33ebf9")));
         assert!(!ANTIGRAVITY.matches_process("gemini", &argv("gemini")));
         assert!(!ANTIGRAVITY.matches_process("bash", &argv("bash -c agy-helper")));
     }

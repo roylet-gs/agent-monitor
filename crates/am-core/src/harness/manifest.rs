@@ -340,6 +340,11 @@ impl Manifest {
         super::hook_command_line(&self.id, self.hooks.project_dir_var.as_deref(), event, invocation)
     }
 
+    /// Whether any registered event maps to `SessionEnd`.
+    pub fn ends_sessions(&self) -> bool {
+        self.events.values().any(|v| v.as_str() == Some("SessionEnd"))
+    }
+
     pub fn hook_entry(&self, event: &str, invocation: &str) -> Value {
         let h = &self.hooks;
         let command = self.hook_command(event, invocation);
@@ -462,6 +467,9 @@ impl Harness for ManifestProvider {
     }
     fn hook_events(&self) -> Vec<String> {
         self.manifest.hook_events()
+    }
+    fn ends_sessions(&self) -> bool {
+        self.manifest.ends_sessions()
     }
     fn hook_entry(&self, event: &str, invocation: &str, _native: bool) -> Value {
         self.manifest.hook_entry(event, invocation)

@@ -312,6 +312,37 @@ fn an_antigravity_conversation_is_tracked_from_its_payload() {
 }
 
 #[test]
+fn a_new_antigravity_conversation_closes_the_settled_ones() {
+    // Antigravity has no session-end hook, so a new conversation closes the
+    // owner's done/idle ones; a still-running one stays open.
+    let env = Env::new();
+    let root = env.root();
+    let agy = |sid: &str, event: &str, extra: Value| {
+        let mut p = json!({ "conversationId": sid, "workspacePaths": [root] });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("antigravity", event, "", p);
+    };
+    agy("old", "SessionStart", json!({}));
+    agy("old", "PreInvocation", json!({ "invocationNum": 0 }));
+    agy("old", "Stop", json!({ "fullyIdle": true }));
+    agy("busy", "SessionStart", json!({}));
+    agy("busy", "PreInvocation", json!({ "invocationNum": 0 }));
+    assert_eq!(env.session("old"), ("done".into(), false), "closed by busy's start");
+    agy("new", "SessionStart", json!({}));
+    assert_eq!(env.session("busy"), ("executing".into(), true), "a running conversation is left open");
+    assert_eq!(env.session("new"), ("idle".into(), true));
+    // A Claude session in the same worktree is another harness's: untouched.
+    env.send("SessionStart", with_session("c", json!({ "source": "startup" })));
+    env.send("Stop", with_session("c", json!({})));
+    agy("newer", "SessionStart", json!({}));
+    assert!(env.session("c").1, "only Antigravity's own sessions close");
+    assert!(!env.session("new").1);
+    // A closed conversation that is resumed opens again.
+    agy("old", "PreInvocation", json!({ "invocationNum": 0 }));
+    assert_eq!(env.session("old"), ("executing".into(), true));
+}
+
+#[test]
 fn main_agent_activity_while_delegating_is_executing() {
     let env = Env::new();
     env.send("UserPromptSubmit", json!({}));

@@ -159,6 +159,14 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
     // Each session keeps its own status, so two sessions in one worktree
     // don't overwrite each other; the owner's row is their headline.
     if let Some(sid) = ev.session_id.as_deref() {
+        // Without a session-end hook nothing else closes a finished
+        // conversation, so a new one closes the settled ones before it.
+        if ev.is("SessionStart") && !kind.provider().ends_sessions() {
+            let n = db::close_settled_sessions(&conn, &owner, kind, sid)?;
+            if n > 0 {
+                info!(MODULE, "SessionStart {}:{sid} closed {n} settled session(s) in {root_str}", kind.id());
+            }
+        }
         let session = db::get_session(&conn, kind, sid)?;
         let running = db::running_subagents_in(&conn, &owner, sid)?;
         let current_status = session.as_ref().map(|s| s.status);

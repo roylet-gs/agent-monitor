@@ -82,6 +82,13 @@ pub trait Harness: Sync + Send {
     /// Native event names am registers a hook for.
     fn hook_events(&self) -> Vec<String>;
 
+    /// Whether a hook marks a session closed (`SessionEnd`). Without one,
+    /// am-hook closes the owner's other settled sessions of this harness when
+    /// a new one starts, so finished conversations don't pile up.
+    fn ends_sessions(&self) -> bool {
+        true
+    }
+
     /// The key holding `event → entries` in the settings file; empty when the
     /// file is that map itself.
     fn hooks_key(&self) -> &str {
