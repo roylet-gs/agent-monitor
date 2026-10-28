@@ -434,6 +434,43 @@ fn a_new_antigravity_conversation_closes_the_settled_ones() {
 }
 
 #[test]
+fn a_grok_session_is_tracked_from_camel_case_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Grok strips the hook's env: `--worktree ""` and the payload's `cwd`.
+    let grok = |event: &str, extra: Value| {
+        let mut p = json!({ "hookEventName": event, "sessionId": "g-1", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("grok", event, "", p);
+    };
+    grok("SessionStart", json!({}));
+    grok("UserPromptSubmit", json!({ "prompt": "fix it" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("grok")));
+    grok("PreToolUse", json!({ "toolName": "bash", "toolInput": { "command": "ls" } }));
+    // Sent for every tool step, even when nothing waits on the user.
+    grok("Notification", json!({ "notificationType": "permission_prompt", "message": "Tool permission requested" }));
+    assert_eq!(env.status().0, "executing");
+    grok("Notification", json!({ "notificationType": "permission_prompt", "message": "Grok needs permission to run rm" }));
+    assert_eq!(env.status().0, "waiting");
+    grok("PreToolUse", json!({ "toolName": "bash" }));
+    grok("Notification", json!({ "message": "Turn complete in 1.2s." }));
+    grok("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("g-1"), ("done".into(), true));
+
+    // A specific prompt the user answers, then the turn ends with no
+    // `PreToolUse` in between: `Stop` still takes it to done.
+    grok("UserPromptSubmit", json!({ "prompt": "clean up" }));
+    grok("PreToolUse", json!({ "toolName": "bash", "toolInput": { "command": "rm -r build" } }));
+    grok("Notification", json!({ "notificationType": "permission_prompt", "message": "Grok needs permission to run rm" }));
+    assert_eq!(env.status().0, "waiting");
+    grok("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("g-1"), ("done".into(), true));
+}
+
+#[test]
 fn main_agent_activity_while_delegating_is_executing() {
     let env = Env::new();
     env.send("UserPromptSubmit", json!({}));

@@ -1,0 +1,21 @@
+{
+  "id": "grok",
+  "name": "Grok CLI",
+  "shortName": "Grok",
+  "program": "grok",
+  "configDir": "~/.grok",
+  "hooks": {
+    "settingsPath": "~/.grok/hooks/agent-monitor.json",
+    "timeoutMs": 5000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "Notification": "Notification",
+    "Stop": "Stop"
+  },
+  "resume": { "session": ["-r", "{id}"] },
+  "process": { "names": ["grok", "grok-macos-aarch64", "grok-macos-aarch"] }
+}

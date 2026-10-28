@@ -668,6 +668,37 @@ fn hooks_for_antigravity() {
     assert!(env.ok(&["hooks", "install"]).stdout.contains("Hooks installed into ~/.gemini/config/hooks.json"));
 }
 
+#[test]
+fn hooks_for_grok_go_in_an_owned_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Grok reads every file in ~/.grok/hooks/: am's own sits beside the user's.
+    let hooks_dir = env.home().join(".grok/hooks");
+    std::fs::create_dir_all(&hooks_dir).unwrap();
+    std::fs::write(hooks_dir.join("mine.json"), "{}").unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "grok"]).stdout, "Hooks installed into ~/.grok/hooks/agent-monitor.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(hooks_dir.join("agent-monitor.json")).unwrap()).unwrap();
+    let hooks = v["hooks"].as_object().unwrap();
+    assert_eq!(hooks.keys().map(String::as_str).collect::<Vec<_>>(), ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop"]);
+    assert_eq!(
+        hooks["Stop"],
+        json!([{"hooks": [{"type": "command", "command": format!("\"{}\" hook-event --agent grok --worktree \"\" --event Stop", fake_hook.display()), "timeout": 5}]}])
+    );
+    assert_eq!(std::fs::read_to_string(hooks_dir.join("mine.json")).unwrap(), "{}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["grok"], true);
+    // Installed by default now that ~/.grok exists, and idempotent.
+    env.ok(&["hooks", "install"]);
+    let again: Value = serde_json::from_str(&std::fs::read_to_string(hooks_dir.join("agent-monitor.json")).unwrap()).unwrap();
+    assert_eq!(again, v);
+
+    env.ok(&["hooks", "uninstall", "--agent", "grok"]);
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["grok"], false);
+}
+
 /// A JSON manifest in `<data>/agents/` is a full harness plugin: no code.
 #[test]
 fn manifest_plugins_need_no_code() {
