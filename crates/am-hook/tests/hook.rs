@@ -314,6 +314,16 @@ fn a_grok_session_is_tracked_from_camel_case_payloads() {
     grok("Stop", json!({}));
     assert_eq!(env.status().0, "done");
     assert_eq!(env.session("g-1"), ("done".into(), true));
+
+    // A specific prompt the user answers, then the turn ends with no
+    // `PreToolUse` in between: `Stop` still takes it to done.
+    grok("UserPromptSubmit", json!({ "prompt": "clean up" }));
+    grok("PreToolUse", json!({ "toolName": "bash", "toolInput": { "command": "rm -r build" } }));
+    grok("Notification", json!({ "notificationType": "permission_prompt", "message": "Grok needs permission to run rm" }));
+    assert_eq!(env.status().0, "waiting");
+    grok("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("g-1"), ("done".into(), true));
 }
 
 #[test]

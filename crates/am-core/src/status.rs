@@ -68,6 +68,11 @@ pub struct HookEvent {
     pub agent_id: Option<String>,
     pub agent_type: Option<String>,
     pub agent_transcript_path: Option<String>,
+    /// Set by a harness whose `Stop` also ends a wait: one with no
+    /// `PostToolUse` to clear a permission prompt once the user answers
+    /// (Grok). Such a `Stop` takes a `waiting` session to `done`; Claude's
+    /// keeps it `waiting`.
+    pub stop_ends_wait: bool,
 }
 
 impl HookEvent {
@@ -97,6 +102,7 @@ impl HookEvent {
             agent_id: s("agent_id").filter(|a| !a.is_empty()),
             agent_type: s("agent_type"),
             agent_transcript_path: s("agent_transcript_path"),
+            stop_ends_wait: false,
         }
     }
 
@@ -220,7 +226,7 @@ pub fn map_event_to_status(
                 return Some(Delegating);
             }
             if current == Some(Waiting) {
-                return Some(Waiting);
+                return Some(if event.stop_ends_wait { Done } else { Waiting });
             }
             if event.plan_mode() || current == Some(Planning) {
                 return Some(Waiting);
@@ -370,6 +376,9 @@ mod tests {
         assert_eq!(map(&ev("Stop"), Some(Executing)), Some(Done));
         assert_eq!(map(&ev("Stop"), Some(Planning)), Some(Waiting));
         assert_eq!(map(&ev("Stop"), Some(Waiting)), Some(Waiting));
+        let ends_wait = with(ev("Stop"), |e| e.stop_ends_wait = true);
+        assert_eq!(map(&ends_wait, Some(Waiting)), Some(Done));
+        assert_eq!(map(&ends_wait, Some(Executing)), Some(Done));
         let plan = with(ev("Stop"), |e| e.permission_mode = Some("plan".into()));
         assert_eq!(map(&plan, Some(Executing)), Some(Waiting));
         assert_eq!(map(&plan, None), Some(Waiting));

@@ -78,7 +78,7 @@ Applied in this order; the first match wins.
 | --------- | ------ |
 | `stop_hook_active: true` | `waiting` |
 | `running > 0` | `delegating` |
-| current status is `waiting` | `waiting` |
+| current status is `waiting` | `waiting`, or `done` when the harness's `Stop` ends a wait (`stop_ends_wait`, Grok) |
 | `permission_mode == "plan"` or current status is `planning` | `waiting` |
 | current status is `executing` | `done` |
 | Fallback | `idle` |
@@ -232,10 +232,10 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `PreToolUse` | same | `executing` |
 | `Notification` (`permission_prompt`, specific message) | same | `waiting` |
 | `Notification` (generic "Tool permission requested", completion text, "waiting for input") | `Notification` without a type | no change |
-| `Stop` | same | `done` after work, else `idle` |
+| `Stop` | same (`stop_ends_wait`) | `done` after work or a wait, else `idle` |
 | `SessionEnd` | not hooked | — |
 
-Grok fires `SessionEnd` at the end of **every turn**, alongside `Stop`, not when the session closes. Mapped to `SessionEnd` it would close the session each turn, and mapped to `Stop` the second `Stop` would turn a `done` turn `idle`, so am doesn't hook it. The generic "Tool permission requested" prompt arrives for every tool step even in auto-approve mode; counting it would leave the session `waiting` (a `Stop` keeps a waiting session waiting), so only a specific prompt ("Grok needs permission to run rm") reaches `waiting`. There are no `PostToolUse` or subagent events.
+Grok fires `SessionEnd` at the end of **every turn**, alongside `Stop`, not when the session closes. Mapped to `SessionEnd` it would close the session each turn, and mapped to `Stop` the second `Stop` would turn a `done` turn `idle`, so am doesn't hook it. The generic "Tool permission requested" prompt arrives for every tool step even in auto-approve mode; so only a specific prompt ("Grok needs permission to run rm") reaches `waiting`. There are no `PostToolUse` or subagent events, so nothing reports that the user answered a prompt (cmux's Feed approval blocks in `PreToolUse`, before it); Grok's `Stop` therefore carries `stop_ends_wait` and takes a `waiting` turn to `done`, where Claude's `Stop` keeps it `waiting`.
 
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 

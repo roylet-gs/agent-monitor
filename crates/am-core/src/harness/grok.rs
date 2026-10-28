@@ -20,10 +20,12 @@
 //!   (`notificationType: "permission_prompt"`). Grok sends a generic "Tool
 //!   permission requested" prompt for every tool step, even in auto-approve
 //!   mode where nothing waits on the user; that one is not counted as
-//!   `waiting` (it would also pin the turn there, since `Stop` keeps a waiting
-//!   session waiting). A specific one ("Grok needs permission to run rm") is.
+//!   `waiting`. A specific one ("Grok needs permission to run rm") is.
 //! - No `PostToolUse` or subagent events, so `executing` comes from
-//!   `UserPromptSubmit` and `PreToolUse`.
+//!   `UserPromptSubmit` and `PreToolUse`. Nothing tells am the user answered a
+//!   permission prompt either (cmux's Feed approval blocks in `PreToolUse`,
+//!   before the prompt), so Grok's `Stop` sets `stop_ends_wait`: it takes a
+//!   `waiting` turn to `done`, where Claude's `Stop` keeps it `waiting`.
 //!
 //! Sessions: `<grok home>/sessions/<percent-encoded cwd>/<sessionId>/
 //! chat_history.jsonl`; resume is `grok -r <id>`.
@@ -80,7 +82,8 @@ fn generic_permission(message: Option<&str>) -> bool {
 }
 
 /// [`Embedded::with_normalize`]: the manifest on snake_case keys, then the
-/// generic per-step permission prompt isn't counted as waiting.
+/// generic per-step permission prompt isn't counted as waiting, and `Stop`
+/// ends a wait ([`HookEvent::stop_ends_wait`]).
 fn normalize(m: &Manifest, payload: &Value, event_override: Option<&str>) -> HookEvent {
     let mut ev = m.normalize(&snake_keys(payload), event_override);
     if ev.is("Notification")
@@ -90,6 +93,9 @@ fn normalize(m: &Manifest, payload: &Value, event_override: Option<&str>) -> Hoo
         crate::debug!("agents", "grok: generic permission notification, not counted as waiting");
         ev.notification_type = None;
     }
+    // No `PostToolUse` clears a specific prompt once the user answers it, so
+    // the turn's `Stop` ends the wait.
+    ev.stop_ends_wait = ev.is("Stop");
     ev
 }
 
@@ -183,6 +189,11 @@ mod tests {
 
         let s = step(s, base("Stop"));
         assert_eq!(s, Some(Done));
+        // A specific prompt the user answered, then the turn ends: no
+        // `PreToolUse` in between, and `Stop` still finishes it.
+        let waiting = step(Some(Executing), note("Grok needs permission to run rm"));
+        assert_eq!(waiting, Some(Waiting));
+        assert_eq!(step(waiting, base("Stop")), Some(Done));
         // snake_case payloads read the same.
         let e = GROK.normalize(&json!({"session_id": "g-2", "cwd": "/w"}), Some("Stop"));
         assert_eq!((e.event.as_str(), e.session_id.as_deref()), ("Stop", Some("g-2")));
