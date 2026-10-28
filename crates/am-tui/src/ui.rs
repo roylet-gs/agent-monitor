@@ -152,6 +152,8 @@ pub enum List {
     Sort,
     Plugins,
     Repos,
+    /// The script chooser for one repository.
+    RepoScripts,
     Keys,
     ThemeTokens,
     Palette,
@@ -823,7 +825,10 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
 
 /// Settings → Repositories.
 fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::repos_ui::RepoEditor, hits: &mut Vec<Hit>) {
-    let header = " Repositories — a add · x remove · s/r edit script · S/R remove · esc back";
+    if let (Some(at), Some(r)) = (ed.scripts, ed.selected()) {
+        return draw_repo_scripts(f, theme, list, help, r, at, ed.message.as_ref(), hits);
+    }
+    let header = " Repositories — a add · x remove · s scripts · esc back";
     hint_hits(hits, header, list.x, list.y);
     let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
     if ed.rows.is_empty() {
@@ -868,12 +873,66 @@ fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::
             Line::styled(text, theme.bold(theme.yellow))
         }
         (None, Some((ok, m)), _) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
-        (None, None, Some(r)) => {
-            let startup = if r.script { "Startup script runs after each new worktree (s to edit)" } else { "No startup script · s creates one from a template" };
-            let review = if r.review_script { "review script runs on pull + run script (r to edit)" } else { "r adds a review script for pull + run script" };
-            Line::styled(format!(" {startup} · {review}"), theme.faint())
-        }
+        (None, None, Some(_)) => Line::styled(" s or ⏎ picks one of its scripts (startup or review) to add, edit or remove", theme.faint()),
         (None, None, None) => Line::raw(""),
+    };
+    f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
+}
+
+/// What each script is for and where it runs, under its row in the chooser.
+fn script_about(kind: am_core::worktrees::ScriptKind) -> &'static str {
+    match kind {
+        am_core::worktrees::ScriptKind::Startup => {
+            "Runs after you create a worktree from the dashboard (am asks first), in the new worktree; output in the jobs pane (a new terminal window with startupScriptMode: window). For installing dependencies, copying .env files…"
+        }
+        am_core::worktrees::ScriptKind::Review => {
+            "Runs after pull + run script (T or ctrl-⏎ on the review page) pulls a PR into Reviewing, in that PR's worktree, headless in the jobs pane, with the PR in AM_PR_* variables. For an automatic review, e.g. claude -p \"review this PR\"."
+        }
+    }
+}
+
+/// Settings → Repositories… → `s` on a repo: pick the script to edit or remove.
+#[allow(clippy::too_many_arguments)]
+fn draw_repo_scripts(
+    f: &mut Frame,
+    theme: &Theme,
+    list: Rect,
+    help: Rect,
+    r: &crate::repos_ui::RepoRow,
+    at: usize,
+    message: Option<&(bool, String)>,
+    hits: &mut Vec<Hit>,
+) {
+    let header = format!(" Scripts for {} — ⏎ add/edit · x remove · esc back", r.name);
+    hint_hits(hits, &header, list.x, list.y);
+    let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
+    let text_w = (list.width as usize).saturating_sub(6).max(20);
+    for (i, kind) in crate::repos_ui::SCRIPTS.into_iter().enumerate() {
+        let sel = i == at;
+        let label = kind.label();
+        let name = format!("{}{}", label[..1].to_uppercase(), &label[1..]);
+        let (state, colour) = if r.has(kind) { ("✓ added", theme.green) } else { ("— not added yet", theme.text) };
+        let line = Line::from(vec![
+            Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+            Span::styled(format!("  {name:<16}"), theme.bold(theme.text)),
+            Span::styled(state, if r.has(kind) { theme.fg(colour) } else { theme.faint() }),
+        ]);
+        push_row(hits, list, lines.len(), Target::Item(List::RepoScripts, i), sel);
+        lines.push(if sel { line.style(theme.selected()) } else { line });
+        for l in wrap_words(script_about(kind), text_w) {
+            push_row(hits, list, lines.len(), Target::Item(List::RepoScripts, i), false);
+            lines.push(Line::styled(format!("     {l}"), theme.faint()));
+        }
+        // Short, under the app dir (`~/.agent-monitor` unless AM_DATA_DIR).
+        let file = kind.path(&r.id).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        lines.push(Line::styled(format!("     scripts/{file}"), theme.faint()));
+        lines.push(Line::raw(""));
+    }
+    f.render_widget(Paragraph::new(lines), list);
+    let help_line = match message {
+        Some((ok, m)) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
+        None if r.has(crate::repos_ui::SCRIPTS[at]) => Line::styled(" ⏎ opens it in your editor · x removes it", theme.faint()),
+        None => Line::styled(" ⏎ creates it from a template and opens it in your editor", theme.faint()),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
 }
@@ -1310,6 +1369,18 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             marks.push((3, Target::Key(Key::Char('y')), false));
             marks.push((4, Target::Key(Key::Esc), false));
             ("Reset settings".into(), theme.red, "", lines)
+        }
+        Modal::AddReviewScript { repo, .. } => {
+            let lines = vec![
+                Line::raw(format!("{repo} has no review script yet. Add one?")),
+                Line::styled("It opens in your editor from a template while the PR is pulled, and runs in the new worktree once you save it.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "⏎ / y", "Add the script, pull and run it", true),
+                key_line(theme, "any key", "Cancel", false),
+            ];
+            marks.push((3, Target::Key(Key::Char('y')), false));
+            marks.push((4, Target::Key(Key::Esc), false));
+            ("Add a review script".into(), theme.yellow, "", lines)
         }
         Modal::AddRepo(_) => unreachable!("drawn by draw_browser"),
         Modal::Suggest { title, body, on_body, error } => {
@@ -1933,7 +2004,11 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
                     .then(|| app.snapshot.repos.iter().find(|x| x.id == r.repo_id).map_or(r.repo.as_str(), |x| x.name.as_str()));
                 // The pull, then (once pulled) a review script it runs.
                 let pull = app.review_pull(r).or_else(|| app.review_script_job(r));
-                review_line(theme, r, &tree[*pos], repo, pull, |id| app.is_deleting(id), selected, (who_w, ticket_w, pr_w), words, inner.width, now)
+                // A pulled PR's worktree with an agent in it: its status dot, as on the dashboard.
+                let agent = r.worktree_id.as_deref().and_then(|id| {
+                    app.snapshot.groups.iter().flat_map(|g| &g.worktrees).find(|v| v.worktree.id == id).and_then(|v| v.status())
+                });
+                review_line(theme, r, &tree[*pos], repo, (pull, agent), |id| app.is_deleting(id), selected, (who_w, ticket_w, pr_w), words, inner.width, now)
             }
         });
     }
@@ -1992,7 +2067,7 @@ fn review_line<'a>(
     r: &'a am_core::model::ReviewRequest,
     prefix: &str,
     repo: Option<&str>,
-    pull: Option<&crate::jobs::Job>,
+    (pull, agent): (Option<&crate::jobs::Job>, Option<am_core::status::Status>),
     deleting: impl Fn(&str) -> bool,
     selected: bool,
     (who_w, ticket_w, pr_w): (usize, usize, usize),
@@ -2030,6 +2105,7 @@ fn review_line<'a>(
         // Pulled: the job is running the review script.
         tags.push(match &job.state {
             crate::jobs::JobState::Failed(_) => (" ✗ script failed".into(), theme.fg(theme.red)),
+            _ if job.question.is_some() => (" ? save the review script to run it (esc, then ⇥: run now)".into(), theme.fg(theme.yellow)),
             _ => {
                 let last = job.log.last().map(|l| format!(" {}", truncate(l.trim(), 40))).unwrap_or_default();
                 (format!(" {} running script…{last}", spinner(now)), theme.fg(theme.green))
@@ -2050,7 +2126,9 @@ fn review_line<'a>(
     }
     let author = if r.author.is_empty() { String::new() } else { format!("  @{}", r.author) };
     let tags_w: usize = tags.iter().map(|(t, _)| t.width()).sum();
-    let room = (width as usize).saturating_sub(1 + prefix.width() + right_w + tags_w);
+    let dot = agent.map(|s| (format!("{} ", status_glyph(Some(s))), theme.fg(theme.status(Some(s)))));
+    let dot_w = dot.as_ref().map_or(0, |(d, _)| d.width());
+    let room = (width as usize).saturating_sub(1 + prefix.width() + dot_w + right_w + tags_w);
     // The author always fits: the title gives way first, down to a few
     // cells (only a very narrow row cuts the author too).
     let author_w = author.width().min(room.saturating_sub(r.pr.title.width().min(10)));
@@ -2061,9 +2139,12 @@ fn review_line<'a>(
     let mut spans = vec![
         Span::styled(if selected { "▌" } else { " " }, theme.bold(theme.border_focus)),
         Span::styled(prefix.to_string(), theme.faint()),
+    ];
+    spans.extend(dot.map(|(d, st)| Span::styled(d, st)));
+    spans.extend([
         Span::styled(title, if selected { theme.bold(theme.text) } else { theme.fg(theme.text) }),
         Span::styled(author, theme.faint()),
-    ];
+    ]);
     spans.extend(tags.into_iter().map(|(t, st)| Span::styled(t, st)));
     spans.push(Span::raw(" ".repeat(fill)));
     spans.extend(right);
@@ -2550,6 +2631,14 @@ fn draw_jobs(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits
                 let r = push(choice("n", false), "Cancel", theme.fg(theme.text));
                     marks.push((r, Target::JobKey(i, Key::Char('n')), false));
             }
+            (Some(Question::SaveReviewScript { repo_id, .. }), _) => {
+                push(vec![Span::raw("   ")], "Runs the review script once you save it:", theme.bold(theme.yellow));
+                push(vec![Span::raw("   ")], &am_core::worktrees::ScriptKind::Review.path(repo_id).display().to_string(), theme.faint());
+                let r = push(choice("⏎ / y", false), "Run it now", theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Enter), false));
+                let r = push(choice("n", false), "Skip it", theme.fg(theme.text));
+                    marks.push((r, Target::JobKey(i, Key::Char('n')), false));
+            }
             (Some(Question::RunScript { repo_id, .. }), _) => {
                 push(vec![Span::raw("   ")], "Run the repo's startup script?", theme.bold(theme.yellow));
                 push(vec![Span::raw("   ")], &am_core::worktrees::script_path(repo_id).display().to_string(), theme.faint());
@@ -2855,13 +2944,23 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             Some(r) if !r.is_cross_repository => "pull",
             _ => "open PR",
         };
-        keys.push(raw("⏎", enter, Some(Key::Enter), 0));
+        // Holding Shift or Ctrl shows what the held key adds (pull + run
+        // the review script, a new window) in place of ⏎'s plain meaning.
+        if app.held.ctrl {
+            keys.push(raw("ctrl-⏎", "pull + run script", Some(Key::CtrlEnter), 0));
+            keys.extend(cmd(Command::ReviewWindow, "new window", 0).filter(|_| !app.reviews_only));
+        } else if app.held.shift {
+            keys.extend(cmd(Command::PullAndRunScript, "pull + run script", 0));
+            keys.extend(cmd(Command::ReviewSplit, if app.reviews.as_ref().is_some_and(|p| p.split) { "close" } else { "beside list" }, 0).filter(|_| !app.reviews_only));
+        } else {
+            keys.push(raw("⏎", enter, Some(Key::Enter), 0));
+        }
         keys.extend(cmd(Command::OpenPr, "PR", 1).filter(|_| enter != "open PR"));
         keys.extend(cmd(Command::OpenLinear, "ticket", 0));
-        keys.extend(cmd(Command::PullToTmpSpace, "pull into Reviewing", 0));
-        // Only for a repo that has a review script to run.
-        let script = app.selected_review().is_some_and(|r| am_core::worktrees::ScriptKind::Review.exists(&r.repo_id));
-        keys.extend(cmd(Command::PullAndRunScript, "pull + script", 2).filter(|_| script));
+        // Where held keys aren't reported, `T` has to be on the bar.
+        if !app.modifiers_reported && !app.held.shift && !app.held.ctrl {
+            keys.extend(cmd(Command::PullAndRunScript, "pull + script", 3));
+        }
         keys.extend(cmd(Command::Delete, "remove", 2));
         keys.extend(cmd(Command::Feedback, "filter", 2));
         keys.push(raw("", "", None, 0));
@@ -2872,6 +2971,9 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             keys.push(raw("esc", "close", Some(Key::Esc), 0));
         } else {
             keys.push(raw("esc", if app.reviews_only { "quit" } else { "back" }, Some(Key::Esc), 0));
+        }
+        if app.modifiers_reported && !app.held.shift && !app.held.ctrl {
+            keys.push(raw("⇧/ctrl", "more", None, 3));
         }
     } else if app.jobs.focused {
         // While jobs are showing, Tab moves between the list and the pane.
@@ -2904,7 +3006,8 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
                 Some(Command::ReviewRequests) if let Some((c, k, label)) = held_review => {
                     keys.push((crate::keymap::display(k), label, Some(BarHit::Command(c)), prio));
                 }
-                Some(Command::ReviewSplit) if held_review.is_some() => {}
+                // Shown by holding Shift where that's reported.
+                Some(Command::ReviewSplit) if held_review.is_some() || app.modifiers_reported => {}
                 Some(c) => {
                     if let (Some(k), Some(label)) = (app.keymap.key(c), c.bar_label()) {
                         keys.push((crate::keymap::display(k), label, Some(BarHit::Command(c)), prio));
@@ -2912,6 +3015,9 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
                 }
             }
         }
+    }
+    if !app.review_focused() && !app.jobs.focused && app.modifiers_reported && !app.held.shift && !app.held.ctrl {
+        keys.push(raw("⇧/ctrl", "more", None, 3));
     }
     let pick = |max_prio: u8| -> Vec<KeyItem> {
         let mut items = Vec::new();
@@ -3020,7 +3126,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
         (&[C::ReviewRequests, C::ReviewSplit, C::ReviewWindow], "", "PRs to review: page / beside the list / new window"),
-        (&[C::PullToTmpSpace, C::PullAndRunScript], "", "review page: pull into Reviewing / and run its script"),
+        (&[C::PullToTmpSpace, C::PullAndRunScript], " / ctrl-⏎", "review page: pull into Reviewing / + run script"),
         (&[C::AddRepo], "", "add repository"),
         (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
         (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
@@ -4159,14 +4265,25 @@ mod tests {
         assert_eq!(app.on_key(Key::Char('T')), Action::None);
         assert!(app.notice.as_deref().unwrap().contains("already pulled"), "{:?}", app.notice);
         assert!(app.reviews.is_some());
-        // #902 (repo r2, renamed) without a review script: refused, pointing at Settings.
+        // #902 (repo r2, renamed) without a review script: T asks to add one;
+        // anything but y/⏎ cancels.
         app.on_key(Key::End);
         assert_eq!(app.selected_review().unwrap().pr.number, 902);
-        assert!(!app.review_key_available(Key::Char('T')));
+        assert!(app.review_key_available(Key::Char('T')), "available without a script too");
         assert_eq!(app.on_key(Key::Char('T')), Action::None);
-        assert!(app.notice.as_deref().unwrap().contains("no review script"), "{:?}", app.notice);
-        assert!(app.jobs.list.is_empty());
-        // With one: a tmp-space pull whose job carries the PR for the script.
+        assert!(matches!(app.modal, Some(crate::modals::Modal::AddReviewScript { .. })));
+        assert!(render(&app, 120, 20).contains("has no review script yet. Add one?"));
+        assert_eq!(app.on_key(Key::Char('n')), Action::None);
+        assert!(app.modal.is_none() && app.jobs.list.is_empty());
+        // ctrl-⏎ is T on the page; y adds the script (main.rs writes and
+        // opens it) and starts the pull.
+        assert_eq!(app.on_key(Key::CtrlEnter), Action::None);
+        assert!(matches!(app.modal, Some(crate::modals::Modal::AddReviewScript { .. })));
+        let Action::AddReviewScriptAndPull(job, repo, _) = app.on_key(Key::Char('y')) else { panic!("expected an add + pull") };
+        assert_eq!(repo.id, ID);
+        assert!(app.jobs.get(job).unwrap().review_script().is_some());
+        app.jobs.dismiss(job);
+        // With a script: straight to a tmp-space pull whose job carries the PR.
         ScriptKind::Review.create(ID).unwrap();
         assert!(app.review_key_available(Key::Char('T')));
         app.notice = None;
@@ -4190,12 +4307,22 @@ mod tests {
         app.jobs.log(job, "reviewing #902".into());
         let screen = render(&app, 140, 10);
         assert!(screen.contains("running script… reviewing #902"), "{screen}");
+        // Waiting for a template to be saved says so on the row.
+        app.jobs.ask(job, crate::jobs::Question::SaveReviewScript { repo_id: ID.into(), worktree_path: "/w902".into() });
+        assert!(render(&app, 140, 10).contains("save the review script to run it"));
+        app.jobs.resume(job);
         app.jobs.finish(job, Err("Script exited with exit status: 1".into()), std::time::Instant::now());
         assert!(render(&app, 140, 10).contains("✗ script failed"));
         app.jobs.dismiss(job);
         let screen = render(&app, 140, 10);
         assert!(!screen.contains("running script") && !screen.contains("script failed"), "{screen}");
         ScriptKind::Review.remove(ID).unwrap();
+    }
+
+    #[test]
+    fn ctrl_enter_is_enter_off_the_review_page() {
+        let mut app = fixture();
+        assert_eq!(app.on_key(Key::CtrlEnter), app.on_key(Key::Enter));
     }
 
     #[test]
@@ -4317,6 +4444,38 @@ mod tests {
         assert!(ctrl.contains("ctrl-v reviews in new window") && !ctrl.contains("V reviews beside list"), "{ctrl}");
         app.held = crate::app::Held::default();
         assert!(bar(&app).contains("v reviews"));
+    }
+
+    #[test]
+    fn held_keys_show_their_variants_where_the_terminal_reports_them() {
+        let bar = |app: &App, w| render(app, w, 10).lines().last().unwrap().to_string();
+        // Dashboard: V lives behind Shift, so it's off the plain bar.
+        let mut app = by_repo();
+        app.modifiers_reported = true;
+        let plain = bar(&app, 200);
+        assert!(plain.contains("v reviews") && !plain.contains("V split") && plain.contains("⇧/ctrl more"), "{plain}");
+        app.held.shift = true;
+        assert!(bar(&app, 200).contains("V reviews beside list"));
+        app.held = crate::app::Held::default();
+        // Review page: ⏎ says what it does; Shift and Ctrl add the script.
+        app.on_key(Key::Char('v'));
+        app.on_key(Key::End);
+        let plain = bar(&app, 200);
+        assert!(plain.contains("⏎ pull") && !plain.contains("pull into Reviewing") && !plain.contains("T pull"), "{plain}");
+        app.held.shift = true;
+        let shifted = bar(&app, 200);
+        assert!(shifted.contains("T pull + run script") && shifted.contains("V beside list") && !shifted.contains("⏎ pull"), "{shifted}");
+        app.held = crate::app::Held { ctrl: true, ..Default::default() };
+        let ctrl = bar(&app, 200);
+        assert!(ctrl.contains("ctrl-⏎ pull + run script") && ctrl.contains("ctrl-v new window"), "{ctrl}");
+        // Clicking the held hint runs it: ctrl-⏎ asks to add a review script here.
+        let at = find(&app, 200, 10, "ctrl-⏎");
+        click(&mut app, 200, 10, at, false);
+        assert!(matches!(app.modal, Some(crate::modals::Modal::AddReviewScript { .. })), "the fixture repo has no review script");
+        // Without the protocol, T stays on the plain bar.
+        let mut app = by_repo();
+        app.on_key(Key::Char('v'));
+        assert!(bar(&app, 200).contains("T pull + script"));
     }
 
     #[test]
@@ -4777,8 +4936,18 @@ mod tests {
         let beta = find(&app, 100, 20, "beta");
         click(&mut app, 100, 20, beta, false);
         assert_eq!(app.settings_editor.as_ref().unwrap().repos.as_ref().unwrap().cursor, 1);
-        // A click on the selected repo opens its script, like ⏎.
-        assert_eq!(click(&mut app, 100, 20, beta, false), crate::app::Action::EditScript("beta".into(), am_core::worktrees::ScriptKind::Startup));
+        // A click on the selected repo opens its script chooser, like ⏎;
+        // there a click picks a script and a second one edits it.
+        assert_eq!(click(&mut app, 100, 20, beta, false), crate::app::Action::None);
+        assert_eq!(app.settings_editor.as_ref().unwrap().repos.as_ref().unwrap().scripts, Some(0));
+        let screen = render(&app, 100, 30);
+        assert!(screen.contains("Scripts for beta") && screen.contains("in that PR's worktree"), "{screen}");
+        let review = find(&app, 100, 30, "Review script");
+        click(&mut app, 100, 30, review, false);
+        assert_eq!(app.settings_editor.as_ref().unwrap().repos.as_ref().unwrap().scripts, Some(1));
+        assert_eq!(click(&mut app, 100, 30, review, false), crate::app::Action::EditScript("beta".into(), am_core::worktrees::ScriptKind::Review));
+        insta::assert_snapshot!("repository_scripts", render(&app, 100, 30));
+        app.on_key(Key::Esc);
         // Header hints are buttons: `x remove` asks, `any other key cancels`.
         let x = find(&app, 100, 20, "x remove");
         click(&mut app, 100, 20, x, false);

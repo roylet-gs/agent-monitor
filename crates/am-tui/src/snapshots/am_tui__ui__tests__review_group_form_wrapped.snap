@@ -5,7 +5,7 @@ expression: screen
 ╭─Review requests ──────────────────────────────────────────────────────────────────────────────────────── 3 to review ╮
 │Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
-│ Batch the PR queries  @alice (agent-monitor) ✓ pulled                                 you           #51✓ review   0s │
+│ ◑ Batch the PR queries  @alice (agent-monitor) ✓ pulled                               you           #51✓ review   0s │
 │Asked your team ──────────────────────────────────────────────────────────────────────────────────────────────────────│
 │ Typo in README  @outsider (agent-monitor) fork                                        @docs         #48✓ review   0s │
 │                                                                                                                      │
@@ -35,4 +35,4 @@ expression: screen
 │                 │ Section header and badge label (empty: Group N)                                  │                 │
 │                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │
 ╰ you + your teams · 1 group ────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ pull  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  esc back
+ ⏎ pull  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc back

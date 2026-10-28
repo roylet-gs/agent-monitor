@@ -12,9 +12,9 @@ gridsight ───────────────────────�
 
 ─Review requests ─ you + your teams ──────────────────────────────────────────────────────────────────────────── 1 of 3
 agent-monitor ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-▌Batch the PR queries  @alice ✓ pulled                                                        you           #51✓ …   0s
+▌◑ Batch the PR queries  @alice ✓ pulled                                                      you           #51✓ …   0s
  Typo in README  @outsider fork                                                               @docs         #48✓ …   0s
 gridsight ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Feeder load forecast v2  @alice                                                              you +1 ENG-77 #902✗ …  0s
 
- ⏎ open  g PR  l ticket  t pull into Reviewing  d remove  f filter  │ r refresh  h help  ⇥ list  esc close
+ ⏎ open  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  ⇥ list  esc close

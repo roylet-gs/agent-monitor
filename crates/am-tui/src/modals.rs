@@ -130,6 +130,9 @@ pub enum Modal {
     Busy { text: String },
     /// Settings → Reset settings: `y` resets, any other key cancels.
     ConfirmReset,
+    /// "Pull + run script" on a PR whose repo (named `repo`) has no review
+    /// script: `y` adds one and pulls, any other key cancels.
+    AddReviewScript { review: Box<am_core::model::ReviewRequest>, repo: String },
 }
 
 pub enum Effect {
@@ -141,6 +144,8 @@ pub enum Effect {
     Suggest { title: String, body: String },
     /// Put settings.json back to defaults, then run setup.
     ResetSettings,
+    /// Add the repo's review script, then pull + run it for this PR.
+    AddReviewScript(Box<am_core::model::ReviewRequest>),
 }
 
 /// Expand `~` and complete the last path component to the longest common
@@ -210,6 +215,10 @@ impl Modal {
             // Only `y`: ⏎ opened this, so a double press mustn't reset.
             Modal::ConfirmReset => match key {
                 Key::Char('y') | Key::Char('Y') => Effect::ResetSettings,
+                _ => Effect::Close,
+            },
+            Modal::AddReviewScript { review, .. } => match key {
+                Key::Char('y') | Key::Char('Y') | Key::Enter => Effect::AddReviewScript(review.clone()),
                 _ => Effect::Close,
             },
             Modal::New(f) => {

@@ -782,19 +782,23 @@ pub(crate) mod tests {
         assert_eq!(ed.repo_count, 0, "set by the app, not by opening the page");
 
         assert!(matches!(ed.on_key(Key::Char('a')), Outcome::AddRepo));
-        assert!(matches!(ed.on_key(Key::Char('s')), Outcome::EditScript(id, ScriptKind::Startup) if id == repo.id));
-        assert!(matches!(ed.on_key(Key::Char('S')), Outcome::None));
+        // s asks which script; ⏎ edits the startup one, x removes it.
+        assert!(matches!(ed.on_key(Key::Char('s')), Outcome::None));
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::EditScript(id, ScriptKind::Startup) if id == repo.id));
+        assert!(matches!(ed.on_key(Key::Char('x')), Outcome::None));
         assert!(!am_core::worktrees::has_script(&repo.id));
         assert!(!ed.repos.as_ref().unwrap().rows[0].script);
 
-        // The review script sits beside it, with its own keys.
-        assert!(matches!(ed.on_key(Key::Char('r')), Outcome::EditScript(id, ScriptKind::Review) if id == repo.id));
+        // The review script is the chooser's second row.
+        ed.on_key(Key::Down);
+        assert!(matches!(ed.on_key(Key::Enter), Outcome::EditScript(id, ScriptKind::Review) if id == repo.id));
         ScriptKind::Review.create(&repo.id).unwrap();
         ed.refresh_repos(None);
         assert!(ed.repos.as_ref().unwrap().rows[0].review_script);
-        assert!(matches!(ed.on_key(Key::Char('R')), Outcome::None));
+        assert!(matches!(ed.on_key(Key::Char('x')), Outcome::None));
         assert!(!ScriptKind::Review.exists(&repo.id));
         assert!(ed.repos.as_ref().unwrap().message.as_ref().is_some_and(|(ok, m)| *ok && m.contains("review script")));
+        ed.on_key(Key::Esc); // the chooser
 
         ed.on_key(Key::Char('x'));
         assert!(matches!(ed.on_key(Key::Char('y')), Outcome::ReposChanged));

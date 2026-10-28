@@ -13,6 +13,7 @@ use crate::launch::Session;
 use crate::status::HookEvent;
 
 pub mod pricing;
+pub mod stream;
 pub mod transcript;
 
 pub const HOOK_EVENTS: [&str; 11] = [
@@ -110,6 +111,10 @@ impl Harness for Claude {
 
     fn usage_record(&self, line: &str) -> Option<crate::usage::UsageRecord> {
         usage_record(line)
+    }
+
+    fn readable_output(&self, line: &str, cwd: Option<&str>) -> Option<Vec<String>> {
+        stream::readable(line, cwd)
     }
 
     fn matches_process(&self, name: &str, argv: &[String]) -> bool {

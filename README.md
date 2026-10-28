@@ -298,7 +298,7 @@ Worktrees created outside am (`git worktree add`, other tools) are picked up aut
 ### Review Requests
 
 With GitHub on, am also looks for the open PRs in your tracked repos that are waiting on your review (one GitHub search every `reviewPollingIntervalMs`, default 2 minutes, plus on `r` and whenever you open the page). The count sits in the top-right corner of the dashboard's border as ` 3 to review ` (with groups, it counts each group shown on the dashboard by name, e.g. ` Platform 4 · 26 to review `, where `to review` is the unnamed default group; `reviewBadgeTotal` adds every open PR asking you or your teams on GitHub regardless of filters, ` · 60 on GitHub `, counted in the same search request); click it or press `v` to open the **Review requests** page, whose border carries the same badge (`V` opens it beside the worktree list, `Ctrl+V` in a new terminal window).
-Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking origin, with no questions and no startup script) happens from this page; `am worktree create --tmp` does the same from the CLI. It lists each PR, with stacked PRs (one whose base is another listed PR's branch) indented under the PR they target as a tree, with its author, who was asked (`you` or `@team`), its Linear ticket (looked up by the PR's branch), CI and review state, and how long ago it changed:
+Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking origin, with no questions and no startup script) happens from this page; `am worktree create --tmp` does the same from the CLI. It lists each PR, with stacked PRs (one whose base is another listed PR's branch) indented under the PR they target as a tree, with its author, who was asked (`you` or `@team`), its Linear ticket (looked up by the PR's branch), CI and review state, and how long ago it changed. A pulled PR whose worktree has an agent in it shows the agent's status dot before its title, as on the dashboard:
 
 | Key | Action |
 | --- | ------ |
@@ -306,7 +306,7 @@ Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking o
 | `g` / `o` | Open the PR in the browser |
 | `l` | Open its Linear ticket |
 | `t` | Pull its branch into **Reviewing**. You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard (beside the list, the list takes the keys); a PR from a fork can't be pulled |
-| `T` | **Pull + run script**: pull it like `t`, then run the repo's [review script](#startup-and-review-scripts) in the new worktree (the row shows `running script…` with its latest output line, then `✓ pulled`). Only for a repo that has a review script, and only on a PR that isn't pulled yet |
+| `T` / `Ctrl+⏎` | **Pull + run script**: pull it like `t`, then run the repo's [review script](#startup-and-review-scripts) in the new worktree (it opens in a new terminal window, and a popup says so). If the repo has no review script yet, am asks whether to add one: `y` creates it from a template and opens it in your editor while the PR is pulled, and it runs once you save it (or press `⏎` on the question in the Jobs pane to run it as is). Only on a PR that isn't pulled yet. `Ctrl+⏎` needs a terminal that reports it (the kitty keyboard protocol: kitty, Ghostty, WezTerm, iTerm2 with the option on…); elsewhere use `T` |
 | `d` | Remove the pulled worktree (the usual delete dialog), staying on the page |
 | `f` | Filters: who's asked, the groups (each with its own order and filters), the badge's GitHub total, **Reset filters…** (who's asked, the default group's filters and the GitHub total back to defaults; groups kept) and **Reset groups…** (removes every group), both asking `y` first, in a small box over the page (changes save at once). The page's bottom border sums up what's in force; clicking it opens the box too |
 | `r` | Clear the review caches (the list, group matches, GitHub total, autocomplete people) and search again now |
@@ -321,14 +321,14 @@ What counts is set under **Settings → Review requests** (or in the setup wizar
 
 Each repository can have a shell script that runs after a new worktree is created, for example to install dependencies or copy `.env` files. After creating a worktree from the dashboard, am asks whether to run it; the script runs in your terminal, in the new worktree's directory, and am returns when you press Enter.
 
-A repository can also have a **review script**, run by **pull + run script** (`T`) on the Review requests page once the PR's branch is checked out into Reviewing (plain pulls never run it). It runs in the PR's worktree with stdin closed and its output in the Jobs pane, with the PR in its environment: `AM_PR_NUMBER`, `AM_PR_URL`, `AM_PR_TITLE`, `AM_PR_AUTHOR`, `AM_PR_BRANCH`, `AM_PR_BASE`, `AM_REPO` (`owner/name`) and `AM_WORKTREE_PATH`. For example, to have Claude review the PR headlessly:
+A repository can also have a **review script**, run by **pull + run script** (`T`) on the Review requests page once the PR's branch is checked out into Reviewing (plain pulls never run it). It opens in a new terminal window in the PR's worktree, so an agent it starts shows its full UI and you can step in (where no terminal window can be opened, it runs in the Jobs pane instead), with the PR in its environment: `AM_PR_NUMBER`, `AM_PR_URL`, `AM_PR_TITLE`, `AM_PR_AUTHOR`, `AM_PR_BRANCH`, `AM_PR_BASE`, `AM_REPO` (`owner/name`) and `AM_WORKTREE_PATH`. For example, to have Claude review the PR:
 
 ```sh
-claude -p "Review PR #$AM_PR_NUMBER ($AM_PR_URL) against origin/$AM_PR_BASE and list bugs and risky changes." \
+claude "Review PR #$AM_PR_NUMBER ($AM_PR_URL) against origin/$AM_PR_BASE and list bugs and risky changes." \
   --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh pr view:*)"
 ```
 
-The session's hooks show its status on the worktree's row, and `Enter` on the row later resumes the conversation.
+The session's hooks show its status on the worktree's row, and `Enter` on the row later resumes the conversation. When it runs in the Jobs pane instead, a headless `claude -p … --output-format stream-json --verbose` is shown one readable line per step (`→ Read src/parse.rs`, Claude's text, `✓ done in 2m 13s · 14 turns`).
 
 ```sh
 am script edit     # create or open the current repo's startup script in your editor
@@ -337,7 +337,7 @@ am script remove   # delete it
 am script edit --review   # the same for the review script (also show/remove)
 ```
 
-Both can also be edited from **Settings → Repositories…** (`s`/`r`, `S`/`R` to remove). Scripts are stored at `~/.agent-monitor/scripts/<repo-id>.sh` and `<repo-id>.review.sh`.
+Both can also be edited from **Settings → Repositories…**: `s` on a repo asks which script, with what each is for and where it runs; `⏎` edits it (creating it from a template), `x` removes it. Scripts are stored at `~/.agent-monitor/scripts/<repo-id>.sh` and `<repo-id>.review.sh`.
 
 ---
 
@@ -661,7 +661,7 @@ am logs a summary every 5 minutes (and when it quits), plus a `[perf]` warning w
 
 - `am hooks status` should report the hooks as installed; if not, run `am hooks install`.
 - After upgrading from 1.x, run `am hooks install` once so the hooks use `am-hook`.
-- **Repositories:** `s` → **Repositories…** lists the tracked repositories with their worktree count and whether they have a startup script. `a` adds one through the folder browser, `x` stops tracking one (after a `y`; its worktrees and files stay on disk), `s` opens its startup script in your editor (created from a template if it has none), and `S` removes the script; `r` and `R` do the same for its review script (run by `T` on the review page), shown as a `review` tag.
+- **Repositories:** `s` → **Repositories…** lists the tracked repositories with their worktree count and whether they have a startup script. `a` adds one through the folder browser, `x` stops tracking one (after a `y`; its worktrees and files stay on disk), and `s` asks which of its scripts to open: the startup script or the review script (run by `T` on the review page, shown as a `review` tag), each with a line on what it's for and where it runs; `⏎` opens it in your editor (created from a template if missing) and `x` removes it.
 - **Harness plugins:** `s` → **Harness plugins…** lists every harness plugin (the built-ins below, and any JSON manifests in `~/.agent-monitor/agents/`) with its hook status. Space turns one on or off, `i` reinstalls its hooks, and `d` makes it the default for `Enter` in a worktree with no session yet. To add an agent CLI without code, see `docs/agent-providers.md`.
 - **Codex CLI:** Codex runs a user hook only after you trust it in `/hooks`, and again after `am hooks install` rewrites it.
 - **Cursor:** Cursor also runs Claude Code's hooks by default; am ignores those for Cursor sessions and tracks them through Cursor's own `~/.cursor/hooks.json`. Cursor has no permission hook, so its sessions never show `waiting`, and the `cursor-agent` CLI may not fire every hook the editor does.

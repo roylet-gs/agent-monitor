@@ -357,6 +357,7 @@ pub fn display(key: Key) -> String {
         Key::CtrlU => "ctrl-u".into(),
         Key::CtrlS => "ctrl-s".into(),
         Key::CtrlV => "ctrl-v".into(),
+        Key::CtrlEnter => "ctrl-⏎".into(),
     }
 }
 

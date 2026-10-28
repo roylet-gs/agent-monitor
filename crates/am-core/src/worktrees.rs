@@ -1104,22 +1104,23 @@ echo \"Startup script finished.\"
 
 const REVIEW_SCRIPT_TEMPLATE: &str = "#!/bin/bash
 # Review script for pulled PRs
-# This runs after \"pull + run script\" (T on the review page) checks a PR's
-# branch out into Reviewing. Plain pulls (t, Enter) don't run it.
-# The working directory is set to the PR's worktree, stdin is closed and the
-# output shows in the jobs pane.
+# This runs after \"pull + run script\" (T or ctrl-Enter on the review page)
+# checks a PR's branch out into Reviewing. Plain pulls (t, Enter) don't run it.
+# It opens in a new terminal window, in the PR's worktree, so an agent it
+# starts shows its own UI and you can talk to it (where no window can be
+# opened it runs in am's jobs pane instead, with stdin closed).
 #
 # Environment:
 #   AM_PR_NUMBER  AM_PR_URL  AM_PR_TITLE  AM_PR_AUTHOR
 #   AM_PR_BRANCH (head)  AM_PR_BASE (base, may be empty)
 #   AM_REPO (owner/name)  AM_WORKTREE_PATH
 
-# Example: have Claude review the PR headlessly. Its hooks show the session on
-# the worktree's row, and Enter on the row resumes the conversation later.
-# claude -p \"Review PR #$AM_PR_NUMBER ($AM_PR_URL): compare this branch with origin/$AM_PR_BASE and list bugs and risky changes.\" \\
+# Example: open Claude on the PR. Its hooks show the session on the
+# worktree's row, and Enter on the row resumes the conversation later.
+# claude \"Review PR #$AM_PR_NUMBER ($AM_PR_URL): compare this branch with origin/$AM_PR_BASE and list bugs and risky changes.\" \\
 #   --allowedTools \"Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh pr view:*)\"
 
-echo \"Review script finished.\"
+echo \"Review script finished for #$AM_PR_NUMBER.\"
 ";
 
 /// Which per-repo script: the startup script offered after creating a

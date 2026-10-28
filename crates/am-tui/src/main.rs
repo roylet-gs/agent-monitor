@@ -101,6 +101,7 @@ fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
         KeyCode::End => Key::End,
         KeyCode::Tab => Key::Tab,
         KeyCode::BackTab => Key::BackTab,
+        KeyCode::Enter if ctrl => Key::CtrlEnter,
         KeyCode::Enter => Key::Enter,
         KeyCode::Esc => Key::Esc,
         _ => return None,
@@ -158,6 +159,7 @@ fn main() -> io::Result<()> {
     let enhanced = matches!(ratatui::crossterm::terminal::supports_keyboard_enhancement(), Ok(true));
     info!("tui", "Kitty keyboard protocol {}", if enhanced { "supported: modifier keys update the key bar" } else { "not supported" });
     KEYBOARD_ENHANCED.store(enhanced, Ordering::Relaxed);
+    app.modifiers_reported = enhanced;
     set_keyboard(true);
     let result = run(&mut terminal, &mut app, &collector);
     set_keyboard(false);
@@ -257,15 +259,18 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             app.pending_select = Some(w.id.clone());
                             app.jobs.set_worktree(job, w.id.clone());
                             let repo_id = w.repo_id.clone();
-                            let review_script = app.jobs.get(job).and_then(|j| j.review_script()).map(<[_]>::to_vec);
+                            let review = app.jobs.get(job).is_some_and(|j| j.review_script().is_some());
                             // "Pull + run script": the review script runs at
-                            // once, here in the pane. Otherwise a tmp-space
-                            // worktree is only there to look at: no startup
-                            // script.
-                            if let Some(mut env) = review_script {
-                                env.push(("AM_WORKTREE_PATH".into(), w.path.clone()));
-                                info!("tui", "Running the review script for {} in {}", w.branch, w.path);
-                                ops::run_script(ScriptKind::Review, repo_id, w.path.clone(), false, env, job, launch_tx.clone());
+                            // once, here in the pane (one just made from the
+                            // template waits until it's been saved).
+                            // Otherwise a tmp-space worktree is only there to
+                            // look at: no startup script.
+                            let unsaved = app.jobs.get(job).and_then(|j| j.await_save.clone()).is_some_and(|(p, at)| modified(&p) == Some(at));
+                            if review && unsaved {
+                                info!("tui", "Pulled {}; waiting for its review script to be saved", w.branch);
+                                app.jobs.ask(job, jobs::Question::SaveReviewScript { repo_id, worktree_path: w.path.clone() });
+                            } else if review {
+                                run_review_script(app, job, repo_id, w.path.clone(), &launch_tx);
                             } else if !w.tmp_space && am_core::worktrees::has_script(&repo_id) {
                                 app.jobs.ask(job, jobs::Question::RunScript { repo_id, worktree_path: w.path.clone() });
                             } else {
@@ -395,6 +400,19 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             }
             if app.jobs.tick(Instant::now()) {
                 app.rebuild_rows();
+            }
+            // Review scripts made from the template run once they're saved.
+            for (job, repo_id, worktree_path, path, at) in app.jobs.awaiting_save() {
+                match modified(&path) {
+                    Some(m) if m == at => {}
+                    Some(_) => {
+                        info!("tui", "Review script {} saved; running it in {worktree_path}", path.display());
+                        run_review_script(app, job, repo_id, worktree_path, &launch_tx);
+                    }
+                    None => {
+                        app.jobs.finish(job, Err(format!("{} was removed", path.display())), Instant::now());
+                    }
+                }
             }
             if app.show_log {
                 // Only re-read once something was appended (or it rotated).
@@ -589,6 +607,25 @@ fn dispatch(
             app.notice = Some("Stopped tracking session".into());
             collector.refresh(false);
         }
+        Action::RunReviewScript { job, repo_id, worktree_path } => run_review_script(app, job, repo_id, worktree_path, launch_tx),
+        Action::AddReviewScriptAndPull(job, repo, req) => {
+            let repo_id = repo.id.clone();
+            ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone());
+            match ScriptKind::Review.create(&repo_id) {
+                Ok(path) => {
+                    if let Some(at) = modified(&path) {
+                        app.jobs.await_save(job, path, at);
+                    }
+                }
+                Err(e) => {
+                    am_core::warn!("scripts", "Couldn't create the review script for {repo_id}: {e}");
+                    app.jobs.finish(job, Err(format!("Couldn't create the review script: {e}")), Instant::now());
+                    app.notice = Some(format!("Couldn't create the review script: {e}"));
+                    return Ok(false);
+                }
+            }
+            return dispatch(Action::EditScript(repo_id, ScriptKind::Review), terminal, app, collector, theme, launch_tx);
+        }
         Action::RunScript { job, repo_id, worktree_path } => {
             let in_window = app.settings.startup_script_in_window();
             ops::run_script(ScriptKind::Startup, repo_id, worktree_path, in_window, Vec::new(), job, launch_tx.clone());
@@ -692,6 +729,22 @@ fn tail_log(n: usize) -> Vec<String> {
     let buf = String::from_utf8_lossy(&bytes);
     let lines: Vec<String> = buf.lines().map(str::to_owned).collect();
     lines[lines.len().saturating_sub(n)..].to_vec()
+}
+
+/// Run a "pull + run script" job's review script in its worktree, with the
+/// PR's environment plus `AM_WORKTREE_PATH`, in a new terminal window (so an
+/// agent it starts shows its own UI and can be talked to), or in the jobs
+/// pane when no window can be opened.
+fn run_review_script(app: &mut App, job: u64, repo_id: String, worktree_path: String, tx: &std::sync::mpsc::Sender<launcher::Msg>) {
+    let mut env = app.jobs.get(job).and_then(|j| j.review_script()).map(<[_]>::to_vec).unwrap_or_default();
+    env.push(("AM_WORKTREE_PATH".into(), worktree_path.clone()));
+    app.jobs.resume(job);
+    info!("tui", "Running the review script for {repo_id} in {worktree_path}");
+    ops::run_script(ScriptKind::Review, repo_id, worktree_path, true, env, job, tx.clone());
+}
+
+fn modified(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 fn settings_file_mtime() -> Option<std::time::SystemTime> {

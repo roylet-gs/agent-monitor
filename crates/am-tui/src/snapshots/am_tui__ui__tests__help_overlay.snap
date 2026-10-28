@@ -11,7 +11,7 @@ expression: "render(&app, 100, 20)"
 │ · main  │               w  toggle log pane (Settings → View logs… opens the file)      │         │
 │         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
 │         │  v / V / ctrl-v  PRs to review: page / beside the list / new window          │         │
-│         │           t / T  review page: pull into Reviewing / and run its script       │         │
+│         │  t / T / ctrl-⏎  review page: pull into Reviewing / + run script             │         │
 │         │               A  add repository                                              │         │
 │         │               f  suggest a feature (files a GitHub issue)                    │         │
 │         │               s  settings (Key bindings… changes these keys)                 │         │
