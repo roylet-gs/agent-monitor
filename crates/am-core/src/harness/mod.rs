@@ -17,6 +17,7 @@
 
 pub mod antigravity;
 pub mod campfire;
+pub mod amp;
 pub mod claude;
 pub mod codebuddy;
 pub mod codex;
@@ -294,6 +295,7 @@ impl HarnessKind {
     pub const PI: HarnessKind = HarnessKind(&pi::PI);
     pub const OMP: HarnessKind = HarnessKind(&omp::OMP);
     pub const CAMPFIRE: HarnessKind = HarnessKind(&campfire::CAMPFIRE);
+    pub const AMP: HarnessKind = HarnessKind(&amp::AMP);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -369,6 +371,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::PI,
     HarnessKind::OMP,
     HarnessKind::CAMPFIRE,
+    HarnessKind::AMP,
 ];
 
 struct Registry {

@@ -1,7 +1,7 @@
 <h1 align="center">Agent Monitor</h1>
 
 <p align="center">
-  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent, OpenCode, Pi, OMP, Campfire)</strong>
+  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent, OpenCode, Pi, OMP, Campfire, Amp)</strong>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent, OpenCode, Pi, OMP or Campfire) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
+  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI, Rovo Dev, Kimi Code, Hermes Agent, OpenCode, Pi, OMP, Campfire or Amp) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
 </p>
 
 ---
@@ -66,7 +66,7 @@ On first launch a setup wizard asks whether you want the full dashboard or only 
 
 - **macOS or Linux** (arm64 or x64)
 - **git**
-- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code**, **Factory Droid**, **Qoder CLI**, **CodeBuddy Code**, **Antigravity CLI** (`agy`), **Grok CLI**, **Muse Code**, **Kiro CLI** (as its `agent-monitor` agent), **Rovo Dev CLI** (`acli rovodev`), **Kimi Code**, **Hermes Agent**, **OpenCode**, **Pi**, **OMP** (oh-my-pi) or **Campfire**
+- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code**, **Factory Droid**, **Qoder CLI**, **CodeBuddy Code**, **Antigravity CLI** (`agy`), **Grok CLI**, **Muse Code**, **Kiro CLI** (as its `agent-monitor` agent), **Rovo Dev CLI** (`acli rovodev`), **Kimi Code**, **Hermes Agent**, **OpenCode**, **Pi**, **OMP** (oh-my-pi), **Campfire** or **Amp** (via a plugin)
 - **gh CLI** (optional), for PR and CI status ([install](https://cli.github.com)); run `gh auth login` once
 - **Linear API key** (optional), for ticket tracking
 - **Node.js >= 18** only if you install through npm (the package is a small launcher for the native binary)
@@ -636,8 +636,9 @@ A harness is the CLI or editor that runs the agent and fires the hooks. `am hook
 | Pi | `pi` | `~/.pi/agent/extensions/agent-monitor.ts` (an extension am writes; `$PI_CODING_AGENT_DIR/extensions/` when set) | confirm/select/input dialogs during a turn | `pi --session <id>` |
 | OMP (oh-my-pi) | `omp` | the extension `~/.omp/agent/extensions/agent-monitor-omp.ts` (or under `$PI_CODING_AGENT_DIR`) | tool approvals, questions, plan review | `omp --session <id>` |
 | Campfire | `campfire` | `~/.campfire/agent/extensions/agent-monitor-campfire.ts` (an extension am writes and owns) | a collaborator waiting to join or asking for a capability | `campfire --session <id>` |
+| Amp (CLI) | `amp` | `~/.config/amp/plugins/agent-monitor.ts` (a plugin am writes and owns) | tool approvals | `amp threads continue <id>` |
 
-Any other CLI whose hooks run a command with a JSON payload on stdin can be added without code as a JSON manifest in `~/.agent-monitor/agents/` (`docs/agent-providers.md`). Not supported yet: Amp (plugins only, no command hooks), Aider (no hooks), Windsurf and Crush (no session or turn-end events), JetBrains Junie (its `Stop` hook carries no session or directory) and Augment Auggie (hook commands must be bare script paths).
+Any other CLI whose hooks run a command with a JSON payload on stdin can be added without code as a JSON manifest in `~/.agent-monitor/agents/` (`docs/agent-providers.md`). Not supported yet: Aider (no hooks), Windsurf and Crush (no session or turn-end events), JetBrains Junie (its `Stop` hook carries no session or directory) and Augment Auggie (hook commands must be bare script paths).
 
 ---
 
@@ -708,6 +709,7 @@ am logs a summary every 5 minutes (and when it quits), plus a `[perf]` warning w
 - **Pi:** Pi has no shell hooks, so am installs a small extension, `~/.pi/agent/extensions/agent-monitor.ts` (`$PI_CODING_AGENT_DIR/extensions/` when set), that reports Pi's events to `am-hook`. Pi loads extensions when a session starts: restart running sessions (or `/reload`) after installing. A file of that name am didn't write is never overwritten. `waiting` shows while an extension dialog (confirm/select/input) is open during a turn.
 - **OMP (oh-my-pi):** OMP has no command hooks, so am installs a small extension, `agent-monitor-omp.ts`, in OMP's agent dir (`$PI_CODING_AGENT_DIR`, else `~/.omp/agent`) that runs `am-hook` on OMP's events; restart running `omp` sessions after installing. OMP counts as installed when `~/.omp` exists or `omp` is on `$PATH`. With a named profile (`OMP_PROFILE`), set `PI_CODING_AGENT_DIR` to that profile's agent dir when running `am hooks install`. OMP's task subagents show as subagents of the session.
 - **Campfire:** Campfire has no command hooks, so `am hooks install` writes a small extension, `agent-monitor-campfire.ts`, into Campfire's `extensions/` directory (`$CAMPFIRE_CODING_AGENT_DIR`, else `~/.campfire/agent`) that runs `am-hook` on session and turn events and when a collaborator waits to join or asks for a capability. Only the session's host is shown (`CAMPFIRE_SESSION_ROLE=host`); a joiner's view reports nothing. Campfire loads extensions at startup, so restart running sessions after installing.
+- **Amp:** Amp has no command hooks, so `am hooks install` writes a small plugin, `agent-monitor.ts`, into `~/.config/amp/plugins/`. Amp's CLI (not the editor extension) loads plugins from there at startup, so restart running sessions after installing; `PLUGINS=off` turns them off, and older Amp releases loaded them only with `PLUGINS=all` set. Amp has no session-end event, so a thread counts as open until its `amp` process exits.
 - **Copilot CLI / Factory Droid:** both read hooks at startup, so restart running sessions after installing. Copilot's permission events aren't available in the hook format am uses, so only questions show as `waiting`.
 - **Grok CLI:** Grok fires `SessionEnd` after every turn, so am ends the turn on `Stop` and leaves `SessionEnd` alone. Grok also sends a generic "Tool permission requested" notification for every tool step (even in auto-approve mode), which am doesn't count as `waiting`; a specific prompt ("Grok needs permission to run rm") does. Grok reports no tool results, so the turn's `Stop` clears that wait (`done`).
 - **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.

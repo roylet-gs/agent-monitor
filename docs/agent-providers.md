@@ -285,6 +285,7 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Pi (`pi`) | `~/.pi/agent/extensions/agent-monitor.ts` (`$PI_CODING_AGENT_DIR/extensions/` when set): an extension am writes and owns (`agent-monitor-hook-plugin v1` marker), plain JavaScript importing only Node built-ins, that spawns am-hook once per event (`--worktree ""`, queued, killed after 5 s) | Claude-shaped payload built by the extension: `session_id` from `ctx.sessionManager`, `cwd` from `ctx.cwd`; Pi's tool names (`bash`, `read`…) mapped in `pi.json`; subagent tools (`subagent`, `task`…) become `SubagentStart`/`Stop` with the tool call id; one `Stop` per turn, on `agent_settled` + `ctx.isIdle()` (Pi ≥ 0.80.5) else `agent_end` | `ctx.ui.confirm`/`select`/`input` dialogs during a turn (wrapped, no permission event) | `pi --session <id>` / `--continue`; sessions `~/.pi/agent/sessions/--<cwd>--/<time>_<id>.jsonl` (or `$PI_CODING_AGENT_SESSION_DIR`), header line `{"type":"session","id","cwd"}` |
 | OMP / oh-my-pi (`omp`) | No command hooks: am owns the TypeScript extension `<agent dir>/extensions/agent-monitor-omp.ts` (`HookInstall::OwnedFile`; agent dir `$PI_CODING_AGENT_DIR` → `~/${PI_CONFIG_DIR:-.omp}/agent`; detected from `~/${PI_CONFIG_DIR:-.omp}` or `omp` on `$PATH`, not the agent dir, which Pi's variable moves) | The extension builds Claude-shaped payloads (`session_id`, `cwd`, `tool_name`…) and passes `--worktree ""`; OMP tool names (`bash`, `read`, `ask`, `task`…) are mapped; other sessions in the same omp process (task subagents) report as subagents; hooks run one at a time in firing order; `ask`'s end goes without the tool name | `tool_approval_requested`, the `ask` tool, the plan review | `omp --session <id>` / `--continue` |
 | Campfire (`campfire`) | No hooks: an `OwnedFile` extension, `extensions/agent-monitor-campfire.ts` in `$CAMPFIRE_CODING_AGENT_DIR` (else `~/.campfire/agent`), which Campfire loads at startup | A white-label of Pi: the extension subscribes to Pi's extension events and Campfire's collaborative observer bridge and runs am-hook with a Claude-shaped payload and canonical event names ([below](#campfires-bridge-extension)); `--worktree ""`, payload `cwd`; host only | `join.requested` / `permission.asked` → `PreToolUse` `permission_prompt` | `campfire --session <id>`; sessions am's hooks recorded |
+| Amp (`amp`) | No hooks: an `OwnedFile` plugin, `~/.config/amp/plugins/agent-monitor.ts`, which the Amp CLI loads at startup (older releases only with `PLUGINS=all`) | The plugin subscribes to Amp's plugin events and each thread's `state` observable and runs am-hook per state change with a Claude-shaped payload and canonical event names (see below); the thread id is the `session_id`, `cwd` is the workspace root | `PermissionRequest` from `state` = `awaiting-approval` | `amp threads continue <id>`; threads live on Amp's servers, so resume offers the sessions am's hooks recorded |
 
 ### OMP (oh-my-pi)
 
@@ -322,7 +323,6 @@ Not built in, and why:
 - **Windsurf / Devin Desktop**: no session, stop or permission events; the only turn end is the async `post_cascade_response`.
 - **Crush**: `PreToolUse` only.
 - **Cline**: one executable file per hook, and current docs point to in-process SDK plugins.
-- **Amp**: JS/TS plugins only; supporting it means shipping a small bridge plugin that runs `am-hook`, as am does for OpenCode and Campfire.
 - **Aider**: no hooks, only a `--notifications-command` with no payload.
 - **Mistral Vibe**: TOML config with tool and `post_agent` events only.
 
@@ -367,3 +367,20 @@ Campfire (a white-label of the Pi coding agent with collaborative sessions) has 
 | `relay.error`, anything else | nothing |
 
 Only the host is reported: unless `CAMPFIRE_SESSION_ROLE=host` the extension registers nothing, because a joiner is an ephemeral view of someone else's session whose command line carries the invite token (the extension never reads `process.argv`). It keeps one observer listener per process (in `globalThis[Symbol.for("agent-monitor.campfire.observer")]`), so a reload replaces it. Unlike cmux's Campfire extension it doesn't step aside for Campfire's built-in cmux bridge; that bridge reports to cmux, not am. No real tool events are sent, so a run is `executing` from prompt to `agent_end`.
+
+### Amp's bridge plugin
+
+Amp has no command hooks; its CLI loads TS/JS plugins (run with Bun) from `.amp/plugins/` and `~/.config/amp/plugins/` at startup, only in the CLI (not the editor extension) and not with `PLUGINS=off`. Older releases loaded them only with `PLUGINS=all` and wanted the first line `// @i-know-the-amp-plugin-api-is-wip-and-very-experimental-right-now`; the template keeps that line for them. am always writes to `~/.config/amp/plugins/` (not `$XDG_CONFIG_HOME`), the directory whose `~/.config/amp` parent decides whether Amp is present. `am hooks install --agent amp` writes `agent-monitor.ts` there (`harness/amp-plugin.ts` with am-hook's argv filled in; `HookInstall::OwnedFile`, no registration). The template is plain JavaScript with no `import type` from `@ampcode/plugin`, so nothing must resolve at runtime. It runs `am-hook hook-event --agent amp --worktree "" --event <E>` without a shell, one at a time, detached, with the payload on stdin, a 5 s kill and an allow-listed environment (`HOME`, `PATH`, `AM_DATA_DIR`…; never `AMP_API_KEY`), and never throws into Amp. `cwd` is `amp.system.workspaceRoot` (the plugin process may run elsewhere), else `$PWD`.
+
+| Amp | Sent |
+|---|---|
+| `session.start` | `SessionStart`, only for a thread new to this process (it also fires on switching to a thread, and `SessionStart` means `idle`) |
+| `agent.start` (or `state` → `running` outside a turn) | `UserPromptSubmit`, once per turn |
+| `tool.call` / `tool.result` | `PreToolUse` / `PostToolUse` with Amp's tool name (`edit_file` → `Edit`… in `amp.json`) and only `command`/`file_path`/`pattern`/`url`/`query`/`description`; `tool.call` answers `allow`. Threads that never started in this process (a subagent's) are left out |
+| thread `state` → `awaiting-approval` / `awaiting-input` | `PermissionRequest` (with the last tool's name) |
+| thread `state` back to `running` | `PostToolUse` (back to `executing`) |
+| `agent.end` + thread `state` → `idle` | `Stop` (`done`, `cancelled`) or `StopFailure` (`error`), once per turn; `PostToolUse` first when still waiting, since `Stop` keeps `waiting`. A thread without a `state` observable (older Amp) ends at `agent.end` |
+| thread `state` → `idle` in a turn no `agent.start` opened (another plugin's `thread.append`, another Amp client) | `Stop`, since `agent.end` may never reach this process |
+| thread `state` → `error` | `StopFailure` |
+
+There is no session-end event; a thread stays open until Amp's process goes, and the process scan stops counting it then.

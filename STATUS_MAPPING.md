@@ -251,6 +251,20 @@ Grok fires `SessionEnd` at the end of **every turn**, alongside `Stop`, not when
 
 Stop waits for `agent_settled` because retries, compaction and queued messages start another run after `agent_end`; a second `Stop` would turn `done` into `idle`, so the extension sends one per turn. Pi awaits `session_shutdown` (quit, `/new`, `/resume`, `/fork`, `/reload`), so the extension waits at most one run's timeout (5 s) for `SessionEnd` to reach am-hook; if that runs out, the tool events still queued are dropped.
 
+**Amp** (`--agent amp`): Amp has no command hooks. am's plugin (`~/.config/amp/plugins/agent-monitor.ts`) sends canonical event names itself, with `--worktree ""`, the thread id as `session_id` and the workspace root as `cwd`:
+
+| Amp event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session.start`, first time this Amp process sees the thread | `SessionStart` | `idle` |
+| `agent.start`, or `state` → `running` outside a turn | `UserPromptSubmit` (once per turn) | `executing` |
+| `tool.call` / `tool.result` | `PreToolUse` / `PostToolUse` | `executing` (`edit_file` → `Edit`, `create_file` → `Write`…) |
+| thread `state` `awaiting-approval` / `awaiting-input` | `PermissionRequest` | `waiting` |
+| thread `state` back to `running` | `PostToolUse` | `executing` |
+| `agent.end` (`done`/`cancelled`) once `state` is `idle`, or `state` → `idle` in a turn no `agent.start` opened | `Stop` (once per turn) | `done` after work |
+| `agent.end` `error`, or `state` `error` | `StopFailure` | `idle` |
+
+The plugin sends one `Stop` per turn, since a second would turn `done` into `idle`, and waits for the thread's `state` to reach `idle` (another plugin can continue a turn from `agent.end`); a turn a `state` change opened (another plugin's `thread.append`, another Amp client) ends on `idle`, since its `agent.end` may never reach this process. `session.start` also fires when the user switches to a thread, so a thread the process already knows gets no second `SessionStart`, which would show a running or `done` thread as `idle`; without a `state` observable (older Amp) `agent.end` ends the turn. A turn that ends while waiting sends `PostToolUse` first, since `Stop` keeps `waiting`. Amp has no session-end event.
+
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 
 | Cursor event | Canonical event | Resulting status |
