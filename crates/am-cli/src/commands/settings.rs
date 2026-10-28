@@ -122,6 +122,10 @@ pub fn set(key: &str, value: &str) {
         ));
     }
 
+    if key == "appMode" && am_core::settings::AppMode::parse(value).is_none() {
+        fail(&format!("Invalid value for appMode: {value}. Use one of: {}.", am_core::settings::AppMode::IDS.join(", ")));
+    }
+
     if key == "reviewGroups" || key == "reviewDefaultGroup" {
         fail(&format!(
             "{key} holds review groups and can't be set from the CLI.\n\

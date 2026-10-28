@@ -6,7 +6,7 @@ expression: "render(&app, 100, 22)"
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ featu╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮░░ 121k │
 │ ◐ fix/o│                                                                                │░░ 185k │
-│        │  ✓ Editor  ›  ✓ Hooks  ›  ✓ Repos  ›  ✓ Integrations  ›  Reviews  ›  Context   │        │
+│        │  ✓ Mode › ✓ Editor › ✓ Hooks › ✓ Repos › ✓ Integrations › Reviews › Context    │        │
 │gridsigh│                                                                                │────────│
 │ · main │ Which pull requests are waiting on your review? (v opens them;                 │        │
 │        │ the dashboard border shows how many)                                           │        │

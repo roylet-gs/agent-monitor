@@ -94,7 +94,11 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     let area = areas.jobs.map_or(area, |jobs| beside_jobs(area, jobs));
     if app.show_help {
         hits.clear();
-        draw_help(f, theme, area, &app.keymap);
+        if app.reviews_only() {
+            draw_review_help(f, theme, area, &app.keymap);
+        } else {
+            draw_help(f, theme, area, &app.keymap);
+        }
     }
     if let Some(editor) = &app.settings_editor {
         hits.clear();
@@ -156,6 +160,7 @@ pub enum List {
     ThemeTokens,
     Palette,
     Browser,
+    SetupMode,
     SetupIde,
     SetupIntegrations,
     SetupReviews,
@@ -345,14 +350,15 @@ fn settings_width(area: Rect) -> u16 {
 }
 
 /// The settings list as lines: `Some(field index)` for a field, `None` for a
-/// section header or blank line. A cut-down editor (`only`) has no headers.
+/// section header or blank line. The review filter box has no headers.
 fn settings_lines(ed: &crate::settings_ui::SettingsEditor) -> Vec<Option<usize>> {
-    if ed.only.is_some() {
+    if ed.is_filter_box() {
         return ed.fields().into_iter().map(Some).collect();
     }
     let mut lines = Vec::new();
     let mut section = "";
-    for (i, field) in crate::settings_ui::FIELDS.iter().enumerate() {
+    for i in ed.fields() {
+        let field = &crate::settings_ui::FIELDS[i];
         if field.section != section {
             section = field.section;
             if !lines.is_empty() && !compact() {
@@ -390,7 +396,7 @@ fn draw_settings(
 ) {
     use crate::settings_ui::{FIELDS, Kind, sort_label};
     // The review page's filter box (`f`) is the same editor, cut down.
-    let filters = ed.only.is_some();
+    let filters = ed.is_filter_box();
     let (name, hint, update) = if filters { ("Review filters ", FILTERS_HINT, None) } else { ("Settings ", SETTINGS_HINT, update) };
     let form = ed.groups.as_ref().and_then(|g| g.form.as_ref());
     let typing_list =
@@ -1008,19 +1014,27 @@ fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &
     use crate::keymap::{self, Command};
     // `▌` + label, key, `(default ctrl-v)`, then the review-page column.
     const REVIEW_X: usize = 1 + 2 + 24 + 8 + 17;
+    // Review-only mode lists only the page's keys, so the column says what
+    // each does there.
     let review_col = list.width as usize >= REVIEW_X + 20;
+    let column_title = if ed.reviews_mode { "What it does" } else { "On the review page" };
     let header = " Key bindings — ⏎ change · x reset · R reset all · esc back";
     hint_hits(hits, header, list.x, list.y);
-    let column = if review_col { format!("{:REVIEW_X$}On the review page", "") } else { String::new() };
+    let column = if review_col { format!("{:REVIEW_X$}{column_title}", "") } else { String::new() };
     f.render_widget(
         Paragraph::new(vec![Line::styled(header, theme.faint()), Line::styled(column, theme.faint())]),
         Rect { height: 2.min(list.height), ..list },
     );
-    let footer = " Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc back · ctrl-c quit";
+    let footer = if ed.reviews_mode {
+        " Always on: ↑↓ pgup pgdn home end · ⇥ jobs · esc back · ctrl-c quit"
+    } else {
+        " Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc back · ctrl-c quit"
+    };
     // (command index, line); section headers take no index.
     let mut rows: Vec<(Option<usize>, Line)> = Vec::new();
     let mut section = "";
-    for (i, cmd) in Command::ALL.into_iter().enumerate() {
+    for i in ed.listed() {
+        let cmd = Command::ALL[i];
         if cmd.section() != section {
             section = cmd.section();
             rows.push((None, Line::styled(format!(" {section}"), theme.bold(theme.accent))));
@@ -1043,7 +1057,8 @@ fn draw_key_bindings(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &
             };
             spans.push(Span::styled(format!("{default:<17}"), theme.faint()));
             if review_col {
-                let (text, style) = match cmd.on_review_page() {
+                let what = if ed.reviews_mode { cmd.in_reviews_mode() } else { cmd.on_review_page() };
+                let (text, style) = match what {
                     Some(t) => (t, theme.fg(theme.text)),
                     None => ("—", theme.faint()),
                 };
@@ -1445,19 +1460,23 @@ fn spinner(now: i64) -> &'static str {
 #[allow(clippy::needless_late_init)] // each arm builds lines then picks its hint
 fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup, hits: &mut Vec<Hit>) {
     use crate::setup::{CONTEXT_CHOICES, CONTEXT_CUSTOM, IDE_CUSTOM, IDES, Step};
-    let steps = [
-        (Step::Editor, "Editor"),
-        (Step::Hooks, "Hooks"),
-        (Step::Repos, "Repos"),
-        (Step::Integrations, "Integrations"),
-        (Step::Reviews, "Reviews"),
-        (Step::Context, "Context"),
-    ];
+    let name = |step: Step| match step {
+        Step::Mode => "Mode",
+        Step::Editor => "Editor",
+        Step::Hooks => "Hooks",
+        Step::Repos => "Repos",
+        // Review-only mode: that step is only GitHub (and Linear).
+        Step::Integrations if s.reviews_mode => "GitHub",
+        Step::Integrations => "Integrations",
+        Step::Reviews => "Reviews",
+        Step::Context => "Context",
+    };
+    let steps = s.steps();
     let mut crumbs = vec![Span::raw(" ")];
-    let cur = steps.iter().position(|(st, _)| *st == s.step).unwrap_or(0);
-    for (i, (_, name)) in steps.iter().enumerate() {
+    let cur = steps.iter().position(|st| *st == s.step).unwrap_or(0);
+    for (i, name) in steps.iter().map(|st| name(*st)).enumerate() {
         if i > 0 {
-            crumbs.push(Span::styled("  ›  ", theme.faint()));
+            crumbs.push(Span::styled(" › ", theme.faint()));
         }
         let style = if i == cur { theme.bold(theme.border_focus) } else if i < cur { theme.fg(theme.green) } else { theme.faint() };
         crumbs.push(Span::styled(format!("{} {name}", if i < cur { "✓" } else { "" }).trim().to_string(), style));
@@ -1467,8 +1486,32 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
     let mut marks: Vec<(usize, Target, bool)> = Vec::new();
     let hint;
     match s.step {
+        Step::Mode => {
+            lines.push(Line::raw("What do you want am for?"));
+            lines.push(Line::raw(""));
+            let choices = [
+                ("Agents & worktrees", "the full dashboard: agent status, worktrees, PRs, tickets and reviews"),
+                ("Review requests only", "just the PRs waiting on your review, to pull and open"),
+            ];
+            for (i, (label, what)) in choices.into_iter().enumerate() {
+                let sel = (i == 1) == s.reviews_mode;
+                marks.push((lines.len(), Target::Item(List::SetupMode, i), false));
+                lines.push(Line::from(vec![
+                    Span::styled(if sel { "  ● " } else { "  ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
+                    Span::styled(label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
+                ]));
+                lines.push(Line::styled(format!("    {what}"), theme.faint()));
+            }
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Settings → Mode switches later", theme.faint()));
+            hint = if s.cancellable { "↑↓ choose  ⏎ next  esc cancel" } else { "↑↓ choose  ⏎ next" };
+        }
         Step::Editor => {
-            lines.push(Line::raw("Where should Enter open a worktree?"));
+            lines.push(Line::raw(if s.reviews_mode {
+                "Where should Enter open a pulled PR?"
+            } else {
+                "Where should Enter open a worktree?"
+            }));
             lines.push(Line::raw(""));
             for (i, (_, label)) in IDES.iter().enumerate() {
                 let sel = i == s.ide;
@@ -1493,7 +1536,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             if let Some(e) = &s.ide_error {
                 lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
             }
-            hint = if s.cancellable { "↑↓ choose  ⏎ next  esc cancel" } else { "↑↓ choose  ⏎ next" };
+            hint = "↑↓ choose  ⏎ next  esc back";
         }
         Step::Hooks => {
             lines.push(Line::raw("am learns what each agent is doing from its CLI's hooks"));
@@ -1526,7 +1569,11 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             hint = if s.hooks_installed { "⏎ next  esc back" } else { "⏎/y install  n skip  esc back" };
         }
         Step::Repos => {
-            lines.push(Line::raw("Add the git repositories whose worktrees you want to watch."));
+            lines.push(Line::raw(if s.reviews_mode {
+                "Add the git repositories whose pull requests you review."
+            } else {
+                "Add the git repositories whose worktrees you want to watch."
+            }));
             lines.push(Line::raw(""));
             for r in &s.repos_added {
                 lines.push(Line::styled(format!("  ✓ {r}"), theme.fg(theme.green)));
@@ -1538,32 +1585,50 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             hint = "tab complete  ⏎ add (empty: next)  esc back";
         }
         Step::Integrations => {
-            lines.push(Line::raw("Optional: show PRs/CI and Linear tickets next to each branch."));
-            lines.push(Line::raw(""));
             let f0 = s.integration_field == 0;
+            if s.reviews_mode {
+                lines.push(Line::raw("Review requests come from GitHub, through the gh CLI."));
+                lines.push(Line::raw("Optional: a Linear key shows each PR's ticket."));
+                lines.push(Line::raw(""));
+            } else {
+                lines.push(Line::raw("Optional: show PRs/CI and Linear tickets next to each branch."));
+                lines.push(Line::raw(""));
+            }
             marks.push((lines.len(), Target::Item(List::SetupIntegrations, 0), false));
             marks.push((lines.len() + 1, Target::Item(List::SetupIntegrations, 1), false));
-            lines.push(Line::from(vec![
-                Span::styled(if f0 { "▌" } else { " " }, theme.bold(theme.border_focus)),
-                Span::raw(format!(" [{}] GitHub PR & CI status (via gh)", if s.gh { "x" } else { " " })),
-            ]));
+            let cursor = Span::styled(if f0 { "▌" } else { " " }, theme.bold(theme.border_focus));
+            lines.push(match (s.reviews_mode, s.gh_found) {
+                (false, _) => Line::from(vec![cursor, Span::raw(format!(" [{}] GitHub PR & CI status (via gh)", if s.gh { "x" } else { " " }))]),
+                (true, true) => Line::from(vec![cursor, Span::styled(" ✓ gh found (it must be logged in: gh auth status)", theme.fg(theme.green))]),
+                (true, false) => Line::from(vec![
+                    cursor,
+                    Span::styled(" ✗ gh not found — install it, then run gh auth login", theme.fg(theme.red)),
+                ]),
+            });
             let masked = "•".repeat(s.linear_key.chars().count());
             lines.push(Line::from(vec![
                 Span::styled(if f0 { " " } else { "▌" }, theme.bold(theme.border_focus)),
                 Span::raw(" Linear API key: "),
                 Span::styled(if masked.is_empty() && f0 { "(optional)".to_string() } else { format!("{masked}{}", if f0 { "" } else { "▏" }) }, theme.faint()),
             ]));
-            hint = "tab field  space toggle  ⏎ next  esc back";
+            hint = if s.reviews_mode { "tab field  ⏎ next  esc back" } else { "tab field  space toggle  ⏎ next  esc back" };
         }
         Step::Reviews => {
             let r = &s.review;
-            lines.push(Line::raw("Which pull requests are waiting on your review? (v opens them;"));
-            lines.push(Line::raw("the dashboard border shows how many)"));
+            if s.reviews_mode {
+                lines.push(Line::raw("Which pull requests are waiting on your review?"));
+            } else {
+                lines.push(Line::raw("Which pull requests are waiting on your review? (v opens them;"));
+                lines.push(Line::raw("the dashboard border shows how many)"));
+            }
             lines.push(Line::raw(""));
             let cursor = |i: usize| Span::styled(if r.field == i { "▌" } else { " " }, theme.bold(theme.border_focus));
             let check = |on: bool| if on { "[x]" } else { "[ ]" };
-            marks.push((lines.len(), Target::Item(List::SetupReviews, 0), false));
-            lines.push(Line::from(vec![cursor(0), Span::raw(format!(" {} Show PRs waiting for my review", check(r.enabled)))]));
+            // Review-only mode has no on/off row: they're what it's for.
+            if !s.reviews_mode {
+                marks.push((lines.len(), Target::Item(List::SetupReviews, 0), false));
+                lines.push(Line::from(vec![cursor(0), Span::raw(format!(" {} Show PRs waiting for my review", check(r.enabled)))]));
+            }
             let scopes = ["Me and my teams", "Only me, by name", "Only my teams"];
             for (k, label) in scopes.iter().enumerate() {
                 let sel = r.scope == k;
@@ -1585,8 +1650,11 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
                 None => format!("Keeps your {} review groups", r.existing_groups.len()),
             };
             lines.push(Line::styled(groups, theme.fg(theme.text)));
-            lines.push(Line::styled("More groups and filters: v, then f → Groups…", theme.faint()));
-            hint = "↑↓ move  space toggle  ⏎ next  esc back";
+            lines.push(Line::styled(
+                if s.reviews_mode { "More groups and filters: f → Groups…" } else { "More groups and filters: v, then f → Groups…" },
+                theme.faint(),
+            ));
+            hint = if s.reviews_mode { "↑↓ move  space toggle  ⏎ finish  esc back" } else { "↑↓ move  space toggle  ⏎ next  esc back" };
         }
         Step::Context => {
             lines.push(Line::raw("How many tokens of context should the bar measure against?"));
@@ -1616,7 +1684,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             hint = "↑↓ choose  ⏎ finish  esc back";
         }
     }
-    // 82 columns fits the six breadcrumbs on one line.
+    // 82 columns fits the seven breadcrumbs on one line.
     let rect = modal_rect(area, 82, lines.len() as u16 + 4);
     clear(f, theme, rect);
     bottom_hint_hits(hits, &format!(" {hint} "), rect);
@@ -1939,6 +2007,15 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
             corner.push(Span::styled(badge, theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
         }
     }
+    // Review-only: no ─Worktrees border to carry the update notice, so it
+    // goes first here when it fits.
+    if let Some(latest) = shown_update(app).map(|u| &u.latest).filter(|_| app.reviews_only()) {
+        let used = corner.iter().map(|s| s.content.width()).sum::<usize>();
+        let room = (area.width as usize).saturating_sub(2 + "─Review requests ".width() + used + 1);
+        if let Some(label) = [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room) {
+            corner.insert(0, Span::styled(label, theme.bold(theme.green)));
+        }
+    }
     if !corner.is_empty() {
         block = block.title(Line::from(corner).alignment(Alignment::Right));
     }
@@ -1967,6 +2044,10 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     }
     if ordered.is_empty() {
         let msg = match &app.snapshot.reviews {
+            // Review-only mode hides those switches; setup turns them back on.
+            None if !app.settings.review_requests_on() && app.settings.reviews_mode() => {
+                "Review requests are off — Settings (s) → Run setup again… turns them on"
+            }
             None if !app.settings.review_requests_on() => "Review requests are off — turn them on in Settings (s)",
             None => "Loading…",
             Some(_) => "Nothing waiting on your review",
@@ -2953,10 +3034,10 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
         // the review script, a new window) in place of ⏎'s plain meaning.
         if app.held.ctrl {
             keys.push(raw("ctrl-⏎", "pull + run script", Some(Key::CtrlEnter), 0));
-            keys.extend(cmd(Command::ReviewWindow, "new window", 0).filter(|_| !app.reviews_only));
+            keys.extend(cmd(Command::ReviewWindow, "new window", 0).filter(|_| !app.reviews_only()));
         } else if app.held.shift {
             keys.extend(cmd(Command::PullAndRunScript, "pull + run script", 0));
-            keys.extend(cmd(Command::ReviewSplit, if app.reviews.as_ref().is_some_and(|p| p.split) { "close" } else { "beside list" }, 0).filter(|_| !app.reviews_only));
+            keys.extend(cmd(Command::ReviewSplit, if app.reviews.as_ref().is_some_and(|p| p.split) { "close" } else { "beside list" }, 0).filter(|_| !app.reviews_only()));
         } else {
             keys.push(raw("⏎", enter, Some(Key::Enter), 0));
         }
@@ -2978,7 +3059,7 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             if app.jobs.visible() {
                 keys.push(raw("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, Some(Key::Tab), 0));
             }
-            keys.push(raw("esc", if app.reviews_only { "quit" } else { "back" }, Some(Key::Esc), 0));
+            keys.push(raw("esc", if app.reviews_only() { "quit" } else { "back" }, Some(Key::Esc), 0));
         }
         if app.modifiers_reported && !app.held.shift && !app.held.ctrl {
             keys.push(raw("⇧/ctrl", "more", None, 3));
@@ -3123,6 +3204,97 @@ fn draw_keybar(f: &mut Frame, app: &App, theme: &Theme, area: Rect, hits: &mut V
     f.render_widget(Paragraph::new(Line::from(spans)), keys_area);
 }
 
+/// A command's key on the help overlay: its binding, else its first fixed
+/// key when the line adds none of its own (`fixed` empty), else `—`.
+fn help_key(keymap: &crate::keymap::Keymap, c: Command, fixed: &str) -> String {
+    match (keymap.key(c), c.fixed_keys().first(), fixed.is_empty()) {
+        (Some(k), _, _) => crate::keymap::display(k),
+        (None, Some(k), true) => crate::keymap::display(*k),
+        _ => "—".into(),
+    }
+}
+
+/// Draw a help overlay: `lines` in a centred `Keys` box.
+fn draw_help_box(f: &mut Frame, theme: &Theme, area: Rect, lines: Vec<Line>) {
+    let w = if compact() { area.width } else { 80.min(area.width.saturating_sub(4)) };
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
+    let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
+    clear(f, theme, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.bold(theme.border_focus))
+        .title(Line::styled(" Keys ", theme.bold(theme.text)));
+    f.render_widget(para.block(block), rect);
+}
+
+/// The PR review-state legend line (`approved` is green with CI ✓, yellow
+/// with CI ✗/◌).
+fn pr_legend(theme: &Theme) -> Line<'static> {
+    let mut spans = vec![Span::styled("PR ", theme.faint())];
+    for (r, note) in [
+        (Review::Ready, "=CI ✓"),
+        (Review::Approved, "=CI ✗/◌"),
+        (Review::Conflicts, ""),
+        (Review::ChangesRequested, ""),
+        (Review::Pending, "=awaiting"),
+        (Review::Closed, "=not merged"),
+    ] {
+        spans.push(Span::styled(r.word(), theme.fg(r.color()(theme))));
+        spans.push(Span::styled(format!("{note}  "), theme.faint()));
+    }
+    Line::from(spans)
+}
+
+/// Help in review-only mode: the review page's keys (each with what it
+/// does there, [`Command::in_reviews_mode`]) and its row legend.
+fn draw_review_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::Keymap) {
+    use Command as C;
+    let groups: &[(&[Command], &str)] = &[
+        (&[C::MoveDown, C::MoveUp], "  ↑ / ↓"),
+        (&[C::Top, C::Bottom], ""),
+        (&[C::PageDown, C::PageUp], ""),
+        (&[C::Open], ""),
+        (&[C::OpenPr], ""),
+        (&[C::OpenLinear], ""),
+        (&[C::PullToTmpSpace], ""),
+        (&[C::PullAndRunScript], " / ctrl-⏎"),
+        (&[C::Delete], ""),
+        (&[C::Feedback], ""),
+        (&[C::Refresh], ""),
+        (&[C::Settings], ""),
+        (&[C::Help], ""),
+        (&[C::Quit], "  esc"),
+    ];
+    let desc = |cmds: &[Command]| match cmds {
+        [C::MoveDown, ..] => "move".to_string(),
+        [C::Top, ..] => "top / bottom".into(),
+        [C::PageDown, ..] => "page down / up".into(),
+        [C::Settings] => "settings (Mode: full brings the agent dashboard back)".into(),
+        [C::Help] => "toggle help".into(),
+        [C::PullAndRunScript] => "pull + run the review script (in a new terminal window)".into(),
+        [c, ..] => c.in_reviews_mode().unwrap_or("").into(),
+        [] => String::new(),
+    };
+    let mut lines: Vec<Line> = groups
+        .iter()
+        .map(|(cmds, fixed)| {
+            let keys = format!("{}{fixed}", cmds.iter().map(|c| help_key(keymap, *c, fixed)).collect::<Vec<_>>().join(" / "));
+            Line::from(vec![Span::styled(format!("{keys:>16}  "), theme.bold(theme.accent)), Span::raw(desc(cmds))])
+        })
+        .collect();
+    lines.push(Line::from(vec![Span::styled(format!("{:>16}  ", "tab"), theme.bold(theme.accent)), Span::raw("focus the jobs pane (pulls and removals)")]));
+    lines.push(Line::raw(""));
+    lines.push(Line::from(vec![
+        Span::styled("✓ pulled", theme.fg(theme.green)),
+        Span::styled(" checked out in a worktree (⏎ opens it, d removes it)  ", theme.faint()),
+        Span::styled("fork", theme.faint()),
+        Span::styled(" from a fork: ⏎ opens the PR", theme.faint()),
+    ]));
+    lines.push(pr_legend(theme));
+    draw_help_box(f, theme, area, lines);
+}
+
 fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::Keymap) {
     use Command as C;
     // Each command's key (unbound: its fixed key, else `—`), then the
@@ -3147,12 +3319,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
     let keys: Vec<(String, &str)> = groups
         .iter()
         .map(|(cmds, fixed, desc)| {
-            let shown = |c: &Command| match (keymap.key(*c), c.fixed_keys().first(), fixed.is_empty()) {
-                (Some(k), _, _) => crate::keymap::display(k),
-                (None, Some(k), true) => crate::keymap::display(*k),
-                _ => "—".into(),
-            };
-            (format!("{}{fixed}", cmds.iter().map(shown).collect::<Vec<_>>().join(" / ")), *desc)
+            (format!("{}{fixed}", cmds.iter().map(|c| help_key(keymap, *c, fixed)).collect::<Vec<_>>().join(" / ")), *desc)
         })
         .collect();
     let legend: Vec<Span> = [Status::Executing, Status::Planning, Status::Waiting, Status::Delegating, Status::Done, Status::Idle]
@@ -3170,20 +3337,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         .collect();
     lines.push(Line::raw(""));
     lines.push(Line::from(legend));
-    // PR review states: `approved` is green with CI ✓, yellow with CI ✗/◌.
-    let mut pr_legend = vec![Span::styled("PR ", theme.faint())];
-    for (r, note) in [
-        (Review::Ready, "=CI ✓"),
-        (Review::Approved, "=CI ✗/◌"),
-        (Review::Conflicts, ""),
-        (Review::ChangesRequested, ""),
-        (Review::Pending, "=awaiting"),
-        (Review::Closed, "=not merged"),
-    ] {
-        pr_legend.push(Span::styled(r.word(), theme.fg(r.color()(theme))));
-        pr_legend.push(Span::styled(format!("{note}  "), theme.faint()));
-    }
-    lines.push(Line::from(pr_legend));
+    lines.push(pr_legend(theme));
     lines.push(Line::from(vec![
         Span::styled("✦ gemini", theme.fg(theme.blue)),
         Span::styled(" session from another harness plugin, by id (no badge: Claude Code)", theme.faint()),
@@ -3200,16 +3354,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         Span::styled("$ 1 command", theme.bold(theme.teal)),
         Span::styled(" an agent's shell command matching the process filter is running; the name turns teal", theme.faint()),
     ]));
-    let w = if compact() { area.width } else { 80.min(area.width.saturating_sub(4)) };
-    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-    let h = (para.line_count(w.saturating_sub(2)) as u16 + 2).min(area.height);
-    let rect = Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h };
-    clear(f, theme, rect);
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(theme.bold(theme.border_focus))
-        .title(Line::styled(" Keys ", theme.bold(theme.text)));
-    f.render_widget(para.block(block), rect);
+    draw_help_box(f, theme, area, lines);
 }
 
 // ------------------------------------------------------------------ helpers
@@ -4454,7 +4599,7 @@ mod tests {
     fn a_review_only_window_quits_when_the_page_closes() {
         use crate::app::Action;
         let mut app = by_repo();
-        app.reviews_only = true;
+        app.reviews_window = true;
         app.on_key(Key::Char('v'));
         assert!(render(&app, 120, 10).lines().last().unwrap().contains("esc quit"));
         assert_eq!(app.on_key(Key::Char('V')), Action::None, "no split in a review-only window");
@@ -4465,6 +4610,81 @@ mod tests {
         assert_eq!(app.on_key(Key::Char('t')), Action::None);
         assert!(app.reviews.is_some());
         assert_eq!(app.on_key(Key::Esc), Action::Quit);
+    }
+
+    #[test]
+    fn review_only_mode_shows_the_page_alone_with_its_own_settings_and_help() {
+        use crate::app::Action;
+        let mut app = by_repo();
+        app.settings.app_mode = "reviews".into();
+        app.update_available = Some(update("2.2.0"));
+        app.enter_reviews_mode();
+        assert!(std::mem::take(&mut app.review_fetch_due), "opening asks for a fetch");
+        let screen = render(&app, 120, 14);
+        assert!(screen.contains("─Review requests") && !screen.contains("─Worktrees"), "{screen}");
+        // No ─Worktrees border to carry it: the update notice is on the page's.
+        assert!(screen.lines().next().unwrap().contains("⬆ v2.2.0 available"), "{screen}");
+        assert!(screen.lines().last().unwrap().contains("esc quit"));
+        insta::assert_snapshot!("review_only_mode_page", screen);
+        // Help: the page's keys, nothing about worktrees or agents.
+        app.on_key(Key::Char('h'));
+        let help = render(&app, 120, 30);
+        assert!(help.contains("pull into Reviewing") && help.contains("quit"), "{help}");
+        assert!(!help.contains("new / delete worktree") && !help.contains("✦ gemini"), "{help}");
+        insta::assert_snapshot!("review_only_mode_help", help);
+        app.on_key(Key::Esc);
+        // Settings: the page's settings only, still under section headers.
+        app.on_key(Key::Char('s'));
+        let settings = render(&app, 120, 50);
+        assert!(settings.contains("Mode") && settings.contains("Review requests") && settings.contains("Requested from"), "{settings}");
+        assert!(!settings.contains("Sort order") && !settings.contains("Harness plugins") && !settings.contains("Fetch PRs"), "{settings}");
+        insta::assert_snapshot!("review_only_mode_settings", settings);
+        app.on_key(Key::Esc);
+        assert_eq!(app.on_key(Key::Esc), Action::Quit);
+    }
+
+    #[test]
+    fn switching_the_mode_live_opens_the_page_or_brings_the_dashboard_back() {
+        use crate::app::Action;
+        let mut app = by_repo();
+        let mut s = app.settings.clone();
+        s.app_mode = "reviews".into();
+        app.set_settings(s.clone());
+        assert!(app.reviews.as_ref().is_some_and(|p| !p.split) && app.review_fetch_due);
+        assert!(app.reviews_only());
+        // Back to full: the page stays, and leaving it shows the dashboard.
+        s.app_mode = "full".into();
+        app.set_settings(s);
+        assert!(app.reviews.is_some() && !app.reviews_only());
+        assert_eq!(app.on_key(Key::Esc), Action::None);
+        assert!(app.reviews.is_none());
+    }
+
+    #[test]
+    fn review_only_mode_with_review_requests_off_says_how_to_turn_them_on() {
+        let mut app = fixture();
+        app.settings.app_mode = "reviews".into();
+        app.settings.gh_pr_status = false;
+        app.enter_reviews_mode();
+        assert!(!app.review_fetch_due, "nothing to fetch");
+        let screen = render(&app, 120, 10);
+        assert!(screen.contains("Review requests are off") && screen.contains("Run setup again"), "{screen}");
+        assert!(!screen.contains("─Worktrees"), "never the dashboard: {screen}");
+    }
+
+    #[test]
+    fn setup_starts_by_asking_for_the_mode() {
+        let mut app = fixture();
+        let mut s = crate::setup::Setup::new(vec![], &Settings::parse("{}"));
+        s.hook_binary = None;
+        app.setup = Some(s);
+        let full = render(&app, 100, 24);
+        assert!(full.contains("● Agents & worktrees") && full.contains("○ Review requests only"), "{full}");
+        assert!(full.contains("Mode › Editor › Hooks › Repos › Integrations › Reviews › Context"), "{full}");
+        insta::assert_snapshot!("setup_mode_step", full);
+        app.on_key(Key::Down);
+        let reviews = render(&app, 100, 24);
+        assert!(reviews.contains("Mode › Editor › Repos › GitHub › Reviews") && !reviews.contains("Hooks"), "{reviews}");
     }
 
     #[test]
@@ -5083,6 +5303,15 @@ mod tests {
         let mut s = crate::setup::Setup::new(vec![], &Settings::parse("{}"));
         s.hook_binary = None;
         app.setup = Some(s);
+        // The mode: a click picks it, a second goes on.
+        let reviews = find(&app, 100, 30, "Review requests only");
+        click(&mut app, 100, 30, reviews, false);
+        assert!(app.setup.as_ref().unwrap().reviews_mode);
+        let full = find(&app, 100, 30, "Agents & worktrees");
+        click(&mut app, 100, 30, full, false);
+        click(&mut app, 100, 30, full, false);
+        assert!(!app.setup.as_ref().unwrap().reviews_mode);
+        assert_eq!(app.setup.as_ref().unwrap().step, crate::setup::Step::Editor);
         let zed = find(&app, 100, 30, "Zed");
         click(&mut app, 100, 30, zed, false);
         let zed_index = crate::setup::IDES.iter().position(|(_, l)| *l == "Zed").unwrap();
@@ -5153,6 +5382,8 @@ mod tests {
         let mut app = fixture();
         app.setup = Some(crate::setup::Setup {
             step: crate::setup::Step::Context,
+            reviews_mode: false,
+            gh_found: true,
             ide: 0,
             ide_command: String::new(),
             ide_error: None,
@@ -5172,7 +5403,7 @@ mod tests {
             cancellable: false,
         });
         let out = render(&app, 100, 20);
-        assert!(out.contains("✓ Reviews  ›  Context"), "breadcrumbs cut off:\n{out}");
+        assert!(out.contains("✓ Reviews › Context"), "breadcrumbs cut off:\n{out}");
         insta::assert_snapshot!(out);
     }
 
@@ -5181,6 +5412,8 @@ mod tests {
         let mut app = fixture();
         app.setup = Some(crate::setup::Setup {
             step: crate::setup::Step::Editor,
+            reviews_mode: false,
+            gh_found: true,
             ide: crate::setup::IDE_CUSTOM,
             ide_command: "subl -n".into(),
             ide_error: None,

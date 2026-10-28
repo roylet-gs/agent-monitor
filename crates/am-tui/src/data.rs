@@ -275,9 +275,14 @@ impl Worker {
 
     /// One collector pass; `false` when there was nothing to do.
     fn cycle(&mut self, force: bool) -> rusqlite::Result<bool> {
+        // Review-only mode draws no worktree rows: no process scan, git
+        // status, context, token usage or stacks; just the worktree list
+        // (for `✓ pulled`) and the integrations' review list.
+        let dashboard = !self.settings.reviews_mode();
         let full_due = force || self.last_full.is_none_or(|t| t.elapsed() >= self.poll_interval());
-        let procs_due = self.last_procs.is_none_or(|t| t.elapsed() >= PROCESS_INTERVAL);
-        let usage_due = self.settings.show_daily_tokens
+        let procs_due = dashboard && self.last_procs.is_none_or(|t| t.elapsed() >= PROCESS_INTERVAL);
+        let usage_due = dashboard
+            && self.settings.show_daily_tokens
             && (force || self.last_usage.is_none_or(|t| t.elapsed() >= USAGE_INTERVAL));
         let mut ints_changed = false;
         while let Ok(u) = self.integrations.try_recv() {
@@ -325,7 +330,7 @@ impl Worker {
             self.last_usage = Some(Instant::now());
         }
         let worktrees = db::worktrees(&self.conn)?;
-        if procs_due || full_due {
+        if procs_due || (full_due && dashboard) {
             let stamp = am_core::harness::plugins_stamp();
             if stamp != self.plugins_stamp {
                 self.plugins_stamp = stamp;
@@ -352,14 +357,16 @@ impl Worker {
         if force {
             self.git.deep_next();
         }
-        let jobs = self.git.due(&worktrees, full_due, |w| moved.contains(w.id.as_str()), gitinfo::signature);
-        if !jobs.is_empty() {
-            debug!("tui", "git refresh queued for {} worktree(s)", jobs.len());
-            let _ = self.git_jobs.send(jobs);
+        if dashboard {
+            let jobs = self.git.due(&worktrees, full_due, |w| moved.contains(w.id.as_str()), gitinfo::signature);
+            if !jobs.is_empty() {
+                debug!("tui", "git refresh queued for {} worktree(s)", jobs.len());
+                let _ = self.git_jobs.send(jobs);
+            }
         }
         let started = Instant::now();
         for w in &worktrees {
-            if !(full_due || moved.contains(w.id.as_str()) || !self.ctx.contains_key(&w.id)) {
+            if !dashboard || !(full_due || moved.contains(w.id.as_str()) || !self.ctx.contains_key(&w.id)) {
                 continue;
             }
             let root = Path::new(&w.path);
@@ -435,7 +442,7 @@ impl Worker {
         });
 
         let repos = db::repositories(&self.conn)?;
-        if full_due || self.stack_git.len() != repos.len() {
+        if dashboard && (full_due || self.stack_git.len() != repos.len()) {
             let started = Instant::now();
             self.refresh_stack_git(&repos, &worktrees_for_stacks(&views));
             self.perf.record("collector.stacks", started.elapsed());
@@ -443,12 +450,15 @@ impl Worker {
         let stack = self.infer_stacks(&views);
         let reviews = self.reviews_with_worktrees(&views);
         let mut roots: Vec<String> = views.iter().map(|v| v.worktree.path.clone()).collect();
-        let mut groups = grouping::build_groups(&repos, grouping::apply_filters(views, &self.settings), &self.settings);
-        if let Some(g) = self.standalone_group()? {
+        // Review-only: every worktree, unfiltered, so a pulled PR's ⏎/`d`
+        // always find theirs (the dashboard's hide* filters don't apply).
+        let views = if dashboard { grouping::apply_filters(views, &self.settings) } else { views };
+        let mut groups = grouping::build_groups(&repos, views, &self.settings);
+        if let Some(g) = if dashboard { self.standalone_group()? } else { None } {
             roots.extend(g.worktrees.iter().map(|v| v.worktree.path.clone()));
             groups.push(g);
         }
-        let today_tokens = self.today_tokens(&roots, &groups);
+        let today_tokens = if dashboard { self.today_tokens(&roots, &groups) } else { None };
         let review_error = self.review_error.clone();
         let review_people = people_with_authors(&self.people, reviews.as_deref().unwrap_or_default());
         let snapshot = Snapshot {
@@ -745,9 +755,14 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
                 || repo_ids != known_repos
                 || last_reviews.is_none_or(|t| t.elapsed() >= reviews_every));
 
-        let gh_due = settings.gh_pr_status
+        // Review-only mode shows no worktree rows, so their PRs and tickets
+        // aren't fetched (review rows get theirs with the review search).
+        let dashboard = !settings.reviews_mode();
+        let gh_due = dashboard
+            && settings.gh_pr_status
             && ((force && settings.gh_refresh_on_manual) || new_branches || last_gh.is_none_or(|t| t.elapsed() >= gh_every));
-        let linear_due = linear_on
+        let linear_due = dashboard
+            && linear_on
             && ((force && settings.linear_refresh_on_manual) || new_branches || last_linear.is_none_or(|t| t.elapsed() >= linear_every));
 
         let people_due = people_now && settings.gh_pr_status;
@@ -792,7 +807,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             ints.refresh_people(&conn, &review_repos);
         }
         known_branches = branches.clone();
-        if settings.linear_enabled && settings.linear_auto_nickname {
+        if dashboard && settings.linear_enabled && settings.linear_auto_nickname {
             auto_nickname(&conn, &ints, &worktrees);
         }
         let _ = tx.send(update(&ints, &branches, &settings));
@@ -1003,6 +1018,36 @@ mod tests {
                 transcript_path: None,
             },
         )
+    }
+
+    /// Review-only mode lists worktrees (for `✓ pulled`) but runs none of
+    /// the dashboard's per-row work: no git status, process scan, context,
+    /// token usage or stacks.
+    #[test]
+    fn review_only_mode_does_no_dashboard_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open_at(&dir.path().join("am.db")).unwrap();
+        let repo = db::add_repository(&conn, &dir.path().display().to_string(), "work").unwrap();
+        let wt = dir.path().join("wt");
+        db::upsert_worktree(&conn, &repo.id, &wt.display().to_string(), "feature/x", "x", false).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let run = |mode: &str| {
+            let conn = db::open_at(&dir.path().join("am.db")).unwrap();
+            let settings = Settings { app_mode: mode.into(), ..Settings::default() };
+            let mut w = Worker::new(settings, conn, tx.clone(), mpsc::channel().1);
+            w.cycle(true).unwrap();
+            w
+        };
+        let w = run("reviews");
+        assert_eq!(w.git.in_flight(), 0, "no git status jobs");
+        assert!(w.last_procs.is_none() && w.last_usage.is_none(), "no process scan or token usage");
+        assert!(w.ctx.is_empty() && w.stack_git.is_empty(), "no context or stacks");
+        let snap = rx.try_iter().last().expect("a snapshot");
+        assert_eq!(snap.groups.iter().map(|g| g.worktrees.len()).sum::<usize>(), 1, "the worktree is still listed");
+        // The full dashboard does all of it.
+        let w = run("full");
+        assert_eq!(w.git.in_flight(), 1);
+        assert!(w.last_procs.is_some() && !w.ctx.is_empty());
     }
 
     #[test]

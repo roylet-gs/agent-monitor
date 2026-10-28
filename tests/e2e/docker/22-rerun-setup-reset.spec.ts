@@ -22,8 +22,10 @@ test("run setup again starts from the current settings and esc cancels", async (
   await tui.waitForText("Run setup again…");
   await tui.sendKey("Enter");
   await tui.waitForText(WELCOME);
+  await tui.waitForText("What do you want am for?");
+  await tui.waitForText("● Agents & worktrees"); // the saved mode
   await tui.waitForText("esc cancel");
-  await tui.screenshot("rerun-setup-editor");
+  await tui.screenshot("rerun-setup-mode");
   await tui.sendKey("Escape");
   await tui.waitForGone(WELCOME);
   await tui.waitForText("Setup closed — settings unchanged");
@@ -31,6 +33,8 @@ test("run setup again starts from the current settings and esc cancels", async (
   // Walk it to the end: the repo is listed as added, and the Linear key
   // survives (the ticket column stays).
   await tui.openSetting(RERUN_HELP, 60);
+  await tui.sendKey("Enter");
+  await tui.waitForText("What do you want am for?");
   await tui.sendKey("Enter");
   await tui.waitForText("Where should Enter open a worktree?");
   await tui.sendKey("Enter");
@@ -76,6 +80,8 @@ test("reset settings asks first, then reopens setup", async ({ page }) => {
   await tui.waitForText(WELCOME, 10_000);
   // A first run can't be cancelled.
   expect(await tui.getScreenText()).not.toContain("esc cancel");
+  await tui.sendKey("Enter"); // mode: full
+  await tui.waitForText("Where should Enter open a worktree?");
   await tui.sendKey("Enter"); // editor
   await tui.waitForText("am learns what each agent is doing");
   await tui.sendKey("n"); // skip hooks
@@ -101,7 +107,7 @@ test("reset settings asks first, then reopens setup", async ({ page }) => {
   await tui.waitForText("Put every setting back to its default");
   await tui.sendKey("y");
   await tui.waitForText(WELCOME);
-  await tui.waitForText("Where should Enter open a worktree?");
+  await tui.waitForText("What do you want am for?");
   // setupCompleted went with the reset, so this is a first run again.
   expect(await tui.getScreenText()).not.toContain("esc cancel");
   await tui.screenshot("reset-settings-setup");

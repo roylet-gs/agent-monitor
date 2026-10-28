@@ -123,18 +123,26 @@ fn main() -> io::Result<()> {
     // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
     let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
     let show_log = args.iter().any(|a| a == "--log");
-    // `ctrl-v` opens a terminal running `am-tui --reviews`: just the review page.
-    let reviews_only = !first_run && args.iter().any(|a| a == "--reviews");
+    // `ctrl-v` / `am reviews` open `am-tui --reviews`: just the review page.
+    let reviews_window = !first_run && args.iter().any(|a| a == "--reviews");
+    let reviews_mode = !first_run && settings.reviews_mode();
     let setup = first_run.then(|| setup::Setup::new(repo_names(), &settings));
     let mut app = App::new(settings);
     app.setup = setup;
     app.show_log = show_log;
-    if reviews_only {
+    if reviews_mode {
+        // Review-only mode: the page even with review requests off (it says
+        // how to turn them on).
+        app.enter_reviews_mode();
+    } else if reviews_window {
         // Review requests off: say why, on the full dashboard.
         if app.open_reviews(false) == app::Action::RefreshReviews {
-            app.reviews_only = true;
-            collector.refresh_reviews();
+            app.reviews_window = true;
+            app.review_fetch_due = true;
         }
+    }
+    if std::mem::take(&mut app.review_fetch_due) {
+        collector.refresh_reviews();
     }
     // Hooks pointing at a deleted am-hook (removed worktree, upgraded install)
     // fail on every agent event; re-point them at the current binary.
@@ -393,6 +401,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     app.set_settings(loaded);
                     theme = theme::Theme::load(&app.settings.theme);
                     collector.update_settings(app.settings.clone());
+                    if std::mem::take(&mut app.review_fetch_due) {
+                        collector.refresh_reviews();
+                    }
                     if app.settings.mouse_enabled != mouse_before {
                         set_mouse(app.settings.mouse_enabled);
                     }
@@ -554,6 +565,9 @@ fn dispatch(
         Action::SettingsChanged => {
             *theme = theme::Theme::load(&app.settings.theme);
             collector.update_settings(app.settings.clone());
+            if std::mem::take(&mut app.review_fetch_due) {
+                collector.refresh_reviews();
+            }
         }
         Action::Create(job, repo, req) => ops::create(app.settings.clone(), *repo, *req, job, launch_tx.clone()),
         Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),

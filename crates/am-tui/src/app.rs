@@ -148,9 +148,12 @@ pub struct App {
     /// `v`: the review-requests page, in place of the worktree list (`V`:
     /// beside it).
     pub reviews: Option<crate::reviews_ui::ReviewPage>,
-    /// `am-tui --reviews` (the window `ctrl-v` opens): only the review page,
-    /// and leaving it quits.
-    pub reviews_only: bool,
+    /// `am-tui --reviews` (the window `ctrl-v` opens, or `am reviews`): only
+    /// the review page, whatever `appMode` says. See [`App::reviews_only`].
+    pub reviews_window: bool,
+    /// The review page was opened by a mode change and wants a fetch (main
+    /// takes it and asks the collector).
+    pub review_fetch_due: bool,
     /// The review groups being edited (Review filters → Groups…), which the
     /// page previews in place of the saved ones.
     pub group_preview: Option<(Vec<am_core::review_groups::ReviewGroup>, am_core::review_groups::ReviewGroup)>,
@@ -207,7 +210,8 @@ impl App {
             modal: None,
             setup: None,
             reviews: None,
-            reviews_only: false,
+            reviews_window: false,
+            review_fetch_due: false,
             group_preview: None,
             pending_select: None,
             unseen: Default::default(),
@@ -983,6 +987,11 @@ impl App {
                 }
                 None
             }
+            L::SetupMode => {
+                let Some(s) = &mut self.setup else { return Action::None };
+                // A click picks; a second one goes on.
+                (std::mem::replace(&mut s.reviews_mode, i == 1) == (i == 1)).then_some(Key::Enter)
+            }
             L::SetupReviews => {
                 let Some(s) = &mut self.setup else { return Action::None };
                 (std::mem::replace(&mut s.review.field, i) == i).then_some(Key::Char(' '))
@@ -1020,8 +1029,12 @@ impl App {
 
     /// Swap in new settings and re-derive rows (header style depends on sort).
     pub fn set_settings(&mut self, settings: Settings) {
+        let to_reviews_mode = settings.reviews_mode() && !self.settings.reviews_mode();
         self.keymap = crate::keymap::Keymap::from_settings(&settings);
         self.settings = settings;
+        if to_reviews_mode && self.setup.is_none() {
+            self.enter_reviews_mode();
+        }
         if let Some(e) = &mut self.settings_editor {
             let cursor = e.cursor;
             // The agent-plugins, key-bindings and review-groups pages report
@@ -1031,10 +1044,13 @@ impl App {
             let keys = e.keys.take();
             let repos = e.repos.take();
             let repo_count = e.repo_count;
-            let only = e.only;
+            let filter_box = e.is_filter_box();
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
-            e.only = only;
-            e.cursor = cursor;
+            if filter_box {
+                e.only = Some(crate::settings_ui::REVIEW_FILTERS);
+            }
+            // A mode change can hide the row the cursor was on.
+            e.cursor = if e.fields().contains(&cursor) { cursor } else { e.fields().first().copied().unwrap_or(0) };
             e.plugins = plugins;
             e.keys = keys;
             e.repos = repos;
@@ -1097,6 +1113,21 @@ impl App {
         false
     }
 
+    /// Only the review page: a `--reviews` window, or review-only mode
+    /// (`appMode: "reviews"`). Leaving the page quits.
+    pub fn reviews_only(&self) -> bool {
+        self.reviews_window || self.settings.reviews_mode()
+    }
+
+    /// Review-only mode (at start-up, after setup, or switched on in
+    /// Settings): the full review page, even when review requests are off
+    /// (the page then says how to turn them on), and a fetch.
+    pub fn enter_reviews_mode(&mut self) {
+        self.jobs.focused = false;
+        self.reviews = Some(crate::reviews_ui::ReviewPage { cursor: 0, split: false, focused: true });
+        self.review_fetch_due = self.settings.review_requests_on();
+    }
+
     /// The review page, in place of the list or (`split`) beside it, with
     /// the keys.
     pub fn open_reviews(&mut self, split: bool) -> Action {
@@ -1110,7 +1141,7 @@ impl App {
 
     /// Leave the review page: closes it, or quits a review-only window.
     fn close_reviews(&mut self) -> Action {
-        if self.reviews_only {
+        if self.reviews_only() {
             return Action::Quit;
         }
         self.reviews = None;
@@ -1155,7 +1186,7 @@ impl App {
         }
         let len = self.review_list().len();
         let cmd = self.keymap.command(key);
-        let reviews_only = self.reviews_only;
+        let reviews_only = self.reviews_only();
         let Some(page) = &mut self.reviews else { return Action::None };
         // Tab in a split: on to the jobs pane when it's open, else the list.
         // On the full page: to the jobs pane, and back with its own Tab.
@@ -1262,7 +1293,7 @@ impl App {
         }
         if let Some(id) = r.worktree_id {
             // A review-only window has no list to show it in.
-            if self.reviews_only {
+            if self.reviews_only() {
                 self.notice = Some(format!("{} is already checked out", r.head_ref_name));
                 return Action::None;
             }
