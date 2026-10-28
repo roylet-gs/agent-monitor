@@ -5,13 +5,17 @@
 //! for one pragma read, not a dozen failed SELECTs. Version 1 is a baseline
 //! that brings any DB the TS app created up to its latest shape idempotently.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use std::time::{Duration, Instant};
+
+use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior, params};
 
 use crate::harness::HarnessKind;
 use crate::paths;
 use crate::status::Status;
 
 pub const SCHEMA_VERSION: i64 = 7;
+/// How long a connection waits for another one's lock before giving up.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A subagent counts as running only if it reported something recently;
 /// protects the count from a missed SubagentStop (crash, killed session).
@@ -25,13 +29,37 @@ pub fn open() -> rusqlite::Result<Connection> {
 
 pub fn open_at(path: &std::path::Path) -> rusqlite::Result<Connection> {
     let mut conn = Connection::open(path)?;
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    set_wal(&conn)?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     // Cap the WAL file after checkpoints; it had grown to 18x the DB size.
     conn.pragma_update(None, "journal_size_limit", 4 * 1024 * 1024)?;
     migrate(&mut conn)?;
     Ok(conn)
+}
+
+/// Switching a new database file to WAL needs an exclusive lock, and while
+/// another connection is doing the same SQLite answers "database is locked"
+/// at once instead of waiting out the busy timeout. am-tui's first run opens
+/// the fresh DB from three threads together, and the two that lost gave up.
+/// Retry for as long as the busy timeout would have waited.
+fn set_wal(conn: &Connection) -> rusqlite::Result<()> {
+    let start = Instant::now();
+    let mut tries = 1;
+    loop {
+        match conn.pragma_update(None, "journal_mode", "WAL") {
+            Err(e) if e.sqlite_error_code() == Some(ErrorCode::DatabaseBusy) && start.elapsed() < BUSY_TIMEOUT => {
+                std::thread::sleep(Duration::from_millis(10));
+                tries += 1;
+            }
+            result => {
+                if tries > 1 {
+                    crate::debug!("db", "WAL switch took {tries} tries ({} ms): another connection held the lock", start.elapsed().as_millis());
+                }
+                return result;
+            }
+        }
+    }
 }
 
 fn user_version(conn: &Connection) -> rusqlite::Result<i64> {
@@ -46,6 +74,10 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     // serialize here; re-check the version once we hold it.
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let v = user_version(&tx)?;
+    if v >= SCHEMA_VERSION {
+        // Another connection migrated while we waited for the lock.
+        return Ok(());
+    }
     if v < 1 {
         baseline(&tx)?;
     }
@@ -985,6 +1017,31 @@ mod tests {
 
     fn wt() -> Owner {
         Owner::Worktree { id: "w".into(), repo_id: "r".into(), branch: "feat".into() }
+    }
+
+    #[test]
+    fn connections_opening_a_new_database_together_all_succeed() {
+        // am-tui's first run opens a DB that doesn't exist yet from three
+        // threads at once; the losers of the WAL switch used to get "database
+        // is locked" straight away (about one round in three) and gave up.
+        for _ in 0..50 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("t.db");
+            let barrier = std::sync::Barrier::new(4);
+            std::thread::scope(|s| {
+                let opens: Vec<_> = (0..4)
+                    .map(|_| {
+                        s.spawn(|| {
+                            barrier.wait();
+                            open_at(&path).map(|conn| user_version(&conn).unwrap())
+                        })
+                    })
+                    .collect();
+                for open in opens {
+                    assert_eq!(open.join().unwrap().unwrap(), SCHEMA_VERSION);
+                }
+            });
+        }
     }
 
     #[test]

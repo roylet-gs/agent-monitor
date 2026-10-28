@@ -91,13 +91,8 @@ impl Collector {
         let handle = std::thread::Builder::new()
             .name("collector".into())
             .spawn(move || {
-                let conn = match db::open() {
-                    Ok(c) => c,
-                    Err(e) => {
-                        warn!("tui", "Cannot open database: {e}");
-                        return;
-                    }
-                };
+                let mut settings = settings;
+                let Some(conn) = open_db("tui", &cmd_rx, &mut settings, db::open) else { return };
                 Worker::new(settings, conn, tx, int_rx).run(cmd_rx);
             })
             .expect("spawn collector");
@@ -660,18 +655,46 @@ impl Worker {
     }
 }
 
+/// Opens a long-lived thread's connection. If that fails, retry every second
+/// instead of returning: a thread that gave up left the dashboard empty and
+/// the review page on "Loading…" for the rest of the run. Settings changes
+/// sent meanwhile are kept; refresh requests can go, since each thread starts
+/// with a full pass. `None` when the TUI quits first.
+fn open_db(
+    module: &str,
+    cmds: &Receiver<Cmd>,
+    settings: &mut Settings,
+    open: impl Fn() -> rusqlite::Result<Connection>,
+) -> Option<Connection> {
+    let mut failing = false;
+    loop {
+        match open() {
+            Ok(conn) => {
+                if failing {
+                    info!(module, "Database opened after retrying");
+                }
+                return Some(conn);
+            }
+            Err(e) if !failing => {
+                warn!(module, "Cannot open database: {e}; retrying every second");
+                failing = true;
+            }
+            Err(e) => debug!(module, "Still cannot open database: {e}"),
+        }
+        match cmds.recv_timeout(Duration::from_secs(1)) {
+            Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => return None,
+            Ok(Cmd::Settings(s)) => *settings = *s,
+            Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+        }
+    }
+}
+
 /// Owns GitHub/Linear fetching. `gh` can take seconds, so it lives on its own
 /// thread and hands the collector a ready-made field map. Cached values are
 /// sent before the first fetch, so PR badges and tickets appear immediately
 /// (and survive being offline).
 fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<IntegrationUpdate>) {
-    let conn = match db::open() {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("integrations", "Cannot open database: {e}");
-            return;
-        }
-    };
+    let Some(conn) = open_db("integrations", &cmds, &mut settings, db::open) else { return };
     let mut ints = Integrations::new();
     let mut perf = Perf::new();
     ints.hydrate(&conn);
@@ -972,6 +995,41 @@ fn live_sessions(mut rows: Vec<db::SessionRow>, processes: &HashMap<&'static str
 mod tests {
     use super::*;
     use am_core::model::AgentState;
+
+    /// An opener that fails `failures` times, then opens an in-memory DB.
+    fn flaky_open(failures: usize) -> impl Fn() -> rusqlite::Result<Connection> {
+        let calls = std::cell::Cell::new(0);
+        move || {
+            calls.set(calls.get() + 1);
+            if calls.get() <= failures {
+                Err(rusqlite::Error::InvalidQuery)
+            } else {
+                Connection::open_in_memory()
+            }
+        }
+    }
+
+    #[test]
+    fn a_thread_that_cannot_open_the_db_retries_and_keeps_new_settings() {
+        let (cmd, cmds) = mpsc::channel();
+        let mut settings = Settings::default();
+        let changed = Settings { review_requests_enabled: !settings.review_requests_enabled, ..Settings::default() };
+        // Each queued command ends one wait, so the retries don't sleep.
+        cmd.send(Cmd::Settings(Box::new(changed.clone()))).unwrap();
+        cmd.send(Cmd::RefreshReviews).unwrap();
+        assert!(open_db("test", &cmds, &mut settings, flaky_open(2)).is_some());
+        assert_eq!(settings.review_requests_enabled, changed.review_requests_enabled);
+    }
+
+    #[test]
+    fn a_thread_that_cannot_open_the_db_still_quits() {
+        let (cmd, cmds) = mpsc::channel();
+        cmd.send(Cmd::Quit).unwrap();
+        assert!(open_db("test", &cmds, &mut Settings::default(), flaky_open(usize::MAX)).is_none());
+        let (cmd, cmds) = mpsc::channel::<Cmd>();
+        drop(cmd);
+        assert!(open_db("test", &cmds, &mut Settings::default(), flaky_open(usize::MAX)).is_none());
+    }
 
     fn view(id: &str, session: &str, status: Status) -> WorktreeView {
         WorktreeView {
