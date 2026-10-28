@@ -271,6 +271,61 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn an_opencode_session_is_tracked_through_its_plugins_payloads() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Exactly what am's OpenCode plugin sends: `--worktree ""`, canonical
+    // event names, a child session reported as a subagent of its parent.
+    let opencode = |event: &str, extra: Value| {
+        let mut p = json!({ "session_id": "ses_1", "cwd": cwd, "hook_event_name": event });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("opencode", event, "", p);
+    };
+    opencode("SessionStart", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("opencode")));
+    opencode("UserPromptSubmit", json!({}));
+    assert_eq!(env.status().0, "executing");
+    opencode("PreToolUse", json!({ "tool_name": "bash", "tool_input": { "command": "cargo test" } }));
+    opencode("PermissionRequest", json!({ "tool_name": "bash" }));
+    assert_eq!(env.status().0, "waiting");
+    opencode("PostToolUse", json!({}));
+    assert_eq!(env.status().0, "executing");
+
+    let child = json!({ "agent_id": "ses_2", "agent_type": "explore" });
+    opencode("SubagentStart", child.clone());
+    assert_eq!(env.status(), ("executing".into(), 1));
+    let mut read = child.clone();
+    read.as_object_mut().unwrap().extend(json!({ "tool_name": "read", "tool_input": { "file_path": "src/a.rs" } }).as_object().unwrap().clone());
+    opencode("PreToolUse", read);
+    let (tool, input): (String, String) = env
+        .db()
+        .query_row("SELECT last_tool, last_tool_input FROM subagents WHERE agent_id = 'ses_2'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((tool.as_str(), input.as_str()), ("Read", "src/a.rs"));
+    let mut ask = child.clone();
+    ask["tool_name"] = "edit".into();
+    opencode("PermissionRequest", ask);
+    assert_eq!(env.status().0, "waiting");
+    opencode("PostToolUse", json!({}));
+    opencode("SubagentStop", child);
+    assert_eq!(env.status(), ("executing".into(), 0));
+
+    opencode("Stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("ses_1").0, "done");
+    // The child never became a session of its own.
+    let sessions: i64 = env.db().query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0)).unwrap();
+    assert_eq!(sessions, 1);
+
+    opencode("UserPromptSubmit", json!({}));
+    opencode("StopFailure", json!({}));
+    assert_eq!(env.status().0, "idle");
+    opencode("SessionEnd", json!({}));
+    assert!(!env.session("ses_1").1);
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

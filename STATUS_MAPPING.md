@@ -233,3 +233,18 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**OpenCode** (`--agent opencode`): OpenCode has no command hooks. am's plugin (`<config dir>/plugins/agent-monitor.js`) sends canonical event names itself, with `--worktree ""` and the session's directory as `cwd`:
+
+| OpenCode event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session.created` | `SessionStart` | `idle` |
+| `session.status` busy (V2 `session.next.prompted` / `session.execution.started`) | `UserPromptSubmit` (once per turn) | `executing` |
+| `tool.execute.before` / `tool.execute.after` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`, `question` → `AskUserQuestion` → `waiting`…) |
+| `permission.asked` | `PermissionRequest` | `waiting` |
+| last `permission.replied` | `PostToolUse` | `executing` |
+| `session.status` idle / `session.idle` (V2 `session.execution.succeeded`) | `Stop` (once per turn) | `done` after work |
+| `session.error` / `session.execution.failed` | `StopFailure` | `idle` |
+| archived / `session.deleted` | `SessionEnd` | `idle` |
+
+OpenCode reports idle twice (`session.status` and `session.idle`); the plugin sends one `Stop` per turn, since a second would turn `done` into `idle`. `MessageAbortedError` (Esc) and `ContextOverflowError` (compaction) don't end the turn; the idle after them does. A turn that ends while a permission request is open sends `PostToolUse` first, since `Stop` keeps `waiting`. A child session (`parentID`, the `task` tool) is reported as a subagent of its parent: `SubagentStart`/`SubagentStop` and its tool and permission events carry `agent_id` = the child, so its tool calls don't move the parent and its permission prompts make it `waiting`.

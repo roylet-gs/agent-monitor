@@ -223,7 +223,7 @@ Most CLIs read hooks from a JSON file, but not all. A built-in picks how am's ho
 |---|---|---|---|
 | `HookInstall::Json` (default) | The CLI reads hooks from a JSON file (Claude, Gemini, Codex, Qwen, Droid, Copilot, Cursor, manifest plugins) | Entries whose command matches `is_am_hook_command` under `hooks_key` | Only am's entries; everyone else's stay. A file that isn't a JSON object (comments) is refused |
 | `HookInstall::TextBlock(TextBlock { comment, render })` | Hooks live in a TOML or YAML file (Kimi Code, Rovo Dev, Hermes) | The lines between `<comment> agent-monitor hooks <id> begin` and `… end` | Exactly the block (plus the blank line install put before it when it is last). Nothing outside the block is touched; a `begin` without `end` is an error, never half-replaced |
-| `HookInstall::OwnedFile(OwnedFile { render, register })` | The CLI loads a JS/TS plugin or extension that must spawn am-hook (OpenCode, Pi, OMP, Campfire, Amp) | The file contains `OWNED_FILE_MARKER` (`agent-monitor-hook-plugin v1`) | The file, only while it holds the marker (a file of that name without it is never overwritten or deleted), and `register`'s JSON list value |
+| `HookInstall::OwnedFile(OwnedFile { render, register })` | The CLI loads a JS/TS plugin or extension that must spawn am-hook (OpenCode; also how Pi, OMP, Campfire or Amp would fit) | The file contains `OWNED_FILE_MARKER` (`agent-monitor-hook-plugin v1`) | The file, only while it holds the marker (a file of that name without it is never overwritten or deleted), and `register`'s JSON list value |
 
 - **`render: fn(&HookContext) -> String`.** `HookContext` has `agent_id`, `program` (the absolute native `am-hook`, or `am` for the CLI fallback), `native`, `invocation` (`"/abs/am-hook" hook-event` or `cat | am hook-event`) and `hooks: Vec<HookCommand>`, one per `hook_events()` in order, each `{ event, command, timeout_ms }` with `timeout_secs()`. `command` is `hook_command()`: `{invocation} --agent <id> --worktree "$VAR"|"" --event <event>`. For a plugin that spawns without a shell, `ctx.argv(event, worktree)` gives `[program, "hook-event", "--agent", id, "--worktree", worktree, "--event", event]`; an empty worktree makes am-hook use the payload's `cwd`. The payload goes to the child's stdin.
 - **Quoting:** `toml_string(s)` (TOML basic string), `yaml_string(s)` (YAML double-quoted scalar) and `js_string(s)` (a JSON string literal, valid JS/TS) quote a value, including a command with its own `"`. Don't hand-roll escaping; there is no toml/yaml dependency.
@@ -249,6 +249,7 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+| OpenCode (`opencode`) | No hooks: an `OwnedFile` plugin, `<config dir>/plugins/agent-monitor.js` (`$OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`), which OpenCode auto-loads (no `opencode.json` entry) | The plugin listens to OpenCode's event bus and `tool.execute.before/after` and runs am-hook per state change with a Claude-shaped payload and canonical event names ([below](#opencodes-bridge-plugin)); `--worktree ""`, payload `cwd` | `permission.asked` → `PermissionRequest` | `opencode --session <id>` / `--continue`; sessions read from `opencode.db` (`$OPENCODE_DB`, else `$XDG_DATA_HOME/opencode/`, else `~/.local/share/opencode/`) |
 
 Not built in, and why:
 
@@ -259,8 +260,24 @@ Not built in, and why:
 - **Windsurf / Devin Desktop**: no session, stop or permission events; the only turn end is the async `post_cascade_response`.
 - **Crush**: `PreToolUse` only.
 - **Cline**: one executable file per hook, and current docs point to in-process SDK plugins.
-- **OpenCode, Amp**: JS/TS plugins only; supporting them means shipping a small bridge plugin that runs `am-hook`.
+- **Amp**: JS/TS plugins only; supporting it means shipping a small bridge plugin that runs `am-hook`, as am does for OpenCode.
 - **Aider**: no hooks, only a `--notifications-command` with no payload.
 - **Mistral Vibe**: TOML config with tool and `post_agent` events only.
 
 Any of these can still be added as a manifest where its hooks fit the format above.
+
+### OpenCode's bridge plugin
+
+OpenCode has no command hooks; it loads JS/TS plugins (it calls every function exported by each file in a config dir's `{plugin,plugins}/`) and hands them its event bus. `am hooks install --agent opencode` writes `plugins/agent-monitor.js` (`harness/opencode-plugin.js` with am-hook's argv filled in; `HookInstall::OwnedFile`, no registration). The plugin keeps per-session state and runs `am-hook hook-event --agent opencode --worktree "" --event <E>` with `{session_id, cwd, hook_event_name, tool_name?, tool_input?, agent_id?, agent_type?}` on stdin: detached, one at a time in order (so a `Stop` can't overtake the tool event before it), killed after 5 s, never throwing into OpenCode. The manifest's `events` map is the identity. Events (V1 payloads in `properties`, V2 in `data`):
+
+| OpenCode | Sent |
+|---|---|
+| `session.created` | `SessionStart` |
+| `session.status` busy, `session.next.prompted`, `session.execution.started` | `UserPromptSubmit`, once per turn |
+| `session.status` idle, `session.idle`, `session.execution.succeeded`, `session.execution.interrupted` (not by OpenCode's shutdown) | `Stop`, once per turn (OpenCode sends both idles; a second `Stop` would turn `done` into `idle`) |
+| `session.error` (not `MessageAbortedError`/`ContextOverflowError`), `session.execution.failed` | `StopFailure` |
+| `permission.asked` (V1 `permission.updated`) | `PermissionRequest`; a turn that ends with one still open sends `PostToolUse` before its `Stop` |
+| the last `permission.replied` of a session | `PostToolUse` (back to `executing`) |
+| `tool.execute.before` / `after` hooks | `PreToolUse` / `PostToolUse`, tool name mapped (`bash` → `Bash`…), only the `command`/`filePath`/`pattern`/`url`/`query`/`description`/`prompt` arguments |
+| `session.updated` with `time.archived`, `session.deleted` | `SessionEnd` |
+| a child session (`parentID`, made by the `task` tool) | `SubagentStart` / `SubagentStop` when it starts and ends, plus its tool and permission events, all with `session_id` = the parent and `agent_id` = the child, so it is never a session of its own |
