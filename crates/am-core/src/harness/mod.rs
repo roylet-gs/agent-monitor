@@ -22,6 +22,7 @@ pub mod cursor;
 pub mod droid;
 pub mod embedded;
 pub mod gemini;
+pub mod qoder;
 pub mod qwen;
 pub mod manifest;
 
@@ -261,6 +262,7 @@ impl HarnessKind {
     pub const DROID: HarnessKind = HarnessKind(&droid::DROID);
     pub const COPILOT: HarnessKind = HarnessKind(&copilot::COPILOT);
     pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
+    pub const QODER: HarnessKind = HarnessKind(&qoder::QODER);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -323,6 +325,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::DROID,
     HarnessKind::COPILOT,
     HarnessKind::CURSOR,
+    HarnessKind::QODER,
 ];
 
 struct Registry {
