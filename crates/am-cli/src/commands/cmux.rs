@@ -11,17 +11,33 @@ use crate::fail;
 
 pub fn dock(project: Option<&Path>, reviews: bool, remove: bool) {
     let path = cmux::dock_path(project);
-    let mut dock = read_settings(&path).unwrap_or_else(|e| fail(&format!("Couldn't read {}: {e}", tilde(&path))));
     let existed = path.exists();
-    let am = am_core::hooks_installer::find_installed_binary("am")
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "am".into());
+    if remove && !existed {
+        println!("Nothing to remove: {} doesn't exist", tilde(&path));
+        return;
+    }
+    let mut dock = read_settings(&path).unwrap_or_else(|e| fail(&format!("Couldn't read {}: {e}", tilde(&path))));
+    // A project's dock.json is committed and shared, so it names plain `am`
+    // (the Dock runs commands in a login shell); the personal one names this
+    // machine's binary.
+    let am = match project {
+        Some(_) => "am".to_string(),
+        None => am_core::hooks_installer::find_installed_binary("am")
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "am".into()),
+    };
     // Removing takes out every control am adds, whatever was asked for then.
     let controls = am_dock_controls(&am, reviews || remove);
+    if remove && !cmux::has_am_controls(&dock, &controls) {
+        println!("Nothing to remove: {} has no am controls", tilde(&path));
+        return;
+    }
     if let Err(e) = merge_dock(&mut dock, &controls, remove) {
         fail(&format!("{} isn't a Dock config: {e}", tilde(&path)));
     }
-    if existed {
+    // The project's file is in git, which keeps its history: no backup
+    // littering `.cmux/`.
+    if existed && project.is_none() {
         let stamp = time::OffsetDateTime::now_utc().unix_timestamp();
         let backup = path.with_file_name(format!("dock.json.{stamp}.bak"));
         if let Err(e) = std::fs::copy(&path, &backup) {

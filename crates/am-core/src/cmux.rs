@@ -139,7 +139,12 @@ pub fn cli_path() -> Option<PathBuf> {
 /// Running in a cmux terminal (or a process started from one), so the
 /// control socket answers.
 pub fn inside() -> bool {
-    std::env::var("CMUX_WORKSPACE_ID").is_ok_and(|v| !v.is_empty())
+    own_workspace().is_some()
+}
+
+/// The workspace this process runs in (`CMUX_WORKSPACE_ID`), if inside cmux.
+pub fn own_workspace() -> Option<String> {
+    std::env::var("CMUX_WORKSPACE_ID").ok().filter(|v| !v.is_empty())
 }
 
 /// A cmux workspace (a sidebar row).
@@ -193,10 +198,19 @@ pub fn select_workspace(r: &dyn CmuxRunner, id: &str) -> Result<(), String> {
     r.run(&["workspace".into(), "select".into(), id.into()]).into_result().map(drop)
 }
 
-/// A new workspace at `cwd` named `name`, its terminal running `command`.
+/// A new workspace at `cwd` named `name`, its terminal running `command`,
+/// switched to (`--focus true`: cmux creates it in the background otherwise).
 pub fn create_workspace(r: &dyn CmuxRunner, cwd: &Path, name: &str, command: Option<&str>) -> Result<(), String> {
-    let mut args: Vec<String> =
-        vec!["workspace".into(), "create".into(), "--cwd".into(), cwd.to_string_lossy().into_owned(), "--name".into(), name.into()];
+    let mut args: Vec<String> = vec![
+        "workspace".into(),
+        "create".into(),
+        "--cwd".into(),
+        cwd.to_string_lossy().into_owned(),
+        "--name".into(),
+        name.into(),
+        "--focus".into(),
+        "true".into(),
+    ];
     if let Some(c) = command.filter(|c| !c.trim().is_empty()) {
         args.extend(["--command".into(), c.into()]);
     }
@@ -295,8 +309,8 @@ pub struct DockControl {
 }
 
 /// The controls `am cmux dock` adds: the dashboard, and optionally the
-/// review page. `am` is the absolute path so the Dock's login shell doesn't
-/// depend on `$PATH`.
+/// review page. `am` is the absolute path for the personal Dock (so it
+/// doesn't depend on `$PATH`), plain `am` for a project's shared one.
 pub fn am_dock_controls(am: &str, reviews: bool) -> Vec<DockControl> {
     let am = crate::launch::sh_quote(am);
     let mut out = vec![DockControl { id: "am", title: "am", command: am.clone() }];
@@ -304,6 +318,13 @@ pub fn am_dock_controls(am: &str, reviews: bool) -> Vec<DockControl> {
         out.push(DockControl { id: "am-reviews", title: "Reviews", command: format!("{am} reviews") });
     }
     out
+}
+
+/// Whether `dock` holds any of `controls` (by id).
+pub fn has_am_controls(dock: &serde_json::Map<String, Value>, controls: &[DockControl]) -> bool {
+    dock.get("controls")
+        .and_then(Value::as_array)
+        .is_some_and(|list| list.iter().any(|c| c["id"].as_str().is_some_and(|id| controls.iter().any(|a| a.id == id))))
 }
 
 /// `dock` (a parsed dock.json, `{}` when new) with `controls` added or, by
@@ -418,8 +439,11 @@ pub mod tests {
         assert_eq!(ids, ["git", "am", "am-reviews"]);
         assert_eq!(dock["controls"][1]["command"], "'/opt/am bin/am'");
         assert_eq!(dock["controls"][2]["command"], "'/opt/am bin/am' reviews");
+        assert!(has_am_controls(&dock, &am_dock_controls("am", true)));
         merge_dock(&mut dock, &am_dock_controls("am", true), true).unwrap();
         assert_eq!(dock["controls"].as_array().unwrap().len(), 1);
+        assert!(!has_am_controls(&dock, &am_dock_controls("am", true)));
+        assert!(!has_am_controls(&serde_json::Map::new(), &am_dock_controls("am", true)));
 
         let mut fresh = serde_json::Map::new();
         merge_dock(&mut fresh, &am_dock_controls("am", false), false).unwrap();
@@ -441,8 +465,8 @@ pub mod tests {
         assert_eq!(
             calls,
             [
-                "workspace create --cwd /r/w --name feat --command claude --resume abc",
-                "workspace create --cwd /r/w --name feat",
+                "workspace create --cwd /r/w --name feat --focus true --command claude --resume abc",
+                "workspace create --cwd /r/w --name feat --focus true",
                 "set-status am_ci ✓ CI --workspace A --color #34c759 --priority 5",
                 "set-progress 1.00 --label ctx 42% --workspace A",
                 "clear-progress --workspace A",

@@ -60,7 +60,10 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
         if ide == IdeChoice::Cmux && cmux::inside() {
             let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
             match cmux::list_workspaces(&cmux::SystemCmux) {
-                Ok(list) => {
+                Ok(mut list) => {
+                    // am's own workspace isn't one to switch to (am started at the repo root).
+                    let own = cmux::own_workspace();
+                    list.retain(|w| own.as_deref() != Some(w.id.as_str()));
                     if let Some(w) = cmux::workspace_for(&list, &v.worktree.path, &roots) {
                         let r = cmux::select_workspace(&cmux::SystemCmux, &w.id).map_err(|e| format!("Couldn't switch cmux workspace: {e}"));
                         report(&tx, r, format!("Switched to {label} in cmux"));

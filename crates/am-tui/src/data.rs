@@ -193,8 +193,9 @@ struct Worker {
     /// Stage timings (`am perf`).
     perf: Perf,
     /// The `cmux-sync` thread, started the first time pills are due
-    /// (`cmuxSync` on, inside cmux), and what it was last sent.
-    cmux: Option<(Sender<crate::cmux_sync::Desired>, crate::cmux_sync::Desired)>,
+    /// (`cmuxSync` on, inside cmux, this process holding the cmux role), and
+    /// what it was last sent.
+    cmux: Option<(crate::cmux_sync::Handle, crate::cmux_sync::Desired)>,
 }
 
 impl Worker {
@@ -247,6 +248,10 @@ impl Worker {
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => {
                     self.perf.report(Instant::now());
+                    // Take the cmux pills down before the process exits.
+                    if let Some((h, _)) = self.cmux.take() {
+                        h.stop(Duration::from_secs(2));
+                    }
                     return;
                 }
                 Ok(Cmd::Refresh { force: f }) => force = f,
@@ -275,14 +280,14 @@ impl Worker {
     /// Hand the cmux sidebar pills to the `cmux-sync` thread when they change
     /// (an empty set once `cmuxSync` is turned off clears them).
     fn sync_cmux(&mut self, views: &[WorktreeView]) {
-        let on = self.settings.cmux_sync && am_core::cmux::inside();
+        let on = self.settings.cmux_sync && am_core::cmux::inside() && crate::cmux_sync::role::owned();
         if !on && self.cmux.is_none() {
             return;
         }
         let desired = if on { crate::cmux_sync::desired(views, &self.settings) } else { Default::default() };
         let (tx, last) = self.cmux.get_or_insert_with(|| (crate::cmux_sync::spawn(), Default::default()));
         if *last != desired {
-            let _ = tx.send(desired.clone());
+            tx.send(desired.clone());
             *last = desired;
         }
     }
@@ -468,6 +473,7 @@ impl Worker {
         }
         let reviews = self.reviews_with_worktrees(&views);
         let mut roots: Vec<String> = views.iter().map(|v| v.worktree.path.clone()).collect();
+        let worktree_paths = roots.clone();
         // Review-only: every worktree, unfiltered, so a pulled PR's ⏎/`d`
         // always find theirs (the dashboard's hide* filters don't apply).
         let views = if dashboard { grouping::apply_filters(views, &self.settings) } else { views };
@@ -491,6 +497,7 @@ impl Worker {
             review_people,
             review_total: self.review_total,
             review_query_hits: self.review_hits.clone(),
+            worktree_paths,
         };
         if self.last_sent.as_ref() != Some(&snapshot) {
             let _ = self.tx.send(snapshot.clone());

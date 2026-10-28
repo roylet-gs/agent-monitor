@@ -38,8 +38,9 @@ pub struct WorktreePills {
     pub progress: Option<(f64, String)>,
 }
 
-/// Worktree path → what its workspace should show. Worktrees with nothing to
-/// show are left out.
+/// Worktree path → what its workspace should show. Every worktree is listed,
+/// also those with nothing to show, so a workspace in a nested worktree is
+/// matched to that worktree and never to the repo around it.
 pub type Desired = BTreeMap<String, WorktreePills>;
 
 fn pill(value: String, color: Option<&'static str>, priority: i32) -> Pill {
@@ -100,13 +101,9 @@ pub fn worktree_pills(v: &WorktreeView, settings: &Settings) -> WorktreePills {
     out
 }
 
-/// Every worktree that has something to show.
+/// Every worktree (empty pills for one with nothing to show).
 pub fn desired<'a>(views: impl IntoIterator<Item = &'a WorktreeView>, settings: &Settings) -> Desired {
-    views
-        .into_iter()
-        .map(|v| (v.worktree.path.clone(), worktree_pills(v, settings)))
-        .filter(|(_, p)| *p != WorktreePills::default())
-        .collect()
+    views.into_iter().map(|v| (v.worktree.path.clone(), worktree_pills(v, settings))).collect()
 }
 
 /// The pushing side: what each workspace was last given.
@@ -179,13 +176,104 @@ impl<R: CmuxRunner> Sync<R> {
     }
 }
 
-/// Start the `cmux-sync` thread. Send it the latest [`Desired`] whenever it
-/// changes; an empty map clears everything. It clears what it put up when
-/// the sender is dropped.
-pub fn spawn() -> Sender<Desired> {
+/// The running `cmux-sync` thread.
+pub struct Handle {
+    tx: Sender<Desired>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Handle {
+    /// Hand it the latest [`Desired`]; an empty map clears everything.
+    pub fn send(&self, desired: Desired) {
+        let _ = self.tx.send(desired);
+    }
+
+    /// Stop it and wait (at most `wait`) for it to take its pills down, so
+    /// they don't outlive am when the process exits right after.
+    pub fn stop(self, wait: Duration) {
+        let Handle { tx, thread } = self;
+        drop(tx);
+        let Some(thread) = thread else { return };
+        let deadline = Instant::now() + wait;
+        while !thread.is_finished() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if thread.is_finished() {
+            let _ = thread.join();
+        } else {
+            warn!("cmux", "Pills still being cleared after {wait:?}; leaving them");
+        }
+    }
+}
+
+/// Start the `cmux-sync` thread. It clears what it put up when stopped.
+pub fn spawn() -> Handle {
     let (tx, rx) = std::sync::mpsc::channel::<Desired>();
-    let _ = std::thread::Builder::new().name("cmux-sync".into()).spawn(move || run(rx));
-    tx
+    let thread = std::thread::Builder::new().name("cmux-sync".into()).spawn(move || run(rx)).ok();
+    Handle { tx, thread }
+}
+
+/// Only one am-tui per data dir talks to cmux (pills and review
+/// notifications): the one holding an advisory lock on
+/// `<app dir>/cmux-sync.lock`. Otherwise two instances (`am cmux dock
+/// --reviews`, a `ctrl-v` window, am in two terminals) would each post every
+/// notification, and one quitting would clear pills the other thinks it set.
+/// The lock goes with the process, so another instance takes over (retrying
+/// every [`RELIST`]) once the owner quits.
+pub mod role {
+    use std::fs::File;
+    use std::path::Path;
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    use am_core::debug;
+
+    struct Role {
+        lock: Option<File>,
+        tried: Option<Instant>,
+        off: bool,
+    }
+
+    static ROLE: Mutex<Role> = Mutex::new(Role { lock: None, tried: None, off: false });
+
+    /// This process never takes the role (a review window beside the
+    /// dashboard).
+    pub fn give_up() {
+        if let Ok(mut r) = ROLE.lock() {
+            r.off = true;
+            r.lock = None;
+        }
+    }
+
+    /// Whether this process is the one that talks to cmux, taking the role
+    /// when it's free.
+    pub fn owned() -> bool {
+        let Ok(mut r) = ROLE.lock() else { return false };
+        if r.off {
+            return false;
+        }
+        if r.lock.is_some() {
+            return true;
+        }
+        if r.tried.is_some_and(|t| t.elapsed() < super::RELIST) {
+            return false;
+        }
+        r.tried = Some(Instant::now());
+        r.lock = try_lock(&am_core::paths::app_dir().join("cmux-sync.lock"));
+        r.lock.is_some()
+    }
+
+    /// The lock file, locked, or `None` when another holder has it.
+    pub fn try_lock(path: &Path) -> Option<File> {
+        let file = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path).ok()?;
+        match file.try_lock() {
+            Ok(()) => {
+                debug!("cmux", "Took the cmux role ({})", path.display());
+                Some(file)
+            }
+            Err(_) => None,
+        }
+    }
 }
 
 fn run(rx: Receiver<Desired>) {
@@ -304,6 +392,43 @@ mod tests {
         let mut cleared = sync.runner.take();
         cleared.sort();
         assert_eq!(cleared, ["clear-status am_pr --workspace A", "clear-status am_ticket --workspace B"]);
+    }
+
+    #[test]
+    fn a_nested_worktree_with_nothing_to_show_never_gets_its_repos_pills() {
+        let mut sync = Sync::new(fake());
+        let mut d = Desired::new();
+        d.insert("/r/repo".into(), wp("#1 ✓", Some(0.4)));
+        d.insert("/r/repo/.claude/worktrees/feat".into(), WorktreePills::default());
+        sync.apply(&d, Instant::now());
+        let calls = sync.runner.take();
+        assert_eq!(
+            &calls[2..],
+            ["set-status am_pr #1 ✓ --workspace A --color #34c759 --priority 30", "set-progress 0.40 --label ctx 40% --workspace A"]
+        );
+        assert!(!sync.pushed.contains_key("B"));
+    }
+
+    #[test]
+    fn only_one_holder_takes_the_role() {
+        let dir = std::env::temp_dir().join(format!("am-cmux-role-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cmux-sync.lock");
+        let first = role::try_lock(&path).expect("free lock");
+        assert!(role::try_lock(&path).is_none());
+        drop(first);
+        assert!(role::try_lock(&path).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stop_waits_for_the_thread() {
+        // Nothing sent, so the thread never runs cmux: it just sees the
+        // sender go and returns.
+        let h = spawn();
+        let started = Instant::now();
+        h.stop(Duration::from_secs(2));
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]

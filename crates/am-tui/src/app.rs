@@ -41,6 +41,9 @@ pub struct Snapshot {
     pub review_total: Option<u64>,
     /// Which PRs match each review group's GitHub search terms.
     pub review_query_hits: am_core::review_groups::QueryHits,
+    /// Every tracked worktree's path, also those the hide* filters leave out
+    /// (matching a cmux workspace to its most specific worktree).
+    pub worktree_paths: Vec<String>,
 }
 
 /// One number in the dashboard's review badge.
@@ -370,27 +373,22 @@ impl App {
 
     /// Queue a notification for each review request that wasn't listed
     /// before (one the review groups show, not one you already approved).
+    /// Every listed PR counts as seen, shown or not, so one that a filter or
+    /// group change brings into view isn't announced as new.
     fn track_new_reviews(&mut self) {
-        if self.snapshot.reviews.is_none() {
-            return;
-        }
-        let shown: Vec<(String, String, String)> = self
-            .review_list()
-            .into_iter()
-            .filter(|r| !r.approved_by_you)
-            .map(|r| (r.pr.url.clone(), format!("Review requested: {} #{}", r.repo, r.pr.number), format!("{} — @{}", r.pr.title, r.author)))
-            .collect();
+        let Some(all) = &self.snapshot.reviews else { return };
         let first = self.seen_reviews.is_none();
         let seen = self.seen_reviews.get_or_insert_with(Default::default);
-        let mut alerts = Vec::new();
-        for (url, title, body) in shown {
-            if seen.insert(url) && !first {
-                alerts.push((title, body));
-            }
+        let new: std::collections::HashSet<String> = all.iter().filter(|r| seen.insert(r.pr.url.clone())).map(|r| r.pr.url.clone()).collect();
+        if first || new.is_empty() || !self.settings.cmux_sync || self.reviews_window {
+            return;
         }
-        if self.settings.cmux_sync {
-            self.review_alerts.extend(alerts);
-        }
+        let alerts = self
+            .review_list()
+            .into_iter()
+            .filter(|r| !r.approved_by_you && new.contains(&r.pr.url))
+            .map(|r| (format!("Review requested: {} #{}", r.repo, r.pr.number), format!("{} — @{}", r.pr.title, r.author)));
+        self.review_alerts.extend(alerts.collect::<Vec<_>>());
     }
 
     fn mark_selected_seen(&mut self) {

@@ -3526,6 +3526,7 @@ mod tests {
             review_people: vec![],
             review_total: None,
             review_query_hits: Default::default(),
+            worktree_paths: Vec::new(),
         };
         let settings = Settings { worktree_sort: vec![], ..Settings::default() };
         let mut app = App::new(settings);
@@ -4049,6 +4050,30 @@ mod tests {
         app.review_alerts.clear();
         app.apply(snap);
         assert!(app.review_alerts.is_empty(), "announced once");
+    }
+
+    #[test]
+    fn a_review_request_brought_into_view_by_a_filter_is_not_announced() {
+        use crate::reviews_ui::tests::review;
+        let mut app = fixture();
+        let mut settings = app.settings.clone();
+        settings.review_default_group.draft = "ready".into();
+        app.settings = settings.clone();
+        let mut draft = review("r1", 2, "2026-10-27T10:00:00Z");
+        draft.pr.is_draft = true;
+        let mut snap = app.snapshot.clone();
+        snap.reviews = Some(vec![review("r1", 1, "2026-10-26T10:00:00Z"), draft]);
+        app.apply(snap.clone());
+        // Drafts shown now: #2 was already waiting, so it isn't new.
+        settings.review_default_group.draft = "any".into();
+        app.settings = settings;
+        app.apply(snap.clone());
+        assert!(app.review_alerts.is_empty(), "{:?}", app.review_alerts);
+        // A review window leaves the announcing to the dashboard.
+        app.reviews_window = true;
+        snap.reviews.as_mut().unwrap().push(review("r1", 3, "2026-10-28T10:00:00Z"));
+        app.apply(snap);
+        assert!(app.review_alerts.is_empty());
     }
 
     /// `fixture()` with three PRs waiting on review: one already pulled

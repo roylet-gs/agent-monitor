@@ -120,8 +120,13 @@ fn main() -> io::Result<()> {
     info!("tui", "am-tui {} starting (theme={})", env!("CARGO_PKG_VERSION"), settings.theme);
 
 
-    let collector = data::Collector::spawn(settings.clone());
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a == "--reviews") {
+        // A review window (`am reviews`, `ctrl-v`, the Dock's Reviews) sits
+        // beside a dashboard, which owns the cmux pills and notifications.
+        cmux_sync::role::give_up();
+    }
+    let collector = data::Collector::spawn(settings.clone());
     // `am setup` → `--setup` reopens the wizard; `am --watch` → `--log` opens the log pane.
     let first_run = setup::needed(&settings) || args.iter().any(|a| a == "--setup");
     let show_log = args.iter().any(|a| a == "--log");
@@ -237,7 +242,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                 play_sound(&sound);
             }
             let alerts = std::mem::take(&mut app.review_alerts);
-            if !alerts.is_empty() && am_core::cmux::inside() {
+            if !alerts.is_empty() && am_core::cmux::inside() && cmux_sync::role::owned() {
                 std::thread::spawn(move || {
                     for (title, body) in alerts {
                         let _ = am_core::cmux::notify(&am_core::cmux::SystemCmux, &title, &body, None);
@@ -571,7 +576,10 @@ fn dispatch(
         Action::ReloadReviews => collector.reload_reviews(),
         Action::LoadReviewPeople => collector.refresh_people(),
         Action::Open(v) => {
+            // Every worktree, hidden ones too, so a workspace in a hidden
+            // nested worktree isn't taken for its repo's.
             let roots = app.snapshot.repos.iter().map(|r| r.path.clone())
+                .chain(app.snapshot.worktree_paths.iter().cloned())
                 .chain(app.snapshot.groups.iter().flat_map(|g| g.worktrees.iter().map(|w| w.worktree.path.clone())))
                 .collect();
             launcher::open(*v, roots, &app.settings, launch_tx.clone())
