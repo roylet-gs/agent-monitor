@@ -467,7 +467,23 @@ pub struct TextBlock {
     /// The block's body, between the marker lines: the hooks in the file's
     /// own syntax. Quote values with [`toml_string`] / [`yaml_string`].
     pub render: fn(&HookContext) -> String,
+    /// Where the block goes: given the file without am's block and the whole
+    /// block (marker lines included), the new file text, or an error that
+    /// stops the install before anything is written. With it, every install
+    /// re-places the block (an earlier one is removed first); `None` keeps it
+    /// where it is, else appends it ([`append_block`]). For a format that
+    /// can't repeat a key (YAML's `hooks:`), so the block can nest under the
+    /// user's own.
+    pub place: Option<fn(&str, &str) -> std::io::Result<String>>,
+    /// State the CLI keeps beside its config file: called with the hooks just
+    /// before the block is written, and with `None` once it is removed on
+    /// uninstall (Hermes's shell-hook allowlist). An error stops the install
+    /// before the config file is touched.
+    pub companion: Option<Companion>,
 }
+
+/// [`TextBlock::companion`]: `Some(hooks)` on install, `None` on uninstall.
+pub type Companion = fn(Option<&HookContext>) -> std::io::Result<()>;
 
 /// [`HookInstall::OwnedFile`]: a file am writes whole and deletes on
 /// uninstall (only while it still holds [`OWNED_FILE_MARKER`]).
@@ -649,13 +665,25 @@ fn find_block(text: &str, begin: &str, end: &str) -> std::io::Result<Option<(usi
 /// appended after a blank line. Everything outside the block is kept.
 pub fn upsert_block(text: &str, comment: &str, id: &str, body: &str) -> std::io::Result<String> {
     let (begin, end) = (block_begin(comment, id), block_end(comment, id));
-    let nl = if body.is_empty() || body.ends_with('\n') { "" } else { "\n" };
-    let block = format!("{begin}\n{body}{nl}{end}\n");
+    let block = block_text(comment, id, body);
     Ok(match find_block(text, &begin, &end)? {
         Some((s, e)) => format!("{}{block}{}", &text[..s], &text[e..]),
-        None if text.is_empty() => block,
-        None => format!("{text}{}\n{block}", if text.ends_with('\n') { "" } else { "\n" }),
+        None => append_block(text, &block),
     })
+}
+
+/// am's whole block: the marker lines around `body`, ending in a newline.
+pub fn block_text(comment: &str, id: &str, body: &str) -> String {
+    let nl = if body.is_empty() || body.ends_with('\n') { "" } else { "\n" };
+    format!("{}\n{body}{nl}{}\n", block_begin(comment, id), block_end(comment, id))
+}
+
+/// `text` with `block` appended after a blank line (just `block` when empty).
+pub fn append_block(text: &str, block: &str) -> String {
+    if text.is_empty() {
+        return block.to_owned();
+    }
+    format!("{text}{}\n{block}", if text.ends_with('\n') { "" } else { "\n" })
 }
 
 /// `text` without am's block (`None` when there is none). A block at the end
@@ -675,7 +703,18 @@ fn install_text(provider: &dyn Harness, style: &HookInstall, native: Option<Path
     match style {
         HookInstall::Json => unreachable!("JSON hooks go through install_json"),
         HookInstall::TextBlock(tb) => {
-            let text = upsert_block(&read_text(&path)?, tb.comment, provider.id(), &(tb.render)(&ctx))?;
+            let current = read_text(&path)?;
+            let body = (tb.render)(&ctx);
+            let text = match tb.place {
+                Some(place) => {
+                    let rest = remove_block(&current, tb.comment, provider.id())?.unwrap_or(current);
+                    place(&rest, &block_text(tb.comment, provider.id(), &body))?
+                }
+                None => upsert_block(&current, tb.comment, provider.id(), &body)?,
+            };
+            if let Some(companion) = tb.companion {
+                companion(Some(&ctx))?;
+            }
             write_text(&path, &text)?;
         }
         HookInstall::OwnedFile(of) => {
@@ -716,14 +755,16 @@ fn install_text(provider: &dyn Harness, style: &HookInstall, native: Option<Path
 
 fn uninstall_text_block(provider: &dyn Harness, tb: &TextBlock) -> std::io::Result<()> {
     let path = provider.settings_path();
-    if !path.exists() {
-        return Ok(());
-    }
-    if let Some(text) = remove_block(&read_text(&path)?, tb.comment, provider.id())? {
+    if path.exists()
+        && let Some(text) = remove_block(&read_text(&path)?, tb.comment, provider.id())?
+    {
         write_text(&path, &text)?;
         info!("hooks", "Uninstalled {} hooks from {} (text block)", provider.name(), path.display());
     }
-    Ok(())
+    match tb.companion {
+        Some(companion) => companion(None),
+        None => Ok(()),
+    }
 }
 
 fn uninstall_owned_file(provider: &dyn Harness, of: &OwnedFile) -> std::io::Result<()> {
@@ -967,7 +1008,7 @@ mod tests {
     }
 
     fn toml_dummy(path: PathBuf) -> Dummy {
-        Dummy { path, install: HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml }) }
+        Dummy { path, install: HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml, place: None, companion: None }) }
     }
 
     fn js_dummy(path: PathBuf, register: Option<JsonListEntry>) -> Dummy {
@@ -1144,7 +1185,7 @@ mod tests {
         },
         None,
     )
-    .with_hook_install(|| HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml }));
+    .with_hook_install(|| HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml, place: None, companion: None }));
 
     #[test]
     fn an_embedded_harness_picks_its_style() {

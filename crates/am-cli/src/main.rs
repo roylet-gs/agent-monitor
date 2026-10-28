@@ -127,7 +127,7 @@ enum Cmd {
         /// Hook is managed by Claude Code (accepted for compatibility)
         #[arg(long)]
         managed: bool,
-        /// Harness that sent the event (claude, gemini, codex, qwen, droid, copilot, cursor, or a plugin id); default claude
+        /// Harness that sent the event (claude, gemini, codex, qwen, droid, copilot, cursor, hermes, or a plugin id); default claude
         #[arg(short, long, value_name = "id")]
         agent: Option<String>,
     },
@@ -287,7 +287,7 @@ enum McpCmd {
 
 #[derive(Args)]
 struct AgentOpt {
-    /// Only this agent (claude, gemini, codex, qwen, droid, copilot, cursor, …); repeatable
+    /// Only this agent (claude, gemini, codex, qwen, droid, copilot, cursor, hermes, …); repeatable
     #[arg(short, long = "agent", value_name = "id")]
     agents: Vec<String>,
 }
