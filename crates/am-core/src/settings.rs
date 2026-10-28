@@ -68,6 +68,17 @@ pub struct Settings {
     pub hide_merged_closed_prs: bool,
     pub hide_idle_done_agents: bool,
     pub hide_without_linear_ticket: bool,
+    /// Master switch for the dashboard's worktree filters (`F`): off shows
+    /// every worktree whatever the `hide*` and `worktreeFilter*` keys say.
+    pub worktree_filters_enabled: bool,
+    /// Only rows whose name, branch or ticket contains this (any case).
+    pub worktree_filter_text: String,
+    /// `WORKTREE_STATUS_FILTERS`: which agent statuses the list shows.
+    pub worktree_filter_status: String,
+    /// `WORKTREE_PR_FILTERS`: which PR states the list shows.
+    pub worktree_filter_pr: String,
+    /// `WORKTREE_GIT_FILTERS`: local changes or not.
+    pub worktree_filter_git: String,
     pub show_pr_status: bool,
     pub show_linear_ticket: bool,
     pub show_git_ahead_behind: bool,
@@ -202,6 +213,11 @@ impl Default for Settings {
             hide_merged_closed_prs: false,
             hide_idle_done_agents: false,
             hide_without_linear_ticket: false,
+            worktree_filters_enabled: true,
+            worktree_filter_text: String::new(),
+            worktree_filter_status: "any".into(),
+            worktree_filter_pr: "any".into(),
+            worktree_filter_git: "any".into(),
             show_pr_status: true,
             show_linear_ticket: true,
             show_git_ahead_behind: true,
@@ -351,6 +367,15 @@ pub fn split_logins(raw: &str) -> Vec<String> {
     }
     out
 }
+
+/// `worktreeFilterStatus` values: every row, rows waiting on you, rows with
+/// a working agent (waiting, executing, planning, delegating), or rows whose
+/// agent is idle, done or absent.
+pub const WORKTREE_STATUS_FILTERS: [&str; 4] = ["any", "waiting", "active", "idle"];
+/// `worktreeFilterPr` values: every row, an open PR, no PR, CI failing.
+pub const WORKTREE_PR_FILTERS: [&str; 4] = ["any", "open", "none", "failing"];
+/// `worktreeFilterGit` values: every row, uncommitted or unpushed work, none.
+pub const WORKTREE_GIT_FILTERS: [&str; 3] = ["any", "changes", "clean"];
 
 /// What today's token total shows (`dailyTokensMode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -563,6 +588,20 @@ mod tests {
         let wiped = reset_to_defaults(s, false);
         assert!(!wiped.raw.contains_key("setupCompleted"));
         assert!(wiped.raw.contains_key("futureKey"));
+    }
+
+    #[test]
+    fn worktree_filters_default_to_on_with_nothing_picked_and_round_trip() {
+        let d = Settings::default();
+        assert!(d.worktree_filters_enabled && d.worktree_filter_text.is_empty());
+        assert_eq!((d.worktree_filter_status.as_str(), d.worktree_filter_pr.as_str(), d.worktree_filter_git.as_str()), ("any", "any", "any"));
+        let s = Settings::parse(
+            r#"{"worktreeFiltersEnabled":false,"worktreeFilterText":"auth","worktreeFilterStatus":"waiting","worktreeFilterPr":"failing","worktreeFilterGit":"changes"}"#,
+        );
+        assert!(!s.worktree_filters_enabled);
+        assert_eq!(s.worktree_filter_text, "auth");
+        let back = Settings::parse(&serde_json::to_string(&s).unwrap());
+        assert_eq!((back.worktree_filter_status.as_str(), back.worktree_filter_pr.as_str(), back.worktree_filter_git.as_str()), ("waiting", "failing", "changes"));
     }
 
     #[test]

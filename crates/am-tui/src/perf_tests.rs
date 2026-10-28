@@ -118,6 +118,7 @@ pub(super) fn big_fixture(worktrees: usize, reviews: usize) -> App {
         review_total: Some(500),
         review_query_hits: Default::default(),
         worktree_paths: Vec::new(),
+        hidden_worktrees: 0,
     };
     let group = |name: &str, f: &dyn Fn(&mut ReviewGroup)| {
         let mut g = ReviewGroup { name: name.into(), ..ReviewGroup::default() };

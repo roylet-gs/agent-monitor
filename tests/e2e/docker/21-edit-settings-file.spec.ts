@@ -33,7 +33,7 @@ test("Settings → View logs… opens debug.log in the default ide: the failed l
 
   // The seeded data dir has a debug.log (no rotated .1), so View logs… opens
   // it in the ide (vscode, not installed) rather than revealing the folder.
-  await tui.openSetting("Open debug.log in the editor", 60);
+  await tui.openSetting("Open debug.log in the editor", 80);
   await tui.waitForText("View logs…");
   await tui.sendKey("Enter");
   await tui.waitForText("✗ Couldn't open");

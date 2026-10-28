@@ -1,7 +1,7 @@
 //! Worktree lifecycle dialogs: new worktree form (with the advisory live
 //! "does this branch exist?" check; the same form, cut down to the branch,
-//! pulls an existing branch into the tmp space), delete confirmation, and a busy
-//! indicator. Pure state + key handling; the work itself runs in ops.rs.
+//! pulls an existing branch into the tmp space), delete confirmation, add
+//! repository and a few confirmations. Pure state + key handling; the work itself runs in ops.rs.
 //! Follow-up questions (branch exists, startup script) are asked in the
 //! jobs pane (jobs.rs).
 
@@ -124,10 +124,6 @@ pub enum Modal {
     Delete(DeleteState),
     /// `A`: browse to a repository to register (typed paths work too).
     AddRepo(crate::folder_browser::FolderBrowser),
-    /// `f`: file a feature request as a GitHub issue on the app's repo.
-    Suggest { title: String, body: String, on_body: bool, error: Option<String> },
-    /// Spinner while a short job runs (add repo, feature request).
-    Busy { text: String },
     /// Settings → Reset settings: `y` resets, any other key cancels.
     ConfirmReset,
     /// "Pull + run script" on a PR whose repo (named `repo`) has no review
@@ -141,7 +137,6 @@ pub enum Effect {
     Create(Repository, CreateRequest),
     Delete { view: Box<WorktreeView>, delete_branch: bool },
     AddRepo(String),
-    Suggest { title: String, body: String },
     /// Put settings.json back to defaults, then run setup.
     ResetSettings,
     /// Add the repo's review script, then pull + run it for this PR.
@@ -197,10 +192,6 @@ impl Modal {
         })
     }
 
-    pub fn busy(text: String) -> Modal {
-        Modal::Busy { text }
-    }
-
     pub fn delete(view: WorktreeView) -> Modal {
         let exists = std::path::Path::new(&view.worktree.path).exists();
         let w = &view.worktree;
@@ -211,7 +202,6 @@ impl Modal {
 
     pub fn on_key(&mut self, key: Key) -> Effect {
         match self {
-            Modal::Busy { .. } => Effect::None,
             // Only `y`: ⏎ opened this, so a double press mustn't reset.
             Modal::ConfirmReset => match key {
                 Key::Char('y') | Key::Char('Y') => Effect::ResetSettings,
@@ -287,29 +277,6 @@ impl Modal {
                     BrowserOutcome::Cancel => Effect::Close,
                     BrowserOutcome::Add(path) => Effect::AddRepo(path),
                 }
-            }
-            Modal::Suggest { title, body, on_body, error } => {
-                *error = None;
-                match key {
-                    Key::Esc => return Effect::Close,
-                    Key::Tab | Key::BackTab | Key::Up | Key::Down => *on_body = !*on_body,
-                    Key::Backspace => {
-                        if *on_body { body.pop() } else { title.pop() };
-                    }
-                    Key::Char(c) => {
-                        if *on_body { body.push(c) } else { title.push(c) }
-                    }
-                    Key::Enter => {
-                        if title.trim().is_empty() {
-                            *on_body = false;
-                            *error = Some("A title is required".into());
-                        } else {
-                            return Effect::Suggest { title: title.trim().into(), body: body.trim().into() };
-                        }
-                    }
-                    _ => {}
-                }
-                Effect::None
             }
         }
     }
@@ -413,17 +380,6 @@ mod tests {
         m.on_check_result("fe".into(), BranchCheck { local: true, remote: Some(false) });
         let Modal::New(f) = &m else { panic!() };
         assert!(f.remote_exists());
-    }
-
-    #[test]
-    fn suggest_requires_a_title() {
-        let mut m = Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None };
-        assert!(matches!(m.on_key(Key::Enter), Effect::None));
-        typed(&mut m, "Dark mode");
-        m.on_key(Key::Tab);
-        typed(&mut m, "please");
-        let Effect::Suggest { title, body } = m.on_key(Key::Enter) else { panic!() };
-        assert_eq!((title.as_str(), body.as_str()), ("Dark mode", "please"));
     }
 
     #[test]

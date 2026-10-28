@@ -1,0 +1,28 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 120, 24)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ feature/refactor ◆ 2 subagents                                      ENG-412 #127✓ approved ↑2 ±3  4m █░░░░░░░ 121k │
+│ ◐ fix/offline-cache                                                                                 4m █▒░░░░░░ 185k │
+│                                                                                                                      │
+│gridsight ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│ · main                                                                                       ↑2 ±3  4m               │
+│                                                                                                                      │
+│                 ╭─Worktree filters ────────────────────────────────────────────────────────────────╮                 │
+│                 │▌  Filters on                    on                                               │                 │
+│                 │   Text search                   auth                                             │                 │
+│                 │   Agent status                  waiting                                          │                 │
+│                 │   PR                            any                                              │                 │
+│                 │   Git                           any                                              │                 │
+│                 │   Hide main branch              on                                               │                 │
+│                 │   Hide merged/closed PRs        off                                              │                 │
+│                 │   Hide idle/done agents         off                                              │                 │
+│                 │   Hide without Linear ticket    off                                              │                 │
+│                 │   Reset filters…                ⏎ reset                                          │                 │
+│                 │                                                                                  │                 │
+│                 │ Off shows every worktree whatever the filters below say (F on the list)          │                 │
+│                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │
+╰ "auth" · waiting · no main · 3 hidden ─────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit

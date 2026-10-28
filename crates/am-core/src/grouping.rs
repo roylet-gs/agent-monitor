@@ -205,10 +205,53 @@ fn is_effectively_open(agent: Option<&AgentState>, cutoff: &str) -> bool {
     true
 }
 
+/// Whether a row passes the filters picked in the Worktree filters box (text,
+/// status, PR, git). Unlike the `hide*` toggles these hide live rows too:
+/// they are asked for by name.
+pub fn matches_picked_filters(v: &WorktreeView, settings: &Settings) -> bool {
+    let text = settings.worktree_filter_text.trim().to_lowercase();
+    if !text.is_empty() {
+        let wt = &v.worktree;
+        let mut fields = vec![wt.display_name(), wt.branch.as_str()];
+        if let Some(l) = &v.linear {
+            fields.extend([l.identifier.as_str(), l.title.as_str()]);
+        }
+        if !fields.iter().any(|f| f.to_lowercase().contains(&text)) {
+            return false;
+        }
+    }
+    let status = v.status();
+    let status_ok = match settings.worktree_filter_status.as_str() {
+        "waiting" => status == Some(Status::Waiting),
+        "active" => matches!(status, Some(Status::Waiting | Status::Executing | Status::Planning | Status::Delegating)),
+        "idle" => matches!(status, None | Some(Status::Idle | Status::Done)),
+        _ => true,
+    };
+    let pr_ok = match settings.worktree_filter_pr.as_str() {
+        "open" => v.pr.as_ref().is_some_and(|p| p.state == "OPEN"),
+        "none" => v.pr.is_none(),
+        "failing" => v.pr.as_ref().is_some_and(|p| p.checks_status == ChecksStatus::Failing),
+        _ => true,
+    };
+    let changes = v.git.as_ref().is_some_and(|g| g.dirty > 0 || g.ahead > 0);
+    let git_ok = match settings.worktree_filter_git.as_str() {
+        "changes" => changes,
+        "clean" => !changes,
+        _ => true,
+    };
+    status_ok && pr_ok && git_ok
+}
+
 fn apply_filters_with_cutoff(views: Vec<WorktreeView>, settings: &Settings, cutoff: &str) -> Vec<WorktreeView> {
+    if !settings.worktree_filters_enabled {
+        return views;
+    }
     views
         .into_iter()
         .filter(|v| {
+            if !matches_picked_filters(v, settings) {
+                return false;
+            }
             let open = is_effectively_open(v.agent.as_ref(), cutoff);
             if open {
                 // A row with a live session is never hidden.
@@ -234,9 +277,11 @@ fn apply_filters_with_cutoff(views: Vec<WorktreeView>, settings: &Settings, cuto
         .collect()
 }
 
-/// Apply the dashboard's visibility filters (`hideMainBranch`,
-/// `hideMergedClosedPrs`, `hideIdleDoneAgents`, `hideWithoutLinearTicket`).
-/// A worktree with an effectively-open session is never hidden.
+/// Apply the dashboard's visibility filters: `hideMainBranch`,
+/// `hideMergedClosedPrs`, `hideIdleDoneAgents`, `hideWithoutLinearTicket`
+/// (a worktree with an effectively-open session is never hidden by these),
+/// then the picked ones (`worktreeFilterText`/`Status`/`Pr`/`Git`, which
+/// hide any row). `worktreeFiltersEnabled: false` turns them all off.
 pub fn apply_filters(views: Vec<WorktreeView>, settings: &Settings) -> Vec<WorktreeView> {
     apply_filters_with_cutoff(views, settings, &now_sqlite_minus_grace())
 }
@@ -710,6 +755,73 @@ pub(crate) mod tests {
     fn no_filters_keeps_everything() {
         let v = vec![wt("a").main().branch("main"), wt("b")];
         assert_eq!(filtered(v, &no_filters()), ["a", "b"]);
+    }
+
+    #[test]
+    fn text_filter_matches_name_branch_and_ticket_in_any_case() {
+        let s = Settings { worktree_filter_text: "AUTH".into(), ..no_filters() };
+        let mut named = wt("named");
+        named.worktree.custom_name = Some("Auth flow".into());
+        let v = vec![named, wt("branch").branch("feature/auth"), wt("ticket").linear("AUTH-1", None), wt("other")];
+        assert_eq!(filtered(v, &s), ["named", "branch", "ticket"]);
+    }
+
+    #[test]
+    fn status_filter_picks_waiting_active_or_idle_rows() {
+        let v = || {
+            vec![
+                wt("waiting").agent(Status::Waiting, "2025-01-01 00:00:00", true),
+                wt("busy").agent(Status::Executing, "2025-01-01 00:00:00", true),
+                wt("done").agent(Status::Done, "2025-01-01 00:00:00", false),
+                wt("none"),
+            ]
+        };
+        let with = |f: &str| Settings { worktree_filter_status: f.into(), ..no_filters() };
+        assert_eq!(filtered(v(), &with("waiting")), ["waiting"]);
+        assert_eq!(filtered(v(), &with("active")), ["waiting", "busy"]);
+        assert_eq!(filtered(v(), &with("idle")), ["done", "none"]);
+        assert_eq!(filtered(v(), &with("any")).len(), 4);
+    }
+
+    #[test]
+    fn pr_and_git_filters() {
+        let v = || {
+            vec![
+                wt("open").pr(|_| {}),
+                wt("failing").pr(|p| p.checks_status = ChecksStatus::Failing).dirty(2),
+                wt("merged").pr(|p| p.state = "MERGED".into()),
+                wt("bare"),
+            ]
+        };
+        let pr = |f: &str| Settings { worktree_filter_pr: f.into(), ..no_filters() };
+        assert_eq!(filtered(v(), &pr("open")), ["open", "failing"]);
+        assert_eq!(filtered(v(), &pr("none")), ["bare"]);
+        assert_eq!(filtered(v(), &pr("failing")), ["failing"]);
+        let git = |f: &str| Settings { worktree_filter_git: f.into(), ..no_filters() };
+        assert_eq!(filtered(v(), &git("changes")), ["failing"]);
+        assert_eq!(filtered(v(), &git("clean")), ["open", "merged", "bare"]);
+    }
+
+    #[test]
+    fn picked_filters_hide_live_rows_but_hide_toggles_keep_them() {
+        let live = || wt("live").main().branch("main").agent(Status::Executing, "2025-01-01 00:00:00", true);
+        let hide = Settings { hide_main_branch: true, ..no_filters() };
+        assert_eq!(filtered(vec![live()], &hide), ["live"]);
+        let text = Settings { worktree_filter_text: "nope".into(), ..no_filters() };
+        assert!(filtered(vec![live()], &text).is_empty());
+    }
+
+    #[test]
+    fn filters_off_shows_everything() {
+        let s = Settings {
+            worktree_filters_enabled: false,
+            hide_main_branch: true,
+            worktree_filter_text: "nope".into(),
+            worktree_filter_status: "waiting".into(),
+            ..Settings::default()
+        };
+        let v = vec![wt("a").main().branch("main"), wt("b")];
+        assert_eq!(filtered(v, &s), ["a", "b"]);
     }
 
     #[test]

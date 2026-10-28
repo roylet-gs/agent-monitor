@@ -44,6 +44,9 @@ pub struct Snapshot {
     /// Every tracked worktree's path, also those the hide* filters leave out
     /// (matching a cmux workspace to its most specific worktree).
     pub worktree_paths: Vec<String>,
+    /// Worktrees the dashboard's filters leave out (the `─Worktrees` border's
+    /// `N hidden`).
+    pub hidden_worktrees: usize,
 }
 
 /// One number in the dashboard's review badge.
@@ -124,7 +127,6 @@ pub enum Action {
     RunSetup,
     /// Settings → Reset settings, confirmed: reset settings.json, then run setup.
     ResetSettings,
-    Suggest { title: String, body: String },
 }
 
 pub struct App {
@@ -662,10 +664,6 @@ impl App {
                     let job = self.jobs.start_delete(id, view.worktree.display_name());
                     Action::Delete(job, view, delete_branch)
                 }
-                Effect::Suggest { title, body } => {
-                    self.modal = Some(crate::modals::Modal::busy("Filing feature request…".into()));
-                    Action::Suggest { title, body }
-                }
                 // The browser stays open (showing "Adding…") until the result comes back.
                 Effect::AddRepo(path) => Action::AddRepo(path),
                 Effect::ResetSettings => {
@@ -842,9 +840,12 @@ impl App {
             }
             // Only the review page pulls (its selected PR).
             C::PullToTmpSpace | C::PullAndRunScript => {}
-            C::Feedback => {
-                self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
+            C::Filter => {
+                self.settings_editor =
+                    Some(crate::settings_ui::SettingsEditor::only(&self.settings, crate::settings_ui::WORKTREE_FILTERS));
+                self.sync_editor();
             }
+            C::ToggleFilters => return self.toggle_filters(),
             C::AddRepo => self.modal = Some(self.add_repo_modal()),
             C::ReviewRequests => match &mut self.reviews {
                 // From the split: the page takes the whole body.
@@ -1031,12 +1032,6 @@ impl App {
                 }
                 _ => None,
             },
-            L::Suggest => {
-                if let Some(Modal::Suggest { on_body, .. }) = &mut self.modal {
-                    *on_body = i == 1;
-                }
-                None
-            }
             L::SetupMode => {
                 let Some(s) = &mut self.setup else { return Action::None };
                 // A click picks; a second one goes on.
@@ -1078,6 +1073,28 @@ impl App {
     }
 
     /// Swap in new settings and re-derive rows (header style depends on sort).
+    /// `F`: every worktree filter off, or back on (`worktreeFiltersEnabled`).
+    fn toggle_filters(&mut self) -> Action {
+        let on = !self.settings.worktree_filters_enabled;
+        match crate::settings_ui::persist("worktreeFiltersEnabled", serde_json::Value::Bool(on)) {
+            Ok(s) => {
+                am_core::info!("tui", "Worktree filters turned {}", if on { "on" } else { "off" });
+                let key = self.keymap.key(crate::keymap::Command::ToggleFilters).map_or("F".into(), crate::keymap::display);
+                self.notice = Some(if on {
+                    "Filters on".into()
+                } else {
+                    format!("Filters off — showing every worktree ({key} turns them back on)")
+                });
+                self.set_settings(s);
+                Action::SettingsChanged
+            }
+            Err(e) => {
+                self.notice = Some(e);
+                Action::None
+            }
+        }
+    }
+
     pub fn set_settings(&mut self, settings: Settings) {
         let to_reviews_mode = settings.reviews_mode() && !self.settings.reviews_mode();
         self.keymap = crate::keymap::Keymap::from_settings(&settings);
@@ -1094,10 +1111,10 @@ impl App {
             let keys = e.keys.take();
             let repos = e.repos.take();
             let repo_count = e.repo_count;
-            let filter_box = e.is_filter_box();
+            let filter_box = e.is_filter_box().then_some(e.only).flatten();
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
-            if filter_box {
-                e.only = Some(crate::settings_ui::REVIEW_FILTERS);
+            if filter_box.is_some() {
+                e.only = filter_box;
             }
             // A mode change can hide the row the cursor was on.
             e.cursor = if e.fields().contains(&cursor) { cursor } else { e.fields().first().copied().unwrap_or(0) };
@@ -1278,8 +1295,8 @@ impl App {
             Some(C::PullToTmpSpace) => return self.pull_review(false),
             Some(C::PullAndRunScript) => return self.pull_review(true),
             Some(C::Delete) => self.remove_review_worktree(),
-            // The feedback key (`f`) filters here.
-            Some(C::Feedback) => {
+            // `f` opens the review filters here.
+            Some(C::Filter) => {
                 self.settings_editor = Some(crate::settings_ui::SettingsEditor::only(&self.settings, crate::settings_ui::REVIEW_FILTERS));
                 self.sync_editor();
             }

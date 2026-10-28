@@ -14,25 +14,25 @@ expression: "render(&app, 100, 34)"
 │       │   New worktree            N       (default n)      —                             │       │
 │       │   Delete worktree         d                        remove the pulled worktree    │       │
 │       │   Add repository          A                        —                             │       │
+│       │   Filter worktrees        f                        review filters                │       │
+│       │   Filters on/off          F                        —                             │       │
 │       │ Review requests                                                                  │       │
 │       │   Review requests         v                        full page / back              │       │
 │       │   Reviews beside list     V                        beside the list / close       │       │
 │       │   Reviews in new window   ctrl-v                   new window                    │       │
-│       │   Pull into Reviewing     t                        pull into Reviewing           │       │
+│       │▌  Pull into Reviewing     press a key…                                           │       │
 │       │   Pull + run script       T                        pull, then run its script     │       │
 │       │ General                                                                          │       │
-│       │▌  Toggle log pane         press a key…                                           │       │
+│       │   Toggle log pane         w                        —                             │       │
 │       │   Settings                s                        same                          │       │
-│       │   Suggest a feature       f                        review filters                │       │
 │       │   Refresh now             r                        clear cache and refetch       │       │
 │       │   Help                    h                        same                          │       │
 │       │   Quit                    q                        back                          │       │
 │       │ Moving                                                                           │       │
-│       │   Move down               j                        same                          │       │
 │       │                                                                                  │       │
 │       │ Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc back · ctrl-c quit  │       │
 │       │                                                                                  │       │
-│       │ Press the new key for Toggle log pane · esc cancels                              │       │
-│       │ Does nothing on the review page                                                  │       │
+│       │ Press the new key for Pull into Reviewing · esc cancels                          │       │
+│       │ On the review page: pull into Reviewing                                          │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
  ⏎ open  │ g PR  l linear  │ N new  d delete  v reviews  │ s settings  r refresh  h help  q quit
