@@ -19,8 +19,8 @@ use std::time::Instant;
 
 use am_core::harness::HarnessKind;
 use am_core::db::{self, Owner, StatusUpdate, SubagentKey};
-use am_core::status::{self, HookEvent};
-use am_core::{debug, info, paths, settings, warn};
+use am_core::status::{self, HookEvent, Status};
+use am_core::{debug, info, paths, program_status, settings, warn};
 use serde_json::Value;
 
 const MODULE: &str = "hook-event";
@@ -96,7 +96,9 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) 
     let event = kind.provider().normalize(&payload, event);
     maybe_capture(kind, &event, &raw);
 
-    if let Err(e) = handle(worktree, kind, &event) {
+    // Only for agents that don't report OSC 7501 themselves.
+    let report_status = s.program_status && !kind.provider().reports_program_status();
+    if let Err(e) = handle(worktree, kind, &event, report_status) {
         warn!(MODULE, "event={} failed: {e}", event.event);
     }
     let elapsed = started.elapsed();
@@ -110,7 +112,7 @@ pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) 
 }
 
 
-fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Result<()> {
+fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent, report_status: bool) -> rusqlite::Result<()> {
     info!(
         MODULE,
         "[{}] event={} tool={} agent={} stop_hook_active={} permission_mode={} for {}",
@@ -155,6 +157,8 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
         None
     };
     let is_open = !ev.is("SessionEnd");
+    // The status this event moved the session to, for the terminal.
+    let mut changed: Option<Status> = None;
 
     // Each session keeps its own status, so two sessions in one worktree
     // don't overwrite each other; the owner's row is their headline.
@@ -167,6 +171,9 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
                 let unchanged = session.as_ref().is_some_and(|s| {
                     s.status == new_status && s.is_open == is_open && last_response.is_none()
                 });
+                if session.as_ref().is_none_or(|s| s.status != new_status || s.is_open != is_open) {
+                    changed = Some(new_status);
+                }
                 if unchanged {
                     db::touch_session(&conn, &owner, kind, sid)?;
                 } else {
@@ -194,6 +201,9 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
         let current_status = current.as_ref().and_then(|c| c.status);
         let running = db::running_subagents(&conn, &owner)?;
         if let Some(new_status) = status::map_event_to_status(ev, current_status, running) {
+            if current_status != Some(new_status) || current.as_ref().is_some_and(|c| c.is_open != is_open) {
+                changed = Some(new_status);
+            }
             db::upsert_status(
                 &conn,
                 &owner,
@@ -213,7 +223,20 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
     if ev.is("Stop") || ev.is("SessionEnd") {
         db::checkpoint_passive(&conn);
     }
+    if report_status && let Some(new_status) = changed {
+        report_to_terminal(kind, new_status, is_open, ev);
+    }
     Ok(())
+}
+
+/// Tell the agent's terminal its new status (OSC 7501). Best effort: a hook
+/// with no controlling terminal (run by an IDE) has nowhere to write.
+fn report_to_terminal(kind: HarnessKind, new_status: Status, is_open: bool, ev: &HookEvent) {
+    let report = program_status::report(kind.id(), new_status, is_open, ev);
+    match report.emit() {
+        Ok(()) => debug!(MODULE, "[{}] OSC 7501 {}", kind.id(), report.body()),
+        Err(e) => debug!(MODULE, "[{}] OSC 7501 not sent ({e}): {}", kind.id(), report.body()),
+    }
 }
 
 /// Mirror the most urgent open session into the owner's `agent_status` /

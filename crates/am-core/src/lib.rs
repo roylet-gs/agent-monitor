@@ -16,6 +16,7 @@ pub mod model;
 pub mod paths;
 pub mod perf;
 pub mod procscan;
+pub mod program_status;
 pub mod review_groups;
 pub mod settings;
 pub mod stacks;

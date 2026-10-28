@@ -62,6 +62,10 @@ impl Harness for Embedded {
         self.manifest.notes.as_deref()
     }
 
+    fn reports_program_status(&self) -> bool {
+        self.manifest.program_status
+    }
+
     fn is_present(&self) -> bool {
         self.manifest.config_dir.as_deref().is_some_and(|d| expand_home(d).is_dir())
     }

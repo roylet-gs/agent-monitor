@@ -117,6 +117,11 @@ impl Harness for Claude {
         stream::readable(line, cwd)
     }
 
+    /// Claude Code reports OSC 7501 itself since 2.1.295.
+    fn reports_program_status(&self) -> bool {
+        true
+    }
+
     fn matches_process(&self, name: &str, argv: &[String]) -> bool {
         static SPEC: std::sync::LazyLock<ProcessSpec> = std::sync::LazyLock::new(|| ProcessSpec {
             names: vec!["claude".into()],
