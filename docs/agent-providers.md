@@ -263,7 +263,7 @@ Most CLIs read hooks from a JSON file, but not all. A built-in picks how am's ho
 
 ## Built-in harnesses and the survey behind them (Oct 2026)
 
-Most coding-agent CLIs now copy Claude Code's hook design: a command per event, JSON on stdin, Claude-style event names and `session_id`/`cwd`/`tool_name` keys. That's why the canonical event stays Claude's vocabulary, and why each built-in below is a manifest (plus Rust discovery for Codex). The details come from each tool's official hook docs.
+Most coding-agent CLIs now copy Claude Code's hook design: a command per event, JSON on stdin, Claude-style event names and `session_id`/`cwd`/`tool_name` keys. That's why the canonical event stays Claude's vocabulary, and why each built-in below is a manifest (plus Rust discovery for Codex and Grok). The details come from each tool's official hook docs.
 
 | Harness | Hook file and shape | Payload notes | Waiting | Resume |
 |---|---|---|---|---|
@@ -272,6 +272,7 @@ Most coding-agent CLIs now copy Claude Code's hook design: a command per event, 
 | Factory Droid (`droid`) | `~/.factory/hooks.json` keyed by event at the top level (or the `hooks` key of `settings.json` when `hooks.json` doesn't exist), nested, s, `$FACTORY_PROJECT_DIR` | Claude keys; tools `Execute`/`Create`/`ApplyPatch`; a cancelled turn sends `idle_prompt` instead of `Stop` | `Notification` `permission_prompt` | `droid --resume <id>` |
 | GitHub Copilot CLI (`copilot`) | `~/.copilot/hooks/agent-monitor.json` (am owns it), flat, `version: 1`, `timeoutSec` | PascalCase event names select the Claude-shaped payload with Claude tool names; no project-dir variable | questions only (its permission/notification hooks exist only in the camelCase format) | `copilot --resume <id>` / `--continue` |
 | Cursor (`cursor`) | `~/.cursor/hooks.json`, flat, `version: 1`, s, `$CURSOR_PROJECT_DIR` | camelCase events; `conversation_id` and `workspace_roots[]` (JSON pointers); `Shell` = `Bash`. Cursor also runs `~/.claude/settings.json` hooks, so am-hook drops Claude events that carry `cursor_version` | none (no permission hook) | `cursor-agent --resume <id>` |
+| Grok CLI (`grok`) | `~/.grok/hooks/agent-monitor.json` (`$GROK_HOME/hooks/`; am owns it), nested, s | camelCase keys (`sessionId`, `notificationType`, `toolName`), read through a snake_case pre-pass in `grok.rs`; Grok strips the hook's env, so no project-dir variable (payload `cwd`); `SessionEnd` fires every turn, so it isn't hooked (`Stop` ends the turn); no `PostToolUse`/subagent events | `Notification` `permission_prompt`, except the generic "Tool permission requested" Grok sends for every tool step | `grok -r <id>`; sessions `~/.grok/sessions/<percent-encoded cwd>/<id>/chat_history.jsonl` |
 
 Not built in, and why:
 

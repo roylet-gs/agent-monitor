@@ -223,6 +223,20 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 - Droid: a cancelled turn sends `Notification` (`idle_prompt`) rather than `Stop`. No `SubagentStart`, so its subagents aren't tracked.
 - Copilot: registered with PascalCase names, which select its Claude-shaped payload. Its permission and notification hooks only exist in the camelCase format, so only `AskUserQuestion` reaches `waiting`.
 
+**Grok CLI** (`--agent grok`, hooks in `~/.grok/hooks/agent-monitor.json`): Claude Code's event names with camelCase payload keys (`sessionId`, `notificationType`, `toolName`), which `grok.rs` also reads as snake_case.
+
+| Grok event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` | same | `idle` |
+| `UserPromptSubmit` | same | `executing` |
+| `PreToolUse` | same | `executing` |
+| `Notification` (`permission_prompt`, specific message) | same | `waiting` |
+| `Notification` (generic "Tool permission requested", completion text, "waiting for input") | `Notification` without a type | no change |
+| `Stop` | same | `done` after work, else `idle` |
+| `SessionEnd` | not hooked | — |
+
+Grok fires `SessionEnd` at the end of **every turn**, alongside `Stop`, not when the session closes. Mapped to `SessionEnd` it would close the session each turn, and mapped to `Stop` the second `Stop` would turn a `done` turn `idle`, so am doesn't hook it. The generic "Tool permission requested" prompt arrives for every tool step even in auto-approve mode; counting it would leave the session `waiting` (a `Stop` keeps a waiting session waiting), so only a specific prompt ("Grok needs permission to run rm") reaches `waiting`. There are no `PostToolUse` or subagent events.
+
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 
 | Cursor event | Canonical event | Resulting status |
