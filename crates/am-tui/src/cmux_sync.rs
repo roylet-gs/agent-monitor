@@ -2,7 +2,9 @@
 //! workspace whose terminal is in a tracked worktree shows that worktree's
 //! PR (number, CI, review), Linear ticket and running agent shell commands,
 //! with the agent's context use as the workspace's progress bar. cmux shows
-//! the branch and agent state itself.
+//! the branch and agent state itself. am's own workspace gets a summary
+//! instead: how many agents wait, work or are done, review requests to do,
+//! and PRs with failing CI ([`own_pills`]).
 //!
 //! The collector computes what each worktree should show ([`desired`]) and
 //! sends it on change; a `cmux-sync` thread maps workspaces to worktrees and
@@ -16,7 +18,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use am_core::cmux::{self, CmuxRunner, Pill, Workspace};
-use am_core::model::{ChecksStatus, WorktreeView};
+use am_core::model::{ChecksStatus, Repository, ReviewRequest, WorktreeView};
+use am_core::review_groups::QueryHits;
+use am_core::status::Status;
 use am_core::settings::Settings;
 use am_core::{debug, info, warn};
 
@@ -30,6 +34,7 @@ const RED: &str = "#ff3b30";
 const YELLOW: &str = "#ffcc00";
 const PURPLE: &str = "#af52de";
 const GREY: &str = "#8e8e93";
+const BLUE: &str = "#0a84ff";
 
 /// What one worktree's workspace shows: pills by key, and the progress bar.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -38,10 +43,16 @@ pub struct WorktreePills {
     pub progress: Option<(f64, String)>,
 }
 
-/// Worktree path → what its workspace should show. Every worktree is listed,
-/// also those with nothing to show, so a workspace in a nested worktree is
-/// matched to that worktree and never to the repo around it.
-pub type Desired = BTreeMap<String, WorktreePills>;
+/// What every workspace should show.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Desired {
+    /// Worktree path → what its workspace should show. Every worktree is
+    /// listed, also those with nothing to show, so a workspace in a nested
+    /// worktree is matched to that worktree and never to the repo around it.
+    pub worktrees: BTreeMap<String, WorktreePills>,
+    /// am's own workspace: the summary, whatever directory it is in.
+    pub own: WorktreePills,
+}
 
 fn pill(value: String, color: Option<&'static str>, priority: i32) -> Pill {
     Pill { value, icon: None, color, priority }
@@ -101,14 +112,62 @@ pub fn worktree_pills(v: &WorktreeView, settings: &Settings) -> WorktreePills {
     out
 }
 
-/// Every worktree (empty pills for one with nothing to show).
-pub fn desired<'a>(views: impl IntoIterator<Item = &'a WorktreeView>, settings: &Settings) -> Desired {
-    views.into_iter().map(|v| (v.worktree.path.clone(), worktree_pills(v, settings))).collect()
+/// `2 waiting`, `3 working`, `1 done` (open sessions, by each worktree's
+/// headline), `4 to review` and `1 CI failing`; counts of zero are left out.
+pub fn own_pills(views: &[WorktreeView], to_review: Option<usize>) -> WorktreePills {
+    let (mut waiting, mut working, mut done, mut failing) = (0, 0, 0, 0);
+    for v in views {
+        if am_core::grouping::is_open_now(v.agent.as_ref()) {
+            match v.agent.as_ref().map(|a| a.status) {
+                Some(Status::Waiting) => waiting += 1,
+                Some(Status::Executing | Status::Planning | Status::Delegating) => working += 1,
+                Some(Status::Done) => done += 1,
+                _ => {}
+            }
+        }
+        if v.pr.as_ref().is_some_and(|p| p.state == "OPEN" && p.checks_status == ChecksStatus::Failing) {
+            failing += 1;
+        }
+    }
+    let mut out = WorktreePills::default();
+    let mut put = |key, n: usize, label: &str, color, priority| {
+        if n > 0 {
+            out.pills.insert(key, pill(format!("{n} {label}"), color, priority));
+        }
+    };
+    put("am_waiting", waiting, "waiting", Some(YELLOW), 50);
+    put("am_working", working, "working", Some(BLUE), 45);
+    put("am_done", done, "done", Some(GREEN), 40);
+    put("am_reviews", to_review.unwrap_or(0), "to review", Some(PURPLE), 35);
+    put("am_ci", failing, "CI failing", Some(RED), 30);
+    out
+}
+
+/// The review requests the dashboard's badge counts: those in groups with
+/// `badge` on. `None` while review requests are off or not fetched yet.
+pub fn to_review(list: Option<&[ReviewRequest]>, repos: &[Repository], settings: &Settings, hits: &QueryHits) -> Option<usize> {
+    let list = list.filter(|_| settings.review_requests_on())?;
+    let g = crate::reviews_ui::Grouping::new(settings, am_core::timefmt::now_unix(), hits);
+    let (per, _) = crate::reviews_ui::counts(list, repos, g);
+    let named = g.groups.iter().enumerate().filter(|(_, x)| x.badge && x.enabled).map(|(i, _)| per[i]);
+    let default = (g.default.badge && g.default.enabled).then(|| per[g.groups.len()]);
+    Some(named.chain(default).sum())
+}
+
+/// Every worktree (empty pills for one with nothing to show), plus am's own
+/// workspace's summary.
+pub fn desired(views: &[WorktreeView], to_review: Option<usize>, settings: &Settings) -> Desired {
+    Desired {
+        worktrees: views.iter().map(|v| (v.worktree.path.clone(), worktree_pills(v, settings))).collect(),
+        own: own_pills(views, to_review),
+    }
 }
 
 /// The pushing side: what each workspace was last given.
 pub struct Sync<R: CmuxRunner> {
     runner: R,
+    /// am's own workspace (`CMUX_WORKSPACE_ID`), which gets the summary.
+    own: Option<String>,
     workspaces: Vec<Workspace>,
     listed: Option<Instant>,
     pushed: HashMap<String, WorktreePills>,
@@ -116,7 +175,7 @@ pub struct Sync<R: CmuxRunner> {
 
 impl<R: CmuxRunner> Sync<R> {
     pub fn new(runner: R) -> Self {
-        Sync { runner, workspaces: Vec::new(), listed: None, pushed: HashMap::new() }
+        Sync { runner, own: cmux::own_workspace(), workspaces: Vec::new(), listed: None, pushed: HashMap::new() }
     }
 
     /// Bring every workspace in line with `desired`, listing workspaces again
@@ -134,11 +193,15 @@ impl<R: CmuxRunner> Sync<R> {
                 }
             }
         }
-        let roots: Vec<&str> = desired.keys().map(String::as_str).collect();
+        let roots: Vec<&str> = desired.worktrees.keys().map(String::as_str).collect();
         let none = WorktreePills::default();
         let mut pushed = HashMap::new();
         for w in &self.workspaces {
-            let want = w.directory.as_deref().and_then(|d| cmux::owner_of(d, &roots)).and_then(|r| desired.get(r)).unwrap_or(&none);
+            let want = if self.own.as_deref() == Some(w.id.as_str()) {
+                &desired.own
+            } else {
+                w.directory.as_deref().and_then(|d| cmux::owner_of(d, &roots)).and_then(|r| desired.worktrees.get(r)).unwrap_or(&none)
+            };
             let had = self.pushed.get(&w.id).unwrap_or(&none);
             if want != had && self.push(&w.id, had, want).is_err() {
                 // Unknown state: forget it so the next pass starts over.
@@ -183,7 +246,7 @@ pub struct Handle {
 }
 
 impl Handle {
-    /// Hand it the latest [`Desired`]; an empty map clears everything.
+    /// Hand it the latest [`Desired`]; an empty one clears everything.
     pub fn send(&self, desired: Desired) {
         let _ = self.tx.send(desired);
     }
@@ -279,7 +342,7 @@ pub mod role {
 fn run(rx: Receiver<Desired>) {
     info!("cmux", "Syncing worktree pills to cmux");
     let mut sync = Sync::new(cmux::SystemCmux);
-    let mut desired = Desired::new();
+    let mut desired = Desired::default();
     loop {
         match rx.recv_timeout(RELIST) {
             Ok(d) => {
@@ -352,9 +415,9 @@ mod tests {
     fn pushes_only_what_changed() {
         let t0 = Instant::now();
         let mut sync = Sync::new(fake());
-        let mut d = Desired::new();
-        d.insert("/r/repo".into(), wp("#1 ✓", None));
-        d.insert("/r/repo/.claude/worktrees/feat".into(), wp("#2 ◌", Some(0.5)));
+        let mut d = Desired::default();
+        d.worktrees.insert("/r/repo".into(), wp("#1 ✓", None));
+        d.worktrees.insert("/r/repo/.claude/worktrees/feat".into(), wp("#2 ◌", Some(0.5)));
         sync.apply(&d, t0);
         let calls = sync.runner.take();
         assert_eq!(&calls[..2], ["rpc window.list {}", r#"rpc workspace.list {"window_id":"W"}"#]);
@@ -372,7 +435,7 @@ mod tests {
         assert!(sync.runner.take().is_empty());
 
         // The feature's PR goes away and its context bar with it; main is untouched.
-        d.insert("/r/repo/.claude/worktrees/feat".into(), {
+        d.worktrees.insert("/r/repo/.claude/worktrees/feat".into(), {
             let mut p = WorktreePills::default();
             p.pills.insert("am_ticket", pill("ENG-1".into(), None, 20));
             p
@@ -397,9 +460,9 @@ mod tests {
     #[test]
     fn a_nested_worktree_with_nothing_to_show_never_gets_its_repos_pills() {
         let mut sync = Sync::new(fake());
-        let mut d = Desired::new();
-        d.insert("/r/repo".into(), wp("#1 ✓", Some(0.4)));
-        d.insert("/r/repo/.claude/worktrees/feat".into(), WorktreePills::default());
+        let mut d = Desired::default();
+        d.worktrees.insert("/r/repo".into(), wp("#1 ✓", Some(0.4)));
+        d.worktrees.insert("/r/repo/.claude/worktrees/feat".into(), WorktreePills::default());
         sync.apply(&d, Instant::now());
         let calls = sync.runner.take();
         assert_eq!(
@@ -431,6 +494,85 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(2));
     }
 
+    fn view(id: &str, status: Option<Status>, ci: Option<ChecksStatus>) -> WorktreeView {
+        use am_core::model::{AgentState, PrInfo, Worktree};
+        WorktreeView {
+            worktree: Worktree {
+                id: id.into(),
+                repo_id: "r".into(),
+                path: format!("/r/{id}"),
+                branch: id.into(),
+                name: id.into(),
+                custom_name: None,
+                is_main: false,
+                created_at: "2026-10-01 00:00:00".into(),
+                tmp_space: false,
+            },
+            agent: status.map(|status| AgentState {
+                status,
+                session_id: Some(id.into()),
+                last_response: None,
+                is_open: true,
+                active_subagents: 0,
+                updated_at: "2026-10-01 00:00:00".into(),
+                agent: Default::default(),
+            }),
+            git: None,
+            last_commit: None,
+            pr: ci.map(|checks_status| PrInfo {
+                number: 1,
+                title: String::new(),
+                url: String::new(),
+                state: "OPEN".into(),
+                is_draft: false,
+                review_decision: String::new(),
+                has_feedback: false,
+                checks_status,
+                active_check_url: None,
+                active_check_name: None,
+                checks_waiting: false,
+                base_ref_name: None,
+                mergeable: None,
+            }),
+            linear: None,
+            has_terminal: false,
+            open_ide: None,
+            running_processes: Vec::new(),
+            shell_commands: 0,
+            context: None,
+            sessions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn own_pills_sum_up_agents_reviews_and_failing_ci() {
+        let views = [
+            view("a", Some(Status::Waiting), Some(ChecksStatus::Failing)),
+            view("b", Some(Status::Executing), Some(ChecksStatus::Passing)),
+            view("c", Some(Status::Delegating), None),
+            view("d", Some(Status::Idle), None),
+            view("e", None, None),
+        ];
+        let p = own_pills(&views, Some(4));
+        let got: Vec<(&str, &str)> = p.pills.iter().map(|(k, v)| (*k, v.value.as_str())).collect();
+        assert_eq!(got, [("am_ci", "1 CI failing"), ("am_reviews", "4 to review"), ("am_waiting", "1 waiting"), ("am_working", "2 working")]);
+        assert!(p.progress.is_none());
+        // Nothing to say: no pills at all.
+        assert_eq!(own_pills(&views[3..], Some(0)), WorktreePills::default());
+    }
+
+    #[test]
+    fn ams_own_workspace_gets_the_summary_wherever_it_is() {
+        let mut sync = Sync::new(fake());
+        sync.own = Some("C".into());
+        let mut d = Desired::default();
+        d.own.pills.insert("am_waiting", pill("1 waiting".into(), Some(YELLOW), 50));
+        sync.apply(&d, Instant::now());
+        assert_eq!(&sync.runner.take()[2..], ["set-status am_waiting 1 waiting --workspace C --color #ffcc00 --priority 50"]);
+        sync.clear_all();
+        assert_eq!(sync.runner.take(), ["clear-status am_waiting --workspace C"]);
+    }
+
     #[test]
     fn a_failed_listing_pushes_nothing() {
         struct Down;
@@ -440,8 +582,8 @@ mod tests {
             }
         }
         let mut sync = Sync::new(Down);
-        let mut d = Desired::new();
-        d.insert("/r/repo".into(), wp("#1", None));
+        let mut d = Desired::default();
+        d.worktrees.insert("/r/repo".into(), wp("#1", None));
         sync.apply(&d, Instant::now());
         assert!(sync.pushed.is_empty());
     }

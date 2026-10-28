@@ -279,12 +279,17 @@ impl Worker {
 
     /// Hand the cmux sidebar pills to the `cmux-sync` thread when they change
     /// (an empty set once `cmuxSync` is turned off clears them).
-    fn sync_cmux(&mut self, views: &[WorktreeView]) {
+    fn sync_cmux(&mut self, views: &[WorktreeView], reviews: Option<&[ReviewRequest]>, repos: &[am_core::model::Repository]) {
         let on = self.settings.cmux_sync && am_core::cmux::inside() && crate::cmux_sync::role::owned();
         if !on && self.cmux.is_none() {
             return;
         }
-        let desired = if on { crate::cmux_sync::desired(views, &self.settings) } else { Default::default() };
+        let desired = if on {
+            let to_review = crate::cmux_sync::to_review(reviews, repos, &self.settings, &self.review_hits);
+            crate::cmux_sync::desired(views, to_review, &self.settings)
+        } else {
+            Default::default()
+        };
         let (tx, last) = self.cmux.get_or_insert_with(|| (crate::cmux_sync::spawn(), Default::default()));
         if *last != desired {
             tx.send(desired.clone());
@@ -467,11 +472,11 @@ impl Worker {
             self.perf.record("collector.stacks", started.elapsed());
         }
         let stack = self.infer_stacks(&views);
+        let reviews = self.reviews_with_worktrees(&views);
         if dashboard {
             // Before the hide* filters: a hidden row's workspace still gets its pills.
-            self.sync_cmux(&views);
+            self.sync_cmux(&views, reviews.as_deref(), &repos);
         }
-        let reviews = self.reviews_with_worktrees(&views);
         let mut roots: Vec<String> = views.iter().map(|v| v.worktree.path.clone()).collect();
         let worktree_paths = roots.clone();
         // Review-only: every worktree, unfiltered, so a pulled PR's ⏎/`d`
