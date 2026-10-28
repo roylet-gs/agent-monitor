@@ -43,7 +43,8 @@
 //!   payload's `cwd`.
 //! - `resume.start` (optional) holds the arguments a fresh session needs
 //!   when the program alone doesn't start one (`["rovodev", "run"]` for
-//!   `acli`, `["chat", "--agent", "agent-monitor"]` for Kiro). Default: none.
+//!   `acli`, `["chat", "--agent", "agent-monitor"]` for Kiro), also used
+//!   to continue when `resume.continue` is empty. Default: none.
 //! - `sessions.command` (optional) prints a JSON array of
 //!   `{"id", "cwd", "modified"}` (modified = unix seconds) for `{root}`;
 //!   without it, resuming falls back to `resume.continue`. Built-ins without
@@ -369,8 +370,10 @@ impl Manifest {
     pub fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String> {
         match (session_id, continue_latest) {
             (Some(id), _) => self.resume.session.iter().map(|a| a.replace("{id}", id)).collect(),
-            (None, true) => self.resume.continue_latest.clone(),
-            (None, false) => self.resume.start.clone(),
+            // A CLI with no continue arguments starts a fresh session
+            // instead, which may need `start` too.
+            (None, true) if !self.resume.continue_latest.is_empty() => self.resume.continue_latest.clone(),
+            (None, _) => self.resume.start.clone(),
         }
     }
 
@@ -592,6 +595,10 @@ mod tests {
         // Resuming and continuing don't add it.
         assert_eq!(m.resume_args(Some("x1"), false), ["resume", "x1"]);
         assert_eq!(m.resume_args(None, true), ["resume", "--last"]);
+        // Without continue arguments, continuing starts a fresh session.
+        v["resume"]["continue"] = json!([]);
+        let m = Manifest::parse(&v.to_string()).unwrap();
+        assert_eq!(m.resume_args(None, true), ["chat", "--agent", "agent-monitor"]);
     }
 
     #[test]

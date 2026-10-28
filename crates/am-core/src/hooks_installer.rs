@@ -433,7 +433,7 @@ fn check_provider(p: &dyn Harness) -> std::io::Result<()> {
                 return Err(not_ours(&path));
             }
             match &of.register {
-                Some(r) => read_settings(&r.path).map(drop),
+                Some(r) => read_registration(r).map(drop),
                 None => Ok(()),
             }
         }
@@ -646,35 +646,58 @@ fn not_ours(path: &Path) -> std::io::Error {
 }
 
 /// Byte range of am's block (from the start of the `begin` line to just
-/// after the `end` line). A `begin` with no `end` after it is an error, so
-/// a hand-damaged block is never half-replaced.
+/// after the `end` line). A `begin` with no `end` after it, or a second
+/// `begin` (nested, or a second block, e.g. from a dotfile merge), is an
+/// error, so a hand-damaged block is never half-replaced and uninstall never
+/// leaves a live copy behind.
 fn find_block(text: &str, begin: &str, end: &str) -> std::io::Result<Option<(usize, usize)>> {
     let mut at = 0;
     let mut start = None;
+    let mut found = None;
     for line in text.split_inclusive('\n') {
         let next = at + line.len();
         let bare = line.trim();
+        if bare == begin && (start.is_some() || found.is_some()) {
+            return Err(std::io::Error::other(format!("`{begin}` appears more than once; keep one am block (or remove them all), then retry")));
+        }
         match start {
             None if bare == begin => start = Some(at),
-            Some(s) if bare == end => return Ok(Some((s, next))),
+            Some(s) if bare == end => {
+                found = Some((s, next));
+                start = None;
+            }
             _ => {}
         }
         at = next;
     }
     match start {
         Some(_) => Err(std::io::Error::other(format!("`{begin}` has no matching `{end}` line; fix or remove am's block, then retry"))),
-        None => Ok(None),
+        None => Ok(found),
     }
 }
 
-/// `text` with am's block set to `body`: replaced where it is, else
-/// appended after a blank line. Everything outside the block is kept.
+/// `text` with am's block set to `body`: replaced where it is (at the old
+/// `begin` line's indentation, every block line indented by it, so a block
+/// inside a mapping stays there), else appended after a blank line.
+/// Everything outside the block is kept.
 pub fn upsert_block(text: &str, comment: &str, id: &str, body: &str) -> std::io::Result<String> {
     let block = block_text(comment, id, body);
     Ok(match find_block(text, &block_begin(comment, id), &block_end(comment, id))? {
-        Some((s, e)) => format!("{}{block}{}", &text[..s], &text[e..]),
+        Some((s, e)) => {
+            let line = &text[s..e];
+            let indent = &line[..line.len() - line.trim_start_matches([' ', '\t']).len()];
+            format!("{}{}{}", &text[..s], indent_lines(&block, indent), &text[e..])
+        }
         None => append_block(text, &block),
     })
+}
+
+/// `text` with `indent` before every non-blank line.
+fn indent_lines(text: &str, indent: &str) -> String {
+    if indent.is_empty() {
+        return text.to_owned();
+    }
+    text.split_inclusive('\n').map(|l| if l.trim().is_empty() { l.to_owned() } else { format!("{indent}{l}") }).collect()
 }
 
 /// am's whole block: the [`block_begin`] line, `body`, the [`block_end`]
@@ -741,16 +764,15 @@ fn install_text(provider: &dyn Harness, style: &HookInstall, native: Option<Path
             if !text.contains(OWNED_FILE_MARKER) {
                 return Err(std::io::Error::other(format!("{}'s plugin file lacks the `{OWNED_FILE_MARKER}` marker", provider.id())));
             }
-            // Read the registration first so an unreadable file stops the
-            // install before anything is written.
-            let registry = of.register.as_ref().map(|r| read_settings(&r.path).map(|s| (r, s))).transpose()?;
+            // Read and check the registration first so an unreadable file,
+            // or a `key` that isn't a list, stops the install before
+            // anything is written.
+            let registry = of.register.as_ref().map(|r| read_registration(r).map(|s| (r, s))).transpose()?;
             provider.hook_companion(Some(&ctx))?;
             write_text(&path, &text)?;
             if let Some((r, mut settings)) = registry {
                 let list = settings.entry(r.key.clone()).or_insert_with(|| Value::Array(Vec::new()));
-                let Value::Array(items) = list else {
-                    return Err(std::io::Error::other(format!("`{}` in {} is not a list; not modifying it", r.key, r.path.display())));
-                };
+                let Value::Array(items) = list else { unreachable!("read_registration checked the list") };
                 if !items.contains(&r.value) {
                     items.push(r.value.clone());
                     write_settings(&r.path, &settings)?;
@@ -782,8 +804,23 @@ fn uninstall_text_block(provider: &dyn Harness, tb: &TextBlock) -> std::io::Resu
     Ok(())
 }
 
+/// An [`OwnedFile`] registration's JSON file, refused when its `key` holds
+/// something other than a list.
+fn read_registration(r: &JsonListEntry) -> std::io::Result<Map<String, Value>> {
+    let settings = read_settings(&r.path)?;
+    match settings.get(&r.key) {
+        None | Some(Value::Array(_)) => Ok(settings),
+        Some(_) => Err(std::io::Error::other(format!("`{}` in {} is not a list; not modifying it", r.key, r.path.display()))),
+    }
+}
+
 fn uninstall_owned_file(provider: &dyn Harness, of: &OwnedFile) -> std::io::Result<()> {
     let path = provider.settings_path();
+    // A plugin file that isn't am's keeps its registration too.
+    if path.exists() && !read_text(&path)?.contains(OWNED_FILE_MARKER) {
+        warn!("hooks", "Not deleting {} or its registration: it lacks am's `{OWNED_FILE_MARKER}` marker", path.display());
+        return Ok(());
+    }
     if let Some(r) = &of.register
         && r.path.exists()
     {
@@ -799,10 +836,6 @@ fn uninstall_owned_file(provider: &dyn Harness, of: &OwnedFile) -> std::io::Resu
         }
     }
     if !path.exists() {
-        return Ok(());
-    }
-    if !read_text(&path)?.contains(OWNED_FILE_MARKER) {
-        warn!("hooks", "Not deleting {}: it lacks am's `{OWNED_FILE_MARKER}` marker", path.display());
         return Ok(());
     }
     std::fs::remove_file(&path)?;
@@ -1281,6 +1314,46 @@ mod tests {
         assert!(install_text(&p, &p.hook_install(), None).is_err());
         assert!(!path.exists());
         assert!(check_provider(&p).is_err());
+
+        // So does a `plugin` key that isn't a list.
+        std::fs::write(&config, r#"{"plugin":"other"}"#).unwrap();
+        let err = install_text(&p, &p.hook_install(), None).unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
+        assert!(!path.exists());
+        assert!(check_provider(&p).is_err(), "am doctor shows it");
+
+        // Uninstall leaves the registration of a plugin file that isn't am's.
+        std::fs::write(&config, format!(r#"{{"plugin":["{}"]}}"#, path.display())).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "// mine\n").unwrap();
+        uninstall_provider(&p).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(v, serde_json::json!({"plugin": [path.display().to_string()]}));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "// mine\n");
+    }
+
+    #[test]
+    fn a_second_am_block_is_refused() {
+        let b = |k: &str| format!("# agent-monitor hooks k {k}\n");
+        // Two blocks (a dotfile merge): every edit refuses, so uninstall
+        // can't report success while a copy stays live.
+        let two = format!("{}a = 1\n{}x = 1\n{}a = 1\n{}", b("begin"), b("end"), b("begin"), b("end"));
+        for err in [upsert_block(&two, "#", "k", "a = 2").unwrap_err(), remove_block(&two, "#", "k").unwrap_err()] {
+            assert!(err.to_string().contains("appears more than once"), "{err}");
+        }
+        // A second begin before the end.
+        let nested = format!("{}{}a = 1\n{}", b("begin"), b("begin"), b("end"));
+        assert!(remove_block(&nested, "#", "k").unwrap_err().to_string().contains("appears more than once"));
+        assert!(find_block(&two, "# agent-monitor hooks k begin", "# agent-monitor hooks k end").is_err());
+    }
+
+    #[test]
+    fn an_indented_block_keeps_its_indentation_when_replaced() {
+        let text = "a:\n  # agent-monitor hooks k begin\n  x: 1\n  # agent-monitor hooks k end\nb: 2\n";
+        let replaced = upsert_block(text, "#", "k", "x: 2\n\ny: 3").unwrap();
+        assert_eq!(replaced, "a:\n  # agent-monitor hooks k begin\n  x: 2\n\n  y: 3\n  # agent-monitor hooks k end\nb: 2\n");
+        assert_eq!(upsert_block(&replaced, "#", "k", "x: 2\n\ny: 3").unwrap(), replaced, "idempotent");
+        assert_eq!(remove_block(&replaced, "#", "k").unwrap().as_deref(), Some("a:\nb: 2\n"));
     }
 
     #[test]
