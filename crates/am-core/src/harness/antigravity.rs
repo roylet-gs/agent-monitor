@@ -1,5 +1,5 @@
 //! Google Antigravity CLI (`agy`) as a built-in plugin: the manifest
-//! `antigravity.json` plus one payload rule.
+//! `antigravity.json` plus one payload rule ([`Embedded::with_normalize`]).
 //!
 //! Hooks live in `~/.gemini/config/hooks.json` (a different file from Gemini
 //! CLI's `~/.gemini/settings.json`), grouped under a named top-level key: am
@@ -30,109 +30,40 @@
 //! live in `~/.gemini/antigravity-cli/brain/<id>/` with no cwd in the path, so
 //! resume discovery uses the sessions am's hooks recorded.
 
-use std::path::{Path, PathBuf};
-
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use super::embedded::Embedded;
 use super::manifest::Manifest;
-use super::{Harness, McpConfig};
-use crate::launch::Session;
 use crate::status::HookEvent;
 
-static INNER: Embedded = Embedded::new(|| Manifest::builtin(include_str!("antigravity.json")), None);
+pub static ANTIGRAVITY: Embedded =
+    Embedded::new(|| Manifest::builtin(include_str!("antigravity.json")), None).with_normalize(normalize);
 
-pub struct Antigravity;
-
-pub static ANTIGRAVITY: Antigravity = Antigravity;
-
-impl Harness for Antigravity {
-    fn id(&self) -> &str {
-        INNER.id()
+/// [`Embedded::with_normalize`]: the manifest's mapping, then a `Stop` with
+/// background work still running is read as activity, and snake_case
+/// spellings fill in a missing session or project.
+fn normalize(m: &Manifest, payload: &Value, event_override: Option<&str>) -> HookEvent {
+    let mut e = m.normalize(payload, event_override);
+    // A stop with background work still running is not the end of the turn.
+    if e.event == "Stop" && payload.get("fullyIdle").and_then(Value::as_bool) == Some(false) {
+        crate::debug!("agents", "antigravity: Stop with fullyIdle=false read as activity");
+        e.event = "PostToolUse".into();
     }
-
-    fn name(&self) -> &str {
-        INNER.name()
+    // Snake-case spellings, should a build send them.
+    let s = |k: &str| payload.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_owned);
+    if e.session_id.is_none() {
+        e.session_id = s("conversation_id").or_else(|| s("session_id"));
     }
-
-    fn short_name(&self) -> &str {
-        INNER.short_name()
+    if e.cwd.is_none() {
+        e.cwd = payload.pointer("/workspace_paths/0").and_then(Value::as_str).map(str::to_owned).or_else(|| s("cwd"));
     }
-
-    fn program(&self) -> &str {
-        INNER.program()
-    }
-
-    fn notes(&self) -> Option<&str> {
-        INNER.notes()
-    }
-
-    fn is_present(&self) -> bool {
-        INNER.is_present()
-    }
-
-    fn settings_path(&self) -> PathBuf {
-        INNER.settings_path()
-    }
-
-    fn hook_events(&self) -> Vec<String> {
-        INNER.hook_events()
-    }
-
-    fn ends_sessions(&self) -> bool {
-        INNER.ends_sessions()
-    }
-
-    fn hooks_key(&self) -> &str {
-        INNER.hooks_key()
-    }
-
-    fn hook_file_defaults(&self) -> Map<String, Value> {
-        INNER.hook_file_defaults()
-    }
-
-    fn hook_entry(&self, event: &str, invocation: &str, native: bool) -> Value {
-        INNER.hook_entry(event, invocation, native)
-    }
-
-    fn normalize(&self, payload: &Value, event_override: Option<&str>) -> HookEvent {
-        let mut e = INNER.normalize(payload, event_override);
-        // A stop with background work still running is not the end of the turn.
-        if e.event == "Stop" && payload.get("fullyIdle").and_then(Value::as_bool) == Some(false) {
-            crate::debug!("agents", "antigravity: Stop with fullyIdle=false read as activity");
-            e.event = "PostToolUse".into();
-        }
-        // Snake-case spellings, should a build send them.
-        let s = |k: &str| payload.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_owned);
-        if e.session_id.is_none() {
-            e.session_id = s("conversation_id").or_else(|| s("session_id"));
-        }
-        if e.cwd.is_none() {
-            e.cwd = payload.pointer("/workspace_paths/0").and_then(Value::as_str).map(str::to_owned).or_else(|| s("cwd"));
-        }
-        e
-    }
-
-    fn discover_sessions(&self, root: &Path) -> Vec<Session> {
-        INNER.discover_sessions(root)
-    }
-
-    fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String> {
-        INNER.resume_args(session_id, continue_latest)
-    }
-
-    fn matches_process(&self, name: &str, argv: &[String]) -> bool {
-        INNER.matches_process(name, argv)
-    }
-
-    fn mcp_config(&self) -> Option<McpConfig> {
-        INNER.mcp_config()
-    }
+    e
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::Harness;
     use crate::status::{Status::*, map_event_to_status};
     use serde_json::json;
 
