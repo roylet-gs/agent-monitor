@@ -7,9 +7,14 @@
 //! `<config dir>/plugins/agent-monitor.js` (an [`OwnedFile`] carrying
 //! [`OWNED_FILE_MARKER`], rendered from `opencode-plugin.js`). OpenCode
 //! auto-loads every `{plugin,plugins}/*.{js,ts}` in its config directories,
-//! so nothing is registered in `opencode.json`. The config dir is
-//! `$OPENCODE_CONFIG_DIR` (an extra dir OpenCode also loads), else
-//! `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`.
+//! so nothing is registered in `opencode.json`. The plugin goes in the
+//! global config dir, `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`,
+//! which OpenCode always loads. `$OPENCODE_CONFIG_DIR` is not used: OpenCode
+//! loads it *as well as* the global dir and dedupes plugins by file URL, so
+//! a copy there would run every hook twice next to a global one, and would
+//! be missed by an OpenCode started without the variable. OpenCode counts as
+//! present when that global dir exists (`with_presence`), so an XDG config
+//! dir is detected too.
 //!
 //! The plugin turns bus events into canonical events (the manifest's events
 //! map is the identity) and runs am-hook for each, one at a time, detached,
@@ -57,6 +62,7 @@ use crate::launch::Session;
 
 pub static OPENCODE: Embedded = Embedded::new(|| Manifest::builtin(include_str!("opencode.json")), Some(discover))
     .with_hook_file(|| (plugin_path(), ""))
+    .with_presence(|| config_dir(&env).is_dir())
     .with_hook_install(|| HookInstall::OwnedFile(OwnedFile { render, register: None }));
 
 const TEMPLATE: &str = include_str!("opencode-plugin.js");
@@ -72,12 +78,10 @@ fn env(key: &str) -> Option<String> {
     std::env::var(key).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
 }
 
-/// OpenCode's config dir: `$OPENCODE_CONFIG_DIR`, `$XDG_CONFIG_HOME/opencode`,
-/// `~/.config/opencode`.
+/// OpenCode's global config dir, which it always loads:
+/// `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. Never
+/// `$OPENCODE_CONFIG_DIR` (see the module docs).
 fn config_dir(get: &dyn Fn(&str) -> Option<String>) -> PathBuf {
-    if let Some(d) = get("OPENCODE_CONFIG_DIR") {
-        return expand_home(&d);
-    }
     match get("XDG_CONFIG_HOME") {
         Some(x) => expand_home(&x).join("opencode"),
         None => expand_home("~/.config/opencode"),
@@ -316,9 +320,12 @@ await new Promise((r) => setTimeout(r, 200));
         let own = |k: &str| match k {
             "OPENCODE_CONFIG_DIR" => Some("/oc".to_owned()),
             "OPENCODE_DB" => Some("/oc/sessions.db".to_owned()),
-            _ => Some("/ignored".to_owned()),
+            "XDG_CONFIG_HOME" => Some("/x/cfg".to_owned()),
+            _ => None,
         };
-        assert_eq!(config_dir(&own), PathBuf::from("/oc"));
+        // $OPENCODE_CONFIG_DIR is an extra dir OpenCode loads beside the
+        // global one; installing there could load the plugin twice.
+        assert_eq!(config_dir(&own), PathBuf::from("/x/cfg/opencode"));
         assert_eq!(db_path(&own), PathBuf::from("/oc/sessions.db"));
     }
 

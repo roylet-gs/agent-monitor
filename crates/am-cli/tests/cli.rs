@@ -560,10 +560,31 @@ fn hooks_for_opencode_are_a_plugin_file() {
     env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
     env.ok(&["hooks", "install", "--agent", "opencode"]);
     assert!(xdg.join("opencode/plugins/agent-monitor.js").exists());
+    // $OPENCODE_CONFIG_DIR is never written: OpenCode loads it beside the
+    // global dir, so a second copy there would run every hook twice.
     let own = env.root().join("oc");
     env.extra_env.push(("OPENCODE_CONFIG_DIR".into(), own.display().to_string()));
     env.ok(&["hooks", "install", "--agent", "opencode"]);
-    assert!(own.join("plugins/agent-monitor.js").exists());
+    assert!(!own.join("plugins/agent-monitor.js").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
+}
+
+/// OpenCode under `$XDG_CONFIG_HOME` (no `~/.config/opencode`) is detected,
+/// so a default `am hooks install` covers it.
+#[test]
+fn opencode_in_an_xdg_config_dir_is_detected() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let xdg = env.root().join("xdg");
+    std::fs::create_dir_all(xdg.join("opencode")).unwrap();
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    assert!(!env.home().join(".config/opencode").exists());
+    env.ok(&["hooks", "install"]);
+    assert!(xdg.join("opencode/plugins/agent-monitor.js").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
 }
 
 /// Built-in harness ids in registry order, so adding a harness doesn't
