@@ -483,6 +483,38 @@ fn a_rovodev_session_with_the_real_envelope_gets_a_session_row() {
 }
 
 #[test]
+fn a_kimi_session_is_tracked_through_its_native_events() {
+    let env = Env::new();
+    let cwd = format!("{}/src", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Kimi has no project-dir variable either: `--worktree ""`, payload `cwd`.
+    let kimi = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "session_id": "k-1", "session_title": "Fix", "client_type": "kimi_code_cli", "cwd": cwd });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("kimi", event, "", p);
+    };
+    kimi("SessionStart", json!({ "source": "startup", "model": "kimi-k2", "profile": "default" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("kimi")));
+    kimi("UserPromptSubmit", json!({ "prompt": "fix it", "is_steer": false }));
+    assert_eq!(env.status().0, "executing");
+    kimi("PreToolUse", json!({ "tool_name": "Bash", "tool_input": { "command": "cargo test" }, "tool_call_id": "c1" }));
+    kimi("PermissionRequest", json!({ "tool_name": "Bash" }));
+    assert_eq!(env.status().0, "waiting");
+    kimi("PermissionResult", json!({ "tool_name": "Bash" }));
+    assert_eq!(env.status().0, "executing");
+    kimi("PostToolUseFailure", json!({ "tool_name": "Bash", "tool_call_id": "c1", "error": { "message": "exit 1" } }));
+    kimi("Stop", json!({ "stop_hook_active": false }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("k-1").0, "done");
+    // Esc mid-turn fires Interrupt, not Stop.
+    kimi("UserPromptSubmit", json!({ "prompt": "again" }));
+    kimi("Interrupt", json!({ "turn_id": 2, "reason": "cancelled" }));
+    assert_eq!(env.status().0, "idle");
+    kimi("SessionEnd", json!({ "reason": "exit" }));
+    assert_eq!(env.session("k-1"), ("idle".into(), false));
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

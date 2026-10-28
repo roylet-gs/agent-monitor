@@ -603,6 +603,49 @@ fn hooks_for_rovodev() {
     assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
 }
 
+/// Kimi Code keeps its hooks in TOML: am owns a marked block of `[[hooks]]`
+/// tables and never touches the rest of the file.
+#[test]
+fn hooks_for_kimi() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // The user's config ends inside a table; `[[hooks]]` after it is still top level.
+    let config = env.home().join(".kimi-code/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let user = "default_model = \"kimi-k2\"\n\n[[hooks]]\nevent = \"Notification\"\nmatcher = \"task\\\\.completed\"\ncommand = \"notify\"\n\n[ui]\ntheme = \"dark\"\n";
+    std::fs::write(&config, user).unwrap();
+    assert!(env.ok(&["hooks", "status"]).stdout.contains("Kimi hooks: not installed\n"));
+
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "kimi"]).stdout, "Hooks installed into ~/.kimi-code/config.toml\n");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let block = text.strip_prefix(user).expect("the user's text stays as it was, block appended");
+    let cmd = |event: &str| format!("\"\\\"{}\\\" hook-event --agent kimi --worktree \\\"\\\" --event {event}\"", fake_hook.display());
+    assert!(block.starts_with(&format!("\n# agent-monitor hooks kimi begin\n[[hooks]]\nevent = \"SessionStart\"\ncommand = {}\ntimeout = 5\n\n[[hooks]]\n", cmd("SessionStart"))), "{block}");
+    assert!(block.ends_with(&format!("event = \"SessionEnd\"\ncommand = {}\ntimeout = 5\n# agent-monitor hooks kimi end\n", cmd("SessionEnd"))), "{block}");
+    assert_eq!(block.matches("[[hooks]]").count(), 11);
+    assert!(env.ok(&["hooks", "status"]).stdout.contains("Kimi hooks: installed\n"));
+
+    // Reinstalling is byte-for-byte the same; uninstall gives the user's file back.
+    env.ok(&["hooks", "install", "--agent", "kimi"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "kimi"]).stdout, "Hooks removed from ~/.kimi-code/config.toml\n");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+
+    // The legacy Kimi CLI (≤ 1.49, ~/.kimi) rejects these events at startup:
+    // its config is never written, and it alone doesn't make Kimi detected.
+    let tmp = Env::new();
+    let legacy = tmp.home().join(".kimi/config.toml");
+    std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+    std::fs::write(&legacy, "").unwrap();
+    assert_eq!(tmp.ok(&["hooks", "install"]).stdout, "Hooks installed into ~/.claude/settings.json\n");
+    assert_eq!(tmp.ok(&["hooks", "install", "--agent", "kimi"]).stdout, "Hooks installed into ~/.kimi-code/config.toml\n");
+    assert_eq!(std::fs::read_to_string(&legacy).unwrap(), "");
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {

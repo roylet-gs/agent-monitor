@@ -296,3 +296,19 @@ Payloads carry Claude's keys (`session_id`, `cwd`, `tool_name`, `tool_input`); t
 | `on_error` | `StopFailure` | `idle` |
 
 Current Rovo Dev releases send `{session_id, transcript_path, cwd, timestamp, hook_event_name, attributes}`, so each session gets its own `sessions` row and the worktree's headline follows the most urgent one, like any harness (`on_session_end` closes it). A release whose payload has no `session_id` updates the worktree's `agent_status` row directly; one without `cwd` is still placed by `--worktree "$PWD"`. It has no subagent events, so no `delegating`. `on_tool_permission` maps to `waiting` (cmux shows it as running): the user has to answer. Older Rovo Dev releases only fire `on_complete`, `on_error` and `on_tool_permission`; there a session never shows `executing`, and an `on_complete` after `waiting` leaves it `waiting` (the rules keep `waiting` through a `Stop`).
+
+**Kimi Code** (`--agent kimi`, a `[[hooks]]` block in Kimi's `config.toml`) sends Claude Code's event names, payload keys (`session_id`, `cwd`, `tool_name`, `tool_input`) and tool names. It has events Claude doesn't, mapped as follows:
+
+| Kimi event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` / `SessionEnd` | same | `idle` |
+| `UserPromptSubmit` | same | `executing` |
+| `PreToolUse` / `PostToolUse` | same | `executing` (`AskUserQuestion`/`ExitPlanMode` → `waiting`) |
+| `PostToolUseFailure` | `PostToolUse` | `executing` |
+| `PermissionRequest` | same | `waiting` |
+| `PermissionResult` (the approval was answered) | `PostToolUse` | `executing` |
+| `Stop` | same | `done` after work, else `idle` |
+| `StopFailure` (the turn errored) | same | `idle` |
+| `Interrupt` (Esc; fires instead of `Stop`) | `StopFailure` | `idle` |
+
+There is no project-dir variable, so the hook passes `--worktree ""` and the payload's `cwd` decides the worktree. Kimi's `Notification` only reports background tasks (`task.completed`…), never an approval, so it isn't hooked. `SubagentStart`/`SubagentStop` carry a name but no id, so Kimi sessions never reach `delegating`.
