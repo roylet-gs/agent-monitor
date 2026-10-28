@@ -41,6 +41,9 @@
 //!   `hooksKey: ""` puts events at the top level of the file. Without
 //!   `projectDirVar` the command passes `--worktree ""` and am-hook uses the
 //!   payload's `cwd`.
+//! - `resume.start` (optional) holds the arguments a fresh session needs
+//!   when the program alone doesn't start one (`["rovodev", "run"]` for
+//!   `acli`, `["chat", "--agent", "agent-monitor"]` for Kiro). Default: none.
 //! - `sessions.command` (optional) prints a JSON array of
 //!   `{"id", "cwd", "modified"}` (modified = unix seconds) for `{root}`;
 //!   without it, resuming falls back to `resume.continue`. Built-ins without
@@ -213,11 +216,15 @@ pub struct ResumeSpec {
     pub session: Vec<String>,
     #[serde(default, rename = "continue")]
     pub continue_latest: Vec<String>,
+    /// Arguments that start a fresh session, for a CLI whose program alone
+    /// doesn't (`acli` needs `rovodev run`). Default: none.
+    #[serde(default)]
+    pub start: Vec<String>,
 }
 
 impl Default for ResumeSpec {
     fn default() -> Self {
-        ResumeSpec { session: default_resume_session(), continue_latest: Vec::new() }
+        ResumeSpec { session: default_resume_session(), continue_latest: Vec::new(), start: Vec::new() }
     }
 }
 
@@ -363,7 +370,7 @@ impl Manifest {
         match (session_id, continue_latest) {
             (Some(id), _) => self.resume.session.iter().map(|a| a.replace("{id}", id)).collect(),
             (None, true) => self.resume.continue_latest.clone(),
-            (None, false) => Vec::new(),
+            (None, false) => self.resume.start.clone(),
         }
     }
 
@@ -570,10 +577,21 @@ mod tests {
         assert!(crate::hooks_installer::is_am_hook_command(cmd));
         assert_eq!(m.resume_args(Some("x1"), true), ["resume", "x1"]);
         assert_eq!(m.resume_args(None, true), ["resume", "--last"]);
-        assert!(m.resume_args(None, false).is_empty());
+        assert!(m.resume_args(None, false).is_empty(), "no `resume.start`: the bare program starts a session");
         assert!(m.process.matches("mycli", &[]));
         assert!(m.process.matches("node", &["node".into(), "/x/bin/mycli".into()]));
         assert!(!m.process.matches("node", &["node".into(), "server.js".into()]));
+    }
+
+    #[test]
+    fn resume_start_gives_the_fresh_session_arguments() {
+        let mut v: Value = serde_json::from_str(EXAMPLE).unwrap();
+        v["resume"]["start"] = json!(["chat", "--agent", "agent-monitor"]);
+        let m = Manifest::parse(&v.to_string()).unwrap();
+        assert_eq!(m.resume_args(None, false), ["chat", "--agent", "agent-monitor"]);
+        // Resuming and continuing don't add it.
+        assert_eq!(m.resume_args(Some("x1"), false), ["resume", "x1"]);
+        assert_eq!(m.resume_args(None, true), ["resume", "--last"]);
     }
 
     #[test]
