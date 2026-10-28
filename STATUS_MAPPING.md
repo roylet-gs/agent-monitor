@@ -354,3 +354,17 @@ Despite its name, `on_session_end` fires at the end of every turn (completed, fa
 | archived / `session.deleted` | `SessionEnd` | `idle` |
 
 OpenCode reports idle twice (`session.status` and `session.idle`); the plugin sends one `Stop` per turn, since a second would turn `done` into `idle`. `MessageAbortedError` (Esc) and `ContextOverflowError` (compaction) don't end the turn; the idle after them does. A turn that ends while a permission request is open sends `PostToolUse` first, since `Stop` keeps `waiting`. A child session (`parentID`, the `task` tool) is reported as a subagent of its parent: `SubagentStart`/`SubagentStop` and its tool and permission events carry `agent_id` = the child, so its tool calls don't move the parent and its permission prompts make it `waiting`.
+
+**OMP / oh-my-pi** (`--agent omp`, no command hooks: am's extension `agent-monitor-omp.ts` in OMP's agent dir sends these):
+
+| OMP event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session_start` / `session_shutdown` | `SessionStart` / `SessionEnd` | `idle` |
+| `before_agent_start` | `UserPromptSubmit` | `executing` |
+| `tool_execution_start` / `tool_execution_end` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`…; `ask` → `AskUserQuestion` → `waiting` on start; its end is sent without the tool name, so answering is `executing` again) |
+| `tool_approval_requested` | `PermissionRequest` | `waiting` |
+| `tool_approval_resolved` | `PostToolUse` | `executing` |
+| `plan_review_requested` | `PreToolUse` of `ExitPlanMode` | `waiting` (also after `done`: the review opens as the planning turn ends) |
+| `agent_end` | `Stop` | `done` after work, else `idle` |
+
+The extension skips an `agent_end` with `willContinue: true` (an automatic continuation follows) and sends one `Stop` per turn, since a second `Stop` would turn `done` into `idle`. Hooks run one at a time in the order OMP fired them, so a `PreToolUse` can't land after its `PermissionRequest` or a `PostToolUse` after the `Stop`. A switch to another session (`/new`, resume, fork) is `SessionEnd` for the old id then `SessionStart` for the new one. Other sessions in the same omp process are task subagents: they report as `SubagentStart`/`SubagentStop` (and tool events with `agent_id`) under the owner session, so `delegating` and subagent rows work, and a subagent's approval prompt shows `waiting`.

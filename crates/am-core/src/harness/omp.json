@@ -1,0 +1,32 @@
+{
+  "id": "omp",
+  "name": "OMP",
+  "shortName": "OMP",
+  "program": "omp",
+  "configDir": "~/.omp",
+  "hooks": {
+    "settingsPath": "~/.omp/agent/extensions/agent-monitor-omp.ts",
+    "timeoutMs": 5000
+  },
+  "events": {
+    "session_start": "SessionStart",
+    "before_agent_start": "UserPromptSubmit",
+    "tool_execution_start": "PreToolUse",
+    "tool_execution_end": "PostToolUse",
+    "tool_approval_requested": "PermissionRequest",
+    "tool_approval_resolved": "PostToolUse",
+    "plan_review_requested": "PreToolUse",
+    "subagent_start": "SubagentStart",
+    "subagent_stop": "SubagentStop",
+    "agent_end": "Stop",
+    "session_shutdown": "SessionEnd"
+  },
+  "tools": {
+    "bash": "Bash", "read": "Read", "write": "Write", "edit": "Edit", "glob": "Glob", "find": "Glob",
+    "grep": "Grep", "web_search": "WebSearch", "ask": "AskUserQuestion", "task": "Agent",
+    "plan_review": "ExitPlanMode"
+  },
+  "resume": { "session": ["--session", "{id}"], "continue": ["--continue"] },
+  "process": { "names": ["omp"], "argvContains": ["/@oh-my-pi/pi-coding-agent/"] },
+  "notes": "Hooks are an OMP extension (agent-monitor-omp.ts in the agent dir's extensions/); restart omp after installing. A named profile (OMP_PROFILE) reads its own agent dir: set PI_CODING_AGENT_DIR to it before installing"
+}
