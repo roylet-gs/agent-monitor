@@ -30,6 +30,7 @@ pub mod muse;
 pub mod kiro;
 pub mod kimi;
 pub mod hermes;
+pub mod opencode;
 pub mod qwen;
 pub mod rovodev;
 pub mod manifest;
@@ -286,6 +287,7 @@ impl HarnessKind {
     pub const ROVODEV: HarnessKind = HarnessKind(&rovodev::ROVODEV);
     pub const KIMI: HarnessKind = HarnessKind(&kimi::KIMI);
     pub const HERMES: HarnessKind = HarnessKind(&hermes::HERMES);
+    pub const OPENCODE: HarnessKind = HarnessKind(&opencode::OPENCODE);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -357,6 +359,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::ROVODEV,
     HarnessKind::KIMI,
     HarnessKind::HERMES,
+    HarnessKind::OPENCODE,
 ];
 
 struct Registry {

@@ -326,3 +326,18 @@ There is no project-dir variable, so the hook passes `--worktree ""` and the pay
 | `on_session_finalize` | `SessionEnd` | `idle` (closed) |
 
 Despite its name, `on_session_end` fires at the end of every turn (completed, failed or interrupted), so it is the turn's `Stop`. `post_llm_call` (successful turns only) isn't installed: a second `Stop` in the same turn would turn `done` into `idle`. The human-input events (Hermes from 2026-10-05 on; older builds log them as unknown and show no approval waits) carry the session id and fire only when a person is actually needed, so automatic ("smart") approvals don't flash `waiting`. Every Hermes turn opens with `pre_llm_call`, so tool and human-input events are **turn-bound** (`HookEvent::turn_bound`): with the session outside a turn (no status yet, `idle` or `done`) they change nothing. That keeps a finished turn `done` while Hermes's background memory/skill review fork, which shares the session id but skips `pre_llm_call` and `on_session_end`, runs its tool calls after the `Stop`. Events whose `extra.platform` is anything but `cli`/`tui` (the gateway's Telegram/Discord/… turns, cron) are dropped: installing approves am's hooks for the gateway and cron too, and their `cwd` is the gateway process's, not a project. The directory is the payload's `cwd`.
+
+**OpenCode** (`--agent opencode`): OpenCode has no command hooks. am's plugin (`<config dir>/plugins/agent-monitor.js`) sends canonical event names itself, with `--worktree ""` and the session's directory as `cwd`:
+
+| OpenCode event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `session.created` | `SessionStart` | `idle` |
+| `session.status` busy (V2 `session.next.prompted` / `session.execution.started`) | `UserPromptSubmit` (once per turn) | `executing` |
+| `tool.execute.before` / `tool.execute.after` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`, `question` → `AskUserQuestion` → `waiting`…) |
+| `permission.asked` | `PermissionRequest` | `waiting` |
+| last `permission.replied` | `PostToolUse` | `executing` |
+| `session.status` idle / `session.idle` (V2 `session.execution.succeeded`) | `Stop` (once per turn) | `done` after work |
+| `session.error` / `session.execution.failed` | `StopFailure` | `idle` |
+| archived / `session.deleted` | `SessionEnd` | `idle` |
+
+OpenCode reports idle twice (`session.status` and `session.idle`); the plugin sends one `Stop` per turn, since a second would turn `done` into `idle`. `MessageAbortedError` (Esc) and `ContextOverflowError` (compaction) don't end the turn; the idle after them does. A turn that ends while a permission request is open sends `PostToolUse` first, since `Stop` keeps `waiting`. A child session (`parentID`, the `task` tool) is reported as a subagent of its parent: `SubagentStart`/`SubagentStop` and its tool and permission events carry `agent_id` = the child, so its tool calls don't move the parent and its permission prompts make it `waiting`.

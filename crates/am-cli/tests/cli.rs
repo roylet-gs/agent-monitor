@@ -739,6 +739,80 @@ fn hermes_is_detected_from_hermes_home() {
     assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["hermes"], true);
 }
 
+/// OpenCode has no hooks: am writes (and owns) a plugin file it auto-loads.
+#[test]
+fn hooks_for_opencode_are_a_plugin_file() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    let plugin = env.home().join(".config/opencode/plugins/agent-monitor.js");
+    assert_eq!(
+        env.ok(&["hooks", "install", "--agent", "opencode"]).stdout,
+        "Hooks installed into ~/.config/opencode/plugins/agent-monitor.js\n"
+    );
+    let text = std::fs::read_to_string(&plugin).unwrap();
+    assert!(text.contains(am_core::hooks_installer::OWNED_FILE_MARKER));
+    let argv = format!("const HOOK = [\"{}\", \"hook-event\", \"--agent\", \"opencode\", \"--worktree\", \"\", \"--event\"];", fake_hook.display());
+    assert!(text.contains(&argv), "{text}");
+    // Nothing to register: OpenCode loads everything in plugins/.
+    assert!(!env.home().join(".config/opencode/opencode.json").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
+    env.ok(&["hooks", "install", "--agent", "opencode"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), text, "reinstalling changes nothing");
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains("OpenCode hooks: Installed in ~/.config/opencode/plugins/agent-monitor.js"), "{doctor}");
+
+    // A binary that's gone is found in the plugin.
+    std::fs::remove_file(&fake_hook).unwrap();
+    let doctor = env.ok(&["doctor"]).stdout;
+    assert!(doctor.contains(&format!("run a missing {}", fake_hook.display())), "{doctor}");
+
+    env.ok(&["hooks", "uninstall", "--agent", "opencode"]);
+    assert!(!plugin.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], false);
+
+    // A file of that name that isn't am's is left alone.
+    std::fs::write(&plugin, "export const Mine = async () => ({});\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "opencode"]);
+    assert_eq!(o.code, 1, "{}", o.stdout);
+    env.ok(&["hooks", "uninstall", "--agent", "opencode"]);
+    assert_eq!(std::fs::read_to_string(&plugin).unwrap(), "export const Mine = async () => ({});\n");
+
+    // OpenCode's config dir overrides.
+    let xdg = env.root().join("xdg");
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "opencode"]);
+    assert!(xdg.join("opencode/plugins/agent-monitor.js").exists());
+    // $OPENCODE_CONFIG_DIR is never written: OpenCode loads it beside the
+    // global dir, so a second copy there would run every hook twice.
+    let own = env.root().join("oc");
+    env.extra_env.push(("OPENCODE_CONFIG_DIR".into(), own.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "opencode"]);
+    assert!(!own.join("plugins/agent-monitor.js").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
+}
+
+/// OpenCode under `$XDG_CONFIG_HOME` (no `~/.config/opencode`) is detected,
+/// so a default `am hooks install` covers it.
+#[test]
+fn opencode_in_an_xdg_config_dir_is_detected() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let xdg = env.root().join("xdg");
+    std::fs::create_dir_all(xdg.join("opencode")).unwrap();
+    env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    assert!(!env.home().join(".config/opencode").exists());
+    env.ok(&["hooks", "install"]);
+    assert!(xdg.join("opencode/plugins/agent-monitor.js").exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["opencode"], true);
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {

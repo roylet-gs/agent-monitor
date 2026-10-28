@@ -1,0 +1,41 @@
+{
+  "id": "opencode",
+  "name": "OpenCode",
+  "program": "opencode",
+  "configDir": "~/.config/opencode",
+  "hooks": {
+    "settingsPath": "~/.config/opencode/plugins/agent-monitor.js",
+    "timeoutMs": 5000
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "SessionEnd": "SessionEnd",
+    "UserPromptSubmit": "UserPromptSubmit",
+    "PreToolUse": "PreToolUse",
+    "PostToolUse": "PostToolUse",
+    "PermissionRequest": "PermissionRequest",
+    "Stop": "Stop",
+    "StopFailure": "StopFailure",
+    "SubagentStart": "SubagentStart",
+    "SubagentStop": "SubagentStop"
+  },
+  "tools": {
+    "bash": "Bash",
+    "read": "Read",
+    "write": "Write",
+    "edit": "Edit",
+    "multiedit": "Edit",
+    "grep": "Grep",
+    "glob": "Glob",
+    "webfetch": "WebFetch",
+    "websearch": "WebSearch",
+    "task": "Task",
+    "todowrite": "TodoWrite",
+    "question": "AskUserQuestion",
+    "plan_enter": "EnterPlanMode",
+    "plan_exit": "ExitPlanMode"
+  },
+  "resume": { "session": ["--session", "{id}"], "continue": ["--continue"] },
+  "process": { "names": ["opencode"], "argvContains": ["/opencode-ai/"] },
+  "notes": "Reported by a plugin am writes into OpenCode's plugins directory; OpenCode loads it at startup, so restart open sessions after installing"
+}
