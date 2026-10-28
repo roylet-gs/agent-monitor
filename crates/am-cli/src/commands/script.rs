@@ -25,7 +25,7 @@ fn title(kind: ScriptKind) -> String {
 /// or the system opener for `terminal`.
 fn open_file_in_editor(path: &Path, s: &settings::Settings) -> Result<(), String> {
     let ide = launch::IdeChoice::from_setting(&s.ide);
-    if ide != launch::IdeChoice::Terminal {
+    if !ide.is_terminal() {
         return launch::open_in_editor(path, ide, &s.ide_command);
     }
     let mut cmd = if cfg!(target_os = "macos") {

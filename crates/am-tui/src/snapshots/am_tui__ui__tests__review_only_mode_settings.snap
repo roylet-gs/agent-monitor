@@ -1,6 +1,5 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 4639
 expression: settings
 ---
 ╭─Review requests ──────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
@@ -23,6 +22,7 @@ expression: settings
 │                 │                                                                                  │                 │
 │                 │ Notifications                                                                    │                 │
 │                 │   Check for updates             on                                               │                 │
+│                 │   cmux sidebar                  on                                               │                 │
 │                 │                                                                                  │                 │
 │                 │ Review requests                                                                  │                 │
 │                 │   Requested from                all                                              │                 │
@@ -45,7 +45,6 @@ expression: settings
 │                 │ Setup                                                                            │                 │
 │                 │   Run setup again…              ⏎ open                                           │                 │
 │                 │   Reset settings…               ⏎ reset                                          │                 │
-│                 │                                                                                  │                 │
 │                 │                                                                                  │                 │
 │                 │                                                                                  │                 │
 │                 │                                                                                  │                 │

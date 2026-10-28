@@ -96,6 +96,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<McpCmd>,
     },
+    /// cmux terminal integration (`am cmux dock`)
+    #[command(subcommand)]
+    Cmux(CmuxCmd),
     /// Check system health (hooks, gh CLI, DB, etc.)
     Doctor(JsonOpt),
     /// Show recent logs
@@ -283,6 +286,22 @@ enum McpCmd {
     Uninstall(AgentOpt),
     /// Check which agents have the MCP server registered
     Status(JsonOpt),
+}
+
+#[derive(Subcommand)]
+enum CmuxCmd {
+    /// Add am to cmux's Dock (its right sidebar): ~/.config/cmux/dock.json, or .cmux/dock.json with --project
+    Dock {
+        /// Write the project's .cmux/dock.json (in the current directory) instead of your own
+        #[arg(long)]
+        project: bool,
+        /// Also add the review-requests page as its own Dock control
+        #[arg(long)]
+        reviews: bool,
+        /// Take am's controls out again
+        #[arg(long)]
+        remove: bool,
+    },
 }
 
 #[derive(Args)]
@@ -504,6 +523,10 @@ fn main() {
             Some(McpCmd::Uninstall(a)) => commands::mcp::uninstall(&a.agents),
             Some(McpCmd::Status(j)) => commands::mcp::status(j.json),
         },
+        Some(Cmd::Cmux(CmuxCmd::Dock { project, reviews, remove })) => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            commands::cmux::dock(project.then_some(cwd.as_path()), reviews, remove)
+        }
         Some(Cmd::Doctor(j)) => doctor::run(j.json),
         Some(Cmd::Logs(a)) => logs::run(logs::Options {
             lines: a.lines.trim().parse().unwrap_or(50),

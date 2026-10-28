@@ -16,11 +16,11 @@ expression: out
 │        │   ○ Zed                                                                        │        │
 │        │   ○ Windsurf                                                                   │        │
 │        │   ○ Terminal                                                                   │        │
+│        │   ○ cmux                                                                       │        │
 │        │   ● Custom command: subl -n▏                                                   │        │
 │        │     Runs with the worktree path appended, or in place of {path}                │        │
 │        │                                                                                │        │
 │        ╰─────────────────────────────────────────────────── ↑↓ choose  ⏎ next  esc back ╯        │
-│                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
  ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit

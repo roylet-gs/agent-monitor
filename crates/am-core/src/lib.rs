@@ -3,6 +3,7 @@
 //! during the migration, so every schema change here must stay readable by it.
 
 pub mod harness;
+pub mod cmux;
 pub mod context;
 pub mod db;
 pub mod gitinfo;
