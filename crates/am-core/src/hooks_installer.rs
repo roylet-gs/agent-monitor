@@ -1133,6 +1133,34 @@ mod tests {
         assert_eq!(hook_programs_in_text(text), [PathBuf::from("/x y/am-hook"), PathBuf::from("/opt/am"), PathBuf::from("/opt/custom")]);
     }
 
+    /// The way a built-in harness branch declares a text-block style.
+    static TOMLCLI: crate::harness::embedded::Embedded = crate::harness::embedded::Embedded::new(
+        || {
+            crate::harness::manifest::Manifest::builtin(
+                r#"{"id":"tomlcli","name":"TOML CLI","program":"tomlcli",
+                    "hooks":{"settingsPath":"~/.tomlcli/config.toml","timeoutMs":30000},
+                    "events":{"Stop":"Stop"}}"#,
+            )
+        },
+        None,
+    )
+    .with_hook_install(|| HookInstall::TextBlock(TextBlock { comment: "#", render: render_toml }));
+
+    #[test]
+    fn an_embedded_harness_picks_its_style() {
+        let ctx = HookContext::new(&TOMLCLI, Some(Path::new("/b/am-hook")));
+        assert!(matches!(TOMLCLI.hook_install(), HookInstall::TextBlock(_)));
+        assert_eq!(
+            ctx.hooks,
+            [HookCommand {
+                event: "Stop".into(),
+                command: "\"/b/am-hook\" hook-event --agent tomlcli --worktree \"\" --event Stop".into(),
+                timeout_ms: 30_000
+            }]
+        );
+        assert_eq!(ctx.argv("Stop", "/w"), ["/b/am-hook", "hook-event", "--agent", "tomlcli", "--worktree", "/w", "--event", "Stop"]);
+    }
+
     #[test]
     fn json_is_the_default_style() {
         assert!(matches!(crate::harness::HarnessKind::GEMINI.provider().hook_install(), HookInstall::Json));
