@@ -233,3 +233,19 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**Kimi Code** (`--agent kimi`, a `[[hooks]]` block in Kimi's `config.toml`) sends Claude Code's event names, payload keys (`session_id`, `cwd`, `tool_name`, `tool_input`) and tool names. It has events Claude doesn't, mapped as follows:
+
+| Kimi event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` / `SessionEnd` | same | `idle` |
+| `UserPromptSubmit` | same | `executing` |
+| `PreToolUse` / `PostToolUse` | same | `executing` (`AskUserQuestion`/`ExitPlanMode` → `waiting`) |
+| `PostToolUseFailure` | `PostToolUse` | `executing` |
+| `PermissionRequest` | same | `waiting` |
+| `PermissionResult` (the approval was answered) | `PostToolUse` | `executing` |
+| `Stop` | same | `done` after work, else `idle` |
+| `StopFailure` (the turn errored) | same | `idle` |
+| `Interrupt` (Esc; fires instead of `Stop`) | `StopFailure` | `idle` |
+
+There is no project-dir variable, so the hook passes `--worktree ""` and the payload's `cwd` decides the worktree. Kimi's `Notification` only reports background tasks (`task.completed`…), never an approval, so it isn't hooked. `SubagentStart`/`SubagentStop` carry a name but no id, so Kimi sessions never reach `delegating`.
