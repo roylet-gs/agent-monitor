@@ -233,3 +233,14 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**Antigravity CLI** (`--agent antigravity`, hooks in the `agent-monitor` group of `~/.gemini/config/hooks.json`):
+
+| Antigravity event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `SessionStart` (new conversations only, agy ≥ 1.1.1) | `SessionStart` | `idle` |
+| `PreInvocation` (before every model invocation, `invocationNum` 0, 1, …) | `UserPromptSubmit` | `executing` |
+| `Stop` with `fullyIdle: false` (background work still running) | `PostToolUse` | stays `executing` |
+| `Stop` with `fullyIdle: true` | `Stop` | `done` after work, else `idle` |
+
+The session is `conversationId`, the directory `workspacePaths[0]` (`--worktree ""`). There is no permission or notification hook, so it never shows `waiting`, and no session-end hook, so a conversation is never marked closed by a hook. am doesn't register the `Notification`, `turn-completion` or per-turn `SessionEnd` events cmux uses (they aren't in Antigravity's documented hook list, and each would be a second `Stop` for the same turn, turning `done` into `idle`).

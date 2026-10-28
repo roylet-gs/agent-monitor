@@ -1,0 +1,28 @@
+{
+  "id": "antigravity",
+  "name": "Antigravity CLI",
+  "shortName": "Antigravity",
+  "program": "agy",
+  "configDir": "~/.gemini/antigravity-cli",
+  "hooks": {
+    "settingsPath": "~/.gemini/config/hooks.json",
+    "hooksKey": "agent-monitor",
+    "layout": "flat",
+    "entry": { "type": "command" },
+    "timeoutMs": 10000,
+    "timeoutUnit": "s"
+  },
+  "events": {
+    "SessionStart": "SessionStart",
+    "PreInvocation": "UserPromptSubmit",
+    "Stop": "Stop"
+  },
+  "fields": {
+    "session_id": "conversationId",
+    "cwd": "/workspacePaths/0",
+    "transcript_path": "transcriptPath"
+  },
+  "resume": { "session": ["--conversation", "{id}"] },
+  "process": { "names": ["agy"] },
+  "notes": "Antigravity has no permission or notification hook, so it never shows waiting"
+}

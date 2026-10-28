@@ -290,6 +290,28 @@ fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
 }
 
 #[test]
+fn an_antigravity_conversation_is_tracked_from_its_payload() {
+    let env = Env::new();
+    let root = env.root();
+    let agy = |event: &str, extra: Value| {
+        let mut p = json!({ "conversationId": "ec33ebf9", "workspacePaths": [root],
+                            "transcriptPath": "/h/.gemini/antigravity-cli/brain/ec33ebf9/t.jsonl", "modelName": "gemini" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        // No project-dir variable: the command passes --worktree "".
+        env.send_raw("antigravity", event, "", p);
+    };
+    agy("SessionStart", json!({}));
+    agy("PreInvocation", json!({ "invocationNum": 0, "initialNumSteps": 1 }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("executing", Some("antigravity")));
+    agy("PreInvocation", json!({ "invocationNum": 1, "initialNumSteps": 3 }));
+    agy("Stop", json!({ "executionNum": 1, "terminationReason": "model_stop", "fullyIdle": false }));
+    assert_eq!(env.status().0, "executing", "background work still running");
+    agy("Stop", json!({ "executionNum": 1, "terminationReason": "model_stop", "fullyIdle": true }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("ec33ebf9").0, "done");
+}
+
+#[test]
 fn main_agent_activity_while_delegating_is_executing() {
     let env = Env::new();
     env.send("UserPromptSubmit", json!({}));
