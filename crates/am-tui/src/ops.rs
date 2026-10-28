@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 
 use am_core::model::{Repository, WorktreeView};
 use am_core::settings::Settings;
-use am_core::worktrees::{self, CreateRequest, DeleteOptions};
+use am_core::worktrees::{self, CreateRequest, DeleteOptions, ScriptKind};
 use am_core::{db, info, launch};
 
 use crate::launcher::Msg;
@@ -52,13 +52,14 @@ pub fn delete(view: WorktreeView, delete_branch: bool, job: u64, tx: Sender<Msg>
     });
 }
 
-/// Run a repo's startup script for a new worktree. By default (and when no
+/// Run a repo's startup script for a new worktree, or its review script for
+/// a pulled PR (with `env` describing the PR). By default (and when no
 /// terminal window can be opened) it runs here with its output streamed to
 /// the job; with `in_window` (`startupScriptMode: window`) it opens in a new
 /// terminal window.
-pub fn run_script(repo_id: String, cwd: String, in_window: bool, job: u64, tx: Sender<Msg>) {
+pub fn run_script(kind: ScriptKind, repo_id: String, cwd: String, in_window: bool, env: Vec<(String, String)>, job: u64, tx: Sender<Msg>) {
     std::thread::spawn(move || {
-        let script = worktrees::script_path(&repo_id);
+        let script = kind.path(&repo_id);
         if in_window {
             let cmd = format!("/bin/sh {}", launch::sh_quote(&script.to_string_lossy()));
             let _ = tx.send(Msg::JobStep(job, "Opening a terminal for the startup script…".into()));
@@ -73,21 +74,22 @@ pub fn run_script(repo_id: String, cwd: String, in_window: bool, job: u64, tx: S
             }
         }
         let _ = tx.send(Msg::JobStep(job, format!("Running {}", script.display())));
-        let result = run_script_piped(&script, &cwd, job, &tx);
+        let result = run_script_piped(&script, &cwd, &env, job, &tx);
         match &result {
-            Ok(()) => info!("tui", "Startup script for {repo_id} finished in {cwd}"),
-            Err(e) => am_core::warn!("tui", "Startup script for {repo_id} in {cwd}: {e}"),
+            Ok(()) => info!("tui", "{kind:?} script for {repo_id} finished in {cwd}"),
+            Err(e) => am_core::warn!("tui", "{kind:?} script for {repo_id} in {cwd}: {e}"),
         }
         let _ = tx.send(Msg::ScriptDone(job, result));
     });
 }
 
-fn run_script_piped(script: &Path, cwd: &str, job: u64, tx: &Sender<Msg>) -> Result<(), String> {
+fn run_script_piped(script: &Path, cwd: &str, env: &[(String, String)], job: u64, tx: &Sender<Msg>) -> Result<(), String> {
     use std::io::{BufRead, BufReader, Read};
     use std::process::{Command, Stdio};
     let mut child = Command::new("/bin/sh")
         .arg(script)
         .current_dir(cwd)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

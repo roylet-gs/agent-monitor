@@ -29,6 +29,7 @@ mod ui;
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+use am_core::worktrees::ScriptKind;
 use am_core::{info, settings};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -256,9 +257,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                             app.pending_select = Some(w.id.clone());
                             app.jobs.set_worktree(job, w.id.clone());
                             let repo_id = w.repo_id.clone();
-                            // A tmp-space worktree is only there to look at:
-                            // no startup script.
-                            if !w.tmp_space && am_core::worktrees::has_script(&repo_id) {
+                            let review_script = app.jobs.get(job).and_then(|j| j.review_script()).map(<[_]>::to_vec);
+                            // "Pull + run script": the review script runs at
+                            // once, here in the pane. Otherwise a tmp-space
+                            // worktree is only there to look at: no startup
+                            // script.
+                            if let Some(mut env) = review_script {
+                                env.push(("AM_WORKTREE_PATH".into(), w.path.clone()));
+                                info!("tui", "Running the review script for {} in {}", w.branch, w.path);
+                                ops::run_script(ScriptKind::Review, repo_id, w.path.clone(), false, env, job, launch_tx.clone());
+                            } else if !w.tmp_space && am_core::worktrees::has_script(&repo_id) {
                                 app.jobs.ask(job, jobs::Question::RunScript { repo_id, worktree_path: w.path.clone() });
                             } else {
                                 app.jobs.finish(job, Ok(()), Instant::now());
@@ -293,7 +301,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     app.rebuild_rows();
                 }
-                launcher::Msg::ScriptDone(job, result) => app.jobs.finish(job, result, Instant::now()),
+                launcher::Msg::ScriptDone(job, result) => {
+                    // The review page hides the jobs pane: say why here.
+                    if let Err(e) = &result
+                        && app.reviews.is_some()
+                        && app.jobs.get(job).is_some_and(|j| j.review_script().is_some())
+                    {
+                        app.notice = Some(format!("Review script failed: {e}"));
+                    }
+                    app.jobs.finish(job, result, Instant::now());
+                }
                 launcher::Msg::RepoAdded(path, result) if app.setup.is_some() => {
                     app.modal = None;
                     if result.is_ok() {
@@ -524,16 +541,16 @@ fn dispatch(
         Action::Delete(job, v, delete_branch) => ops::delete(*v, delete_branch, job, launch_tx.clone()),
         Action::AddRepo(path) => ops::add_repo(path, launch_tx.clone()),
         Action::ReposChanged => collector.refresh(false),
-        Action::EditScript(repo_id) => {
-            let path = match am_core::worktrees::create_script(&repo_id) {
+        Action::EditScript(repo_id, kind) => {
+            let path = match kind.create(&repo_id) {
                 Ok(p) => p,
                 Err(e) => {
-                    am_core::warn!("scripts", "Couldn't create the startup script for {repo_id}: {e}");
-                    app.popup = Some(format!("✗ Couldn't create the startup script: {e}"));
+                    am_core::warn!("scripts", "Couldn't create the {} for {repo_id}: {e}", kind.label());
+                    app.popup = Some(format!("✗ Couldn't create the {}: {e}", kind.label()));
                     return Ok(false);
                 }
             };
-            am_core::info!("scripts", "Editing startup script {}", path.display());
+            am_core::info!("scripts", "Editing {} {}", kind.label(), path.display());
             let shown = am_core::hooks_installer::tilde(&path);
             let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);
             if ide != am_core::launch::IdeChoice::Terminal {
@@ -542,7 +559,9 @@ fn dispatch(
                 edit_file(terminal, mouse_before, &path)?;
             }
             if let Some(e) = &mut app.settings_editor {
-                e.refresh_repos(Some((true, format!("Startup script: {shown}"))));
+                let label = kind.label();
+                let label = format!("{}{}", label[..1].to_uppercase(), &label[1..]);
+                e.refresh_repos(Some((true, format!("{label}: {shown}"))));
             }
         }
         Action::Suggest { title, body } => ops::suggest(title, body, launch_tx.clone()),
@@ -571,7 +590,8 @@ fn dispatch(
             collector.refresh(false);
         }
         Action::RunScript { job, repo_id, worktree_path } => {
-            ops::run_script(repo_id, worktree_path, app.settings.startup_script_in_window(), job, launch_tx.clone());
+            let in_window = app.settings.startup_script_in_window();
+            ops::run_script(ScriptKind::Startup, repo_id, worktree_path, in_window, Vec::new(), job, launch_tx.clone());
         }
         Action::EditSettingsFile => {
             let ide = am_core::launch::IdeChoice::from_setting(&app.settings.ide);

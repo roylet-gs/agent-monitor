@@ -19,6 +19,7 @@ expression: "render(&app, 66, 34)"
 ││   Reviews beside list     V                                  ││
 ││   Reviews in new window   ctrl-v                             ││
 ││   Pull into Reviewing     t                                  ││
+││   Pull + run script       T                                  ││
 ││ General                                                      ││
 ││   Toggle log pane         w                                  ││
 ││   Settings                s                                  ││
@@ -28,7 +29,6 @@ expression: "render(&app, 66, 34)"
 ││   Quit                    q                                  ││
 ││ Moving                                                       ││
 ││   Move down               j                                  ││
-││   Move up                 k                                  ││
 ││                                                              ││
 ││ Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc…││
 ││                                                              ││

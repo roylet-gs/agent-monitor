@@ -22,8 +22,10 @@ const LOG_CAP: usize = 500;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JobKind {
-    /// `worktree_id` is set once the worktree exists.
-    Create { repo: Repository, req: CreateRequest, worktree_id: Option<String> },
+    /// `worktree_id` is set once the worktree exists. `review_script`: the
+    /// environment for the repo's review script, run once the worktree
+    /// exists ("pull + run script" on the review page).
+    Create { repo: Repository, req: CreateRequest, worktree_id: Option<String>, review_script: Option<Vec<(String, String)>> },
     Delete { worktree_id: String },
 }
 
@@ -66,9 +68,17 @@ impl Job {
 
     /// A create that hasn't failed: the list shows a placeholder row for it
     /// until the snapshot has the worktree (`worktree_id`, once known).
+    /// The review script's environment when this create runs one after it.
+    pub fn review_script(&self) -> Option<&[(String, String)]> {
+        match &self.kind {
+            JobKind::Create { review_script, .. } => review_script.as_deref(),
+            _ => None,
+        }
+    }
+
     pub fn pending_create(&self) -> Option<(&Repository, &CreateRequest, Option<&str>)> {
         match &self.kind {
-            JobKind::Create { repo, req, worktree_id } if !matches!(self.state, JobState::Failed(_)) => {
+            JobKind::Create { repo, req, worktree_id, .. } if !matches!(self.state, JobState::Failed(_)) => {
                 Some((repo, req, worktree_id.as_deref()))
             }
             _ => None,
@@ -104,7 +114,14 @@ impl Jobs {
 
     pub fn start_create(&mut self, repo: Repository, req: CreateRequest) -> u64 {
         let label = format!("Create {}", req.branch);
-        self.push(JobKind::Create { repo, req, worktree_id: None }, label)
+        self.push(JobKind::Create { repo, req, worktree_id: None, review_script: None }, label)
+    }
+
+    /// A review-page pull that runs the repo's review script (with `env`)
+    /// once the worktree exists.
+    pub fn start_review_pull(&mut self, repo: Repository, req: CreateRequest, env: Vec<(String, String)>) -> u64 {
+        let label = format!("Pull {} + run script", req.branch);
+        self.push(JobKind::Create { repo, req, worktree_id: None, review_script: Some(env) }, label)
     }
 
     pub fn start_delete(&mut self, worktree_id: String, name: &str) -> u64 {
@@ -123,10 +140,10 @@ impl Jobs {
     /// exists", or the tmp space's automatic one).
     pub fn rerun_create(&mut self, id: u64, mode: CreateMode) -> JobEffect {
         let Some(job) = self.get_mut(id) else { return JobEffect::None };
-        let JobKind::Create { repo, req, .. } = &job.kind else { return JobEffect::None };
+        let JobKind::Create { repo, req, review_script, .. } = &job.kind else { return JobEffect::None };
         let req = CreateRequest { mode, ..req.clone() };
         let repo = repo.clone();
-        job.kind = JobKind::Create { repo: repo.clone(), req: req.clone(), worktree_id: None };
+        job.kind = JobKind::Create { repo: repo.clone(), req: req.clone(), worktree_id: None, review_script: review_script.clone() };
         job.question = None;
         job.state = JobState::Running;
         JobEffect::Create(id, Box::new(repo), Box::new(req))
@@ -399,6 +416,18 @@ mod tests {
         assert!(matches!(&j.kind, JobKind::Create { req, .. } if req.mode == CreateMode::TrackRemote));
         assert_eq!(jobs.list.len(), 1);
         assert_eq!(jobs.rerun_create(99, CreateMode::TrackRemote), JobEffect::None);
+    }
+
+    #[test]
+    fn a_review_pull_keeps_its_script_across_reruns() {
+        let mut jobs = Jobs::default();
+        let env = vec![("AM_PR_NUMBER".to_string(), "61".to_string())];
+        let id = jobs.start_review_pull(repo(), CreateRequest { tmp_space: true, ..req() }, env.clone());
+        assert_eq!(jobs.get(id).unwrap().label, "Pull feat + run script");
+        jobs.rerun_create(id, CreateMode::ReuseLocal);
+        assert_eq!(jobs.get(id).unwrap().review_script(), Some(env.as_slice()));
+        let plain = jobs.start_create(repo(), req());
+        assert_eq!(jobs.get(plain).unwrap().review_script(), None);
     }
 
     #[test]

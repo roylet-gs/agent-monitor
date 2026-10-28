@@ -21,6 +21,7 @@ pub enum Command {
     NewWorktree,
     Delete,
     PullToTmpSpace,
+    PullAndRunScript,
     ReviewRequests,
     ReviewSplit,
     ReviewWindow,
@@ -42,7 +43,7 @@ pub enum Command {
 impl Command {
     /// Every command, in the order the Key bindings page lists them (grouped
     /// by `section`).
-    pub const ALL: [Command; 23] = [
+    pub const ALL: [Command; 24] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -54,6 +55,7 @@ impl Command {
         Command::ReviewSplit,
         Command::ReviewWindow,
         Command::PullToTmpSpace,
+        Command::PullAndRunScript,
         Command::ToggleLog,
         Command::Settings,
         Command::Feedback,
@@ -82,6 +84,7 @@ impl Command {
             Command::NewWorktree => "newWorktree",
             Command::Delete => "deleteWorktree",
             Command::PullToTmpSpace => "pullToTmpSpace",
+            Command::PullAndRunScript => "pullAndRunScript",
             Command::ReviewRequests => "reviewRequests",
             Command::ReviewSplit => "reviewSplit",
             Command::ReviewWindow => "reviewWindow",
@@ -115,6 +118,7 @@ impl Command {
             Command::NewWorktree => "New worktree",
             Command::Delete => "Delete worktree",
             Command::PullToTmpSpace => "Pull into Reviewing",
+            Command::PullAndRunScript => "Pull + run script",
             Command::ReviewRequests => "Review requests",
             Command::ReviewSplit => "Reviews beside list",
             Command::ReviewWindow => "Reviews in new window",
@@ -140,7 +144,9 @@ impl Command {
             Command::Open | Command::OpenPr | Command::OpenLinear | Command::OpenProject | Command::NewWorktree | Command::Delete | Command::AddRepo => {
                 "Worktrees"
             }
-            Command::ReviewRequests | Command::ReviewSplit | Command::ReviewWindow | Command::PullToTmpSpace => "Review requests",
+            Command::ReviewRequests | Command::ReviewSplit | Command::ReviewWindow | Command::PullToTmpSpace | Command::PullAndRunScript => {
+                "Review requests"
+            },
             Command::ToggleLog | Command::Settings | Command::Feedback | Command::Refresh | Command::Help | Command::Quit => "General",
             Command::MoveDown | Command::MoveUp | Command::PageDown | Command::PageUp | Command::Top | Command::Bottom => "Moving",
         }
@@ -160,6 +166,7 @@ impl Command {
             Command::ReviewSplit => "The review page beside the worktree list (⇥ moves between list, reviews and jobs)",
             Command::ReviewWindow => "The review page in a new terminal window",
             Command::PullToTmpSpace => "Pull the selected PR into the Reviewing group (review page only)",
+            Command::PullAndRunScript => "Pull the selected PR into Reviewing, then run the repo's review script (review page only)",
             Command::ToggleLog => "Show or hide the debug.log pane",
             Command::Settings => "Open settings",
             Command::Feedback => "File a feature request on GitHub",
@@ -187,6 +194,7 @@ impl Command {
             Command::ReviewSplit => "beside the list / close",
             Command::ReviewWindow => "new window",
             Command::PullToTmpSpace => "pull into Reviewing",
+            Command::PullAndRunScript => "pull, then run its script",
             Command::Settings | Command::Help => "same",
             Command::Feedback => "review filters",
             Command::Refresh => "clear cache and refetch",
@@ -206,6 +214,7 @@ impl Command {
             Command::NewWorktree => "new",
             Command::Delete => "delete",
             Command::PullToTmpSpace => "pull",
+            Command::PullAndRunScript => "pull + script",
             Command::ReviewRequests => "reviews",
             Command::ReviewSplit => "split",
             Command::ReviewWindow => "new window",
@@ -229,6 +238,7 @@ impl Command {
             Command::NewWorktree => Key::Char('n'),
             Command::Delete => Key::Char('d'),
             Command::PullToTmpSpace => Key::Char('t'),
+            Command::PullAndRunScript => Key::Char('T'),
             Command::ReviewRequests => Key::Char('v'),
             Command::ReviewSplit => Key::Char('V'),
             Command::ReviewWindow => Key::CtrlV,

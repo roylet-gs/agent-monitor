@@ -4,11 +4,11 @@ expression: "render(&app, 100, 20)"
 ---
 ╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
-│▌◑ feat│ Repositories — a add · x remove · s startup script · S remove script · esc back  │░ 121k │
+│▌◑ feat│ Repositories — a add · x remove · s/r edit script · S/R remove · esc back        │░ 121k │
 │ ◐ fix/│                                                                                  │░ 185k │
-│       │   agent-monitor  ~/code/agent-monitor                      4 worktrees   script  │       │
-│gridsig│▌  website        ~/code/website                            1 worktree            │───────│
-│ · main│   old-thing      ~/gone/old-thing (missing)                2 worktrees           │       │
+│       │   agent-monitor  ~/code/agent-monitor                4 worktrees   script review │       │
+│gridsig│▌  website        ~/code/website                      1 worktree                  │───────│
+│ · main│   old-thing      ~/gone/old-thing (missing)          2 worktrees                 │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │
 │       │                                                                                  │       │

@@ -5,7 +5,7 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-const REPOS_HELP = "Add or stop tracking repositories, edit their startup scripts";
+const REPOS_HELP = "Add or stop tracking repositories, edit their startup and review scripts";
 const PAGE_HEADER = "Repositories — a add · x remove";
 
 /** Settings → Repositories… */
@@ -31,8 +31,8 @@ test("Settings → Repositories… adds a repo through the folder browser and re
   await tui.open();
   await openReposPage(tui);
 
-  // The seeded repo, with the startup script the entrypoint wrote.
-  await tui.waitForMatch(/work\s+\/work\s+\d+ worktrees\s+script/);
+  // The seeded repo, with the startup and review scripts the entrypoint wrote.
+  await tui.waitForMatch(/work\s+\/work\s+\d+ worktrees\s+script review/);
   // A retry after a failed attempt may find the repo still tracked.
   if ((await tui.getScreenText()).includes("other-repo")) {
     await removeRepo(tui, "other-repo");

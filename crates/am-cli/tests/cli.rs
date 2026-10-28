@@ -817,6 +817,25 @@ fn script_edit_show_remove() {
     assert!(!path.exists());
 }
 
+#[test]
+fn review_scripts_sit_beside_the_startup_script() {
+    let env = Env::new();
+    let (repo, _) = env.seed_repo();
+    let repo_s = repo.to_str().unwrap();
+    assert_eq!(env.ok(&["script", "show", "--review", "--repo", repo_s]).stdout, "No review script for myrepo\n");
+    env.fake_bin("code", "true");
+    assert_eq!(env.ok(&["script", "edit", "--review", "--repo", repo_s]).stdout, "Opened review script for myrepo in vscode\n");
+    let path = env.data().join("scripts/r1.review.sh");
+    assert!(path.exists());
+    assert!(!env.data().join("scripts/r1.sh").exists(), "the startup script is untouched");
+    let out = env.ok(&["script", "show", "--review", "--repo", repo_s]).stdout;
+    assert!(out.starts_with("# Review script for myrepo\n# Path: "), "{out}");
+    assert!(out.contains("AM_PR_NUMBER"));
+    assert_eq!(env.ok(&["script", "show", "--repo", repo_s]).stdout, "No startup script for myrepo\n");
+    assert_eq!(env.ok(&["script", "remove", "--review", "--repo", repo_s]).stdout, "Removed review script for myrepo\n");
+    assert!(!path.exists());
+}
+
 // --- doctor / logs / stubs ---
 
 #[test]

@@ -3,7 +3,8 @@ import { RustTui, resetMock, setupMock } from "./helpers/rust-tui";
 
 // PRs waiting on your review: the `N to review` badge on the ─Worktrees
 // border, the `v` page (`V` beside the list, `ctrl-v` in a new window), and
-// `t` pulling one into Reviewing. The mock answers
+// `t` pulling one into Reviewing (`T` also running the repo's review script,
+// which the entrypoint seeds). The mock answers
 // the review search with gh-review-requests.json: three acme/work PRs. In the
 // default order (`reviewSort: direct`) the ones asking you by name come first,
 // newest first — #61 (head feature/on-origin, ticket ENG-123), #63 (from a
@@ -125,6 +126,50 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.waitForText("Nothing waiting on your review", 20_000);
   await tui.sendKey("Escape");
   await tui.waitForGone("to review", 5_000);
+});
+
+test("T pulls a PR and runs the repo's review script", async ({ page }) => {
+  await setupMock({ reviews: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
+  const tui = new RustTui(page);
+  await tui.open();
+  const branch = "feature/on-origin";
+  await tui.sendKey("v");
+  await tui.waitForText("Add retry to the sync job", 20_000);
+  await tui.waitForText("1 of 3");
+  expect(await tui.keyBar()).toContain("T pull + script");
+
+  // #61 is pulled into Reviewing, then its review script runs with the PR in
+  // its environment; the row shows the script's latest line.
+  await tui.sendKey("T");
+  await tui.waitForMatch(/pulling…|running script…/, 10_000);
+  await tui.waitForText("running script… e2e review of #61", 20_000);
+  expect(await tui.getScreenText()).toContain("─Review requests");
+  expect(await tui.getScreenText()).not.toContain("Run the repo's startup script?");
+  await tui.screenshot("review-pull-run-script");
+  await tui.waitForGone("running script…", 20_000);
+  await tui.waitForText("✓ pulled");
+
+  // The script's output is in the job (the pane shows beside the list).
+  await tui.sendKey("Escape");
+  await tui.waitForText("e2e review script done", 10_000);
+  await tui.screenshot("review-script-output");
+
+  // Already pulled: T refuses instead of running the script again.
+  await tui.sendKey("v");
+  await tui.waitForText("✓ pulled");
+  await tui.sendKey("T");
+  await tui.waitForText(`${branch} is already pulled`);
+
+  // Restore: remove it with its local branch, then empty the cached list.
+  await tui.sendKey("d");
+  await tui.waitForText(`Delete worktree "${branch}"`);
+  await tui.sendKey("y");
+  await tui.waitForText(`Also delete local branch ${branch}?`);
+  await tui.sendKey("y");
+  await tui.waitForGone("✓ pulled", 20_000);
+  await setupMock({ reviews: false });
+  await tui.sendKey("r");
+  await tui.waitForText("Nothing waiting on your review", 20_000);
 });
 
 test("review groups: a group takes its PRs first, with autocomplete and a badge", async ({ page }) => {

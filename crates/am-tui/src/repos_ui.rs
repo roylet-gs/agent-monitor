@@ -1,9 +1,12 @@
 //! Settings → Repositories…: the tracked repositories, to add one (folder
-//! browser), stop tracking one, and edit or remove its startup script. Pure
+//! browser), stop tracking one, and edit or remove its startup and review
+//! scripts. Pure
 //! state and keys; `settings_ui` performs the effects and hands back fresh
 //! rows (port of the 1.x Settings "Repositories" section).
 
 use std::path::Path;
+
+use am_core::worktrees::ScriptKind;
 
 use crate::app::Key;
 
@@ -18,6 +21,9 @@ pub struct RepoRow {
     pub worktrees: usize,
     /// Has a startup script (`scripts/<id>.sh`).
     pub script: bool,
+    /// Has a review script (`scripts/<id>.review.sh`), run by "pull + run
+    /// script" on the review page.
+    pub review_script: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +32,8 @@ pub enum RepoOutcome {
     Close,
     Add,
     Remove(String),
-    EditScript(String),
-    RemoveScript(String),
+    EditScript(String, ScriptKind),
+    RemoveScript(String, ScriptKind),
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +61,7 @@ pub fn load_rows() -> Vec<RepoRow> {
         .map(|r| RepoRow {
             worktrees: am_core::db::worktrees_for_repo(&conn, &r.id).map(|w| w.len()).unwrap_or(0),
             script: am_core::worktrees::has_script(&r.id),
+            review_script: ScriptKind::Review.exists(&r.id),
             exists: Path::new(&r.path).is_dir(),
             path: am_core::hooks_installer::tilde(Path::new(&r.path)),
             id: r.id,
@@ -87,9 +94,12 @@ impl RepoEditor {
         let Some(row) = self.rows.get(self.cursor) else { return RepoOutcome::Stay };
         match key {
             Key::Char('x') => self.confirm_remove = Some(row.id.clone()),
-            Key::Char('s') | Key::Enter => return RepoOutcome::EditScript(row.id.clone()),
-            Key::Char('S') if row.script => return RepoOutcome::RemoveScript(row.id.clone()),
+            Key::Char('s') | Key::Enter => return RepoOutcome::EditScript(row.id.clone(), ScriptKind::Startup),
+            Key::Char('S') if row.script => return RepoOutcome::RemoveScript(row.id.clone(), ScriptKind::Startup),
             Key::Char('S') => self.message = Some((false, format!("{} has no startup script", row.name))),
+            Key::Char('r') => return RepoOutcome::EditScript(row.id.clone(), ScriptKind::Review),
+            Key::Char('R') if row.review_script => return RepoOutcome::RemoveScript(row.id.clone(), ScriptKind::Review),
+            Key::Char('R') => self.message = Some((false, format!("{} has no review script", row.name))),
             _ => {}
         }
         RepoOutcome::Stay
@@ -119,15 +129,17 @@ mod tests {
     use super::*;
 
     fn row(id: &str, script: bool) -> RepoRow {
-        RepoRow { id: id.into(), name: format!("{id}-name"), path: format!("~/{id}"), exists: true, worktrees: 2, script }
+        RepoRow { id: id.into(), name: format!("{id}-name"), path: format!("~/{id}"), exists: true, worktrees: 2, script, review_script: script }
     }
 
     #[test]
     fn keys_map_to_effects() {
         let mut ed = RepoEditor::new(vec![row("a", true), row("b", false)]);
-        assert_eq!(ed.on_key(Key::Char('s')), RepoOutcome::EditScript("a".into()));
-        assert_eq!(ed.on_key(Key::Enter), RepoOutcome::EditScript("a".into()));
-        assert_eq!(ed.on_key(Key::Char('S')), RepoOutcome::RemoveScript("a".into()));
+        assert_eq!(ed.on_key(Key::Char('s')), RepoOutcome::EditScript("a".into(), ScriptKind::Startup));
+        assert_eq!(ed.on_key(Key::Enter), RepoOutcome::EditScript("a".into(), ScriptKind::Startup));
+        assert_eq!(ed.on_key(Key::Char('S')), RepoOutcome::RemoveScript("a".into(), ScriptKind::Startup));
+        assert_eq!(ed.on_key(Key::Char('r')), RepoOutcome::EditScript("a".into(), ScriptKind::Review));
+        assert_eq!(ed.on_key(Key::Char('R')), RepoOutcome::RemoveScript("a".into(), ScriptKind::Review));
         assert_eq!(ed.on_key(Key::Char('a')), RepoOutcome::Add);
         ed.on_key(Key::Char('j'));
         ed.on_key(Key::Char('j'));
@@ -135,6 +147,8 @@ mod tests {
         // No script to remove.
         assert_eq!(ed.on_key(Key::Char('S')), RepoOutcome::Stay);
         assert!(ed.message.as_ref().is_some_and(|(ok, m)| !ok && m.contains("no startup script")));
+        assert_eq!(ed.on_key(Key::Char('R')), RepoOutcome::Stay);
+        assert!(ed.message.as_ref().is_some_and(|(ok, m)| !ok && m.contains("no review script")));
         assert_eq!(ed.on_key(Key::Esc), RepoOutcome::Close);
     }
 

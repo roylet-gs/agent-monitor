@@ -125,6 +125,7 @@ fn agents(mut argv: Vec<String>, a: &Args) -> Vec<String> {
 }
 
 const REPO: Param = opt("repo", Kind::Str, "Repository path (default: the repo containing the agent's working directory)");
+const REVIEW_SCRIPT: Param = opt("review", Kind::Bool, "The review script (<repo-id>.review.sh) instead of the startup script");
 const TARGET: Param = req("target", Kind::Str, "Worktree branch name or path");
 const TARGET_OPT: Param = opt("target", Kind::Str, "Worktree branch name or path (default: the current branch)");
 const AGENTS: Param = opt(
@@ -364,19 +365,19 @@ pub static TOOLS: &[Tool] = &[
     },
     Tool {
         name: "script_show",
-        description: "A repository's startup script (run after creating a worktree).",
-        params: &[REPO],
+        description: "A repository's startup script (run after creating a worktree), or with review its review script (run by \"pull + run script\" on the review page, with the PR in AM_PR_* env vars).",
+        params: &[REPO, REVIEW_SCRIPT],
         hints: READ,
         timeout: SHORT,
-        build: |a| repo(cmd(&["script", "show", "--json"]), a),
+        build: |a| switch(repo(cmd(&["script", "show", "--json"]), a), a, "review", "--review"),
     },
     Tool {
         name: "script_remove",
-        description: "Delete a repository's startup script.",
-        params: &[REPO],
+        description: "Delete a repository's startup script (or with review its review script).",
+        params: &[REPO, REVIEW_SCRIPT],
         hints: DESTRUCTIVE,
         timeout: SHORT,
-        build: |a| repo(cmd(&["script", "remove"]), a),
+        build: |a| switch(repo(cmd(&["script", "remove"]), a), a, "review", "--review"),
     },
     Tool {
         name: "doctor",

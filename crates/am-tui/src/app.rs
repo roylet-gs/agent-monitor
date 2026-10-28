@@ -106,8 +106,8 @@ pub enum Action {
     /// `d` on an "Other sessions" row: stop tracking it.
     RemoveStandalone(String),
     AddRepo(String),
-    /// Settings → Repositories… `s`: open the repo's startup script.
-    EditScript(String),
+    /// Settings → Repositories… `s` / `r`: open the repo's startup or review script.
+    EditScript(String, am_core::worktrees::ScriptKind),
     /// A repository was removed in Settings: refresh the dashboard.
     ReposChanged,
     InstallHooks,
@@ -681,7 +681,7 @@ impl App {
                 self.modal = Some(self.add_repo_modal());
                 Action::None
             }
-            Outcome::EditScript(id) => Action::EditScript(id),
+            Outcome::EditScript(id, kind) => Action::EditScript(id, kind),
             Outcome::ReposChanged => Action::ReposChanged,
             Outcome::RunSetup => Action::RunSetup,
             Outcome::ViewLogs => Action::ViewLogs,
@@ -761,7 +761,7 @@ impl App {
                 }
             }
             // Only the review page pulls (its selected PR).
-            C::PullToTmpSpace => {}
+            C::PullToTmpSpace | C::PullAndRunScript => {}
             C::Feedback => {
                 self.modal = Some(crate::modals::Modal::Suggest { title: String::new(), body: String::new(), on_body: false, error: None })
             }
@@ -1094,6 +1094,12 @@ impl App {
                 !r.is_cross_repository
                     && self.review_pull(r).is_none_or(|j| matches!(j.state, crate::jobs::JobState::Failed(_)))
             }),
+            Some(C::PullAndRunScript) => r.is_some_and(|r| {
+                !r.is_cross_repository
+                    && r.worktree_id.is_none()
+                    && self.review_pull(r).is_none_or(|j| matches!(j.state, crate::jobs::JobState::Failed(_)))
+                    && am_core::worktrees::ScriptKind::Review.exists(&r.repo_id)
+            }),
             _ => true,
         }
     }
@@ -1144,7 +1150,8 @@ impl App {
                     None => self.notice = Some("No Linear ticket for this PR".into()),
                 }
             }
-            Some(C::PullToTmpSpace) => return self.pull_review(),
+            Some(C::PullToTmpSpace) => return self.pull_review(false),
+            Some(C::PullAndRunScript) => return self.pull_review(true),
             Some(C::Delete) => self.remove_review_worktree(),
             // The feedback key (`f`) filters here.
             Some(C::Feedback) => {
@@ -1190,7 +1197,7 @@ impl App {
             self.notice = Some(format!("{} is already being pulled", r.head_ref_name));
             return Action::None;
         }
-        self.pull_review()
+        self.pull_review(false)
     }
 
     fn review_open_pr(&mut self) -> Action {
@@ -1201,11 +1208,17 @@ impl App {
     }
 
     /// Check the PR's branch out into Reviewing (the tmp space), or jump to
-    /// the worktree that already has it.
-    fn pull_review(&mut self) -> Action {
+    /// the worktree that already has it. With `run_script` ("pull + run
+    /// script") the repo's review script runs in the new worktree; that only
+    /// happens on a fresh pull.
+    fn pull_review(&mut self, run_script: bool) -> Action {
         let Some(r) = self.selected_review().cloned() else { return Action::None };
         if r.is_cross_repository {
             self.notice = Some(format!("#{} is from a fork — its branch isn't on origin", r.pr.number));
+            return Action::None;
+        }
+        if run_script && r.worktree_id.is_some() {
+            self.notice = Some(format!("{} is already pulled — pull + run script only runs on a fresh pull", r.head_ref_name));
             return Action::None;
         }
         if let Some(id) = r.worktree_id {
@@ -1244,15 +1257,24 @@ impl App {
             }
             None => {}
         }
+        if run_script && !am_core::worktrees::ScriptKind::Review.exists(&repo.id) {
+            self.notice = Some(format!("{} has no review script — add one in Settings → Repositories… (r)", repo.name));
+            return Action::None;
+        }
         let req = am_core::worktrees::CreateRequest {
             branch: r.head_ref_name.clone(),
             mode: am_core::worktrees::CreateMode::TrackRemote,
             tmp_space: true,
             ..Default::default()
         };
-        let job = self.jobs.start_create(repo.clone(), req.clone());
+        let job = if run_script {
+            self.notice = Some(format!("Pulling {} into Reviewing, then running its review script…", r.head_ref_name));
+            self.jobs.start_review_pull(repo.clone(), req.clone(), review_script_env(&r))
+        } else {
+            self.notice = Some(format!("Pulling {} into Reviewing…", r.head_ref_name));
+            self.jobs.start_create(repo.clone(), req.clone())
+        };
         self.rebuild_rows();
-        self.notice = Some(format!("Pulling {} into Reviewing…", r.head_ref_name));
         Action::Create(job, Box::new(repo), Box::new(req))
     }
 
@@ -1284,6 +1306,17 @@ impl App {
         self.jobs.list.iter().rev().find(|j| {
             matches!(&j.kind, crate::jobs::JobKind::Create { repo, req, .. }
                 if req.tmp_space && repo.id == r.repo_id && req.branch == r.head_ref_name)
+        })
+    }
+
+    /// The job running the review script in `r`'s pulled worktree (or whose
+    /// script failed). `review_pull` stops seeing the job once the worktree
+    /// is listed; this picks it up from there.
+    pub fn review_script_job(&self, r: &ReviewRequest) -> Option<&crate::jobs::Job> {
+        let id = r.worktree_id.as_deref()?;
+        self.jobs.list.iter().rev().find(|j| {
+            matches!(&j.kind, crate::jobs::JobKind::Create { worktree_id: Some(w), review_script: Some(_), .. } if w == id)
+                && matches!(j.state, crate::jobs::JobState::Running | crate::jobs::JobState::Failed(_))
         })
     }
 
@@ -1368,6 +1401,23 @@ pub fn tree_order(len: usize, parent_of: impl Fn(usize) -> Option<usize>) -> Vec
     // Anything left (only possible with a cycle) is shown flat.
     out.extend(seen.iter().enumerate().filter(|(_, s)| !**s).map(|(i, _)| (i, String::new())));
     out
+}
+
+/// What the review script is told about the PR (`AM_WORKTREE_PATH` is
+/// added once the worktree exists).
+fn review_script_env(r: &ReviewRequest) -> Vec<(String, String)> {
+    [
+        ("AM_PR_NUMBER", r.pr.number.to_string()),
+        ("AM_PR_URL", r.pr.url.clone()),
+        ("AM_PR_TITLE", r.pr.title.clone()),
+        ("AM_PR_AUTHOR", r.author.clone()),
+        ("AM_PR_BRANCH", r.head_ref_name.clone()),
+        ("AM_PR_BASE", r.pr.base_ref_name.clone().unwrap_or_default()),
+        ("AM_REPO", r.repo.clone()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect()
 }
 
 fn linear_url(url: &str, s: &Settings) -> String {

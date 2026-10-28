@@ -52,6 +52,15 @@ printf '\033[32mcoloured line\033[0m\n'
 echo "e2e startup script done"
 SH
 
+# A review script, run by "pull + run script" (T) on the review page with the
+# PR in AM_PR_* variables. The sleep keeps it on the row long enough to see.
+cat > "$AM_DATA_DIR/scripts/$REPO_ID.review.sh" <<'SH'
+#!/bin/sh
+echo "e2e review of #$AM_PR_NUMBER ($AM_PR_BRANCH) in $(basename "$AM_WORKTREE_PATH")"
+sleep 3
+echo "e2e review script done"
+SH
+
 # Skip the setup wizard, show main, enable Linear against the mock.
 # linearAutoNickname is off so rows keep their branch names (the mock links
 # every branch to the same ticket, which would rename them all).

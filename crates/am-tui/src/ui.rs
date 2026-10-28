@@ -823,15 +823,15 @@ fn draw_plugins(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, pl: &crate
 
 /// Settings → Repositories.
 fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::repos_ui::RepoEditor, hits: &mut Vec<Hit>) {
-    let header = " Repositories — a add · x remove · s startup script · S remove script · esc back";
+    let header = " Repositories — a add · x remove · s/r edit script · S/R remove · esc back";
     hint_hits(hits, header, list.x, list.y);
     let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
     if ed.rows.is_empty() {
         lines.push(Line::styled("   No repositories yet — press a to add one", theme.faint()));
     }
     let name_w = ed.rows.iter().map(|r| r.name.width() + 2).max().unwrap_or(0).clamp(12, 24);
-    // name, path, "12 worktrees", "script"
-    let path_w = (list.width as usize).saturating_sub(1 + 2 + name_w + 14 + 8).max(8);
+    // name, path, "12 worktrees", "script review"
+    let path_w = (list.width as usize).saturating_sub(1 + 2 + name_w + 14 + 14).max(8);
     let height = (list.height as usize).saturating_sub(lines.len());
     let start = (ed.cursor + 1).saturating_sub(height);
     for (i, r) in ed.rows.iter().enumerate().skip(start).take(height) {
@@ -849,7 +849,8 @@ fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::
                 Span::styled(format!("{:<path_w$}", truncate(&format!("{} (missing)", r.path), path_w - 1)), theme.fg(theme.red))
             },
             Span::styled(format!("{count:<14}"), theme.faint()),
-            if r.script { Span::styled("script", theme.fg(theme.green)) } else { Span::raw("") },
+            Span::styled(if r.script { "script " } else { "       " }, theme.fg(theme.green)),
+            if r.review_script { Span::styled("review", theme.fg(theme.teal)) } else { Span::raw("") },
         ]);
         push_row(hits, list, lines.len(), Target::Item(List::Repos, i), sel);
         lines.push(if sel { line.style(theme.selected()) } else { line });
@@ -867,8 +868,11 @@ fn draw_repos(f: &mut Frame, theme: &Theme, list: Rect, help: Rect, ed: &crate::
             Line::styled(text, theme.bold(theme.yellow))
         }
         (None, Some((ok, m)), _) => Line::styled(format!(" {m}"), theme.fg(if *ok { theme.green } else { theme.red })),
-        (None, None, Some(r)) if r.script => Line::styled(" Startup script runs after each new worktree (s to edit)", theme.faint()),
-        (None, None, Some(_)) => Line::styled(" No startup script · s creates one from a template", theme.faint()),
+        (None, None, Some(r)) => {
+            let startup = if r.script { "Startup script runs after each new worktree (s to edit)" } else { "No startup script · s creates one from a template" };
+            let review = if r.review_script { "review script runs on pull + run script (r to edit)" } else { "r adds a review script for pull + run script" };
+            Line::styled(format!(" {startup} · {review}"), theme.faint())
+        }
         (None, None, None) => Line::raw(""),
     };
     f.render_widget(Paragraph::new(vec![Line::raw(""), help_line]), help);
@@ -1927,7 +1931,8 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
                 let r = &list[ordered[*pos]];
                 let repo = tag_repos
                     .then(|| app.snapshot.repos.iter().find(|x| x.id == r.repo_id).map_or(r.repo.as_str(), |x| x.name.as_str()));
-                let pull = app.review_pull(r);
+                // The pull, then (once pulled) a review script it runs.
+                let pull = app.review_pull(r).or_else(|| app.review_script_job(r));
                 review_line(theme, r, &tree[*pos], repo, pull, |id| app.is_deleting(id), selected, (who_w, ticket_w, pr_w), words, inner.width, now)
             }
         });
@@ -2021,7 +2026,16 @@ fn review_line<'a>(
         Some(_) => tags.push((" ✓ pulled".into(), theme.fg(theme.teal))),
         None => {}
     }
-    if let Some(job) = pull {
+    if let Some(job) = pull.filter(|_| r.worktree_id.is_some()) {
+        // Pulled: the job is running the review script.
+        tags.push(match &job.state {
+            crate::jobs::JobState::Failed(_) => (" ✗ script failed".into(), theme.fg(theme.red)),
+            _ => {
+                let last = job.log.last().map(|l| format!(" {}", truncate(l.trim(), 40))).unwrap_or_default();
+                (format!(" {} running script…{last}", spinner(now)), theme.fg(theme.green))
+            }
+        });
+    } else if let Some(job) = pull {
         tags.push(match &job.state {
             crate::jobs::JobState::Failed(_) => (" ✗ pull failed — t retries".into(), theme.fg(theme.red)),
             _ if job.question.is_some() => (" ? waiting — esc, then ⇥ to answer".into(), theme.fg(theme.yellow)),
@@ -2845,6 +2859,9 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
         keys.extend(cmd(Command::OpenPr, "PR", 1).filter(|_| enter != "open PR"));
         keys.extend(cmd(Command::OpenLinear, "ticket", 0));
         keys.extend(cmd(Command::PullToTmpSpace, "pull into Reviewing", 0));
+        // Only for a repo that has a review script to run.
+        let script = app.selected_review().is_some_and(|r| am_core::worktrees::ScriptKind::Review.exists(&r.repo_id));
+        keys.extend(cmd(Command::PullAndRunScript, "pull + script", 2).filter(|_| script));
         keys.extend(cmd(Command::Delete, "remove", 2));
         keys.extend(cmd(Command::Feedback, "filter", 2));
         keys.push(raw("", "", None, 0));
@@ -3003,7 +3020,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
         (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
         (&[C::ReviewRequests, C::ReviewSplit, C::ReviewWindow], "", "PRs to review: page / beside the list / new window"),
-        (&[C::PullToTmpSpace], "", "on the review page: pull the PR into Reviewing"),
+        (&[C::PullToTmpSpace, C::PullAndRunScript], "", "review page: pull into Reviewing / and run its script"),
         (&[C::AddRepo], "", "add repository"),
         (&[C::Feedback], "", "suggest a feature (files a GitHub issue)"),
         (&[C::Settings], "", "settings (Key bindings… changes these keys)"),
@@ -3560,6 +3577,7 @@ mod tests {
             exists,
             worktrees,
             script,
+            review_script: script,
         };
         let mut rp = RepoEditor::new(vec![
             row("agent-monitor", "~/code/agent-monitor", true, 4, true),
@@ -4120,6 +4138,64 @@ mod tests {
             assert_eq!(app.on_key(k), Action::None);
             assert!(app.reviews.is_none(), "{k:?}");
         }
+    }
+
+    #[test]
+    fn pull_and_run_script_pulls_then_shows_the_review_script() {
+        use crate::app::Action;
+        use am_core::worktrees::ScriptKind;
+        let (_guard, _) = crate::settings_ui::tests::data_dir();
+        // A repo id of its own, so other tests rendering r2 never see its script.
+        const ID: &str = "r2-review-script";
+        let _ = ScriptKind::Review.remove(ID);
+        let mut app = by_repo();
+        let mut snap = app.snapshot.clone();
+        snap.repos.iter_mut().filter(|r| r.id == "r2").for_each(|r| r.id = ID.into());
+        snap.reviews.iter_mut().flatten().filter(|r| r.repo_id == "r2").for_each(|r| r.repo_id = ID.into());
+        app.apply(snap);
+        app.on_key(Key::Char('v'));
+        // #51 is pulled: refused, and the page stays put.
+        assert!(!app.review_key_available(Key::Char('T')));
+        assert_eq!(app.on_key(Key::Char('T')), Action::None);
+        assert!(app.notice.as_deref().unwrap().contains("already pulled"), "{:?}", app.notice);
+        assert!(app.reviews.is_some());
+        // #902 (repo r2, renamed) without a review script: refused, pointing at Settings.
+        app.on_key(Key::End);
+        assert_eq!(app.selected_review().unwrap().pr.number, 902);
+        assert!(!app.review_key_available(Key::Char('T')));
+        assert_eq!(app.on_key(Key::Char('T')), Action::None);
+        assert!(app.notice.as_deref().unwrap().contains("no review script"), "{:?}", app.notice);
+        assert!(app.jobs.list.is_empty());
+        // With one: a tmp-space pull whose job carries the PR for the script.
+        ScriptKind::Review.create(ID).unwrap();
+        assert!(app.review_key_available(Key::Char('T')));
+        app.notice = None;
+        let bar = render(&app, 160, 10).lines().last().unwrap().to_string();
+        assert!(bar.contains("T pull + script"), "{bar}");
+        let Action::Create(job, repo, req) = app.on_key(Key::Char('T')) else { panic!("expected a create") };
+        assert_eq!((repo.id.as_str(), req.branch.as_str(), req.tmp_space), (ID, "feature/902", true));
+        let env = app.jobs.get(job).unwrap().review_script().unwrap().to_vec();
+        assert!(env.contains(&("AM_PR_NUMBER".into(), "902".into())), "{env:?}");
+        assert!(env.iter().any(|(k, _)| k == "AM_PR_URL"));
+        assert!(render(&app, 120, 10).contains("pulling…"));
+        assert!(!app.review_key_available(Key::Char('T')), "already pulling");
+        // Pulled: the row follows the script, then its failure.
+        app.jobs.set_worktree(job, "w902".into());
+        let mut snap = app.snapshot.clone();
+        for r in snap.reviews.iter_mut().flatten().filter(|r| r.pr.number == 902) {
+            r.worktree_id = Some("w902".into());
+        }
+        app.apply(snap);
+        app.jobs.step(job, "Running review script".into());
+        app.jobs.log(job, "reviewing #902".into());
+        let screen = render(&app, 140, 10);
+        assert!(screen.contains("running script… reviewing #902"), "{screen}");
+        app.jobs.finish(job, Err("Script exited with exit status: 1".into()), std::time::Instant::now());
+        assert!(render(&app, 140, 10).contains("✗ script failed"));
+        app.jobs.dismiss(job);
+        let screen = render(&app, 140, 10);
+        assert!(!screen.contains("running script") && !screen.contains("script failed"), "{screen}");
+        ScriptKind::Review.remove(ID).unwrap();
     }
 
     #[test]
@@ -4695,14 +4771,14 @@ mod tests {
         use crate::repos_ui::{RepoEditor, RepoRow};
         let mut app = fixture();
         let mut ed = crate::settings_ui::SettingsEditor::new(&app.settings);
-        let row = |id: &str| RepoRow { id: id.into(), name: id.into(), path: format!("~/{id}"), exists: true, worktrees: 1, script: false };
+        let row = |id: &str| RepoRow { id: id.into(), name: id.into(), path: format!("~/{id}"), exists: true, worktrees: 1, script: false, review_script: false };
         ed.repos = Some(RepoEditor::new(vec![row("alpha"), row("beta")]));
         app.settings_editor = Some(ed);
         let beta = find(&app, 100, 20, "beta");
         click(&mut app, 100, 20, beta, false);
         assert_eq!(app.settings_editor.as_ref().unwrap().repos.as_ref().unwrap().cursor, 1);
         // A click on the selected repo opens its script, like ⏎.
-        assert_eq!(click(&mut app, 100, 20, beta, false), crate::app::Action::EditScript("beta".into()));
+        assert_eq!(click(&mut app, 100, 20, beta, false), crate::app::Action::EditScript("beta".into(), am_core::worktrees::ScriptKind::Startup));
         // Header hints are buttons: `x remove` asks, `any other key cancels`.
         let x = find(&app, 100, 20, "x remove");
         click(&mut app, 100, 20, x, false);
@@ -4719,7 +4795,7 @@ mod tests {
         // Key bindings: a click on the selected row starts capturing, and
         // then clicks don't count as the new key.
         app.settings_editor.as_mut().unwrap().keys = Some(crate::keys_ui::KeyEditor::new(app.keymap.clone()));
-        let row = find(&app, 100, 34, "Move up");
+        let row = find(&app, 100, 34, "Refresh now");
         click(&mut app, 100, 34, row, false);
         click(&mut app, 100, 34, row, false);
         assert!(app.settings_editor.as_ref().unwrap().keys.as_ref().unwrap().capturing);
