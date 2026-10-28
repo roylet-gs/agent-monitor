@@ -1,0 +1,21 @@
+---
+source: crates/am-tui/src/ui.rs
+assertion_line: 4426
+expression: screen
+---
+╭─Review requests ──────────────────────────────────────────────── 3 to review ╮╭─Jobs ────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────││ ◐ Create feature/902                 │
+│ ◑ Batch the PR queries  @alice ✓ pulled            you           #51✓ …   0s ││                                      │
+│ Typo in README  @outsider fork                     @docs         #48✓ …   0s ││                                      │
+│gridsight ────────────────────────────────────────────────────────────────────││                                      │
+│▌Feeder load forecast v2  @alice ◐ pulling…         you +1 ENG-77 #902✗ …  0s ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+╰ you + your teams ──────────────────────────────────────────────────── 3 of 3 ╯╰──────────────────────────────────────╯
+ ⏎ pull  g PR  l ticket  d remove  f filter  │ r refresh  h help  ⇥ jobs  esc back  Pulling feature/902 into Reviewing…

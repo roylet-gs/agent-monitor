@@ -79,7 +79,7 @@ pub fn run_script(kind: ScriptKind, repo_id: String, cwd: String, in_window: boo
                     am_core::debug!("tui", "No terminal window for the {} ({e}); running it in the jobs pane", kind.label());
                     if kind == ScriptKind::Review {
                         let _ = tx.send(Msg::Popup(format!(
-                            "Couldn't open a terminal window, so the review script{} runs in the jobs pane (esc, then ⇥)\n\n{e}",
+                            "Couldn't open a terminal window, so the review script{} runs in the jobs pane (⇥)\n\n{e}",
                             pr_label(&env)
                         )));
                     }

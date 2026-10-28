@@ -650,7 +650,7 @@ impl App {
             }
             return Action::None;
         }
-        if self.reviews.as_ref().is_some_and(|p| !p.split) {
+        if self.reviews.as_ref().is_some_and(|p| !p.split) && !self.jobs.focused {
             return self.review_key(key);
         }
         if self.jobs.focused {
@@ -671,9 +671,9 @@ impl App {
     }
 
     /// Whether the review page takes the keys: a full page, or the review
-    /// side of a split while it (not the list or jobs pane) has focus.
+    /// side of a split while it has focus, and the jobs pane doesn't.
     pub fn review_focused(&self) -> bool {
-        self.reviews.as_ref().is_some_and(|p| !p.split || (p.focused && !self.jobs.focused))
+        self.reviews.as_ref().is_some_and(|p| !p.split || p.focused) && !self.jobs.focused
     }
 
     /// Give the keys to the jobs pane (Tab, a click on it).
@@ -1001,7 +1001,7 @@ impl App {
             L::Reviews => {
                 let Some(p) = &mut self.reviews else { return Action::None };
                 // A click on the unfocused split side only focuses it.
-                let was_focused = !p.split || (p.focused && !self.jobs.focused);
+                let was_focused = (!p.split || p.focused) && !self.jobs.focused;
                 p.focused = true;
                 self.jobs.focused = false;
                 (std::mem::replace(&mut p.cursor, i) == i && was_focused).then_some(Key::Enter)
@@ -1158,7 +1158,8 @@ impl App {
         let reviews_only = self.reviews_only;
         let Some(page) = &mut self.reviews else { return Action::None };
         // Tab in a split: on to the jobs pane when it's open, else the list.
-        if key == Key::Tab && page.split {
+        // On the full page: to the jobs pane, and back with its own Tab.
+        if key == Key::Tab && (page.split || self.jobs.visible()) {
             page.focused = false;
             if self.jobs.visible() {
                 self.jobs.focus();

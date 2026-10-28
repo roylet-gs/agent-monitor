@@ -81,19 +81,17 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
         // `V`: the review page beside the list.
         draw_worktrees(f, app, theme, areas.list, now, &mut hits);
         draw_reviews(f, app, theme, reviews, now, &mut hits);
-        if let Some(jobs) = areas.jobs {
-            draw_jobs(f, app, theme, jobs, now, &mut hits);
-        }
     } else if app.reviews.is_some() {
-        // The review page takes the whole body, jobs pane included.
-        let body = areas.jobs.map_or(areas.list, |j| areas.list.union(j));
-        draw_reviews(f, app, theme, body, now, &mut hits);
+        // The full review page takes the list's place.
+        draw_reviews(f, app, theme, areas.list, now, &mut hits);
     } else {
         draw_worktrees(f, app, theme, areas.list, now, &mut hits);
-        if let Some(jobs) = areas.jobs {
-            draw_jobs(f, app, theme, jobs, now, &mut hits);
-        }
     }
+    if let Some(jobs) = areas.jobs {
+        draw_jobs(f, app, theme, jobs, now, &mut hits);
+    }
+    // Overlays keep clear of the jobs pane, so it stays in view on every page.
+    let area = areas.jobs.map_or(area, |jobs| beside_jobs(area, jobs));
     if app.show_help {
         hits.clear();
         draw_help(f, theme, area, &app.keymap);
@@ -316,6 +314,13 @@ fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
     } else {
         DashAreas { list: body, jobs: None, reviews: None, log, keys }
     }
+}
+
+/// The bigger part of the screen the jobs pane leaves: left of it, or above it.
+fn beside_jobs(area: Rect, jobs: Rect) -> Rect {
+    let left = Rect { width: jobs.x - area.x, ..area };
+    let above = Rect { height: jobs.y - area.y, ..area };
+    if left.area() >= above.area() { left } else { above }
 }
 
 /// Settings box, then inside it the update banner, field list and help line.
@@ -2105,7 +2110,7 @@ fn review_line<'a>(
         // Pulled: the job is running the review script.
         tags.push(match &job.state {
             crate::jobs::JobState::Failed(_) => (" ✗ script failed".into(), theme.fg(theme.red)),
-            _ if job.question.is_some() => (" ? save the review script to run it (esc, then ⇥: run now)".into(), theme.fg(theme.yellow)),
+            _ if job.question.is_some() => (" ? save the review script to run it (⇥ to run now)".into(), theme.fg(theme.yellow)),
             _ => {
                 let last = job.log.last().map(|l| format!(" {}", truncate(l.trim(), 40))).unwrap_or_default();
                 (format!(" {} running script…{last}", spinner(now)), theme.fg(theme.green))
@@ -2114,7 +2119,7 @@ fn review_line<'a>(
     } else if let Some(job) = pull {
         tags.push(match &job.state {
             crate::jobs::JobState::Failed(_) => (" ✗ pull failed — t retries".into(), theme.fg(theme.red)),
-            _ if job.question.is_some() => (" ? waiting — esc, then ⇥ to answer".into(), theme.fg(theme.yellow)),
+            _ if job.question.is_some() => (" ? waiting — ⇥ to answer".into(), theme.fg(theme.yellow)),
             _ => {
                 let step = job.current_step().map(|s| format!(" {s}")).unwrap_or_default();
                 (format!(" {} pulling…{step}", spinner(now)), theme.fg(theme.green))
@@ -2970,15 +2975,20 @@ fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
             keys.push(raw("⇥", if app.jobs.visible() { "jobs" } else { "list" }, Some(Key::Tab), 0));
             keys.push(raw("esc", "close", Some(Key::Esc), 0));
         } else {
+            if app.jobs.visible() {
+                keys.push(raw("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, Some(Key::Tab), 0));
+            }
             keys.push(raw("esc", if app.reviews_only { "quit" } else { "back" }, Some(Key::Esc), 0));
         }
         if app.modifiers_reported && !app.held.shift && !app.held.ctrl {
             keys.push(raw("⇧/ctrl", "more", None, 3));
         }
     } else if app.jobs.focused {
-        // While jobs are showing, Tab moves between the list and the pane.
+        // While jobs are showing, Tab moves between the list (or the full
+        // review page) and the pane.
+        let back = if app.reviews.as_ref().is_some_and(|p| !p.split) { "back to reviews" } else { "back to list" };
         keys.extend([
-            raw("⇥", "back to list", Some(Key::Tab), 0),
+            raw("⇥", back, Some(Key::Tab), 0),
             raw("j/k", "select job", None, 1),
             raw("x", "dismiss", Some(Key::Char('x')), 1),
             raw("", "", None, 0),
@@ -4402,6 +4412,32 @@ mod tests {
         assert!(!app.jobs.focused && !app.review_focused());
         app.on_key(Key::Tab);
         assert!(app.review_focused());
+    }
+
+    #[test]
+    fn jobs_pane_stays_beside_the_full_review_page_and_overlays() {
+        let mut app = by_repo();
+        app.on_key(Key::Char('v'));
+        app.on_key(Key::Down);
+        app.on_key(Key::Down);
+        assert!(matches!(app.on_key(Key::Enter), crate::app::Action::Create(..)));
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("─Review requests") && screen.contains("─Jobs"), "{screen}");
+        insta::assert_snapshot!("review_page_jobs", screen);
+        // ⇥: page → jobs → page.
+        app.on_key(Key::Tab);
+        assert!(app.jobs.focused && !app.review_focused());
+        assert!(render(&app, 120, 16).contains("back to reviews"));
+        app.on_key(Key::Tab);
+        assert!(!app.jobs.focused && app.review_focused());
+        // Help and Settings leave the pane in view.
+        app.on_key(Key::Char('h'));
+        assert!(render(&app, 120, 30).contains("─Jobs"));
+        app.on_key(Key::Esc);
+        app.on_key(Key::Char('s'));
+        assert!(app.settings_editor.is_some());
+        let screen = render(&app, 120, 30);
+        assert!(screen.contains("Settings") && screen.contains("─Jobs"), "{screen}");
     }
 
     #[test]
