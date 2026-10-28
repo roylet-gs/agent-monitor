@@ -233,3 +233,17 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 | `stop` | `Stop` | `done` after work, else `idle` |
 
 The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has no permission hook, so it never shows `waiting`. Cursor also runs the user's Claude Code hooks; am-hook drops a `--agent claude` event whose payload has `cursor_version`, so a Cursor session is never counted as Claude.
+
+**Hermes Agent** (`--agent hermes`, shell hooks in `$HERMES_HOME/config.yaml`, default `~/.hermes`):
+
+| Hermes event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `on_session_start` / `on_session_reset` | `SessionStart` | `idle` |
+| `pre_llm_call` | `UserPromptSubmit` | `executing` |
+| `pre_tool_call` / `post_tool_call` | `PreToolUse` / `PostToolUse` | `executing` (`terminal` → `Bash`; `clarify` → `AskUserQuestion`, so `waiting`) |
+| `pre_approval_request` | `PermissionRequest` | `waiting` |
+| `post_approval_response` | `PostToolUse` | `executing` |
+| `on_session_end` | `Stop` | `done` after work, else `idle` |
+| `on_session_finalize` | `SessionEnd` | `idle` (closed) |
+
+Despite its name, `on_session_end` fires at the end of every turn (completed, failed or interrupted), so it is the turn's `Stop`. `post_llm_call` (successful turns only) isn't installed: a second `Stop` in the same turn would turn `done` into `idle`. The approval events carry no `session_id` (only `extra.session_key`), so they set the worktree's headline row directly, as session-less events always have; the next event with a session id puts the per-session headline back. Automatic ("smart") approvals also fire them, so they can show `waiting` briefly. The directory is the payload's `cwd`.

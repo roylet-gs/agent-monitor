@@ -513,6 +513,75 @@ fn hooks_for_gemini() {
     assert!(o.stderr.contains(&format!("Unknown agent: aider. Valid agents: {}", builtin_ids().join(", "))), "{}", o.stderr);
 }
 
+/// Hermes Agent: a YAML block in config.yaml plus approvals in its
+/// shell-hook allowlist, both undone by the uninstall.
+#[test]
+fn hooks_for_hermes() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+    let config = env.home().join(".hermes/config.yaml");
+    let allowlist = env.home().join(".hermes/shell-hooks-allowlist.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let cmd = |e: &str| format!("\"{}\" hook-event --agent hermes --worktree \"\" --event {e}", fake_hook.display());
+
+    // No hooks key yet: the block (with its own `hooks:`) is appended.
+    let user = "model:\n  default: anthropic/claude-sonnet\n";
+    std::fs::write(&config, user).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "hermes"]).stdout, "Hooks installed into ~/.hermes/config.yaml\n");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let quoted = serde_json::to_string(&cmd("on_session_end")).unwrap();
+    assert!(text.starts_with(&format!("{user}\n# agent-monitor hooks hermes begin\nhooks:\n  on_session_start:\n")), "{text}");
+    assert!(text.contains(&format!("  on_session_end:\n    - command: {quoted}\n      timeout: 5\n")), "{text}");
+    let approvals: Value = serde_json::from_str(&std::fs::read_to_string(&allowlist).unwrap()).unwrap();
+    let pairs: Vec<(&str, &str)> =
+        approvals["approvals"].as_array().unwrap().iter().map(|a| (a["event"].as_str().unwrap(), a["command"].as_str().unwrap())).collect();
+    assert_eq!(pairs.len(), 9);
+    assert!(pairs.contains(&("on_session_end", cmd("on_session_end").as_str())), "{pairs:?}");
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["hermes"], true);
+
+    // Reinstalling changes neither file.
+    let allow_text = std::fs::read_to_string(&allowlist).unwrap();
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text);
+    assert_eq!(std::fs::read_to_string(&allowlist).unwrap(), allow_text);
+
+    // Uninstall restores the config and removes am's approvals.
+    env.ok(&["hooks", "uninstall", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
+    assert!(!allowlist.exists());
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["hermes"], false);
+
+    // The user's own `hooks:` key: am's block goes inside it, and comes out again.
+    let mine = "hooks:\n  subagent_stop:\n    - command: ~/.hermes/agent-hooks/log.sh\nhooks_auto_accept: false\n";
+    std::fs::write(&config, mine).unwrap();
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.starts_with("hooks:\n  # agent-monitor hooks hermes begin\n  on_session_start:\n    - command: "), "{text}");
+    assert_eq!(text.matches("hooks:\n").count(), 1, "{text}");
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), text, "reinstalling changes nothing");
+    env.ok(&["hooks", "uninstall", "--agent", "hermes"]);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), mine);
+
+    // `hooks: {}` is refused before either file is written.
+    std::fs::write(&config, "hooks: {}\n").unwrap();
+    let o = env.run(&["hooks", "install", "--agent", "hermes"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("sets `hooks: {}` on one line"), "{}", o.stderr);
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "hooks: {}\n");
+    assert!(!allowlist.exists());
+
+    // $HERMES_HOME moves both files.
+    let other = env.root().join("hermes-home");
+    env.extra_env.push(("HERMES_HOME".into(), other.display().to_string()));
+    env.ok(&["hooks", "install", "--agent", "hermes"]);
+    assert!(std::fs::read_to_string(other.join("config.yaml")).unwrap().contains("--event pre_llm_call"));
+    assert!(other.join("shell-hooks-allowlist.json").exists());
+}
+
 /// Built-in harness ids in registry order, so adding a harness doesn't
 /// touch these tests.
 fn builtin_ids() -> Vec<&'static str> {

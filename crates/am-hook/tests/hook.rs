@@ -271,6 +271,37 @@ fn a_codex_session_is_found_from_the_payload_cwd() {
 }
 
 #[test]
+fn a_hermes_session_is_tracked_through_its_shell_hooks() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Hermes's stdin payload; no project-dir variable, so `--worktree ""`.
+    let hermes = |event: &str, session: &str, top: Value, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "tool_name": null, "tool_input": null, "session_id": session,
+                            "cwd": cwd, "profile": "default", "extra": extra });
+        p.as_object_mut().unwrap().extend(top.as_object().unwrap().clone());
+        env.send_raw("hermes", event, "", p);
+    };
+    let sid = "20261028_101500_ab12cd";
+    hermes("on_session_start", sid, json!({}), json!({ "model": "anthropic/claude-sonnet", "platform": "cli" }));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("hermes")));
+    hermes("pre_llm_call", sid, json!({}), json!({ "user_message": "fix the bug", "is_first_turn": true }));
+    assert_eq!(env.status().0, "executing");
+    hermes("pre_tool_call", sid, json!({ "tool_name": "terminal", "tool_input": { "command": "rm -rf target" } }), json!({}));
+    // Approval events carry only `extra.session_key`.
+    hermes("pre_approval_request", "", json!({}), json!({ "command": "rm -rf target", "session_key": sid, "surface": "cli" }));
+    assert_eq!(env.status().0, "waiting");
+    hermes("post_approval_response", "", json!({}), json!({ "choice": "once", "session_key": sid, "surface": "cli" }));
+    assert_eq!(env.status().0, "executing");
+    hermes("post_tool_call", sid, json!({ "tool_name": "terminal" }), json!({ "status": "ok" }));
+    hermes("on_session_end", sid, json!({}), json!({ "completed": true, "interrupted": false, "turn_id": "t1" }));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session(sid).0, "done");
+    hermes("on_session_finalize", sid, json!({}), json!({ "platform": "cli" }));
+    assert_eq!(env.session(sid), ("idle".into(), false));
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();
