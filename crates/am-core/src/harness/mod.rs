@@ -27,6 +27,7 @@ pub mod gemini;
 pub mod qoder;
 pub mod grok;
 pub mod muse;
+pub mod kiro;
 pub mod qwen;
 pub mod manifest;
 
@@ -278,6 +279,7 @@ impl HarnessKind {
     pub const ANTIGRAVITY: HarnessKind = HarnessKind(&antigravity::ANTIGRAVITY);
     pub const GROK: HarnessKind = HarnessKind(&grok::GROK);
     pub const MUSE: HarnessKind = HarnessKind(&muse::MUSE);
+    pub const KIRO: HarnessKind = HarnessKind(&kiro::KIRO);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -345,6 +347,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::ANTIGRAVITY,
     HarnessKind::GROK,
     HarnessKind::MUSE,
+    HarnessKind::KIRO,
 ];
 
 struct Registry {

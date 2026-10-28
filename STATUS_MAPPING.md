@@ -272,3 +272,13 @@ The session is `conversationId`, the directory `workspacePaths[0]` (`--worktree 
 | `StopFailure` | same | `idle` |
 
 There are no tool hooks, so a Muse turn shows `executing` without tool detail, and nothing says when a permission prompt was answered: Muse events are marked `stop_ends_wait` (as Grok's `Stop` is), and for those `Stop` after `waiting` gives `done` (for other harnesses it stays `waiting`). Muse's internal child sessions (reminders, delegated subagents) fire the same hooks with `turn_id == session_id`; they are ignored, so they never show up as extra sessions or move the status, except a child's permission prompt/elicitation, which is kept without its session id so the owner's row reads `waiting` (until the top-level session's next event rewrites the headline). Lifecycle events carry no `turn_id`, so a child's `SessionStart` couldn't be told from a top-level one; Muse's `SessionStart` is therefore ignored, and a child's `SessionEnd` finds no session to close. No project-dir variable: the directory is the payload's `cwd`.
+**Kiro CLI** (`--agent kiro`, hooks in the `agent-monitor` agent, `~/.kiro/agents/agent-monitor.json`):
+
+| Kiro event | Canonical event | Resulting status |
+| --- | --- | --- |
+| `agentSpawn` | `SessionStart` | `idle` |
+| `userPromptSubmit` | `UserPromptSubmit` | `executing` |
+| `preToolUse` / `postToolUse` | `PreToolUse` / `PostToolUse` | `executing` (`execute_bash`/`shell` → `Bash`, `fs_read` → `Read`, `fs_write` → `Write`, `use_subagent`/`delegate` → `Agent`) |
+| `stop` | `Stop` | `done` after work, else `idle` |
+
+Payloads carry Claude's keys (`session_id`, `cwd`, `tool_name`, `tool_input`); the hook passes `--worktree ""`, so the directory is the payload's `cwd`. The `--event` flag names the event, so Kiro v3's PascalCase `hook_event_name` doesn't matter. Kiro has no permission or notification hook and no session-end event (2.x) or subagent ids, so it never shows `waiting` or `delegating`. Its hooks only run while the `agent-monitor` agent is in use (`kiro-cli chat --agent agent-monitor`).

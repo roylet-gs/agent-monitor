@@ -407,6 +407,29 @@ fn a_muse_session_is_tracked_and_its_child_sessions_are_ignored() {
 }
 
 #[test]
+fn a_kiro_session_is_tracked_through_its_agent_hooks() {
+    let env = Env::new();
+    let cwd = format!("{}/pkg", env.root());
+    std::fs::create_dir_all(&cwd).unwrap();
+    // Kiro has no project-dir variable: the hook passes `--worktree ""`.
+    let kiro = |event: &str, extra: Value| {
+        let mut p = json!({ "hook_event_name": event, "cwd": cwd, "session_id": "k-1" });
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        env.send_raw("kiro", event, "", p);
+    };
+    kiro("agentSpawn", json!({}));
+    assert_eq!((env.status().0.as_str(), env.agent().as_deref()), ("idle", Some("kiro")));
+    kiro("userPromptSubmit", json!({ "prompt": "fix the bug" }));
+    assert_eq!(env.status().0, "executing");
+    kiro("preToolUse", json!({ "tool_name": "execute_bash", "tool_input": { "command": "cargo test" } }));
+    kiro("postToolUse", json!({ "tool_name": "execute_bash", "tool_response": { "success": true } }));
+    assert_eq!(env.status().0, "executing");
+    kiro("stop", json!({}));
+    assert_eq!(env.status().0, "done");
+    assert_eq!(env.session("k-1").0, "done");
+}
+
+#[test]
 fn a_cursor_session_is_tracked_and_its_claude_hooks_are_ignored() {
     let env = Env::new();
     let root = env.root();

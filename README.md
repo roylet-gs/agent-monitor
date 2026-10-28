@@ -1,7 +1,7 @@
 <h1 align="center">Agent Monitor</h1>
 
 <p align="center">
-  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code)</strong>
+  <strong>A terminal dashboard for managing git worktrees and monitoring coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code, Kiro CLI)</strong>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI or Muse Code) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
+  Agent Monitor (<code>am</code>) gives you one terminal dashboard for your git worktrees across repositories. It shows what each coding agent (Claude Code, Codex, Gemini CLI, Cursor, Copilot CLI, Qwen Code, Factory Droid, Qoder CLI, CodeBuddy Code, Antigravity CLI, Grok CLI, Muse Code or Kiro CLI) is doing in real time, along with GitHub PR/CI and Linear ticket status, so you don't have to leave the terminal to check.
 </p>
 
 ---
@@ -58,7 +58,7 @@ brew install agent-monitor
 am
 ```
 
-On first launch a setup wizard asks whether you want the full dashboard or only the PRs waiting on your review ([review-only mode](#review-only-mode)), then picks your editor, installs the agent hooks (Claude Code, plus every other supported harness whose config dir exists, e.g. `~/.gemini`, `~/.codex`, `~/.cursor`, `~/.gemini/antigravity-cli`), adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
+On first launch a setup wizard asks whether you want the full dashboard or only the PRs waiting on your review ([review-only mode](#review-only-mode)), then picks your editor, installs the agent hooks (Claude Code, plus every other supported harness whose config dir exists, e.g. `~/.gemini`, `~/.codex`, `~/.cursor`, `~/.gemini/antigravity-cli`, `~/.kiro`), adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
 
 ---
 
@@ -66,7 +66,7 @@ On first launch a setup wizard asks whether you want the full dashboard or only 
 
 - **macOS or Linux** (arm64 or x64)
 - **git**
-- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code**, **Factory Droid**, **Qoder CLI**, **CodeBuddy Code**, **Antigravity CLI** (`agy`), **Grok CLI** or **Muse Code**
+- At least one supported coding agent with hook support, for agent monitoring: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor** (editor agent or `cursor-agent`), **GitHub Copilot CLI**, **Qwen Code**, **Factory Droid**, **Qoder CLI**, **CodeBuddy Code**, **Antigravity CLI** (`agy`), **Grok CLI**, **Muse Code** or **Kiro CLI** (as its `agent-monitor` agent)
 - **gh CLI** (optional), for PR and CI status ([install](https://cli.github.com)); run `gh auth login` once
 - **Linear API key** (optional), for ticket tracking
 - **Node.js >= 18** only if you install through npm (the package is a small launcher for the native binary)
@@ -628,6 +628,7 @@ A harness is the CLI or editor that runs the agent and fires the hooks. `am hook
 | Antigravity CLI | `antigravity` | `~/.gemini/config/hooks.json` (its own `agent-monitor` group) | — (no permission hook) | `agy --conversation <id>` |
 | Grok CLI | `grok` | `~/.grok/hooks/agent-monitor.json` (`$GROK_HOME/hooks/`) | specific permission prompts | `grok -r <id>` |
 | Muse Code | `muse` | `~/.config/muse/settings.json` (or `$XDG_CONFIG_HOME/muse/`) | permission notifications | `muse resume <id>` |
+| Kiro CLI | `kiro` | `~/.kiro/agents/agent-monitor.json` (an `agent-monitor` agent; run Kiro as it) | — (no permission hook) | `kiro-cli chat --agent agent-monitor --resume-id <id>` |
 
 Any other CLI whose hooks run a command with a JSON payload on stdin can be added without code as a JSON manifest in `~/.agent-monitor/agents/` (`docs/agent-providers.md`). Not supported yet: OpenCode and Amp (plugins only, no command hooks), Aider (no hooks), Windsurf and Crush (no session or turn-end events), JetBrains Junie (its `Stop` hook carries no session or directory) and Augment Auggie (hook commands must be bare script paths).
 
@@ -692,6 +693,7 @@ am logs a summary every 5 minutes (and when it quits), plus a `[perf]` warning w
 - **Cursor:** Cursor also runs Claude Code's hooks by default; am ignores those for Cursor sessions and tracks them through Cursor's own `~/.cursor/hooks.json`. Cursor has no permission hook, so its sessions never show `waiting`, and the `cursor-agent` CLI may not fire every hook the editor does.
 - **Antigravity CLI:** hooks go into their own `agent-monitor` group in `~/.gemini/config/hooks.json` (other groups, such as cmux's, are left alone) and are installed by default once `~/.gemini/antigravity-cli` exists. agy has no permission hook, so its sessions never show `waiting`; a stop while background work is still running keeps the row `executing`. agy before 1.1.25 doesn't run hooks in Gemini API-key mode.
 - **Muse Code:** am adds the `"schema_version": 1` Muse requires when the settings file has none. Muse has no tool hooks, so its rows show `executing` without tool detail, and it runs hooks through your login shell: sh, bash, zsh and fish run am's hook command as is, but nushell needs a `^` before the quoted path, so nushell users have to edit the entries by hand. Muse's internal child sessions (reminders, delegated subagents) are ignored, except that one asking for permission marks the row `waiting`. A Muse session appears with its first prompt, and a turn that hit a permission prompt still ends `done`.
+- **Kiro CLI:** Kiro keeps hooks inside agent files, so am installs an `agent-monitor` agent (`~/.kiro/agents/agent-monitor.json`, or under `$KIRO_HOME`, with every tool allowed and your `mcp.json` servers included) and Kiro runs its hooks only while that agent is in use. Start Kiro with `kiro-cli chat --agent agent-monitor` (am does when it starts or resumes Kiro for you), or make it the default with `kiro-cli settings chat.defaultAgent agent-monitor`. To keep using your own agent instead, copy the `hooks` block from `agent-monitor.json` into it. am counts Kiro CLI as installed when `~/.kiro` exists and `kiro-cli` is on your `$PATH` (the Kiro IDE alone isn't enough). Kiro has no permission hook, so its sessions never show `waiting`.
 - **Copilot CLI / Factory Droid:** both read hooks at startup, so restart running sessions after installing. Copilot's permission events aren't available in the hook format am uses, so only questions show as `waiting`.
 - **Grok CLI:** Grok fires `SessionEnd` after every turn, so am ends the turn on `Stop` and leaves `SessionEnd` alone. Grok also sends a generic "Tool permission requested" notification for every tool step (even in auto-approve mode), which am doesn't count as `waiting`; a specific prompt ("Grok needs permission to run rm") does. Grok reports no tool results, so the turn's `Stop` clears that wait (`done`).
 - **Gemini CLI:** hooks need a Gemini CLI version with hook support (`npm i -g @google/gemini-cli` to upgrade), and Gemini runs hooks only in folders it trusts. Trust the repository's parent directory so new worktrees are covered. Gemini allows comments in `~/.gemini/settings.json`; if it has any, `am hooks install` refuses to rewrite the file (so the comments aren't lost). Remove them, or add the entries shown in `docs/agent-providers.md` by hand.
