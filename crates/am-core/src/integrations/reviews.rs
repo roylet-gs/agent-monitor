@@ -19,6 +19,11 @@
 //! GitHub, ignoring the filters ([`TOTAL_SEARCH`], `issueCount` only), so the
 //! unfiltered number costs no extra request. Cached under key `total`.
 //!
+//! A PR you approve stops requesting your review, so it leaves the search.
+//! While a tmp-space worktree (Reviewing) still has its branch, the PR is
+//! looked up by branch ([`pulled_args`]) and kept, marked `approved_only`, if
+//! your latest review approved it, so the page can remind you to remove it.
+//!
 //! [`people_args`] looks up who can author PRs in the tracked repos (each
 //! repo's `assignableUsers`), the autocomplete for `reviewPriorityAuthors`.
 //! Cached the same way under `kind = "people"`.
@@ -65,11 +70,18 @@ pub struct ReviewRepo {
     /// The repository's display name (its directory name).
     pub name: String,
     pub path: PathBuf,
+    /// Branches pulled into the tmp space (Reviewing) from this repo.
+    pub pulled: Vec<String>,
 }
 
 impl ReviewRepo {
     pub fn new(repo_id: impl Into<String>, name: impl Into<String>, path: impl Into<PathBuf>) -> Self {
-        ReviewRepo { repo_id: repo_id.into(), name: name.into(), path: path.into() }
+        ReviewRepo { repo_id: repo_id.into(), name: name.into(), path: path.into(), pulled: Vec::new() }
+    }
+
+    pub fn with_pulled(mut self, pulled: Vec<String>) -> Self {
+        self.pulled = pulled;
+        self
     }
 }
 
@@ -115,6 +127,17 @@ pub struct Extras<'a> {
     pub queries: &'a [String],
 }
 
+/// What a review row needs of a `PullRequest`: [`pr_selection_counts`] plus
+/// dates, author, repo, your latest review and the pending reviewers.
+fn review_fields() -> String {
+    format!(
+        "{} createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
+         reviewRequests(first: 20) {{ nodes {{ requestedReviewer {{ ... on User {{ login }} \
+         ... on Team {{ combinedSlug }} ... on Bot {{ login }} ... on Mannequin {{ login }} }} }} }} }}",
+        pr_selection_counts()
+    )
+}
+
 /// `gh api graphql` argv for one page of a search. The search string (and
 /// the page cursor) travel as variables; the query text is a single line (the
 /// E2E shim splits argv on newlines). Checks are counts only
@@ -140,10 +163,8 @@ pub fn search_args(search: &str, after: Option<&str>, extras: Extras) -> Vec<Str
     let query = format!(
         "query($q: String!, $after: String{vars}) {{ viewer {{ login }} {fields}\
          search(query: $q, type: ISSUE, first: {PAGE_SIZE}, after: $after) {{ pageInfo {{ hasNextPage endCursor }} nodes {{ \
-         ... on PullRequest {{ {} createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
-         reviewRequests(first: 20) {{ nodes {{ requestedReviewer {{ ... on User {{ login }} \
-         ... on Team {{ combinedSlug }} ... on Bot {{ login }} ... on Mannequin {{ login }} }} }} }} }} }} }} }}",
-        pr_selection_counts()
+         ... on PullRequest {{ {} }} }} }} }}",
+        review_fields()
     );
     let mut args: Vec<String> = ["api", "graphql", "-f"].iter().map(|s| s.to_string()).collect();
     args.push(format!("q={search}"));
@@ -193,34 +214,7 @@ pub fn parse_search(stdout: &str, repo_ids: &HashMap<String, String>, queries: &
     for node in nodes {
         let repo = str_at(node, "/repository/nameWithOwner");
         let Some(repo_id) = repo_ids.get(&repo.to_lowercase()) else { continue };
-        let Some(pr) = pr_info_from_node(node) else { continue };
-        let requested = node
-            .pointer("/reviewRequests/nodes")
-            .and_then(Value::as_array)
-            .map(|rs| {
-                rs.iter()
-                    .filter_map(|r| {
-                        let who = r.get("requestedReviewer")?;
-                        let name = who.get("login").or_else(|| who.get("combinedSlug")).and_then(Value::as_str)?;
-                        Some(if !viewer.is_empty() && name == viewer { "you".to_string() } else { name.to_string() })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        out.push(ReviewRequest {
-            repo_id: repo_id.clone(),
-            repo,
-            pr,
-            author: str_at(node, "/author/login"),
-            head_ref_name: str_at(node, "/headRefName"),
-            is_cross_repository: node.get("isCrossRepository").and_then(Value::as_bool).unwrap_or(false),
-            created_at: str_at(node, "/createdAt"),
-            updated_at: str_at(node, "/updatedAt"),
-            requested,
-            linear: None,
-            reviewed_by_you: node.pointer("/viewerLatestReview/state").and_then(Value::as_str).is_some(),
-            worktree_id: None,
-        });
+        out.extend(review_from_node(node, repo_id, &repo, &viewer));
     }
     let next = (json.pointer("/data/search/pageInfo/hasNextPage").and_then(Value::as_bool) == Some(true))
         .then(|| str_at(&json, "/data/search/pageInfo/endCursor"))
@@ -232,6 +226,44 @@ pub fn parse_search(stdout: &str, repo_ids: &HashMap<String, String>, queries: &
         hits.insert(q.clone(), nodes.iter().map(|n| str_at(n, "/url")).filter(|u| !u.is_empty()).collect());
     }
     Ok(SearchPage { prs: out, next, total, hits })
+}
+
+/// A [`ReviewRequest`] from one PR node (search or `pullRequests`) of
+/// tracked repo `repo_id` (`owner/name` `repo`). A pending reviewer who is
+/// `viewer` reads `you`. `None` for a node that isn't a PR.
+fn review_from_node(node: &Value, repo_id: &str, repo: &str, viewer: &str) -> Option<ReviewRequest> {
+    let str_at = |p: &str| node.pointer(p).and_then(Value::as_str).unwrap_or("").to_string();
+    let pr = pr_info_from_node(node)?;
+    let requested = node
+        .pointer("/reviewRequests/nodes")
+        .and_then(Value::as_array)
+        .map(|rs| {
+            rs.iter()
+                .filter_map(|r| {
+                    let who = r.get("requestedReviewer")?;
+                    let name = who.get("login").or_else(|| who.get("combinedSlug")).and_then(Value::as_str)?;
+                    Some(if !viewer.is_empty() && name == viewer { "you".to_string() } else { name.to_string() })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let latest = node.pointer("/viewerLatestReview/state").and_then(Value::as_str);
+    Some(ReviewRequest {
+        repo_id: repo_id.to_string(),
+        repo: repo.to_string(),
+        pr,
+        author: str_at("/author/login"),
+        head_ref_name: str_at("/headRefName"),
+        is_cross_repository: node.get("isCrossRepository").and_then(Value::as_bool).unwrap_or(false),
+        created_at: str_at("/createdAt"),
+        updated_at: str_at("/updatedAt"),
+        requested,
+        linear: None,
+        reviewed_by_you: latest.is_some(),
+        approved_by_you: latest == Some("APPROVED"),
+        approved_only: false,
+        worktree_id: None,
+    })
 }
 
 /// Run a search, page by page (at most [`MAX_PAGES`]), with the `extras`
@@ -273,6 +305,68 @@ pub fn fetch(
         }
     }
     Ok(all)
+}
+
+/// A pulled branch to look up: its tracked repo, `owner/name` and branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pulled {
+    pub repo_id: String,
+    pub slug: String,
+    pub branch: String,
+}
+
+/// `gh api graphql` argv for the newest PR (any state) of each `pulled`
+/// branch: one aliased `repository { pullRequests(headRefName:) }` per
+/// branch, owner, name and branch as variables, on one line (the E2E shim
+/// splits argv on newlines).
+pub fn pulled_args(pulled: &[Pulled]) -> Vec<String> {
+    let mut vars = Vec::new();
+    let mut fields = Vec::new();
+    let mut args: Vec<String> = vec!["api".into(), "graphql".into()];
+    for (i, p) in pulled.iter().enumerate() {
+        let Some((owner, name)) = p.slug.split_once('/') else { continue };
+        vars.push(format!("$o{i}: String!, $n{i}: String!, $b{i}: String!"));
+        fields.push(format!(
+            "p{i}: repository(owner: $o{i}, name: $n{i}) {{ pullRequests(headRefName: $b{i}, first: 1, \
+             orderBy: {{ field: UPDATED_AT, direction: DESC }}) {{ nodes {{ {} }} }} }}",
+            review_fields()
+        ));
+        args.extend(["-f".into(), format!("o{i}={owner}"), "-f".into(), format!("n{i}={name}")]);
+        args.extend(["-f".into(), format!("b{i}={}", p.branch)]);
+    }
+    args.extend(["-f".into(), format!("query=query({}) {{ viewer {{ login }} {} }}", vars.join(", "), fields.join(" "))]);
+    args
+}
+
+/// The PRs of a [`pulled_args`] response that you approved, marked
+/// `approved_only`. A branch without a PR (or a repo that errored) is
+/// skipped as long as some data came back.
+pub fn parse_pulled(stdout: &str, pulled: &[Pulled]) -> Result<Vec<ReviewRequest>, String> {
+    let json: Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("unparseable gh graphql output: {e}"))?;
+    if json.get("data").and_then(Value::as_object).is_none() {
+        let msg = json.pointer("/errors/0/message").and_then(Value::as_str).unwrap_or("no data in response");
+        return Err(format!("graphql: {msg}"));
+    }
+    let viewer = json.pointer("/data/viewer/login").and_then(Value::as_str).unwrap_or("");
+    let mut out = Vec::new();
+    for (i, p) in pulled.iter().enumerate() {
+        let Some(node) = json.pointer(&format!("/data/p{i}/pullRequests/nodes/0")) else { continue };
+        let Some(mut r) = review_from_node(node, &p.repo_id, &p.slug, viewer) else { continue };
+        if r.approved_by_you && !r.is_cross_repository {
+            r.approved_only = true;
+            out.push(r);
+        }
+    }
+    Ok(out)
+}
+
+/// Run [`pulled_args`] for `pulled`. `Err` is one line, for the debug log.
+pub fn fetch_pulled(gh: &dyn GhRunner, cwd: &Path, pulled: &[Pulled]) -> Result<Vec<ReviewRequest>, String> {
+    let out = gh.run(cwd, &pulled_args(pulled), SEARCH_TIMEOUT);
+    if !out.stdout.trim_start().starts_with('{') {
+        return Err(summarize_error(if out.ok { "unexpected gh graphql output" } else { &out.stderr }));
+    }
+    parse_pulled(&out.stdout, pulled).map_err(|e| summarize_error(&e))
 }
 
 /// `gh api graphql` argv listing who can be assigned in each of `slugs`
@@ -525,6 +619,67 @@ pub(crate) mod tests {
         assert!(load_cached_hits(&conn).is_none());
         store_hits(&conn, &page.hits);
         assert_eq!(load_cached_hits(&conn).unwrap(), page.hits);
+    }
+
+    #[test]
+    fn approved_by_you_is_your_latest_review_approving() {
+        let mut node = search_node(7, "acme/web", "b", vec![]);
+        node["viewerLatestReview"] = json!({"state": "APPROVED"});
+        let body = json!({"data": {"search": {"nodes": [node, search_node(8, "acme/web", "c", vec![])]}}}).to_string();
+        let ids = HashMap::from([("acme/web".to_string(), "r".to_string())]);
+        let prs = parse_search(&body, &ids, &[]).unwrap().prs;
+        assert!(prs[0].approved_by_you && prs[0].reviewed_by_you && !prs[0].approved_only);
+        assert!(!prs[1].approved_by_you);
+    }
+
+    #[test]
+    fn pulled_args_look_up_each_branch_on_one_line() {
+        let pulled = vec![
+            Pulled { repo_id: "r1".into(), slug: "acme/web".into(), branch: "feat/a".into() },
+            Pulled { repo_id: "r2".into(), slug: "acme/api".into(), branch: "fix/b".into() },
+        ];
+        let args = pulled_args(&pulled);
+        assert_eq!(&args[..2], ["api", "graphql"]);
+        for v in ["o0=acme", "n0=web", "b0=feat/a", "o1=acme", "n1=api", "b1=fix/b"] {
+            assert!(args.contains(&v.to_string()), "{v} in {args:?}");
+        }
+        let query = args.last().unwrap();
+        assert!(query.starts_with("query=query($o0: String!, $n0: String!, $b0: String!, $o1: String!"));
+        assert!(query.contains("viewer { login }"));
+        assert!(query.contains("p1: repository(owner: $o1, name: $n1) { pullRequests(headRefName: $b1, first: 1,"));
+        assert!(query.contains("viewerLatestReview { state }"));
+        assert!(!query.contains('\n'));
+    }
+
+    #[test]
+    fn parse_pulled_keeps_only_prs_you_approved() {
+        let pulled: Vec<Pulled> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|b| Pulled { repo_id: "r1".into(), slug: "acme/web".into(), branch: b.to_string() })
+            .collect();
+        let with = |head: &str, state: Option<&str>| {
+            let mut node = search_node(1, "acme/web", head, vec![json!({"login": "me"})]);
+            if let Some(s) = state {
+                node["viewerLatestReview"] = json!({"state": s});
+            }
+            node["state"] = json!("MERGED");
+            json!({"pullRequests": {"nodes": [node]}})
+        };
+        let body = json!({"data": {
+            "viewer": {"login": "me"},
+            "p0": with("a", Some("APPROVED")),
+            "p1": with("b", Some("COMMENTED")),
+            "p2": {"pullRequests": {"nodes": []}},
+            "p3": with("d", None),
+        }})
+        .to_string();
+        let list = parse_pulled(&body, &pulled).unwrap();
+        assert_eq!(list.len(), 1);
+        let r = &list[0];
+        assert!(r.approved_only && r.approved_by_you && r.head_ref_name == "a");
+        assert_eq!((r.repo_id.as_str(), r.repo.as_str(), r.pr.state.as_str()), ("r1", "acme/web", "MERGED"));
+        assert_eq!(r.requested, ["you"]);
+        assert!(parse_pulled(r#"{"errors":[{"message":"nope"}]}"#, &pulled).unwrap_err().contains("nope"));
     }
 
     #[test]

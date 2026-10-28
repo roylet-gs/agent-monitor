@@ -28,7 +28,7 @@ pub mod linear;
 pub mod reviews;
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
@@ -354,11 +354,13 @@ impl Integrations {
                     self.review_total = Some(total);
                 }
                 let mut list = found.prs;
-                self.fill_tickets(settings, &mut list, force);
                 let n = list.len();
-                if self.reviews.as_ref().map(Vec::len) != Some(n) {
+                let waiting_before = self.reviews.as_ref().map(|l| l.iter().filter(|r| !r.approved_only).count());
+                if waiting_before != Some(n) {
                     info!("reviews", "{n} PR(s) waiting on your review");
                 }
+                self.add_pulled(repos, &cwd, &mut list);
+                self.fill_tickets(settings, &mut list, force);
                 self.set_reviews(conn, list);
                 self.review_error = None;
                 finish(&mut self.github_breaker, now, None, None);
@@ -375,6 +377,39 @@ impl Integrations {
                 RefreshOutcome::Ran { fetched: 0, failed: 1, aborted: network }
             }
         }
+    }
+
+    /// Append the PRs pulled into the tmp space that you approved and that
+    /// the search no longer lists ([`reviews::fetch_pulled`]). A failed lookup
+    /// keeps the ones found before for branches still pulled.
+    fn add_pulled(&mut self, repos: &[reviews::ReviewRepo], cwd: &Path, list: &mut Vec<ReviewRequest>) {
+        let pulled: Vec<reviews::Pulled> = repos
+            .iter()
+            .filter_map(|r| self.slugs.get(&r.path).map(|slug| (r, slug)))
+            .flat_map(|(r, slug)| {
+                r.pulled.iter().map(|b| reviews::Pulled { repo_id: r.repo_id.clone(), slug: slug.clone(), branch: b.clone() })
+            })
+            .filter(|p| !list.iter().any(|x| x.repo_id == p.repo_id && x.head_ref_name == p.branch))
+            .collect();
+        if pulled.is_empty() {
+            return;
+        }
+        let found = match reviews::fetch_pulled(self.gh.as_ref(), cwd, &pulled) {
+            Ok(found) => {
+                debug!("reviews", "{} of {} pulled branch(es) off the list are approved by you", found.len(), pulled.len());
+                found
+            }
+            Err(e) => {
+                debug!("reviews", "Pulled PR lookup failed (keeping the approved ones found before): {e}");
+                self.reviews
+                    .iter()
+                    .flatten()
+                    .filter(|r| r.approved_only && pulled.iter().any(|p| p.repo_id == r.repo_id && p.branch == r.head_ref_name))
+                    .cloned()
+                    .collect()
+            }
+        };
+        list.extend(found);
     }
 
     fn set_reviews(&mut self, conn: &Connection, list: Vec<ReviewRequest>) {
@@ -705,6 +740,53 @@ mod tests {
         e.http.push(offline());
         e.ints.refresh_reviews(&e.conn, &repos, &s, true);
         assert_eq!(e.ints.reviews().unwrap()[0].linear.as_ref().unwrap().identifier, "ENG-1");
+    }
+
+    fn pulled_body(entries: &[(&str, Option<&str>)]) -> String {
+        let mut data = serde_json::Map::new();
+        data.insert("viewer".into(), json!({"login": "me"}));
+        for (i, (head, state)) in entries.iter().enumerate() {
+            let mut node = reviews::tests::search_node(40 + i as u64, "acme/web", head, vec![]);
+            if let Some(state) = state {
+                node["viewerLatestReview"] = json!({"state": state});
+            }
+            data.insert(format!("p{i}"), json!({"pullRequests": {"nodes": [node]}}));
+        }
+        json!({"data": data}).to_string()
+    }
+
+    #[test]
+    fn approved_pulled_prs_off_the_list_are_kept() {
+        let mut e = env();
+        let pulled = vec!["feature/x".to_string(), "review/a".into(), "review/b".into()];
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a").with_pulled(pulled)];
+        let s = Settings::default();
+        e.gh.push(GhOutput::success("acme/web"));
+        e.gh.push(GhOutput::success(review_body(&["feature/x"])));
+        e.gh.push(GhOutput::success(pulled_body(&[("review/a", Some("APPROVED")), ("review/b", Some("COMMENTED"))])));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, false);
+        let list = e.ints.reviews().unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(!list[0].approved_only);
+        assert!(list[1].approved_only && list[1].approved_by_you && list[1].head_ref_name == "review/a");
+        // Only the pulled branches the search didn't list are looked up.
+        let calls = e.gh.calls.lock().unwrap().clone();
+        assert!(calls[2].contains(&"b0=review/a".to_string()) && calls[2].contains(&"b1=review/b".to_string()));
+        assert!(!calls[2].contains(&"b0=feature/x".to_string()) && !calls[2].iter().any(|a| a == "b2=feature/x"));
+
+        // A failed lookup keeps the approved ones found before.
+        e.gh.push(GhOutput::success(review_body(&["feature/x"])));
+        e.gh.push(gh_offline());
+        e.ints.refresh_reviews(&e.conn, &repos, &s, true);
+        assert_eq!(e.ints.reviews().unwrap().len(), 2);
+        assert!(!e.ints.health().github_failing, "the lookup never fails the list");
+
+        // Nothing pulled off the list: no extra call.
+        let repos = vec![reviews::ReviewRepo::new("r1", "web", "/a").with_pulled(vec!["feature/x".into()])];
+        e.gh.push(GhOutput::success(review_body(&["feature/x"])));
+        e.ints.refresh_reviews(&e.conn, &repos, &s, true);
+        assert_eq!(e.gh.call_count(), 6);
+        assert_eq!(e.ints.reviews().unwrap().len(), 1);
     }
 
     #[test]

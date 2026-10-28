@@ -509,6 +509,8 @@ impl Worker {
                 .find(|v| v.worktree.repo_id == r.repo_id && v.worktree.branch == r.head_ref_name)
                 .map(|v| v.worktree.id.clone());
         }
+        // Listed only to remind you to remove the worktree: gone with it.
+        list.retain(|r| !r.approved_only || r.worktree_id.is_some());
         Some(list)
     }
 
@@ -793,8 +795,14 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         }
         if reviews_due {
             let started = Instant::now();
-            let review_repos: Vec<ReviewRepo> =
-                repos.iter().map(|r| ReviewRepo::new(r.id.clone(), r.name.clone(), r.path.clone())).collect();
+            let review_repos: Vec<ReviewRepo> = repos
+                .iter()
+                .map(|r| {
+                    let pulled =
+                        worktrees.iter().filter(|w| w.repo_id == r.id && w.tmp_space).map(|w| w.branch.clone()).collect();
+                    ReviewRepo::new(r.id.clone(), r.name.clone(), r.path.clone()).with_pulled(pulled)
+                })
+                .collect();
             let outcome = ints.refresh_reviews(&conn, &review_repos, &settings, force || reviews_now);
             info!("integrations", "review requests refresh: {outcome:?} in {:?}", started.elapsed());
             perf.record("integrations.reviews", started.elapsed());
@@ -1048,6 +1056,24 @@ mod tests {
         let w = run("full");
         assert_eq!(w.git.in_flight(), 1);
         assert!(w.last_procs.is_some() && !w.ctx.is_empty());
+    }
+
+    #[test]
+    fn an_approved_only_pr_goes_with_its_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = db::open_at(&dir.path().join("am.db")).unwrap();
+        let mut w = Worker::new(Settings::default(), conn, mpsc::channel().0, mpsc::channel().1);
+        let pr = |branch: &str, approved_only: bool| {
+            let mut r = crate::reviews_ui::tests::review("r", 1, "2026-10-01T00:00:00Z");
+            r.head_ref_name = branch.into();
+            r.approved_only = approved_only;
+            r
+        };
+        w.reviews = Some(vec![pr("w1", true), pr("gone", true), pr("asked", false)]);
+        let list = w.reviews_with_worktrees(&[view("w1", "s1", Status::Done)]).unwrap();
+        let heads: Vec<&str> = list.iter().map(|r| r.head_ref_name.as_str()).collect();
+        assert_eq!(heads, ["w1", "asked"]);
+        assert_eq!(list[0].worktree_id.as_deref(), Some("w1"));
     }
 
     #[test]
