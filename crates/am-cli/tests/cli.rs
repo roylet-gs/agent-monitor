@@ -40,7 +40,6 @@ const AGENT_ENV: &[&str] = &[
     "GROK_HOME",
     "HERMES_HOME",
     "KIMI_CODE_HOME",
-    "KIMI_SHARE_DIR",
     "KIRO_HOME",
     "OPENCODE_CONFIG_DIR",
     "OPENCODE_DB",
@@ -545,14 +544,15 @@ fn hooks_for_kimi() {
     assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "kimi"]).stdout, "Hooks removed from ~/.kimi-code/config.toml\n");
     assert_eq!(std::fs::read_to_string(&config).unwrap(), user);
 
-    // Kimi CLI ≤ 1.49 only: its legacy config is the one written.
+    // The legacy Kimi CLI (≤ 1.49, ~/.kimi) rejects these events at startup:
+    // its config is never written, and it alone doesn't make Kimi detected.
     let tmp = Env::new();
     let legacy = tmp.home().join(".kimi/config.toml");
     std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
     std::fs::write(&legacy, "").unwrap();
-    assert_eq!(tmp.ok(&["hooks", "install", "--agent", "kimi"]).stdout, "Hooks installed into ~/.kimi/config.toml\n");
-    assert!(std::fs::read_to_string(&legacy).unwrap().starts_with("# agent-monitor hooks kimi begin\n[[hooks]]\n"));
-    assert!(!tmp.home().join(".kimi-code").exists());
+    assert_eq!(tmp.ok(&["hooks", "install"]).stdout, "Hooks installed into ~/.claude/settings.json\n");
+    assert_eq!(tmp.ok(&["hooks", "install", "--agent", "kimi"]).stdout, "Hooks installed into ~/.kimi-code/config.toml\n");
+    assert_eq!(std::fs::read_to_string(&legacy).unwrap(), "");
 }
 
 /// Built-in harness ids in registry order, so adding a harness doesn't

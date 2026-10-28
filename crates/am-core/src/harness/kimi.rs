@@ -5,11 +5,14 @@
 //! seconds; `matcher` optional, any other key fails Kimi's config load) in
 //! its `config.toml`, so am writes them as a [`TextBlock`] between
 //! `# agent-monitor hooks kimi begin/end` lines and leaves the rest of the
-//! file alone. The file is the one the installed CLI reads:
-//! `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml` (Kimi Code CLI) or the
-//! legacy `${KIMI_SHARE_DIR:-~/.kimi}/config.toml` (Kimi CLI ≤ 1.49): the
-//! first that exists, else the first whose directory exists, else Kimi
-//! Code's. am doesn't run `kimi doctor` to ask (a spawn during install).
+//! file alone. The file is Kimi Code CLI's
+//! `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`, and only its directory
+//! makes Kimi present. The legacy Python Kimi CLI (≤ 1.49,
+//! `${KIMI_SHARE_DIR:-~/.kimi}/config.toml`) is deliberately not supported:
+//! it validates `[[hooks]]` events against a closed list without
+//! `PermissionRequest`, `PermissionResult` or `Interrupt` (so the block would
+//! stop it from starting), and it rewrites its config on `/login`/`/model`,
+//! dropping the block's marker comments.
 //! A `hooks = [...]` inline array in the user's file would clash with the
 //! appended `[[hooks]]` tables; Kimi's docs only use the table form.
 //!
@@ -49,23 +52,13 @@ fn render(ctx: &HookContext) -> String {
         .join("\n")
 }
 
+/// `config.toml` in `$KIMI_CODE_HOME`, else `~/.kimi-code`.
 fn hook_file() -> (PathBuf, &'static str) {
-    let dir = |var: &str, default: &str| {
-        let v = std::env::var(var).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
-        expand_home(v.as_deref().unwrap_or(default))
-    };
-    (pick_config(&[dir("KIMI_CODE_HOME", "~/.kimi-code"), dir("KIMI_SHARE_DIR", "~/.kimi")]), "")
+    (home_dir(std::env::var("KIMI_CODE_HOME").ok().as_deref()).join("config.toml"), "")
 }
 
-/// `config.toml` in the first of `dirs` that has one, else in the first that
-/// exists, else in the first (Kimi Code's).
-fn pick_config(dirs: &[PathBuf]) -> PathBuf {
-    let dir = dirs
-        .iter()
-        .find(|d| d.join("config.toml").is_file())
-        .or_else(|| dirs.iter().find(|d| d.is_dir()))
-        .unwrap_or(&dirs[0]);
-    dir.join("config.toml")
+fn home_dir(var: Option<&str>) -> PathBuf {
+    expand_home(var.map(str::trim).filter(|v| !v.is_empty()).unwrap_or("~/.kimi-code"))
 }
 
 #[cfg(test)]
@@ -121,19 +114,11 @@ mod tests {
     }
 
     #[test]
-    fn the_config_kimi_reads_is_picked() {
-        let dir = tempfile::tempdir().unwrap();
-        let (code, legacy) = (dir.path().join(".kimi-code"), dir.path().join(".kimi"));
-        let dirs = [code.clone(), legacy.clone()];
-        assert_eq!(pick_config(&dirs), code.join("config.toml"), "nothing yet: Kimi Code's");
-        std::fs::create_dir(&legacy).unwrap();
-        assert_eq!(pick_config(&dirs), legacy.join("config.toml"), "only the legacy dir");
-        std::fs::create_dir(&code).unwrap();
-        assert_eq!(pick_config(&dirs), code.join("config.toml"));
-        std::fs::write(legacy.join("config.toml"), "").unwrap();
-        assert_eq!(pick_config(&dirs), legacy.join("config.toml"), "the dir with a config wins");
-        std::fs::write(code.join("config.toml"), "").unwrap();
-        assert_eq!(pick_config(&dirs), code.join("config.toml"));
+    fn the_config_is_kimi_codes_never_the_legacy_one() {
+        assert_eq!(home_dir(Some("/k")), Path::new("/k"));
+        assert_eq!(home_dir(Some("  ")), expand_home("~/.kimi-code"), "an empty $KIMI_CODE_HOME is unset");
+        assert_eq!(home_dir(None), expand_home("~/.kimi-code"));
+        assert!(!home_dir(None).ends_with(".kimi"));
     }
 
     #[test]
