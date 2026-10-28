@@ -4,7 +4,8 @@ expression: screen
 ---
 ╭─Settings ────────────────────────────────────────────────╮
 │ General                                                  │
-│▌  Open in                       vscode                   │
+│▌  Mode                          full                     │
+│   Open in                       vscode                   │
 │   Editor command                —                        │
 │   Resume last session on open   on                       │
 │   Repositories…                 0 tracked                │
@@ -18,7 +19,6 @@ expression: screen
 │ Appearance                                               │
 │   Theme                         ansi                     │
 │   Theme builder…                ⏎ open                   │
-│   Compact view                  on                       │
 │                                                          │
-│ Which editor/IDE Enter opens worktrees in; custom runs Ed│
+│ reviews: open straight to the review page and hide the ag│
 ╰─────── ⏎/space change  ←→ adjust  e edit file  esc close ╯

@@ -19,6 +19,12 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
   await tui.openUrl(FRESH_URL);
   await tui.waitForText("Welcome to agent-monitor", 10_000);
 
+  // 0. Mode: the full dashboard is preselected.
+  await tui.waitForText("What do you want am for?");
+  await tui.waitForText("● Agents & worktrees");
+  await tui.screenshot("setup-mode");
+  await tui.sendKey("Enter");
+
   // 1. Editor
   await tui.waitForText("Where should Enter open a worktree?");
   await tui.waitForText("● VS Code");

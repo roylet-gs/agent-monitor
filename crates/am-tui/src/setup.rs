@@ -1,10 +1,18 @@
 //! First-run setup (shown when settings.json has no `setupCompleted`).
-//! Port of the TS SetupWizard, trimmed to what a first run needs: editor,
-//! agent hooks (Claude Code plus any other agent CLI found), repositories,
-//! integrations, review requests (when GitHub is on), context window. Everything is also reachable
-//! later via `s` (settings), `A` (add repo) and `am hooks install`.
-//! Settings → Run setup again (or `am setup`) walks it again over the current
-//! settings: it starts from their values, and Esc on the first step cancels.
+//! Port of the TS SetupWizard, trimmed to what a first run needs. It starts
+//! by asking what am is for (`appMode`), and each mode has its own steps
+//! ([`Setup::steps`]):
+//! - the full dashboard: editor, agent hooks (Claude Code plus any other
+//!   agent CLI found), repositories, integrations, review requests (when
+//!   GitHub is on), context window;
+//! - review requests only: editor, repositories (at least one: the search is
+//!   scoped to them), GitHub (gh is required, Linear optional), review
+//!   requests. GitHub PR status and review requests are turned on.
+//!
+//! Everything is also reachable later via `s` (settings), `A` (add repo) and
+//! `am hooks install`. Settings → Run setup again (or `am setup`) walks it
+//! again over the current settings: it starts from their values, and Esc on
+//! the first step cancels.
 
 use am_core::harness::{self, HarnessKind};
 use serde_json::Value;
@@ -13,6 +21,8 @@ use crate::app::Key;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
+    /// The full dashboard, or review requests only.
+    Mode,
     Editor,
     Hooks,
     Repos,
@@ -44,6 +54,7 @@ pub struct ReviewSetup {
 }
 
 /// Rows of the Reviews step: the switch, the three scopes, two filters.
+/// Review-only mode has no switch (row 0): review requests are what it's for.
 pub const REVIEW_ROWS: usize = 6;
 
 impl ReviewSetup {
@@ -121,6 +132,10 @@ impl Default for ReviewSetup {
 #[derive(Debug, Clone)]
 pub struct Setup {
     pub step: Step,
+    /// The Mode step's choice: review requests only (`appMode: "reviews"`).
+    pub reviews_mode: bool,
+    /// `gh` is on `$PATH` (review-only mode needs it).
+    pub gh_found: bool,
     /// Index into `IDES`; the last one (`custom`) takes a typed command.
     pub ide: usize,
     pub ide_command: String,
@@ -147,6 +162,11 @@ pub struct Setup {
 }
 
 pub const IDES: [(&str, &str); 6] = am_core::launch::IdeChoice::ALL;
+
+/// The full dashboard's steps (Reviews is skipped with GitHub off).
+pub const STEPS_FULL: &[Step] = &[Step::Mode, Step::Editor, Step::Hooks, Step::Repos, Step::Integrations, Step::Reviews, Step::Context];
+/// Review-only mode's steps: no agent hooks and no context window.
+pub const STEPS_REVIEWS: &[Step] = &[Step::Mode, Step::Editor, Step::Repos, Step::Integrations, Step::Reviews];
 pub const IDE_CUSTOM: usize = IDES.len() - 1;
 
 /// Context-window presets offered by the wizard; a third row takes a typed value.
@@ -174,8 +194,11 @@ impl Setup {
         // A re-run starts from what's saved, so finishing it keeps the Linear
         // key and the PR setting; a first run guesses from what's installed.
         let rerun = !needed(settings);
+        let gh_found = which("gh");
         Setup {
-            step: Step::Editor,
+            step: Step::Mode,
+            reviews_mode: settings.reviews_mode(),
+            gh_found,
             ide: IDES.iter().position(|(k, _)| *k == ide).unwrap_or(0),
             ide_command: settings.ide_command.clone(),
             ide_error: None,
@@ -185,7 +208,7 @@ impl Setup {
             repo_input: "~/".into(),
             repos_added: existing_repos,
             repo_error: None,
-            gh: if rerun { settings.gh_pr_status } else { which("gh") },
+            gh: if rerun { settings.gh_pr_status } else { gh_found },
             linear_key: if rerun { settings.linear_api_key.clone() } else { String::new() },
             integration_field: 0,
             review: ReviewSetup::from_settings(settings),
@@ -196,8 +219,62 @@ impl Setup {
         }
     }
 
+    /// The steps of the chosen mode, in order.
+    pub fn steps(&self) -> &'static [Step] {
+        if self.reviews_mode { STEPS_REVIEWS } else { STEPS_FULL }
+    }
+
+    /// The step `dir` (±1) away along [`Setup::steps`], skipping Reviews
+    /// with GitHub off; `None` past either end.
+    fn step_from(&self, dir: isize) -> Option<Step> {
+        let steps = self.steps();
+        let mut i = steps.iter().position(|s| *s == self.step)? as isize;
+        loop {
+            i += dir;
+            let step = *steps.get(usize::try_from(i).ok()?)?;
+            if step != Step::Reviews || self.reviews_gh() {
+                return Some(step);
+            }
+        }
+    }
+
+    /// GitHub is on: always in review-only mode, else the Integrations
+    /// step's checkbox.
+    fn reviews_gh(&self) -> bool {
+        self.reviews_mode || self.gh
+    }
+
+    /// On to the next step, or finish after the last one.
+    fn next(&mut self, context_tokens: Option<u64>) -> SetupEffect {
+        match self.step_from(1) {
+            Some(step) => {
+                self.step = step;
+                if step == Step::Reviews && self.reviews_mode {
+                    // No on/off row in review-only mode.
+                    self.review.field = self.review.field.max(1);
+                }
+                SetupEffect::None
+            }
+            None => self.finish(context_tokens),
+        }
+    }
+
+    fn back(&mut self) {
+        if let Some(step) = self.step_from(-1) {
+            self.step = step;
+        }
+    }
+
     pub fn on_key(&mut self, key: Key) -> SetupEffect {
         match self.step {
+            Step::Mode => match key {
+                Key::Up | Key::Down | Key::Tab | Key::BackTab | Key::Char('j') | Key::Char('k') => {
+                    self.reviews_mode = !self.reviews_mode
+                }
+                Key::Enter => return self.next(None),
+                Key::Esc if self.cancellable => return SetupEffect::Cancel,
+                _ => {}
+            },
             Step::Editor => {
                 self.ide_error = None;
                 let custom = self.ide == IDE_CUSTOM;
@@ -216,15 +293,15 @@ impl Setup {
                     Key::Enter if custom && self.ide_command.trim().is_empty() => {
                         self.ide_error = Some("Type the command that opens a folder, e.g. idea or subl -n".into());
                     }
-                    Key::Enter => self.step = Step::Hooks,
-                    Key::Esc if self.cancellable => return SetupEffect::Cancel,
+                    Key::Enter => return self.next(None),
+                    Key::Esc => self.back(),
                     _ => {}
                 }
             }
             Step::Hooks => match key {
                 Key::Enter | Key::Char('y') if !self.hooks_installed => return SetupEffect::InstallHooks,
-                Key::Enter | Key::Char('n') => self.step = Step::Repos,
-                Key::Esc => self.step = Step::Editor,
+                Key::Enter | Key::Char('n') => return self.next(None),
+                Key::Esc => self.back(),
                 _ => {}
             },
             Step::Repos => {
@@ -235,37 +312,43 @@ impl Setup {
                         self.repo_input.pop();
                     }
                     Key::Char(c) => self.repo_input.push(c),
-                    Key::Esc => self.step = Step::Hooks,
+                    Key::Esc => self.back(),
                     Key::Enter => {
                         let p = self.repo_input.trim().to_string();
-                        if p.is_empty() || p == "~/" || p == "~" {
-                            self.step = Step::Integrations;
-                        } else {
+                        if !(p.is_empty() || p == "~/" || p == "~") {
                             return SetupEffect::AddRepo(p);
+                        }
+                        if self.reviews_mode && self.repos_added.is_empty() {
+                            self.repo_error = Some("Add at least one repository — review requests are searched in them".into());
+                        } else {
+                            return self.next(None);
                         }
                     }
                     _ => {}
                 }
             }
             Step::Integrations => match key {
-                Key::Esc => self.step = Step::Repos,
+                Key::Esc => self.back(),
                 Key::Tab | Key::Down | Key::Up => self.integration_field ^= 1,
-                Key::Char(' ') if self.integration_field == 0 => self.gh = !self.gh,
+                // Review-only mode can't do without GitHub: no checkbox.
+                Key::Char(' ') if self.integration_field == 0 && !self.reviews_mode => self.gh = !self.gh,
                 Key::Backspace if self.integration_field == 1 => {
                     self.linear_key.pop();
                 }
                 Key::Char(c) if self.integration_field == 1 => self.linear_key.push(c),
-                Key::Enter => self.step = if self.gh { Step::Reviews } else { Step::Context },
+                Key::Enter => return self.next(None),
                 _ => {}
             },
             Step::Reviews => {
+                let first = usize::from(self.reviews_mode);
+                let rows = REVIEW_ROWS - first;
                 let r = &mut self.review;
                 match key {
-                    Key::Esc => self.step = Step::Integrations,
-                    Key::Up | Key::BackTab | Key::Char('k') => r.field = (r.field + REVIEW_ROWS - 1) % REVIEW_ROWS,
-                    Key::Down | Key::Tab | Key::Char('j') => r.field = (r.field + 1) % REVIEW_ROWS,
+                    Key::Esc => self.back(),
+                    Key::Up | Key::BackTab | Key::Char('k') => r.field = first + (r.field - first + rows - 1) % rows,
+                    Key::Down | Key::Tab | Key::Char('j') => r.field = first + (r.field - first + 1) % rows,
                     Key::Char(' ') => r.toggle(),
-                    Key::Enter => self.step = Step::Context,
+                    Key::Enter => return self.next(None),
                     _ => {}
                 }
             }
@@ -273,7 +356,7 @@ impl Setup {
                 self.ctx_error = None;
                 let custom = self.ctx_choice == CONTEXT_CUSTOM;
                 match key {
-                    Key::Esc => self.step = if self.gh { Step::Reviews } else { Step::Integrations },
+                    Key::Esc => self.back(),
                     Key::Up => self.ctx_choice = (self.ctx_choice + CONTEXT_CUSTOM) % (CONTEXT_CUSTOM + 1),
                     Key::Down | Key::Tab => self.ctx_choice = (self.ctx_choice + 1) % (CONTEXT_CUSTOM + 1),
                     // On the custom row letters are input (`128k`, `1m`), so only arrows move.
@@ -294,34 +377,42 @@ impl Setup {
                                 }
                             },
                         };
-                        let key = self.linear_key.trim().to_string();
-                        let mut keys = vec![("ide", Value::from(IDES[self.ide].0))];
-                        if self.ide == IDE_CUSTOM {
-                            keys.push(("ideCommand", Value::from(self.ide_command.trim())));
-                        }
-                        keys.extend([
-                            ("ghPrStatus", Value::Bool(self.gh)),
-                            ("reviewRequestsEnabled", Value::Bool(self.review.enabled)),
-                            ("reviewRequestsScope", Value::from(am_core::settings::ReviewScope::IDS[self.review.scope.min(2)])),
-                            ("reviewDefaultGroup", serde_json::to_value(self.review.group()).unwrap_or_default()),
-                            ("linearEnabled", Value::Bool(!key.is_empty())),
-                            ("linearApiKey", Value::from(key)),
-                            ("contextWindowTokens", Value::from(tokens)),
-                            ("setupCompleted", Value::Bool(true)),
-                        ]);
-                        // The review groups follow the step (skipped with GitHub off).
-                        if self.gh
-                            && let Some(groups) = self.review.groups()
-                        {
-                            keys.push(("reviewGroups", serde_json::to_value(groups).unwrap_or_default()));
-                        }
-                        return SetupEffect::Finish(keys);
+                        return self.next(Some(tokens));
                     }
                     _ => {}
                 }
             }
         }
         SetupEffect::None
+    }
+
+    /// The keys finishing writes (plus the context window when the mode
+    /// asked for it). Review-only mode turns GitHub and review requests on.
+    fn finish(&self, context_tokens: Option<u64>) -> SetupEffect {
+        let key = self.linear_key.trim().to_string();
+        let mode = if self.reviews_mode { am_core::settings::AppMode::Reviews } else { am_core::settings::AppMode::Full };
+        let mut keys = vec![("appMode", Value::from(mode.id())), ("ide", Value::from(IDES[self.ide].0))];
+        if self.ide == IDE_CUSTOM {
+            keys.push(("ideCommand", Value::from(self.ide_command.trim())));
+        }
+        let gh = self.reviews_gh();
+        keys.extend([
+            ("ghPrStatus", Value::Bool(gh)),
+            ("reviewRequestsEnabled", Value::Bool(self.reviews_mode || self.review.enabled)),
+            ("reviewRequestsScope", Value::from(am_core::settings::ReviewScope::IDS[self.review.scope.min(2)])),
+            ("reviewDefaultGroup", serde_json::to_value(self.review.group()).unwrap_or_default()),
+            ("linearEnabled", Value::Bool(!key.is_empty())),
+            ("linearApiKey", Value::from(key)),
+        ]);
+        if let Some(tokens) = context_tokens {
+            keys.push(("contextWindowTokens", Value::from(tokens)));
+        }
+        keys.push(("setupCompleted", Value::Bool(true)));
+        // The review groups follow the step (skipped with GitHub off).
+        if gh && let Some(groups) = self.review.groups() {
+            keys.push(("reviewGroups", serde_json::to_value(groups).unwrap_or_default()));
+        }
+        SetupEffect::Finish(keys)
     }
 
     pub fn on_hooks_installed(&mut self, result: Result<Option<String>, String>) {
@@ -368,6 +459,8 @@ mod tests {
     fn setup() -> Setup {
         Setup {
             step: Step::Editor,
+            reviews_mode: false,
+            gh_found: true,
             ide: 0,
             ide_command: String::new(),
             ide_error: None,
@@ -474,7 +567,10 @@ mod tests {
         assert!(v.contains(&("linearEnabled", Value::Bool(true))));
         assert!(v.contains(&("linearApiKey", Value::from("lin_x"))));
         assert!(v.contains(&("ghPrStatus", Value::Bool(false))));
+        // Esc steps back to the first step (the mode), where it cancels.
         s.step = Step::Editor;
+        assert!(matches!(s.on_key(Key::Esc), SetupEffect::None));
+        assert_eq!(s.step, Step::Mode);
         assert!(matches!(s.on_key(Key::Esc), SetupEffect::Cancel));
 
         let first = Setup::new(vec![], &am_core::settings::Settings::parse(r#"{"linearApiKey":"lin_x"}"#));
@@ -482,6 +578,59 @@ mod tests {
         assert!(first.linear_key.is_empty());
         let mut first = first;
         assert!(matches!(first.on_key(Key::Esc), SetupEffect::None));
+    }
+
+    #[test]
+    fn review_only_mode_skips_hooks_and_context_and_needs_a_repo() {
+        let mut s = setup();
+        s.step = Step::Mode;
+        s.gh = false; // review-only mode ignores the GitHub checkbox
+        s.on_key(Key::Down);
+        assert!(s.reviews_mode);
+        s.on_key(Key::Enter);
+        assert_eq!(s.step, Step::Editor);
+        s.on_key(Key::Enter);
+        assert_eq!(s.step, Step::Repos, "no hooks step");
+        assert!(matches!(s.on_key(Key::Enter), SetupEffect::None));
+        assert_eq!(s.step, Step::Repos, "a repo is required");
+        assert!(s.repo_error.as_deref().is_some_and(|e| e.contains("at least one repository")));
+        s.on_repo_added("/r".into(), Ok("r".into()));
+        s.on_key(Key::Enter);
+        assert_eq!(s.step, Step::Integrations);
+        s.on_key(Key::Char(' '));
+        assert!(!s.gh, "no GitHub checkbox to toggle");
+        s.on_key(Key::Enter);
+        assert_eq!(s.step, Step::Reviews, "not skipped: GitHub is on in this mode");
+        assert_eq!(s.review.field, 1, "no on/off row");
+        s.on_key(Key::Up);
+        assert_eq!(s.review.field, 5, "wraps past the hidden row");
+        s.on_key(Key::Down);
+        assert_eq!(s.review.field, 1);
+        // Esc goes back along this mode's steps.
+        s.on_key(Key::Esc);
+        assert_eq!(s.step, Step::Integrations);
+        s.on_key(Key::Esc);
+        s.on_key(Key::Esc);
+        assert_eq!(s.step, Step::Editor, "back past the repos, not into hooks");
+        s.step = Step::Reviews;
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!("the reviews step finishes") };
+        assert!(v.contains(&("appMode", Value::from("reviews"))));
+        assert!(v.contains(&("ghPrStatus", Value::Bool(true))));
+        assert!(v.contains(&("reviewRequestsEnabled", Value::Bool(true))));
+        assert!(!v.iter().any(|(k, _)| *k == "contextWindowTokens"));
+        assert!(v.iter().any(|(k, _)| *k == "reviewGroups"));
+        assert!(v.contains(&("setupCompleted", Value::Bool(true))));
+    }
+
+    #[test]
+    fn a_rerun_starts_on_the_saved_mode_and_full_writes_full() {
+        let saved = am_core::settings::Settings::parse(r#"{"setupCompleted":true,"appMode":"reviews"}"#);
+        let mut s = Setup::new(vec!["work".into()], &saved);
+        assert_eq!((s.step, s.reviews_mode), (Step::Mode, true));
+        s.on_key(Key::Up);
+        s.step = Step::Context;
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        assert!(v.contains(&("appMode", Value::from("full"))));
     }
 
     #[test]

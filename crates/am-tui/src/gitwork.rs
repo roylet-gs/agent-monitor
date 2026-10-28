@@ -96,6 +96,12 @@ impl Tracker {
         jobs
     }
 
+    /// Rows sent to the git thread so far and still in flight (tests).
+    #[cfg(test)]
+    pub fn in_flight(&self) -> usize {
+        self.pending.len()
+    }
+
     /// Make the next full sweep refresh every row (`r`).
     pub fn deep_next(&mut self) {
         self.sweeps = 0;

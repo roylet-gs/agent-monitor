@@ -196,6 +196,17 @@ impl Command {
         })
     }
 
+    /// What the key does in review-only mode, where the review page is all
+    /// there is: [`Command::on_review_page`], except that leaving quits and
+    /// there's no list to split beside or window to open.
+    pub fn in_reviews_mode(self) -> Option<&'static str> {
+        match self {
+            Command::ReviewRequests | Command::Quit => Some("quit"),
+            Command::ReviewSplit | Command::ReviewWindow => None,
+            _ => self.on_review_page(),
+        }
+    }
+
     /// Key-bar text; `None` for commands that aren't on the bar.
     pub fn bar_label(self) -> Option<&'static str> {
         Some(match self {

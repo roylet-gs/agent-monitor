@@ -291,6 +291,11 @@ fn settings_set_coerces_and_validates() {
     assert!(o.code == 1 && o.stderr.contains("Use one of: direct, repo, updated, oldest"), "{}", o.stderr);
     env.ok(&["settings", "set", "reviewExcludeRepos", "docs, acme/web"]);
     assert_eq!(env.settings()["reviewExcludeRepos"], "docs, acme/web");
+
+    env.ok(&["settings", "set", "appMode", "reviews"]);
+    assert_eq!(env.settings()["appMode"], "reviews");
+    let o = env.run(&["settings", "set", "appMode", "dashboard"]);
+    assert!(o.code == 1 && o.stderr.contains("Use one of: full, reviews"), "{}", o.stderr);
 }
 
 #[test]

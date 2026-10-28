@@ -8,7 +8,8 @@ expression: "render(&app, 100, 24)"
 │ ◐ fix/│ Update: brew update && brew upgrade agent-monitor                                │░ 185k │
 │       │                                                                                  │       │
 │gridsig│ General                                                                          │───────│
-│ · main│▌  Open in                       vscode                                           │       │
+│ · main│▌  Mode                          full                                             │       │
+│       │   Open in                       vscode                                           │       │
 │       │   Editor command                —                                                │       │
 │       │   Resume last session on open   on                                               │       │
 │       │   Repositories…                 0 tracked                                        │       │
@@ -21,8 +22,7 @@ expression: "render(&app, 100, 24)"
 │       │   Git refresh (ms)              30000                                            │       │
 │       │                                                                                  │       │
 │       │ Appearance                                                                       │       │
-│       │   Theme                         ansi                                             │       │
 │       │                                                                                  │       │
-│       │ Which editor/IDE Enter opens worktrees in; custom runs Editor command            │       │
+│       │ reviews: open straight to the review page and hide the agent/worktree settings   │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
  ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
