@@ -111,6 +111,10 @@ pub struct Settings {
     pub daily_tokens_mode: String,
     /// Check GitHub Releases for a newer `am` and show it in the dashboard.
     pub check_for_updates: bool,
+    /// Inside cmux: show each worktree's PR, ticket and context use on its
+    /// cmux workspace's sidebar row, and post new review requests as cmux
+    /// notifications (`crate::cmux`). Does nothing outside cmux.
+    pub cmux_sync: bool,
     /// What `am` opens to (see [`AppMode`]): `full` (the dashboard) or
     /// `reviews` (only the review-requests page). Unknown values are `full`.
     pub app_mode: String,
@@ -221,6 +225,7 @@ impl Default for Settings {
             daily_tokens_scope: "all".into(),
             daily_tokens_mode: "tokens".into(),
             check_for_updates: true,
+            cmux_sync: true,
             app_mode: "full".into(),
             startup_script_mode: "pane".into(),
             key_bindings: Default::default(),
@@ -700,6 +705,13 @@ mod tests {
     fn context_window_defaults_to_1m() {
         assert_eq!(Settings::parse("{}").context_window_tokens, 1_000_000);
         assert_eq!(Settings::parse(r#"{"contextWindowTokens":200000}"#).context_window_tokens, 200_000);
+    }
+
+    #[test]
+    fn cmux_sync_defaults_on_and_parses() {
+        assert!(Settings::parse("{}").cmux_sync);
+        assert!(!Settings::parse(r#"{"cmuxSync":false}"#).cmux_sync);
+        assert_eq!(Settings::default().to_file_json()["cmuxSync"], true);
     }
 
     #[test]

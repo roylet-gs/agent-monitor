@@ -53,7 +53,7 @@ fn open() {
         LogView::Edit(path) => {
             let s = settings::load();
             let ide = IdeChoice::from_setting(&s.ide);
-            let r = if ide == IdeChoice::Terminal { edit_here(&path) } else { launch::open_in_editor(&path, ide, &s.ide_command) };
+            let r = if ide.is_terminal() { edit_here(&path) } else { launch::open_in_editor(&path, ide, &s.ide_command) };
             r.map(|()| format!("Opened {}", path.display()))
         }
     };

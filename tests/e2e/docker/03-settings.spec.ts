@@ -26,7 +26,7 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
   const before = await resumeValue(tui);
   const after = before === "on" ? "off" : "on";
   await tui.sendKey("j"); // cursor (on "Mode") → "Open in"
-  await tui.waitForText("Which editor/IDE Enter opens worktrees in");
+  await tui.waitForText("Where Enter opens worktrees");
   await tui.sendKey("j"); // → "Editor command"
   await tui.waitForText("For Open in = custom");
   await tui.sendKey("j"); // → "Resume last session on open"
@@ -76,18 +76,18 @@ test("Open in cycles to custom and takes an editor command", async ({ page }) =>
   await tui.sendKey("s");
   await tui.waitForText("esc close");
   await tui.sendKey("j"); // past "Mode"
-  await tui.waitForText("Which editor/IDE Enter opens worktrees in");
+  await tui.waitForText("Where Enter opens worktrees");
   expect(await rowValue(tui, OPEN_IN)).toBe("vscode");
   expect(await rowValue(tui, EDITOR_CMD)).toBe("—");
 
-  // Every choice in order: vscode → cursor → zed → windsurf → terminal → custom.
+  // Every choice in order: vscode → cursor → zed → windsurf → terminal → cmux → custom.
   const seen: string[] = [];
-  for (const want of ["cursor", "zed", "windsurf", "terminal", "custom"]) {
+  for (const want of ["cursor", "zed", "windsurf", "terminal", "cmux", "custom"]) {
     await tui.sendKey(" ");
     await tui.waitForMatch(new RegExp(`Open in {2,}${want}\\b`));
     seen.push(await rowValue(tui, OPEN_IN));
   }
-  expect(seen).toEqual(["cursor", "zed", "windsurf", "terminal", "custom"]);
+  expect(seen).toEqual(["cursor", "zed", "windsurf", "terminal", "cmux", "custom"]);
 
   // Editor command: Enter edits (prefilled with the current, empty value).
   await tui.sendKey("j");
@@ -111,7 +111,7 @@ test("Open in cycles to custom and takes an editor command", async ({ page }) =>
   expect(await rowValue(tui, EDITOR_CMD)).toBe("—");
 
   await tui.sendKey("k");
-  await tui.waitForText("Which editor/IDE Enter opens worktrees in");
+  await tui.waitForText("Where Enter opens worktrees");
   await cycleTo(tui, OPEN_IN, "vscode");
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");

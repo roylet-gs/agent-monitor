@@ -40,6 +40,8 @@ pub enum IdeChoice {
     Zed,
     Windsurf,
     Terminal,
+    /// A cmux workspace (`crate::cmux`).
+    Cmux,
     /// The `ideCommand` setting.
     Custom,
 }
@@ -47,15 +49,16 @@ pub enum IdeChoice {
 impl IdeChoice {
     /// Every `ide` value with its label, in the order the settings editor,
     /// setup wizard and CLI offer them.
-    pub const ALL: [(&'static str, &'static str); 6] = [
+    pub const ALL: [(&'static str, &'static str); 7] = [
         ("vscode", "VS Code"),
         ("cursor", "Cursor"),
         ("zed", "Zed"),
         ("windsurf", "Windsurf"),
         ("terminal", "Terminal"),
+        ("cmux", "cmux"),
         ("custom", "Custom command"),
     ];
-    pub const IDS: [&'static str; 6] = ["vscode", "cursor", "zed", "windsurf", "terminal", "custom"];
+    pub const IDS: [&'static str; 7] = ["vscode", "cursor", "zed", "windsurf", "terminal", "cmux", "custom"];
 
     /// Unknown values fall back to VS Code.
     pub fn from_setting(s: &str) -> IdeChoice {
@@ -64,9 +67,15 @@ impl IdeChoice {
             "zed" => IdeChoice::Zed,
             "windsurf" => IdeChoice::Windsurf,
             "terminal" => IdeChoice::Terminal,
+            "cmux" => IdeChoice::Cmux,
             "custom" => IdeChoice::Custom,
             _ => IdeChoice::Vscode,
         }
+    }
+
+    /// Opens in a terminal (the agent runs there itself), not an editor.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, IdeChoice::Terminal | IdeChoice::Cmux)
     }
 
     /// Shell CLI and macOS app name of a built-in editor.
@@ -76,7 +85,7 @@ impl IdeChoice {
             IdeChoice::Cursor => Some(("cursor", "Cursor")),
             IdeChoice::Zed => Some(("zed", "Zed")),
             IdeChoice::Windsurf => Some(("windsurf", "Windsurf")),
-            IdeChoice::Terminal | IdeChoice::Custom => None,
+            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
         }
     }
 }
@@ -108,7 +117,7 @@ pub fn resolve_open_action(resume_last_session: bool, already_open: bool, ide: I
     if !resume_last_session || already_open {
         return OpenAction::Plain;
     }
-    if ide == IdeChoice::Terminal {
+    if ide.is_terminal() {
         return OpenAction::TerminalAgent(resume);
     }
     if resume.session_id.is_none() && !resume.continue_session {
@@ -183,7 +192,8 @@ pub fn custom_command(cmd: &str, path: &Path) -> String {
 pub fn open_in_editor(path: &Path, ide: IdeChoice, custom_cmd: &str) -> Result<(), String> {
     let (cli, app) = match ide.editor() {
         Some(e) => e,
-        None if ide == IdeChoice::Terminal => return open_terminal(path, None),
+        None if ide == IdeChoice::Terminal => return open_terminal(path, None).map(|_| ()),
+        None if ide == IdeChoice::Cmux => return open_in_cmux(path, None, None),
         None => return open_custom(path, custom_cmd),
     };
     let result = run(Command::new(cli).arg(path)).or_else(|e| {
@@ -281,13 +291,21 @@ fn open_custom(path: &Path, cmd: &str) -> Result<(), String> {
     result.map_err(|e| format!("Couldn't run `{line}`: {e}"))
 }
 
-/// Which terminal app to drive. Inside an editor's integrated terminal
-/// (TERM_PROGRAM=vscode) there is no app to drive, so use Terminal.app.
+/// Which terminal app to drive. Inside cmux (its socket is in the
+/// environment; it reports TERM_PROGRAM=ghostty) new terminals are cmux
+/// workspaces. Inside an editor's integrated terminal (TERM_PROGRAM=vscode)
+/// there is no app to drive, so use Terminal.app.
 pub fn terminal_app() -> &'static str {
-    match std::env::var("TERM_PROGRAM").as_deref() {
-        Ok("iTerm.app") => "iTerm2",
-        Ok("ghostty") => "Ghostty",
-        Ok("WarpTerminal") => "Warp",
+    let cmux = std::env::var("CMUX_SOCKET_PATH").is_ok_and(|s| !s.is_empty());
+    terminal_app_for(std::env::var("TERM_PROGRAM").ok().as_deref(), cmux)
+}
+
+fn terminal_app_for(term_program: Option<&str>, cmux: bool) -> &'static str {
+    match term_program {
+        _ if cmux => "cmux",
+        Some("iTerm.app") => "iTerm2",
+        Some("ghostty") => "Ghostty",
+        Some("WarpTerminal") => "Warp",
         _ => "Terminal",
     }
 }
@@ -296,53 +314,114 @@ fn applescript_string(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// Open a new terminal window/tab at `path`, optionally running `command`.
-pub fn open_terminal(path: &Path, command: Option<&str>) -> Result<(), String> {
+/// The cmux CLI: the app bundle's copy that cmux names in our environment,
+/// else `cmux` on `$PATH`.
+fn cmux_cli() -> String {
+    std::env::var("CMUX_BUNDLED_CLI_PATH").ok().filter(|p| Path::new(p).is_file()).unwrap_or_else(|| "cmux".into())
+}
+
+/// `cmux new-workspace` arguments. cmux runs `command` in the workspace's
+/// login shell, which stays open after it (like the `exec $SHELL` the other
+/// apps get), and leaves a new workspace in the background unless told to
+/// focus it.
+fn cmux_args(dir: &str, command: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = ["new-workspace", "--cwd", dir, "--focus", "true"].iter().map(|s| s.to_string()).collect();
+    if let Some(cmd) = command {
+        args.extend(["--command".into(), cmd.into()]);
+    }
+    args
+}
+
+/// Where [`open_terminal`] opened, for messages: `a new Ghostty window`.
+fn opened_in(app: &str) -> String {
+    match app {
+        "cmux" => "a new cmux workspace".into(),
+        _ => format!("a new {app} window"),
+    }
+}
+
+/// Open a new terminal at `path`, optionally running `command`, and say
+/// where (`a new cmux workspace`, `a new iTerm2 window`): a workspace inside
+/// cmux, else a window or tab of the terminal app am runs in. On macOS, when
+/// that app can't be driven (a Ghostty-based terminal without Ghostty.app,
+/// automation refused) Terminal.app opens instead.
+pub fn open_terminal(path: &Path, command: Option<&str>) -> Result<String, String> {
     let dir = path.to_string_lossy();
-    let shell_cmd = match command {
-        Some(c) => format!("cd {} && {c}", sh_quote(&dir)),
-        None => format!("cd {}", sh_quote(&dir)),
+    let app = match terminal_app() {
+        "cmux" => "cmux",
+        _ if !cfg!(target_os = "macos") => "x-terminal-emulator",
+        app => app,
     };
-    let app = terminal_app();
-    let result = if !cfg!(target_os = "macos") {
-        let mut c = Command::new("x-terminal-emulator");
-        c.arg(format!("--working-directory={dir}"));
-        if let Some(cmd) = command {
-            c.args(["-e", "sh", "-c", cmd]);
-        }
-        run(&mut c)
-    } else {
-        match app {
-            "iTerm2" => {
-                let cmd = applescript_string(&format!("/bin/zsh -lc {}", sh_quote(&format!("{shell_cmd}; exec $SHELL"))));
-                let script = format!(
-                    "tell application \"iTerm2\"\n activate\n if (count of windows) > 0 then\n  tell current window to create tab with default profile command {cmd}\n else\n  create window with default profile command {cmd}\n end if\nend tell"
-                );
-                run(Command::new("osascript").arg("-e").arg(script))
-            }
-            "Ghostty" => {
-                let mut c = Command::new("open");
-                c.args(["-na", "Ghostty", "--args"]).arg(format!("--working-directory={dir}"));
-                if let Some(cmd) = command {
-                    c.arg("-e").args(["/bin/zsh", "-lc", &format!("{cmd}; exec $SHELL")]);
-                }
-                run(&mut c)
-            }
-            "Warp" if command.is_none() => run(Command::new("open").args(["-a", "Warp"]).arg(path)),
-            _ => {
-                let script = format!(
-                    "tell application \"Terminal\"\n activate\n do script {}\nend tell",
-                    applescript_string(&shell_cmd)
-                );
-                run(Command::new("osascript").arg("-e").arg(script))
-            }
-        }
-    };
+    let mut result = open_terminal_in(app, &dir, command).map(|()| app);
+    if let Err(e) = &result
+        && cfg!(target_os = "macos")
+        && app != "Terminal"
+    {
+        warn!("launch", "Failed to open {app} at {dir}: {e}; trying Terminal");
+        result = open_terminal_in("Terminal", &dir, command).map(|()| "Terminal").or(result);
+    }
     match &result {
-        Ok(()) => info!("launch", "Opened {app} at {dir} (command: {})", command.unwrap_or("-")),
+        Ok(opened) => info!("launch", "Opened {opened} at {dir} (command: {})", command.unwrap_or("-")),
         Err(e) => warn!("launch", "Failed to open {app} at {dir}: {e}"),
     }
-    result.map_err(|e| format!("Couldn't open {app}: {e}"))
+    result.map(opened_in).map_err(|e| format!("Couldn't open {app}: {e}"))
+}
+
+fn open_terminal_in(app: &str, dir: &str, command: Option<&str>) -> Result<(), String> {
+    let shell_cmd = match command {
+        Some(c) => format!("cd {} && {c}", sh_quote(dir)),
+        None => format!("cd {}", sh_quote(dir)),
+    };
+    match app {
+        "cmux" => run(Command::new(cmux_cli()).args(cmux_args(dir, command))),
+        "x-terminal-emulator" => {
+            let mut c = Command::new("x-terminal-emulator");
+            c.arg(format!("--working-directory={dir}"));
+            if let Some(cmd) = command {
+                c.args(["-e", "sh", "-c", cmd]);
+            }
+            run(&mut c)
+        }
+        "iTerm2" => {
+            let cmd = applescript_string(&format!("/bin/zsh -lc {}", sh_quote(&format!("{shell_cmd}; exec $SHELL"))));
+            let script = format!(
+                "tell application \"iTerm2\"\n activate\n if (count of windows) > 0 then\n  tell current window to create tab with default profile command {cmd}\n else\n  create window with default profile command {cmd}\n end if\nend tell"
+            );
+            run(Command::new("osascript").arg("-e").arg(script))
+        }
+        "Ghostty" => {
+            let mut c = Command::new("open");
+            c.args(["-na", "Ghostty", "--args"]).arg(format!("--working-directory={dir}"));
+            if let Some(cmd) = command {
+                c.arg("-e").args(["/bin/zsh", "-lc", &format!("{cmd}; exec $SHELL")]);
+            }
+            run(&mut c)
+        }
+        "Warp" if command.is_none() => run(Command::new("open").args(["-a", "Warp", dir])),
+        _ => {
+            let script = format!(
+                "tell application \"Terminal\"\n activate\n do script {}\nend tell",
+                applescript_string(&shell_cmd)
+            );
+            run(Command::new("osascript").arg("-e").arg(script))
+        }
+    }
+}
+
+/// A new cmux workspace at `path` running `command`, named `name` (else
+/// after the directory). Outside cmux the socket won't answer (see
+/// `crate::cmux`), so the directory is opened with `cmux <path>` and the
+/// command doesn't run: callers with a resume command check
+/// `crate::cmux::inside()` first.
+pub fn open_in_cmux(path: &Path, name: Option<&str>, command: Option<&str>) -> Result<(), String> {
+    let runner = crate::cmux::SystemCmux;
+    let dir_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string_lossy().into_owned());
+    let result = if crate::cmux::inside() {
+        crate::cmux::create_workspace(&runner, path, name.unwrap_or(&dir_name), command)
+    } else {
+        crate::cmux::open_path(&runner, path)
+    };
+    result.map_err(|e| format!("Couldn't open cmux: {e}"))
 }
 
 /// Bring the terminal app forward (a terminal is already open at the worktree).
@@ -377,6 +456,28 @@ mod tests {
 
     fn resume(id: Option<&str>, cont: bool) -> Resume {
         Resume { session_id: id.map(str::to_owned), continue_session: cont, ..Default::default() }
+    }
+
+    #[test]
+    fn cmux_is_picked_before_the_ghostty_it_reports() {
+        assert_eq!(terminal_app_for(Some("ghostty"), true), "cmux");
+        assert_eq!(terminal_app_for(None, true), "cmux");
+        assert_eq!(terminal_app_for(Some("ghostty"), false), "Ghostty");
+        assert_eq!(terminal_app_for(Some("iTerm.app"), false), "iTerm2");
+        assert_eq!(terminal_app_for(Some("WarpTerminal"), false), "Warp");
+        assert_eq!(terminal_app_for(Some("vscode"), false), "Terminal");
+        assert_eq!(terminal_app_for(None, false), "Terminal");
+    }
+
+    #[test]
+    fn cmux_opens_a_focused_workspace_running_the_command() {
+        assert_eq!(cmux_args("/w/t", None), ["new-workspace", "--cwd", "/w/t", "--focus", "true"]);
+        assert_eq!(
+            cmux_args("/w/t", Some("AM_PR_NUMBER='61' /bin/sh '/s/r.review.sh'")),
+            ["new-workspace", "--cwd", "/w/t", "--focus", "true", "--command", "AM_PR_NUMBER='61' /bin/sh '/s/r.review.sh'"]
+        );
+        assert_eq!(opened_in("cmux"), "a new cmux workspace");
+        assert_eq!(opened_in("Ghostty"), "a new Ghostty window");
     }
 
     #[test]

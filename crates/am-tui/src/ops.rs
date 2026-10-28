@@ -66,11 +66,10 @@ pub fn run_script(kind: ScriptKind, repo_id: String, cwd: String, in_window: boo
             let cmd = format!("{vars}/bin/sh {}", launch::sh_quote(&script.to_string_lossy()));
             let _ = tx.send(Msg::JobStep(job, format!("Opening a terminal for the {}…", kind.label())));
             match launch::open_terminal(Path::new(&cwd), Some(&cmd)) {
-                Ok(()) => {
-                    let app = if cfg!(target_os = "macos") { launch::terminal_app() } else { "x-terminal-emulator" };
-                    let _ = tx.send(Msg::JobStep(job, format!("Running in a new {app} window")));
+                Ok(place) => {
+                    let _ = tx.send(Msg::JobStep(job, format!("Running in {place}")));
                     if kind == ScriptKind::Review {
-                        let _ = tx.send(Msg::Popup(format!("✓ The review script{} is running in a new {app} window", pr_label(&env))));
+                        let _ = tx.send(Msg::Popup(format!("✓ The review script{} is running in {place}", pr_label(&env))));
                     }
                     let _ = tx.send(Msg::ScriptDone(job, Ok(())));
                     return;

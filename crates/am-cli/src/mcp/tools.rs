@@ -380,6 +380,18 @@ pub static TOOLS: &[Tool] = &[
         build: |a| switch(repo(cmd(&["script", "remove"]), a), a, "review", "--review"),
     },
     Tool {
+        name: "cmux_dock",
+        description: "Add am (the dashboard, optionally the review page) to the cmux terminal's Dock, its right sidebar: ~/.config/cmux/dock.json, or the project's .cmux/dock.json. Backs up an existing file.",
+        params: &[
+            opt("project", Kind::Bool, "Write .cmux/dock.json in the current project instead of the user's own"),
+            opt("reviews", Kind::Bool, "Also add the review-requests page as its own Dock control"),
+            opt("remove", Kind::Bool, "Take am's controls out instead"),
+        ],
+        hints: WRITE_SAME,
+        timeout: SHORT,
+        build: |a| switch(switch(switch(cmd(&["cmux", "dock"]), a, "project", "--project"), a, "reviews", "--reviews"), a, "remove", "--remove"),
+    },
+    Tool {
         name: "doctor",
         description: "Health checks: app dir, database, settings, hooks, gh CLI, Linear key, themes.",
         params: &[],

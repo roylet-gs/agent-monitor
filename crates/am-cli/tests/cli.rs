@@ -256,7 +256,7 @@ fn settings_set_coerces_and_validates() {
     assert_eq!(env.settings()["ide"], "zed");
     let o = env.run(&["settings", "set", "ide", "notepad"]);
     assert_eq!(o.code, 1);
-    assert!(o.stderr.contains("Use one of: vscode, cursor, zed, windsurf, terminal, custom"), "{}", o.stderr);
+    assert!(o.stderr.contains("Use one of: vscode, cursor, zed, windsurf, terminal, cmux, custom"), "{}", o.stderr);
     env.ok(&["settings", "set", "ideCommand", "open -a Nova {path}"]);
     assert_eq!(env.settings()["ideCommand"], "open -a Nova {path}");
 
@@ -2038,4 +2038,32 @@ fn mcp_install_uses_the_claude_cli_when_present() {
     let calls: Vec<&str> = calls.lines().collect();
     assert_eq!(calls[0], "mcp remove --scope user agent-monitor");
     assert!(calls[1].starts_with("mcp add-json --scope user agent-monitor {\"type\":\"stdio\",\"command\":"), "{}", calls[1]);
+}
+
+#[test]
+fn cmux_dock_project_names_plain_am_and_remove_creates_nothing() {
+    let env = Env::new();
+    let proj = env.root().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    let dock = proj.join(".cmux").join("dock.json");
+
+    // Nothing there: --remove leaves it that way (no `{"controls": []}`).
+    let o = env.run_in(Some(&proj), &["cmux", "dock", "--project", "--remove"]);
+    assert_eq!(o.code, 0, "{}{}", o.stdout, o.stderr);
+    assert!(!dock.exists());
+
+    env.run_in(Some(&proj), &["cmux", "dock", "--project", "--reviews"]);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&dock).unwrap()).unwrap();
+    assert_eq!(v["controls"][0]["command"], "am");
+    assert_eq!(v["controls"][1]["command"], "am reviews");
+    // Run again over an existing file: still no backup in the repo.
+    env.run_in(Some(&proj), &["cmux", "dock", "--project"]);
+    let names: Vec<String> =
+        std::fs::read_dir(proj.join(".cmux")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, ["dock.json"]);
+
+    // A file without am's controls isn't rewritten by --remove.
+    std::fs::write(&dock, r#"{"controls":[{"id":"git","title":"Git","command":"lazygit"}]}"#).unwrap();
+    env.run_in(Some(&proj), &["cmux", "dock", "--project", "--remove"]);
+    assert_eq!(std::fs::read_to_string(&dock).unwrap(), r#"{"controls":[{"id":"git","title":"Git","command":"lazygit"}]}"#);
 }

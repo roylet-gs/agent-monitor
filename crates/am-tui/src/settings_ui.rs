@@ -64,7 +64,7 @@ const SOUNDS: &[&str] =
 
 pub const FIELDS: &[Field] = &[
     Field { key: "appMode", label: "Mode", help: "reviews: open straight to the review page and hide the agent/worktree settings", section: "General", kind: Kind::Choice(&am_core::settings::AppMode::IDS) },
-    Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
+    Field { key: "ide", label: "Open in", help: "Where Enter opens worktrees; cmux switches to or makes a workspace; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
     Field { key: "repositories", label: "Repositories…", help: "Add or stop tracking repositories, edit their startup and review scripts", section: "General", kind: Kind::Repos },
@@ -96,6 +96,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only show processes and agent commands whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
     Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
+    Field { key: "cmuxSync", label: "cmux sidebar", help: "Inside cmux: PR, ticket and context on each worktree's workspace; review requests as notifications", section: "Notifications", kind: Kind::Bool },
     Field { key: "audioWaitingSound", label: "Waiting sound", help: "Played when an agent needs you", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "audioDoneSound", label: "Done sound", help: "Played when an agent finishes", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "ghPrStatus", label: "Fetch PRs", help: "GitHub PR and CI status via gh", section: "GitHub", kind: Kind::Bool },
@@ -143,6 +144,7 @@ pub const REVIEW_MODE_FIELDS: &[&str] = &[
     "themeBuilder",
     "compactView",
     "checkForUpdates",
+    "cmuxSync",
     "reviewRequestsScope",
     "reviewGroups",
     "reviewBadgeTotal",
