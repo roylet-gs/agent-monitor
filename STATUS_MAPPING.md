@@ -22,7 +22,7 @@ The rules are written against Claude Code's event vocabulary, which is am's **ca
 2. **Subagent bookkeeping** (always, even if the status won't change; see [Subagent Tracking](#subagent-tracking)).
 3. **Count running subagents** for the owner *after* step 2. This `running` count is an input to the rules below, and is mirrored into `active_subagents` for 1.x compatibility.
 4. **Map the event** with `map_event_to_status(event, current, running)`. `None` means "leave the status alone".
-5. **Write.** If the status, `is_open` and `session_id` are unchanged and there's no new message, only `updated_at` is touched. Otherwise the row is upserted. `is_open` is false only after `SessionEnd`. `last_response` comes from `last_assistant_message` (main-agent events only, not subagent lifecycle) or a `Notification`'s `message`. Events from inside a subagent never write `session_id` or `last_response`.
+5. **Write.** If the status, `is_open` and `session_id` are unchanged and there's no new message, only `updated_at` is touched. Otherwise the row is upserted. `is_open` is false only after `SessionEnd`; a `SessionEnd` for a session with no row is skipped (nothing to close). `last_response` comes from `last_assistant_message` (main-agent events only, not subagent lifecycle) or a `Notification`'s `message`. Events from inside a subagent never write `session_id` or `last_response`.
 
 ## Event Origin
 
@@ -238,10 +238,11 @@ The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has
 
 | Muse event | Canonical event | Resulting status |
 | --- | --- | --- |
-| `SessionStart` / `SessionEnd` | same | `idle` |
+| `SessionStart` | ignored (a session opens with its first prompt) | — |
+| `SessionEnd` | same | `idle`, closed (skipped for a session am never saw) |
 | `UserPromptSubmit` | same | `executing` |
 | `Notification` | same | `waiting` when `notification_type` is `permission_prompt`/`elicitation_dialog`, `idle_prompt` as for Claude, otherwise no change |
-| `Stop` | same | `done` after work, else `idle` (stays `waiting` after a prompt, since no tool event moves it back) |
+| `Stop` | same | `done` after work or a permission prompt, else `idle` |
 | `StopFailure` | same | `idle` |
 
-There are no tool hooks, so a Muse turn shows `executing` without tool detail, and a `waiting` set by a permission prompt lasts until the next prompt. Muse's internal child sessions (reminders, delegated subagents) fire the same hooks with `turn_id == session_id`; they are ignored, so they never show up as extra sessions or move the status. No project-dir variable: the directory is the payload's `cwd`.
+There are no tool hooks, so a Muse turn shows `executing` without tool detail, and nothing says when a permission prompt was answered: Muse events are marked `turn_events_only`, and for those `Stop` after `waiting` gives `done` (for other harnesses it stays `waiting`). Muse's internal child sessions (reminders, delegated subagents) fire the same hooks with `turn_id == session_id`; they are ignored, so they never show up as extra sessions or move the status, except a child's permission prompt/elicitation, which is kept without its session id so the owner's row reads `waiting` (until the top-level session's next event rewrites the headline). Lifecycle events carry no `turn_id`, so a child's `SessionStart` couldn't be told from a top-level one; Muse's `SessionStart` is therefore ignored, and a child's `SessionEnd` finds no session to close. No project-dir variable: the directory is the payload's `cwd`.

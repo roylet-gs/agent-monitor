@@ -68,6 +68,10 @@ pub struct HookEvent {
     pub agent_id: Option<String>,
     pub agent_type: Option<String>,
     pub agent_transcript_path: Option<String>,
+    /// Set by a provider whose harness fires only session/turn hooks (no tool
+    /// events, e.g. Muse): nothing reports that a permission prompt was
+    /// answered, so its `Stop` ends a `waiting` turn as `done`.
+    pub turn_events_only: bool,
 }
 
 impl HookEvent {
@@ -97,6 +101,7 @@ impl HookEvent {
             agent_id: s("agent_id").filter(|a| !a.is_empty()),
             agent_type: s("agent_type"),
             agent_transcript_path: s("agent_transcript_path"),
+            turn_events_only: false,
         }
     }
 
@@ -220,7 +225,9 @@ pub fn map_event_to_status(
                 return Some(Delegating);
             }
             if current == Some(Waiting) {
-                return Some(Waiting);
+                // Without tool events nothing moved the turn back to executing
+                // after the prompt was answered, so the turn just finished.
+                return Some(if event.turn_events_only { Done } else { Waiting });
             }
             if event.plan_mode() || current == Some(Planning) {
                 return Some(Waiting);

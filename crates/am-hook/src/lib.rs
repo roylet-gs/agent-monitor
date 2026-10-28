@@ -160,6 +160,12 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
     // don't overwrite each other; the owner's row is their headline.
     if let Some(sid) = ev.session_id.as_deref() {
         let session = db::get_session(&conn, kind, sid)?;
+        // Nothing to close, and recording it would only add a closed session
+        // (e.g. a Muse child session's end, which can't be told apart).
+        if session.is_none() && ev.is("SessionEnd") {
+            debug!(MODULE, "SessionEnd for unknown session {sid} in {root_str}; skipped");
+            return Ok(());
+        }
         let running = db::running_subagents_in(&conn, &owner, sid)?;
         let current_status = session.as_ref().map(|s| s.status);
         match status::map_event_to_status(ev, current_status, running) {
