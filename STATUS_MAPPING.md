@@ -217,7 +217,7 @@ Set `AM_HOOK_CAPTURE=1` in Claude Code's environment to save the latest raw payl
 
 Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gemini sessions never reach `delegating` and record nothing in `subagents`.
 
-**Codex CLI** (`--agent codex`), **Qwen Code** (`--agent qwen`), **Factory Droid** (`--agent droid`), **GitHub Copilot CLI** (`--agent copilot`) and **CodeBuddy Code** (`--agent codebuddy`) send Claude Code's event names and payload keys, so the rules above apply unchanged once tool names are mapped (Codex `apply_patch` → `Edit`; Qwen `run_shell_command` → `Bash`…; Droid `Execute` → `Bash`, `Create` → `Write`). Differences:
+**Codex CLI** (`--agent codex`), **Qwen Code** (`--agent qwen`), **Factory Droid** (`--agent droid`), **GitHub Copilot CLI** (`--agent copilot`), **Qoder CLI** (`--agent qoder`, Claude's tool names too) and **CodeBuddy Code** (`--agent codebuddy`) send Claude Code's event names and payload keys, so the rules above apply unchanged once tool names are mapped (Codex `apply_patch` → `Edit`; Qwen `run_shell_command` → `Bash`…; Droid `Execute` → `Bash`, `Create` → `Write`). Differences:
 
 - Codex: `Interrupt` (the user stopped the turn) → `Stop`. No `Notification`; `waiting` comes from `PermissionRequest`. Subagent events carry `agent_id`, so `delegating` works.
 - Droid: a cancelled turn sends `Notification` (`idle_prompt`) rather than `Stop`. No `SubagentStart`, so its subagents aren't tracked.

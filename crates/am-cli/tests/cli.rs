@@ -525,6 +525,34 @@ fn hooks_installed(on: &[&str]) -> Value {
     Value::Object(builtin_ids().into_iter().map(|id| (id.to_string(), Value::Bool(on.contains(&id)))).collect())
 }
 
+#[test]
+fn hooks_for_qoder() {
+    let mut env = Env::new();
+    let fake_hook = env.bin().join("my-am-hook");
+    std::fs::write(&fake_hook, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&fake_hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+    env.extra_env.push(("AM_HOOK_BIN".into(), fake_hook.display().to_string()));
+
+    // Qoder CLI: Claude-style nested entries in ~/.qoder/settings.json, timeout in seconds.
+    let qoder_settings = env.home().join(".qoder/settings.json");
+    std::fs::create_dir_all(qoder_settings.parent().unwrap()).unwrap();
+    std::fs::write(&qoder_settings, json!({"model": "auto"}).to_string()).unwrap();
+    assert_eq!(env.ok(&["hooks", "install", "--agent", "qoder"]).stdout, "Hooks installed into ~/.qoder/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&qoder_settings).unwrap()).unwrap();
+    assert_eq!(v["model"], "auto");
+    assert_eq!(v["hooks"].as_object().unwrap().len(), 11);
+    let stop = &v["hooks"]["Stop"][0]["hooks"][0];
+    assert_eq!((stop["type"].as_str(), stop["timeout"].as_u64()), (Some("command"), Some(5)));
+    assert_eq!(
+        stop["command"],
+        format!("\"{}\" hook-event --agent qoder --worktree \"$QODER_PROJECT_DIR\" --event Stop", fake_hook.display())
+    );
+    assert_eq!(env.ok(&["hooks", "status", "--json"]).json()["agents"]["qoder"], true);
+    assert_eq!(env.ok(&["hooks", "uninstall", "--agent", "qoder"]).stdout, "Hooks removed from ~/.qoder/settings.json\n");
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&qoder_settings).unwrap()).unwrap();
+    assert_eq!(v, json!({"model": "auto"}));
+}
+
 /// With nothing to resume, `am agent attach` suggests the default agent's
 /// fresh-start command, `resume.start` included (`acli rovodev run`).
 #[test]
