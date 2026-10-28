@@ -29,6 +29,8 @@
   - [Stacked Branches](#stacked-branches)
 - [Worktree Management](#worktree-management)
 - [GitHub and Linear](#github-and-linear)
+  - [Review Requests](#review-requests)
+  - [Review-only mode](#review-only-mode)
 - [Startup Scripts](#startup-scripts)
 - [Settings](#settings)
 - [Themes](#themes)
@@ -56,7 +58,7 @@ brew install agent-monitor
 am
 ```
 
-On first launch a setup wizard picks your editor, installs the agent hooks (Claude Code, plus every other supported harness whose config dir exists, e.g. `~/.gemini`, `~/.codex`, `~/.cursor`), adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
+On first launch a setup wizard asks whether you want the full dashboard or only the PRs waiting on your review ([review-only mode](#review-only-mode)), then picks your editor, installs the agent hooks (Claude Code, plus every other supported harness whose config dir exists, e.g. `~/.gemini`, `~/.codex`, `~/.cursor`), adds your repositories, configures the GitHub/Linear integrations and sets the context window for the context bar.
 
 ---
 
@@ -129,6 +131,7 @@ Prebuilt tarballs for each platform (with `SHA256SUMS`) are also attached to eve
 
 Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walks through:
 
+0. **Mode**: *Agents & worktrees* (the full dashboard) or *Review requests only* ([review-only mode](#review-only-mode), which skips the hooks and context-window steps, needs at least one repository, and turns GitHub and review requests on)
 1. **Editor**: Cursor, VS Code or Terminal (what `Enter` opens worktrees in)
 2. **Agent hooks**: installs am's hooks into `~/.claude/settings.json` and into each other harness in use (see [Supported harnesses](#supported-harnesses)), pointing at the native `am-hook`
 3. **Repositories**: type a path (Tab completes) to start tracking a repo and its worktrees
@@ -136,7 +139,7 @@ Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walk
 5. **Review requests** (with GitHub on): show the PRs waiting on your review, whose requests count (you and your teams, only you, or only your teams), and whether to hide drafts and PRs you've already reviewed. Your choice sets up the review page's groups: an **Asked you** group and/or an **Asked your team** group, each hiding drafts and reviewed PRs if you said so (running setup again replaces only groups it made itself)
 6. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
 
-Everything can be changed later: `s` for settings (**Repositories…** manages the tracked repos), `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use **Settings → Run setup again…** or `am setup`. It starts from your current settings and repositories, nothing is saved until you finish it, and `Esc` on the first step closes it. **Settings → Reset settings…** (confirm with `y`) puts every setting back to its default and then opens the wizard. Repositories, worktrees, history, custom themes, startup scripts and agent hooks are kept. Run `am doctor` to check the setup.
+Everything can be changed later (the mode too: **Settings → Mode**): `s` for settings (**Repositories…** manages the tracked repos), `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use **Settings → Run setup again…** or `am setup`. It starts from your current settings and repositories, nothing is saved until you finish it, and `Esc` on the first step closes it. **Settings → Reset settings…** (confirm with `y`) puts every setting back to its default and then opens the wizard. Repositories, worktrees, history, custom themes, startup scripts and agent hooks are kept. Run `am doctor` to check the setup.
 
 ---
 
@@ -314,6 +317,17 @@ Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking o
 | `Esc` / `q` / `v` | Back to the dashboard (beside the list: `Esc`/`q`/`V` close the page and `v` gives it the whole screen) |
 | `Tab` | Beside the list: hand the keys to the list (or the Jobs pane). On the full page: to the Jobs pane and back |
 
+### Review-only mode
+
+If you only want the review page, pick **Review requests only** on the setup wizard's first step, or set **Settings → Mode** to `reviews` (`am settings set appMode reviews`). `am` then opens straight to the review page, full screen, and nothing else:
+
+- `Esc`/`q` quits; there's no worktree list to go back to, so `V` and `Ctrl+V` do nothing and `t` on an already-pulled PR just says so (`⏎` opens it, `d` removes it). Pulls and removals still run in the Jobs pane beside the page.
+- Settings lists only what the page uses: mode, editor, repositories, key bindings, mouse, appearance, update check, the review-request settings, Linear (for each PR's ticket), logging and setup. Everything else keeps its value for when you switch back. Key bindings lists only the page's keys, and `h` shows the page's own help.
+- am does no dashboard work in the background: no agent hooks are needed (`am doctor` doesn't warn about them), and there's no git status, process scan, context or token usage, or PR/ticket fetching for worktrees. It still lists worktrees, so it knows which PRs you've pulled.
+- The `⬆ vX.Y.Z available` notice sits on the page's top border.
+
+Switching **Settings → Mode** to `reviews` turns GitHub PR status and review requests on (the page needs them, so Settings hides their switches) and opens the page at once. Switching back to `full` keeps you on the page, and `Esc` then shows the dashboard. To open the page alone once without changing the mode, run `am reviews` (the same as `Ctrl+V`, in this terminal).
+
 What counts is set under **Settings → Review requests** (or in the setup wizard): `reviewRequestsScope` (`all`: requested from you or a team you're on, `direct`: you by name, `teams`: only your teams) decides what's fetched, across every tracked repo. **Groups** (`f` → **Groups…**) split the page: each group takes the PRs its rules match and passes the rest down to the next, top to bottom; what no group takes falls to the **default group** at the bottom, which can have rules too: what it doesn't match is hidden (the bottom border then says `N hidden`). With no groups, everything is in the default group and the page looks as it always has. Each group (the default one too) has its own order, `direct` (PRs asking you by name first), `repo`, `updated` (newest first) or `oldest` (waiting longest), and its own filters: authors, who's asked (you by name, or one of your teams), specific teams, only / not in repos, draft or ready, CI checks, review state, whether you've already reviewed it, age (older than N days), whether it has a Linear ticket, text in the title or branch, and GitHub search terms (`label:urgent -author:app/dependabot`, checked by GitHub in the same request). A new default group has every filter off; settings from before groups (`reviewHideDrafts`, `reviewHideReviewed`, `reviewIncludeRepos`, `reviewExcludeRepos`, `reviewSearchQualifiers`, `reviewSort`) become the default group's filters and order. Rows always show the PR's `@author` in full; a long title is cut instead. All of a group's rules must match; a list (authors, teams, repos) matches any of its entries. On the groups page `a` adds a group under the selected one, `x` removes it, `J`/`K` move it, `⏎` edits it, `space` switches it off or on (a group that's off takes nothing, so its PRs fall to the next group; the default group off hides everything no group took) and `b` toggles whether it's counted on the dashboard. In a group's form, the authors, teams and repos lists autocomplete: people who can author PRs in your tracked repos (each repo's assignable users on GitHub, looked up at most once an hour and cached, plus the authors already on the page), the teams asked in the list, and your tracked repos; `⇥` (or `⏎` partway through a name) takes the highlighted suggestion, `↑`/`↓` pick, and a click takes one; an entry that matches no known person, team or repo is flagged with ⚠ (a group that never matches anything gets no section on the page). While the groups page is open it sits at the bottom of the page, and the page above previews the groups as you edit them, keystroke by keystroke, from the PRs already loaded: no GitHub calls until a group's GitHub search terms change. GitHub has no push channel a local app can subscribe to, so this is polling: one GraphQL request per refresh.
 
 ---
@@ -384,6 +398,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `audioNotifications` | `false` | Play a macOS system sound when an agent starts waiting or finishes |
 | `audioWaitingSound` | `"Glass"` | Sound for waiting |
 | `audioDoneSound` | `"Funk"` | Sound for done |
+| `appMode` | `"full"` | `full` (the dashboard) or `reviews` ([review-only mode](#review-only-mode): `am` opens to the review page alone) |
 | `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
@@ -520,6 +535,7 @@ am --version
 | `am perf` | How long each part of am has been taking (UI frames, the collector, git, GitHub/Linear, hooks), from the log, against per-stage budgets | `--since <window>` (`30m`, `1h`, `2d`, `all`; default `24h`), `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear`, `--open` (in your editor, or the folder once rotated) |
 | `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run; also Settings → Run setup again…) | |
+| `am reviews` | Open only the review-requests page, this once (`appMode` is unchanged; `Esc` quits). Alias `am review` | |
 | `am hook-event` | Receive a hook event on stdin (used by the agent CLIs; same handler as `am-hook`) | `-w, --worktree <path>`, `-e, --event <name>`, `-a, --agent <id>` |
 
 </details>

@@ -63,6 +63,7 @@ const SOUNDS: &[&str] =
     &["Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"];
 
 pub const FIELDS: &[Field] = &[
+    Field { key: "appMode", label: "Mode", help: "reviews: open straight to the review page and hide the agent/worktree settings", section: "General", kind: Kind::Choice(&am_core::settings::AppMode::IDS) },
     Field { key: "ide", label: "Open in", help: "Which editor/IDE Enter opens worktrees in; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },
@@ -128,6 +129,36 @@ pub const FIELDS: &[Field] = &[
 pub const REVIEW_FILTERS: &[&str] =
     &["reviewRequestsScope", "reviewGroups", "reviewBadgeTotal", "resetReviewFilters", "resetReviewGroups"];
 
+/// The rows Settings shows in review-only mode (`appMode: "reviews"`):
+/// what the review page uses. The rest keep their values for the full
+/// dashboard.
+pub const REVIEW_MODE_FIELDS: &[&str] = &[
+    "appMode",
+    "ide",
+    "ideCommand",
+    "repositories",
+    "keyBindings",
+    "mouseEnabled",
+    "theme",
+    "themeBuilder",
+    "compactView",
+    "checkForUpdates",
+    "reviewRequestsScope",
+    "reviewGroups",
+    "reviewBadgeTotal",
+    "resetReviewFilters",
+    "resetReviewGroups",
+    "reviewPollingIntervalMs",
+    "linearEnabled",
+    "linearApiKey",
+    "linearUseDesktopApp",
+    "logLevel",
+    "maxLogSizeMb",
+    "viewLogs",
+    "rerunSetup",
+    "resetSettings",
+];
+
 pub enum Outcome {
     None,
     Close,
@@ -163,7 +194,8 @@ pub struct SettingsEditor {
     pub error: Option<String>,
     /// A review reset waiting for `y` (the field's key).
     pub confirm: Option<&'static str>,
-    /// Only these keys are shown and reachable (the review filter box).
+    /// Only these keys are shown and reachable (the review filter box, or
+    /// review-only mode's [`REVIEW_MODE_FIELDS`]).
     pub only: Option<&'static [&'static str]>,
     /// Review filters → Groups….
     pub groups: Option<GroupsEditor>,
@@ -181,7 +213,8 @@ impl SettingsEditor {
             Ok(Value::Object(m)) => m,
             _ => Map::new(),
         };
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, confirm: None, only: None, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default(), scroll: Default::default() }
+        let only = settings.reviews_mode().then_some(REVIEW_MODE_FIELDS);
+        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, confirm: None, only, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default(), scroll: Default::default() }
     }
 
     /// An editor showing only the `keys` fields, starting on the first.
@@ -190,6 +223,11 @@ impl SettingsEditor {
         e.only = Some(keys);
         e.cursor = e.fields().first().copied().unwrap_or(0);
         e
+    }
+
+    /// The review page's filter box (`f`), not the full Settings.
+    pub fn is_filter_box(&self) -> bool {
+        self.only == Some(REVIEW_FILTERS)
     }
 
     /// Indices into `FIELDS` this editor shows.
@@ -391,8 +429,8 @@ impl SettingsEditor {
         self.error = None;
         match key {
             Key::Esc | Key::Char('q') | Key::Char('s') => return Outcome::Close,
-            Key::Char('f') if self.only.is_some() => return Outcome::Close,
-            Key::Char('e') if self.only.is_none() => return Outcome::EditFile,
+            Key::Char('f') if self.is_filter_box() => return Outcome::Close,
+            Key::Char('e') if !self.is_filter_box() => return Outcome::EditFile,
             k if let Some(d) = crate::nav::delta(k, true) => self.move_cursor(d),
             Key::Enter | Key::Char(' ') => return self.activate(),
             Key::Right | Key::Char('l') => return self.step(1),
@@ -426,7 +464,9 @@ impl SettingsEditor {
                 Outcome::None
             }
             Kind::KeyBindings => {
-                self.keys = Some(KeyEditor::new(crate::keymap::Keymap::from_settings(&self.settings())));
+                let settings = self.settings();
+                let keymap = crate::keymap::Keymap::from_settings(&settings);
+                self.keys = Some(if settings.reviews_mode() { KeyEditor::for_reviews_mode(keymap) } else { KeyEditor::new(keymap) });
                 Outcome::None
             }
             Kind::Number { .. } => {
@@ -503,6 +543,17 @@ impl SettingsEditor {
 
     fn set(&mut self, key: &str, value: Value) -> Outcome {
         self.values.insert(key.to_string(), value.clone());
+        // Review-only mode needs review requests (and the GitHub fetch they
+        // ride on), whose switches it hides: turn them on with it.
+        if key == "appMode" && value == "reviews" {
+            for k in ["ghPrStatus", "reviewRequestsEnabled"] {
+                self.values.insert(k.into(), Value::Bool(true));
+                if let Err(e) = persist(k, Value::Bool(true)) {
+                    self.error = Some(e);
+                    return Outcome::None;
+                }
+            }
+        }
         match persist(key, value) {
             Ok(s) => Outcome::Changed(Box::new(s)),
             Err(e) => {
@@ -763,6 +814,32 @@ mod tests {
         unsafe { std::env::set_var("AM_DATA_DIR", d.path()) };
         let _ = std::fs::remove_file(d.path().join("settings.json"));
         (guard, d.path())
+    }
+
+    #[test]
+    fn review_only_mode_shows_only_the_review_pages_settings() {
+        for key in REVIEW_MODE_FIELDS {
+            assert!(FIELDS.iter().any(|f| f.key == *key), "{key} isn't a field");
+        }
+        let full = SettingsEditor::new(&Settings::default());
+        assert_eq!(full.fields().len(), FIELDS.len());
+        let ed = SettingsEditor::new(&Settings::parse(r#"{"appMode":"reviews"}"#));
+        let keys: Vec<&str> = ed.fields().into_iter().map(|i| FIELDS[i].key).collect();
+        assert_eq!(keys, REVIEW_MODE_FIELDS);
+        assert!(!ed.fields().iter().any(|&i| FIELDS[i].section == "Dashboard"));
+        assert!(!ed.is_filter_box(), "a full Settings page: `e` edits the file");
+        assert_eq!(FIELDS[ed.cursor].key, "appMode");
+    }
+
+    #[test]
+    fn switching_to_review_only_mode_turns_review_requests_on() {
+        let (_g, _dir) = data_dir();
+        let off = Settings::parse(r#"{"ghPrStatus":false,"reviewRequestsEnabled":false}"#);
+        let mut ed = SettingsEditor::new(&off);
+        assert_eq!(FIELDS[ed.cursor].key, "appMode");
+        let Outcome::Changed(s) = ed.on_key(Key::Right) else { panic!("expected a change") };
+        assert!(s.reviews_mode() && s.gh_pr_status && s.review_requests_enabled);
+        assert!(s.review_requests_on());
     }
 
     #[test]

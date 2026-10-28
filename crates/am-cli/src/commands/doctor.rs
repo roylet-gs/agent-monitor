@@ -67,6 +67,15 @@ pub fn run(as_json: bool) {
     });
 
     let s = settings::load();
+    checks.push(Check {
+        name: "Mode".into(),
+        status: "ok",
+        message: if s.reviews_mode() {
+            "reviews (review requests only; agent hooks aren't needed)".into()
+        } else {
+            "full".into()
+        },
+    });
     for &kind in am_core::harness::all() {
         let p = kind.provider();
         let hooks = hi::is_hooks_installed(kind);
@@ -90,6 +99,7 @@ pub fn run(as_json: bool) {
             ),
             Ok(_) if !enabled && hooks => ("warn", format!("Plugin disabled but hooks remain in {path}. Run: am hooks uninstall --agent {}", kind.id())),
             Ok(_) if !enabled => ("ok", "Plugin disabled".into()),
+            Ok(_) if !hooks && s.reviews_mode() => ("ok", "Not installed (not needed in review-only mode)".into()),
             Ok(_) if !hooks => ("warn", format!("Not installed. Run: am hooks install --agent {}", kind.id())),
             Ok(_) => ("ok", format!("Installed in {path}{note}")),
         };

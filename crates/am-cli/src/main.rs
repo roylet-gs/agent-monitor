@@ -104,6 +104,9 @@ enum Cmd {
     Perf(PerfArgs),
     /// Run the setup wizard
     Setup,
+    /// Open only the review-requests page (appMode stays as it is)
+    #[command(visible_alias = "review")]
+    Reviews,
     /// Get/set agent status for a worktree
     Status {
         /// Worktree path
@@ -426,8 +429,9 @@ fn main() {
 
     use commands::*;
     match cli.command {
-        None => tui::launch(cli.watch, false),
-        Some(Cmd::Setup) => tui::launch(false, true),
+        None => tui::launch(cli.watch, tui::Page::Dashboard),
+        Some(Cmd::Setup) => tui::launch(false, tui::Page::Setup),
+        Some(Cmd::Reviews) => tui::launch(false, tui::Page::Reviews),
         Some(Cmd::Worktree(w)) => match w {
             WorktreeCmd::List(a) => worktree::list(a.repo.repo.as_deref(), a.json.json),
             WorktreeCmd::Create(a) => lifecycle::create(&a),
