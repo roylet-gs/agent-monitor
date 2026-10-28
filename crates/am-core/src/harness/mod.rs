@@ -16,6 +16,7 @@
 //! setting. See `docs/agent-providers.md`.
 
 pub mod claude;
+pub mod codebuddy;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
@@ -263,6 +264,7 @@ impl HarnessKind {
     pub const COPILOT: HarnessKind = HarnessKind(&copilot::COPILOT);
     pub const CURSOR: HarnessKind = HarnessKind(&cursor::CURSOR);
     pub const QODER: HarnessKind = HarnessKind(&qoder::QODER);
+    pub const CODEBUDDY: HarnessKind = HarnessKind(&codebuddy::CODEBUDDY);
 
     pub fn provider(self) -> &'static dyn Harness {
         self.0
@@ -326,6 +328,7 @@ pub const BUILTIN: &[HarnessKind] = &[
     HarnessKind::COPILOT,
     HarnessKind::CURSOR,
     HarnessKind::QODER,
+    HarnessKind::CODEBUDDY,
 ];
 
 struct Registry {
