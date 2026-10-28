@@ -34,6 +34,18 @@ let reviews = false;
  * rate_limit` still answers, with a reset ten minutes out.
  */
 let rateLimited = false;
+/**
+ * You've approved #61 (head feature/on-origin): the review search no longer
+ * lists it, and the pulled-branch lookup answers it as approved by you.
+ */
+let approvedPulled = false;
+const APPROVED_PR = 61;
+
+/** The review fixture's PR nodes. */
+function reviewNodes(): Array<Record<string, unknown>> {
+  const f = loadFixture("gh-review-requests.json") as { data: { search: { nodes: Array<Record<string, unknown>> } } };
+  return f.data.search.nodes;
+}
 
 interface GhFixture {
   number: number;
@@ -194,11 +206,33 @@ const server = http.createServer(async (req, res) => {
         res.end("simulated outage");
         return;
       }
-      const body = reviews
-        ? loadFixture("gh-review-requests.json")
-        : { data: { viewer: { login: "e2e-user" }, search: { nodes: [] } } };
+      const nodes = reviews ? reviewNodes().filter((n) => !(approvedPulled && n.number === APPROVED_PR)) : [];
+      const body = { data: { viewer: { login: "e2e-user" }, search: { nodes } } };
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
+      return;
+    }
+
+    // PRs of branches pulled into Reviewing that left the review search:
+    // `gh api graphql -f o0=… -f n0=… -f b0=<branch> -f query=…pN: repository(…) { pullRequests(headRefName: $bN…viewerLatestReview…`.
+    if (args[0] === "api" && args[1] === "graphql" && argsStr.includes("viewerLatestReview") && argsStr.includes("pullRequests(headRefName")) {
+      if (outage) {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("simulated outage");
+        return;
+      }
+      const data: Record<string, unknown> = { viewer: { login: "e2e-user" } };
+      for (const a of args) {
+        const m = /^b(\d+)=(.*)$/.exec(a);
+        if (!m) continue;
+        const node = reviewNodes().find((n) => n.headRefName === m[2] && n.number === APPROVED_PR);
+        const nodes = approvedPulled && node
+          ? [{ ...node, reviewDecision: "APPROVED", viewerLatestReview: { state: "APPROVED" }, reviewRequests: { nodes: [] } }]
+          : [];
+        data[`p${m[1]}`] = { pullRequests: { nodes } };
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ data }));
       return;
     }
 
@@ -305,6 +339,9 @@ const server = http.createServer(async (req, res) => {
       if (config.rateLimited !== undefined) {
         rateLimited = Boolean(config.rateLimited);
       }
+      if (config.approvedPulled !== undefined) {
+        approvedPulled = Boolean(config.approvedPulled);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "configured" }));
     } catch (err) {
@@ -323,6 +360,7 @@ const server = http.createServer(async (req, res) => {
     linearByBranch = {};
     reviews = false;
     rateLimited = false;
+    approvedPulled = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "reset" }));
     return;

@@ -98,6 +98,26 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.sendKey("x"); // any key closes the popup
   await tui.waitForGone("Couldn't open");
 
+  // Approved on GitHub: it leaves the search, but while it's still pulled it
+  // stays on the page in its own section at the bottom, and the badge drops it.
+  await setupMock({ reviews: true, approvedPulled: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
+  await tui.sendKey("r");
+  await tui.waitForText("Approved, still pulled", 20_000);
+  const approvedAt = await lineOf(/Approved, still pulled ─/);
+  expect(approvedAt).toBeGreaterThan(await lineOf(/Update onboarding copy/));
+  expect(approvedAt).toBeLessThan(await lineOf(/Add retry to the sync job/));
+  expect((await tui.lines())[0]).toMatch(/─Review requests.* 2 to review ╮/);
+  await tui.screenshot("review-approved-pulled");
+  await setupMock({ approvedPulled: false });
+  await tui.sendKey("r");
+  await tui.waitForGone("Approved, still pulled", 20_000);
+  await tui.waitForText("Add retry to the sync job");
+  await tui.sendKey("g"); // back on #61, at the top
+  await tui.waitForMatch(/✗ |Opened https:\/\/github\.com\/acme\/work\/pull\/61/, 10_000);
+  if ((await tui.getScreenText()).includes("✗ ")) {
+    await tui.sendKey("x");
+  }
+
   // t again selects its worktree, under Reviewing.
   await tui.sendKey("t");
   await tui.waitForText(`${branch} is already checked out`);

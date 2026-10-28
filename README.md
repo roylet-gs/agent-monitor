@@ -318,6 +318,8 @@ Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking o
 | `Esc` / `q` / `v` | Back to the dashboard (beside the list: `Esc`/`q`/`V` close the page and `v` gives it the whole screen) |
 | `Tab` | Beside the list: hand the keys to the list (or the Jobs pane). On the full page: to the Jobs pane and back |
 
+Once you approve a PR you pulled, GitHub stops asking for your review, but the worktree is still there. While it is, the PR stays on the page, in an **Approved, still pulled** section at the bottom (merged or closed too, until you remove the worktree with `d`). A group of yours whose rules match it (say, *reviewed by you: yes*) still takes it; the default group never does. These PRs don't count toward the `to review` badge. am finds them by looking up the PRs of the branches in **Reviewing** that the search no longer lists (one extra GraphQL request, only when there are any).
+
 ### Review-only mode
 
 If you only want the review page, pick **Review requests only** on the setup wizard's first step, or set **Settings → Mode** to `reviews` (`am settings set appMode reviews`). `am` then opens straight to the review page, full screen, and nothing else:

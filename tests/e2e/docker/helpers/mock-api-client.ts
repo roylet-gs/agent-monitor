@@ -21,6 +21,11 @@ interface MockSetupConfig {
   reviews?: boolean;
   /** GitHub rate-limits every gh API call; `gh api rate_limit` still answers. */
   rateLimited?: boolean;
+  /**
+   * You approved #61: the review search drops it and the pulled-branch lookup
+   * returns it as approved by you (shown while feature/on-origin is pulled).
+   */
+  approvedPulled?: boolean;
 }
 
 /** Configure mock-api fixtures for the current test. */

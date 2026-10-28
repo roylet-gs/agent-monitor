@@ -190,6 +190,13 @@ pub struct ReviewRequest {
     /// You've already reviewed it (any review state).
     #[serde(default)]
     pub reviewed_by_you: bool,
+    /// Your latest review approved it.
+    #[serde(default)]
+    pub approved_by_you: bool,
+    /// Not waiting on you: listed only because you approved it and a
+    /// tmp-space worktree still has it (`integrations::reviews::fetch_pulled`).
+    #[serde(default)]
+    pub approved_only: bool,
     /// The worktree that already has this branch checked out (filled in by
     /// the TUI collector; never cached).
     #[serde(skip)]
