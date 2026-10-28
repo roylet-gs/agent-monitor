@@ -136,6 +136,8 @@ fn dangling_provider(p: &dyn Harness) -> Vec<PathBuf> {
         HookInstall::TextBlock(tb) => {
             let text = read_text(&p.settings_path()).unwrap_or_default();
             match find_block(&text, &block_begin(tb.comment, p.id()), &block_end(tb.comment, p.id())) {
+                // Entries that lost their marker lines count too.
+                _ if has_unmarked_hooks(&text, tb.comment, p.id()) => missing_programs(&text),
                 Ok(Some((s, e))) => missing_programs(&text[s..e]),
                 _ => Vec::new(),
             }
@@ -409,6 +411,7 @@ fn is_installed_provider(provider: &dyn Harness) -> bool {
         HookInstall::TextBlock(tb) => {
             let text = read_text(&provider.settings_path()).unwrap_or_default();
             find_block(&text, &block_begin(tb.comment, provider.id()), &block_end(tb.comment, provider.id())).is_ok_and(|b| b.is_some())
+                || has_am_hook_command(&text, provider.id())
         }
         HookInstall::OwnedFile(_) => read_text(&provider.settings_path()).is_ok_and(|t| t.contains(OWNED_FILE_MARKER)),
     }
@@ -725,6 +728,9 @@ fn place_text_block(provider: &dyn Harness, tb: &TextBlock, text: &str, ctx: &Ho
     let id = provider.id();
     let body = (tb.render)(ctx);
     let without = remove_block(text, tb.comment, id)?;
+    if has_am_hook_command(without.as_deref().unwrap_or(text), id) {
+        return Err(unmarked(provider, ", then install again"));
+    }
     let Some(placed) = provider.place_hook_block(without.as_deref().unwrap_or(text), &block_text(tb.comment, id, &body), ctx)? else {
         return upsert_block(text, tb.comment, id, &body);
     };
@@ -733,6 +739,35 @@ fn place_text_block(provider: &dyn Harness, tb: &TextBlock, text: &str, ctx: &Ho
         return Err(std::io::Error::other(format!("{id}: the placed hook block lacks its `{begin}` / `{end}` lines")));
     }
     Ok(placed)
+}
+
+/// Whether `text` holds an am hook command for agent `id` (`… hook-event
+/// --agent <id> …`, also the `cat | am hook-event` form). Words are compared
+/// with quotes and backslashes stripped, so a command a YAML dumper folded
+/// across lines (`\` line continuations included) still counts.
+pub fn has_am_hook_command(text: &str, id: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().map(|w| w.trim_matches(['"', '\'', '\\', ',', '[', ']'])).filter(|w| !w.is_empty()).collect();
+    words.windows(3).any(|w| w == ["hook-event", "--agent", id])
+}
+
+/// Whether `text` has am hook commands for `id` outside am's marked block:
+/// its `begin`/`end` lines were deleted or moved, e.g. by the harness
+/// rewriting its own config file.
+fn has_unmarked_hooks(text: &str, comment: &str, id: &str) -> bool {
+    match remove_block(text, comment, id) {
+        Ok(without) => has_am_hook_command(without.as_deref().unwrap_or(text), id),
+        Err(_) => has_am_hook_command(text, id),
+    }
+}
+
+/// `then`: what to do after removing them (`", then install again"`).
+fn unmarked(provider: &dyn Harness, then: &str) -> std::io::Error {
+    let id = provider.id();
+    std::io::Error::other(format!(
+        "{} has am hook commands (`hook-event --agent {id}`) outside am's `agent-monitor hooks {id}` marker lines (perhaps {} rewrote the file); remove those entries by hand{then}",
+        tilde(&provider.settings_path()),
+        provider.name()
+    ))
 }
 
 /// `text` without am's block (`None` when there is none). A block at the end
@@ -797,7 +832,11 @@ fn uninstall_text_block(provider: &dyn Harness, tb: &TextBlock) -> std::io::Resu
     if !path.exists() {
         return Ok(());
     }
-    if let Some(text) = remove_block(&read_text(&path)?, tb.comment, provider.id())? {
+    let text = read_text(&path)?;
+    if has_unmarked_hooks(&text, tb.comment, provider.id()) {
+        return Err(unmarked(provider, ""));
+    }
+    if let Some(text) = remove_block(&text, tb.comment, provider.id())? {
         write_text(&path, &text)?;
         info!("hooks", "Uninstalled {} hooks from {} (text block)", provider.name(), path.display());
     }
@@ -1158,6 +1197,46 @@ mod tests {
         assert!(check_provider(&p).is_err());
         assert!(install_text(&p, &p.hook_install(), Some(bin)).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "# agent-monitor hooks dummy begin\n");
+    }
+
+    #[test]
+    fn am_commands_are_matched_across_folds_and_quotes() {
+        assert!(has_am_hook_command("command = \"\\\"/x/am-hook\\\" hook-event --agent dummy --worktree \\\"$D\\\"\"", "dummy"));
+        assert!(has_am_hook_command("- command: 'cat | am hook-event --agent dummy --worktree \"\"\n    --event stop'", "dummy"));
+        // A YAML dumper's fold, `\` continuation included.
+        assert!(has_am_hook_command("- command: \"\\\"/x/am-hook\\\" hook-event\\\n    \\ --agent dummy --event stop\"", "dummy"));
+        assert!(!has_am_hook_command("hook-event --agent dummy2", "dummy"));
+        assert!(!has_am_hook_command("hook-event --agent other --event dummy", "dummy"));
+    }
+
+    /// The harness rewrote its config and dropped am's marker lines: the
+    /// hooks still count as installed, a second set is never added, and
+    /// uninstall says what to remove instead of leaving them silently.
+    #[test]
+    fn text_block_hooks_without_their_markers_are_still_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kimi/config.toml");
+        let p = toml_dummy(path.clone());
+        let bin = executable(dir.path(), "am-hook");
+        install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let stripped: String = text.lines().filter(|l| !l.contains("agent-monitor hooks")).map(|l| format!("{l}\n")).collect();
+        std::fs::write(&path, &stripped).unwrap();
+
+        assert!(is_installed_provider(&p));
+        let err = install_text(&p, &p.hook_install(), Some(bin.clone())).unwrap_err().to_string();
+        assert!(err.contains("outside am's `agent-monitor hooks dummy` marker lines") && err.ends_with("then install again"), "{err}");
+        assert!(check_provider(&p).is_err());
+        assert!(uninstall_provider(&p).unwrap_err().to_string().contains("remove those entries by hand"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), stripped, "nothing written");
+        // Their binary going away is still noticed.
+        std::fs::remove_file(&bin).unwrap();
+        assert_eq!(dangling_provider(&p), std::slice::from_ref(&bin));
+
+        // A marked block plus a stray copy outside it: refused the same way.
+        std::fs::write(&path, format!("{text}{}", stripped.lines().take(4).map(|l| format!("{l}\n")).collect::<String>())).unwrap();
+        assert!(uninstall_provider(&p).is_err());
+        assert!(install_text(&p, &p.hook_install(), Some(bin)).is_err());
     }
 
     /// Hermes-style YAML: a top-level `hooks:` map of events.

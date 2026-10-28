@@ -240,9 +240,9 @@ The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has
 | --- | --- | --- |
 | `on_session_start` / `on_session_end` | `SessionStart` / `SessionEnd` | `idle` |
 | `on_user_prompt` | `UserPromptSubmit` | `executing` |
-| `on_tool_start` / `on_tool_end` | `PreToolUse` / `PostToolUse` | `executing` (tool from `attributes.tool_input.tool_name`; `bash` → `Bash`) |
+| `on_tool_start` / `on_tool_end` | `PreToolUse` / `PostToolUse` | `executing` (tool from `attributes.tool_input.tool_name`, a flat `attributes.tool_name` or the first of `attributes.tool_calls[]`; `bash` → `Bash`) |
 | `on_tool_permission` | `PermissionRequest` | `waiting` |
 | `on_complete` | `Stop` | `done` after work, else `idle` |
 | `on_error` | `StopFailure` | `idle` |
 
-Rovo Dev's payload has no session id, so every event updates the worktree's `agent_status` row directly (no `sessions` rows, no per-session headline). It has no subagent events, so no `delegating`. `on_tool_permission` maps to `waiting` (cmux shows it as running): the user has to answer. Older Rovo Dev releases only fire `on_complete`, `on_error` and `on_tool_permission`; there a session never shows `executing`, and an `on_complete` after `waiting` leaves it `waiting` (the rules keep `waiting` through a `Stop`).
+Current Rovo Dev releases send `{session_id, transcript_path, cwd, timestamp, hook_event_name, attributes}`, so each session gets its own `sessions` row and the worktree's headline follows the most urgent one, like any harness (`on_session_end` closes it). A release whose payload has no `session_id` updates the worktree's `agent_status` row directly; one without `cwd` is still placed by `--worktree "$PWD"`. It has no subagent events, so no `delegating`. `on_tool_permission` maps to `waiting` (cmux shows it as running): the user has to answer. Older Rovo Dev releases only fire `on_complete`, `on_error` and `on_tool_permission`; there a session never shows `executing`, and an `on_complete` after `waiting` leaves it `waiting` (the rules keep `waiting` through a `Stop`).
