@@ -2,15 +2,16 @@
 //! `amp.json` plus a generated TypeScript plugin in place of hooks.
 //!
 //! Amp has no shell hooks; its CLI loads TS/JS plugins (run with Bun) from
-//! `.amp/plugins/` in a project and `$XDG_CONFIG_HOME/amp/plugins/` (else
-//! `~/.config/amp/plugins/`) system-wide, and hands each one a `PluginAPI`.
+//! `.amp/plugins/` in a project and `~/.config/amp/plugins/` system-wide,
+//! and hands each one a `PluginAPI`.
 //! `am hooks install --agent amp` writes `<that dir>/agent-monitor.ts` (an
 //! [`OwnedFile`] carrying [`OWNED_FILE_MARKER`], rendered from
 //! `amp-plugin.ts`). Quirks:
-//! - The plugin API is experimental: Amp only loads plugins when started
-//!   with `PLUGINS=all`, only in the CLI (not the editor extension), and the
-//!   file's first line must be
-//!   `// @i-know-the-amp-plugin-api-is-wip-and-very-experimental-right-now`.
+//! - Amp loads plugins at startup, only in the CLI (not the editor
+//!   extension), and not with `PLUGINS=off`. Older releases loaded them only
+//!   with `PLUGINS=all` and wanted the first line to be
+//!   `// @i-know-the-amp-plugin-api-is-wip-and-very-experimental-right-now`,
+//!   which the template keeps for them.
 //! - The template is plain JavaScript with no `import type` from
 //!   `@ampcode/plugin`, so nothing has to resolve at runtime; the default
 //!   export is the plugin function and `description` a static string.
@@ -23,8 +24,10 @@
 //! The plugin runs am-hook once per state change, one at a time, detached,
 //! with a 5 s kill, stdin JSON closed, a minimal environment (no
 //! `AMP_API_KEY`) and never throwing into Amp:
-//! - `session.start` → `SessionStart`; `agent.start` → `UserPromptSubmit`
-//!   (once per turn).
+//! - `session.start` → `SessionStart`, only for a thread new to this
+//!   process (it also fires when the user switches to a thread, and
+//!   `SessionStart` means idle); `agent.start` → `UserPromptSubmit` (once
+//!   per turn).
 //! - `tool.call` / `tool.result` → `PreToolUse` / `PostToolUse` with Amp's
 //!   tool name (mapped onto Claude's in `amp.json`: `edit_file` → `Edit`…)
 //!   and only the arguments am summarises. `tool.call` always answers
@@ -33,6 +36,10 @@
 //! - The thread's `state` observable: `awaiting-approval` (or
 //!   `awaiting-input`) → `PermissionRequest` (waiting); `running` again →
 //!   `PostToolUse` (executing).
+//! - A turn that `state` → `running` (or a tool call) opened without
+//!   `agent.start` (another plugin's `thread.append`, another Amp client)
+//!   ends with `Stop` when `state` goes `idle`, since `agent.end` may never
+//!   reach this process.
 //! - `agent.end` records the outcome; the turn ends when `state` is `idle`
 //!   (or at once when the thread has no `state` observable): `Stop`
 //!   (done, cancelled) or `StopFailure` (error), once per turn, since a
@@ -55,21 +62,16 @@ pub static AMP: Embedded = Embedded::new(|| Manifest::builtin(include_str!("amp.
 const TEMPLATE: &str = include_str!("amp-plugin.ts");
 const ARGV_SLOT: &str = "__AM_HOOK_ARGV__";
 const COMMAND_SLOT: &str = "__AM_HOOK_COMMAND__";
-/// Amp refuses a plugin file without this line.
+/// Older Amp releases wanted this as a plugin's first line; current ones
+/// don't look for it. Kept for compatibility.
 pub const WIP_LINE: &str = "// @i-know-the-amp-plugin-api-is-wip-and-very-experimental-right-now";
 
-/// The plugin file am owns.
+/// The plugin file am owns, in Amp's system plugin dir. Always
+/// `~/.config/amp/plugins` (Amp names that path, and `configDir`, which
+/// decides whether Amp is present, is `~/.config/amp`); `$XDG_CONFIG_HOME`
+/// isn't followed.
 pub fn plugin_path() -> PathBuf {
-    plugins_dir(&|k| std::env::var(k).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())).join("agent-monitor.ts")
-}
-
-/// Amp's system plugin dir: `$XDG_CONFIG_HOME/amp/plugins`, else
-/// `~/.config/amp/plugins`.
-fn plugins_dir(get: &dyn Fn(&str) -> Option<String>) -> PathBuf {
-    match get("XDG_CONFIG_HOME") {
-        Some(x) => expand_home(&x).join("amp/plugins"),
-        None => expand_home("~/.config/amp/plugins"),
-    }
+    expand_home("~/.config/amp/plugins/agent-monitor.ts")
 }
 
 /// The plugin's source: the template with am-hook's argv up to `--event`
@@ -104,7 +106,7 @@ mod tests {
     #[test]
     fn the_plugin_spawns_am_hook_with_the_exact_argv() {
         let text = render(&ctx(Some(Path::new("/opt/am bin/am-hook"))));
-        assert!(text.starts_with(&format!("{WIP_LINE}\n")), "Amp wants the WIP line first");
+        assert!(text.starts_with(&format!("{WIP_LINE}\n")), "older Amp releases want the WIP line first");
         assert!(text.contains(OWNED_FILE_MARKER));
         assert!(!text.contains(ARGV_SLOT) && !text.contains(COMMAND_SLOT));
         assert!(text.contains("// \"/opt/am bin/am-hook\" hook-event --agent amp --worktree \"\" --event <event>\n"), "{text}");
@@ -127,12 +129,10 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_dir_follows_xdg_config_home() {
-        assert_eq!(plugins_dir(&|_| None), crate::paths::home_dir().join(".config/amp/plugins"));
-        let xdg = |k: &str| (k == "XDG_CONFIG_HOME").then(|| "/x/cfg".to_owned());
-        assert_eq!(plugins_dir(&xdg), PathBuf::from("/x/cfg/amp/plugins"));
-        assert!(plugin_path().ends_with("amp/plugins/agent-monitor.ts"));
+    fn the_plugin_lives_in_the_config_dir_that_detects_amp() {
+        assert_eq!(plugin_path(), crate::paths::home_dir().join(".config/amp/plugins/agent-monitor.ts"));
         assert_eq!(AMP.settings_path(), plugin_path());
+        assert!(plugin_path().starts_with(expand_home("~/.config/amp")), "is_present looks at configDir");
     }
 
     #[test]
@@ -218,6 +218,20 @@ states[T].set("running");
 states[T].set("awaiting-approval");
 await on("agent.end", { thread: { id: T }, status: "error", messages: [] });
 states[T].set("idle");
+// Switching away from a running thread and back (session.start again) sends
+// nothing, so it stays executing and its turn still ends done.
+await on("agent.start", { thread: { id: T }, message: "third", id: 3 });
+states[T].set("running");
+await on("session.start", { thread: { id: T } });
+await on("agent.end", { thread: { id: T }, status: "done", messages: [] });
+states[T].set("idle");
+await on("session.start", { thread: { id: T } });
+// A turn no agent.start opened here (another plugin's thread.append, another
+// Amp client) ends when the thread goes idle.
+await on("session.start", { thread: { id: "T-3" } });
+states["T-3"].set("running");
+states["T-3"].set("idle");
+states["T-3"].set("idle");
 // A thread without a state observable ends its turn on agent.end.
 amp.threads.get = () => ({ id: "T-2" });
 await on("session.start", { thread: { id: "T-2" } });
@@ -225,7 +239,7 @@ await on("agent.start", { thread: { id: "T-2" } });
 await on("agent.end", { thread: { id: "T-2" }, status: "cancelled" });
 await on("agent.end", { thread: { id: "T-2" }, status: "done" });
 await on("session.start", {});
-const want = 14;
+const want = 19;
 const start = Date.now();
 const lines = () => { try { return fs.readFileSync(log, "utf8").split("\n").filter(Boolean).length; } catch { return 0; } };
 while (lines() < want && Date.now() - start < 8000) await new Promise((r) => setTimeout(r, 25));
@@ -268,6 +282,11 @@ await new Promise((r) => setTimeout(r, 200));
                 "PermissionRequest",
                 "PostToolUse",
                 "StopFailure",
+                "UserPromptSubmit",
+                "Stop",
+                "SessionStart",
+                "UserPromptSubmit",
+                "Stop",
                 "SessionStart",
                 "UserPromptSubmit",
                 "Stop",
@@ -275,7 +294,12 @@ await new Promise((r) => setTimeout(r, 200));
         );
         for (i, (event, p)) in sent.iter().enumerate() {
             assert_eq!(p["hook_event_name"], event.as_str());
-            assert_eq!(p["session_id"], if i < 11 { "T-1" } else { "T-2" }, "{p}");
+            let want = match i {
+                0..13 => "T-1",
+                13..16 => "T-3",
+                _ => "T-2",
+            };
+            assert_eq!(p["session_id"], want, "{p}");
             assert_eq!(p["cwd"], "/w/my repo", "the workspace root wins over $PWD");
         }
         assert_eq!(sent[2].1["tool_name"], "Bash");

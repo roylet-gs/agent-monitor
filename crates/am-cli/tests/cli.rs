@@ -555,11 +555,13 @@ fn hooks_for_amp_are_a_plugin_file() {
     env.ok(&["hooks", "uninstall", "--agent", "amp"]);
     assert_eq!(std::fs::read_to_string(&plugin).unwrap(), "export default function (amp) {}\n");
 
-    // $XDG_CONFIG_HOME moves Amp's config dir.
+    // $XDG_CONFIG_HOME doesn't move it: Amp is detected by ~/.config/amp.
+    std::fs::remove_file(&plugin).unwrap();
     let xdg = env.root().join("xdg");
     env.extra_env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
     env.ok(&["hooks", "install", "--agent", "amp"]);
-    assert!(xdg.join("amp/plugins/agent-monitor.ts").exists());
+    assert!(plugin.exists() && !xdg.join("amp").exists());
+    env.ok(&["hooks", "uninstall", "--agent", "amp"]);
 }
 
 /// Built-in harness ids in registry order, so adding a harness doesn't

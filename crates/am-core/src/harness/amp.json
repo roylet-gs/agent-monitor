@@ -31,5 +31,5 @@
   },
   "resume": { "session": ["threads", "continue", "{id}"] },
   "process": { "names": ["amp"], "argvContains": ["/@sourcegraph/amp/", "/@ampcode/cli/"] },
-  "notes": "Reported by a plugin am writes into Amp's plugins directory; Amp loads plugins only with PLUGINS=all set (binary installs of the CLI, not the editor extension), at startup"
+  "notes": "Reported by a plugin am writes into Amp's plugins directory; Amp's CLI (not the editor extension) loads it from ~/.config/amp/plugins/ at startup, so restart running sessions; older releases needed PLUGINS=all set"
 }

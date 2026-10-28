@@ -227,15 +227,15 @@ Gemini sends no subagent ids (a subagent is an `invoke_agent` tool call), so Gem
 
 | Amp event | Canonical event | Resulting status |
 | --- | --- | --- |
-| `session.start` | `SessionStart` | `idle` |
-| `agent.start` | `UserPromptSubmit` (once per turn) | `executing` |
+| `session.start`, first time this Amp process sees the thread | `SessionStart` | `idle` |
+| `agent.start`, or `state` → `running` outside a turn | `UserPromptSubmit` (once per turn) | `executing` |
 | `tool.call` / `tool.result` | `PreToolUse` / `PostToolUse` | `executing` (`edit_file` → `Edit`, `create_file` → `Write`…) |
 | thread `state` `awaiting-approval` / `awaiting-input` | `PermissionRequest` | `waiting` |
 | thread `state` back to `running` | `PostToolUse` | `executing` |
-| `agent.end` (`done`/`cancelled`) once `state` is `idle` | `Stop` (once per turn) | `done` after work |
+| `agent.end` (`done`/`cancelled`) once `state` is `idle`, or `state` → `idle` in a turn no `agent.start` opened | `Stop` (once per turn) | `done` after work |
 | `agent.end` `error`, or `state` `error` | `StopFailure` | `idle` |
 
-The plugin sends one `Stop` per turn, since a second would turn `done` into `idle`, and waits for the thread's `state` to reach `idle` (another plugin can continue a turn from `agent.end`); without a `state` observable (older Amp) `agent.end` ends the turn. A turn that ends while waiting sends `PostToolUse` first, since `Stop` keeps `waiting`. Amp has no session-end event.
+The plugin sends one `Stop` per turn, since a second would turn `done` into `idle`, and waits for the thread's `state` to reach `idle` (another plugin can continue a turn from `agent.end`); a turn a `state` change opened (another plugin's `thread.append`, another Amp client) ends on `idle`, since its `agent.end` may never reach this process. `session.start` also fires when the user switches to a thread, so a thread the process already knows gets no second `SessionStart`, which would show a running or `done` thread as `idle`; without a `state` observable (older Amp) `agent.end` ends the turn. A turn that ends while waiting sends `PostToolUse` first, since `Stop` keeps `waiting`. Amp has no session-end event.
 
 **Cursor** (`--agent cursor`, hooks in `~/.cursor/hooks.json`):
 
