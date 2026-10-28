@@ -12,7 +12,8 @@ test.beforeEach(async () => {
 test("t on the dashboard does nothing", async ({ page }) => {
   const tui = new RustTui(page);
   await tui.open();
-  const before = await tui.selectedRow();
+  // By name: the row's PR and age columns may still be filling in.
+  const before = await tui.selectedName();
 
   expect(await tui.keyBar()).not.toContain("pull");
   await tui.sendKey("t");
@@ -20,7 +21,7 @@ test("t on the dashboard does nothing", async ({ page }) => {
   const screen = await tui.getScreenText();
   expect(screen).not.toContain("Pull into Reviewing");
   expect(screen).not.toContain("─Jobs");
-  expect(await tui.selectedRow()).toBe(before);
+  expect(await tui.selectedName()).toBe(before);
 
   // The New Worktree form has no tmp space switch either.
   await tui.sendKey("n");
