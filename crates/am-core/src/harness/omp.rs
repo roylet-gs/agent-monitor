@@ -13,11 +13,18 @@
 //! `PI_CODING_AGENT_DIR`, and the file reports nothing outside omp.
 //!
 //! Quirks:
-//! - **Agent dir:** `$OMP_AGENT_DIR` (cmux's override), else
-//!   `$PI_CODING_AGENT_DIR`, else `~/${PI_CONFIG_DIR:-.omp}/agent`. A named
-//!   profile (`OMP_PROFILE`) uses `~/.omp/profiles/<name>/agent`, which am
-//!   can't see from outside omp: set `PI_CODING_AGENT_DIR` to it when
-//!   installing. Detection: the agent dir, or `~/${PI_CONFIG_DIR:-.omp}`.
+//! - **Agent dir:** `$PI_CODING_AGENT_DIR`, else
+//!   `~/${PI_CONFIG_DIR:-.omp}/agent`, as OMP's `dirs.ts` resolves it for the
+//!   default profile (`OMP_AGENT_DIR` is only cmux's bridge and OMP's own
+//!   tests; omp never reads it). A named profile (`OMP_PROFILE`) uses
+//!   `~/.omp/profiles/<name>/agent`, which am can't see from outside omp: set
+//!   `PI_CODING_AGENT_DIR` to it when installing.
+//! - **Detection** is from OMP's own evidence only: `~/${PI_CONFIG_DIR:-.omp}`
+//!   or `omp` on `$PATH`, never the agent dir, since Pi reads
+//!   `PI_CODING_AGENT_DIR` too and a Pi-only user would otherwise get OMP.
+//! - **Ordering:** hooks run one at a time in the order OMP fired them (a FIFO
+//!   chain on `globalThis`), so a `PreToolUse` can't land after its
+//!   `PermissionRequest` or a `PostToolUse` after the `Stop`.
 //! - **One module per session:** OMP loads a fresh copy of the extension for
 //!   the main session and each in-process task subagent, so ownership lives
 //!   on `globalThis`: the first top-level session owns the terminal; other
@@ -34,7 +41,9 @@
 //!   review opens as the planning turn is aborted, so `plan_review_requested`
 //!   is sent as `PreToolUse` of `plan_review` → `ExitPlanMode`, which shows
 //!   `waiting` even after the turn's `done`; a dismissed review stays
-//!   `waiting` until the next prompt. The `ask` tool → `AskUserQuestion`.
+//!   `waiting` until the next prompt. The `ask` tool → `AskUserQuestion`
+//!   (`waiting`); its `tool_execution_end` goes without the tool name, so the
+//!   answer reads as working again instead of `waiting` past the turn.
 //! - Resume is `omp --session <id>` / `omp --continue`; the sessions offered
 //!   are the ones am's hooks recorded.
 
@@ -67,9 +76,10 @@ fn hook_install() -> HookInstall {
     HookInstall::OwnedFile(OwnedFile { render: render_extension, register: None })
 }
 
+/// OMP's own evidence only: its config root or `omp` on `$PATH`. Not the
+/// agent dir, which `PI_CODING_AGENT_DIR` (Pi's variable too) can move.
 fn is_present() -> bool {
-    let home = paths::home_dir();
-    agent_dir(env, &home).is_dir() || config_root(env, &home).is_dir()
+    config_root(env, &paths::home_dir()).is_dir() || crate::mcp_installer::on_path("omp")
 }
 
 /// `~` / `~/x` → under `home`.
@@ -90,9 +100,9 @@ fn config_root(env: impl Fn(&str) -> Option<String>, home: &Path) -> PathBuf {
     }
 }
 
-/// OMP's agent dir, as OMP (and cmux) resolve it from the environment.
+/// OMP's agent dir for the default profile, as omp resolves it.
 fn agent_dir(env: impl Fn(&str) -> Option<String>, home: &Path) -> PathBuf {
-    match env("OMP_AGENT_DIR").or_else(|| env("PI_CODING_AGENT_DIR")) {
+    match env("PI_CODING_AGENT_DIR") {
         Some(dir) => tilde(&dir, home),
         None => config_root(env, home).join("agent"),
     }
@@ -164,11 +174,28 @@ mod tests {
         assert_eq!(agent_dir(vars(&[("PI_CODING_AGENT_DIR", "~/pi-agent")]), home), Path::new("/h/pi-agent"));
         assert_eq!(
             agent_dir(vars(&[("PI_CODING_AGENT_DIR", "/pi"), ("OMP_AGENT_DIR", "/omp")]), home),
-            Path::new("/omp"),
-            "OMP_AGENT_DIR wins over the Pi variable"
+            Path::new("/pi"),
+            "omp never reads OMP_AGENT_DIR"
         );
-        assert_eq!(agent_dir(vars(&[("OMP_AGENT_DIR", ""), ("PI_CONFIG_DIR", "")]), home), Path::new("/h/.omp/agent"), "empty = unset");
+        assert_eq!(agent_dir(vars(&[("OMP_AGENT_DIR", "/omp")]), home), Path::new("/h/.omp/agent"));
+        assert_eq!(agent_dir(vars(&[("PI_CODING_AGENT_DIR", ""), ("PI_CONFIG_DIR", "")]), home), Path::new("/h/.omp/agent"), "empty = unset");
         assert_eq!(config_root(vars(&[]), home), Path::new("/h/.omp"));
+    }
+
+    #[test]
+    fn a_pi_agent_dir_alone_isnt_omp() {
+        // A Pi-only user: PI_CODING_AGENT_DIR exists, no ~/.omp. Detection
+        // looks at the config root, which that variable doesn't move.
+        let home = tempfile::tempdir().unwrap();
+        let pi = home.path().join("pi-agent");
+        std::fs::create_dir_all(&pi).unwrap();
+        let pi = pi.display().to_string();
+        let pairs = [("PI_CODING_AGENT_DIR", pi.as_str())];
+        let env = vars(&pairs);
+        assert!(agent_dir(&env, home.path()).is_dir());
+        assert!(!config_root(&env, home.path()).is_dir());
+        std::fs::create_dir_all(home.path().join(".omp")).unwrap();
+        assert!(config_root(&env, home.path()).is_dir());
     }
 
     #[test]
@@ -187,6 +214,11 @@ mod tests {
             assert!(text.contains(&format!("  \"{event}\": [")), "{event} has an argv");
             assert!(text.contains(&format!("send(\"{event}\"")) || text.contains(&format!(": \"{event}\"")), "{event} is sent");
         }
+        // Hooks run in order, one at a time, and `ask`'s end goes without its name.
+        assert!(text.contains("const next = s.queue.then("), "{text}");
+        assert!(text.contains("s.queue = next;"));
+        assert!(text.contains("tool_name: endedTool(e.toolName)"));
+        assert!(text.contains(r#"new Set(["ask", "plan_review"])"#));
         // Nothing from OMP's package is imported at runtime.
         let imports: Vec<&str> = text.lines().filter(|l| l.starts_with("import ")).collect();
         assert_eq!(
@@ -237,8 +269,20 @@ mod tests {
         assert_eq!(step(s, &ev("session_shutdown", json!({}))), Some(Idle));
         assert_eq!(ev("session_shutdown", json!({})).event, "SessionEnd");
         assert_eq!(ev("ask", json!({})).event, "ask", "unknown events pass through unmapped");
-        let ask = ev("tool_execution_start", json!({"tool_name": "ask"}));
-        assert_eq!(step(Some(Executing), &ask), Some(Waiting));
+        // The `ask` tool waits on the user; answering it is working again, and
+        // a text-only finish after it is done, not waiting.
+        let s = step(Some(Executing), &ev("tool_execution_start", json!({"tool_name": "ask"})));
+        assert_eq!(s, Some(Waiting));
+        let ask_end = ev("tool_execution_end", json!({}));
+        assert_eq!((ask_end.event.as_str(), ask_end.tool_name.as_deref()), ("PostToolUse", None));
+        let s = step(s, &ask_end);
+        assert_eq!(s, Some(Executing));
+        assert_eq!(step(s, &stop), Some(Done));
+        assert_eq!(
+            step(Some(Waiting), &ev("tool_execution_end", json!({"tool_name": "ask"}))),
+            Some(Waiting),
+            "why the extension drops the name"
+        );
 
         // A subagent (another session in the same omp process) reports under the owner.
         let sub = ev("subagent_start", json!({"agent_id": "s2", "agent_type": "task"}));

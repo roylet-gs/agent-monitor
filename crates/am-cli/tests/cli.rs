@@ -560,18 +560,17 @@ fn hooks_for_omp_are_an_owned_extension_file() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "// someone else's\n");
     std::fs::remove_file(&file).unwrap();
 
-    // The agent dir follows OMP's environment: PI_CODING_AGENT_DIR, then OMP_AGENT_DIR over it.
+    // The agent dir follows OMP's environment: PI_CODING_AGENT_DIR moves it;
+    // OMP_AGENT_DIR (cmux's, never read by omp) doesn't.
     let pi_dir = env.root().join("pi-agent");
     env.extra_env.push(("PI_CODING_AGENT_DIR".into(), pi_dir.display().to_string()));
-    env.ok(&["hooks", "install", "--agent", "omp"]);
-    assert!(pi_dir.join("extensions/agent-monitor-omp.ts").exists());
     let omp_dir = env.root().join("omp-agent");
     env.extra_env.push(("OMP_AGENT_DIR".into(), omp_dir.display().to_string()));
     env.ok(&["hooks", "install", "--agent", "omp"]);
-    assert!(omp_dir.join("extensions/agent-monitor-omp.ts").exists());
+    assert!(pi_dir.join("extensions/agent-monitor-omp.ts").exists());
+    assert!(!omp_dir.exists(), "OMP_AGENT_DIR is ignored");
     env.ok(&["hooks", "uninstall", "--agent", "omp"]);
-    assert!(!omp_dir.join("extensions/agent-monitor-omp.ts").exists());
-    assert!(pi_dir.join("extensions/agent-monitor-omp.ts").exists(), "only the active agent dir is touched");
+    assert!(!pi_dir.join("extensions/agent-monitor-omp.ts").exists());
 }
 
 /// Built-in harness ids in registry order, so adding a harness doesn't

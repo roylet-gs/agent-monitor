@@ -240,10 +240,10 @@ The session is `conversation_id`, the directory `workspace_roots[0]`. Cursor has
 | --- | --- | --- |
 | `session_start` / `session_shutdown` | `SessionStart` / `SessionEnd` | `idle` |
 | `before_agent_start` | `UserPromptSubmit` | `executing` |
-| `tool_execution_start` / `tool_execution_end` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`…; `ask` → `AskUserQuestion` → `waiting`) |
+| `tool_execution_start` / `tool_execution_end` | `PreToolUse` / `PostToolUse` | `executing` (`bash` → `Bash`…; `ask` → `AskUserQuestion` → `waiting` on start; its end is sent without the tool name, so answering is `executing` again) |
 | `tool_approval_requested` | `PermissionRequest` | `waiting` |
 | `tool_approval_resolved` | `PostToolUse` | `executing` |
 | `plan_review_requested` | `PreToolUse` of `ExitPlanMode` | `waiting` (also after `done`: the review opens as the planning turn ends) |
 | `agent_end` | `Stop` | `done` after work, else `idle` |
 
-The extension skips an `agent_end` with `willContinue: true` (an automatic continuation follows) and sends one `Stop` per turn, since a second `Stop` would turn `done` into `idle`. A switch to another session (`/new`, resume, fork) is `SessionEnd` for the old id then `SessionStart` for the new one. Other sessions in the same omp process are task subagents: they report as `SubagentStart`/`SubagentStop` (and tool events with `agent_id`) under the owner session, so `delegating` and subagent rows work, and a subagent's approval prompt shows `waiting`.
+The extension skips an `agent_end` with `willContinue: true` (an automatic continuation follows) and sends one `Stop` per turn, since a second `Stop` would turn `done` into `idle`. Hooks run one at a time in the order OMP fired them, so a `PreToolUse` can't land after its `PermissionRequest` or a `PostToolUse` after the `Stop`. A switch to another session (`/new`, resume, fork) is `SessionEnd` for the old id then `SessionStart` for the new one. Other sessions in the same omp process are task subagents: they report as `SubagentStart`/`SubagentStop` (and tool events with `agent_id`) under the owner session, so `delegating` and subagent rows work, and a subagent's approval prompt shows `waiting`.

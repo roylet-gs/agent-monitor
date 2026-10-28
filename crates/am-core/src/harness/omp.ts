@@ -6,6 +6,7 @@
 //
 // Dependency-free on purpose (no import of OMP's package), never throws into
 // OMP, and never waits on am-hook except briefly at session shutdown.
+// Hooks run one at a time, in order (see `send`).
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -27,15 +28,25 @@ type Ctx = any;
 // OMP loads a fresh copy of this module per session in the process (the main
 // session and every task subagent), so what spans sessions lives on
 // globalThis: the first top-level session seen owns the terminal, later ones
-// are its subagents.
+// are its subagents. `queue` is the tail of the hook runs, shared by every
+// session so events from all of them reach am-hook in the order they fired.
 interface State {
   owner: string | null;
   stopped: Record<string, boolean>;
+  queue: Promise<void>;
 }
 const G = globalThis as typeof globalThis & { __agentMonitorOmp?: State };
 function state(): State {
-  if (!G.__agentMonitorOmp) G.__agentMonitorOmp = { owner: null, stopped: {} };
+  if (!G.__agentMonitorOmp) G.__agentMonitorOmp = { owner: null, stopped: {}, queue: Promise.resolve() };
+  if (!G.__agentMonitorOmp.queue) G.__agentMonitorOmp.queue = Promise.resolve();
   return G.__agentMonitorOmp;
+}
+
+// Tools whose name reads as "waiting on the user" (AskUserQuestion): their
+// end is sent without the name, so it reads as working again, not waiting.
+const WAITING_TOOLS = new Set(["ask", "plan_review"]);
+function endedTool(name: unknown): unknown {
+  return typeof name === "string" && WAITING_TOOLS.has(name) ? undefined : name;
 }
 
 function text(v: unknown): string | null {
@@ -110,12 +121,23 @@ function payload(r: Role, ctx: Ctx, extra: Obj = {}): Obj {
   return p;
 }
 
-// Run am-hook detached with the payload on stdin. Resolves once the payload
-// is written (or on any failure); a hook still running after TIMEOUT_MS is
-// killed. Never rejects.
+// Queue one am-hook run after the ones before it: OMP fires events
+// microseconds apart, and hook processes racing to commit would land them
+// out of order (a PreToolUse after its PermissionRequest, a PostToolUse after
+// the Stop). Returns the queue's new tail; callers don't await it, except at
+// shutdown. Never rejects.
 function send(event: string, p: Obj): Promise<void> {
   const argv = HOOKS[event];
   if (!argv) return Promise.resolve();
+  const s = state();
+  const next = s.queue.then(() => run(argv, event, p), () => run(argv, event, p));
+  s.queue = next;
+  return next;
+}
+
+// Run am-hook detached with the payload on stdin. Resolves when it exits (or
+// on any failure); one still running after TIMEOUT_MS is killed.
+function run(argv: string[], event: string, p: Obj): Promise<void> {
   return new Promise<void>((resolve) => {
     let settled = false;
     const done = () => {
@@ -133,13 +155,14 @@ function send(event: string, p: Obj): Promise<void> {
         done();
       }, TIMEOUT_MS);
       timer.unref?.();
-      child.on("error", () => {
+      const finish = () => {
         clearTimeout(timer);
         done();
-      });
-      child.on("exit", () => clearTimeout(timer));
-      child.stdin?.on("error", done);
-      child.stdin?.end(JSON.stringify({ ...p, hook_event_name: event }), done);
+      };
+      child.on("error", finish);
+      child.on("exit", finish);
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(JSON.stringify({ ...p, hook_event_name: event }));
       child.unref();
     } catch {
       done();
@@ -230,7 +253,7 @@ export default function agentMonitor(api: Ctx) {
 
   on("tool_execution_end", (e, ctx) => {
     const r = role(ctx);
-    if (r) void send("tool_execution_end", payload(r, ctx, { tool_name: e.toolName }));
+    if (r) void send("tool_execution_end", payload(r, ctx, { tool_name: endedTool(e.toolName) }));
   });
 
   // An approval prompt is on screen (from the session or one of its subagents).
@@ -241,7 +264,7 @@ export default function agentMonitor(api: Ctx) {
 
   on("tool_approval_resolved", (e, ctx) => {
     const r = role(ctx);
-    if (r) void send("tool_approval_resolved", payload(r, ctx, { tool_name: e.toolName }));
+    if (r) void send("tool_approval_resolved", payload(r, ctx, { tool_name: endedTool(e.toolName) }));
   });
 
   // The plan review is shown after the turn ends (as a tool that waits on the
@@ -279,7 +302,8 @@ export default function agentMonitor(api: Ctx) {
     const s = state();
     if (s.owner === r.id) s.owner = null;
     delete s.stopped[r.id];
-    // omp may exit right after this: let the payload reach am-hook first.
+    // omp may exit right after this: let the queued hooks (this one last)
+    // finish first, for up to a second.
     return settleWithin(send("session_shutdown", payload(r, ctx)), 1000);
   });
 }
