@@ -23,7 +23,7 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
 
   // The badge sits in the top-right corner of the border (after the update notice).
   await tui.waitForText("3 to review", 20_000);
-  expect((await tui.lines())[0]).toMatch(/─Worktrees ─.* 3 to review ╮$/);
+  expect((await tui.lines())[0]).toMatch(/· Worktrees ─.* 3 to review ╮$/);
   expect(await tui.keyBar()).toContain("v reviews");
   await tui.screenshot("review-badge");
   await tui.screenshot("dashboard-review-badge");
@@ -160,7 +160,7 @@ test("T pulls a PR and runs the repo's review script, offering to add one first"
   await tui.waitForText("Add retry to the sync job", 20_000);
   await tui.waitForText("1 of 3");
   // T is on the bar, or behind Shift where the terminal reports held keys.
-  expect(await tui.keyBar()).toMatch(/T pull \+ script|⇧\/ctrl more/);
+  expect(await tui.keyBar()).toMatch(/T pull \+ run script|⇧\/ctrl more/);
 
   // /work has no review script: T asks to add one, and n cancels.
   await tui.sendKey("T");
@@ -306,7 +306,7 @@ test("V puts the review page beside the list; ctrl-v opens it in a new window", 
   await tui.waitForText("Add retry to the sync job");
   // Both panes side by side on the same rows.
   const top = (await tui.lines())[0];
-  expect(top).toMatch(/─Worktrees .*─Review requests/);
+  expect(top).toMatch(/· Worktrees .*─Review requests/);
   expect(await tui.keyBar()).toContain("⇥ list");
   expect(await tui.keyBar()).toContain("l ticket");
   await tui.screenshot("review-split");
@@ -324,7 +324,7 @@ test("V puts the review page beside the list; ctrl-v opens it in a new window", 
   await tui.waitForMatch(/⇥ list/);
   await tui.sendKey("Escape");
   await tui.waitForGone("─Review requests", 5_000);
-  expect(await tui.getScreenText()).toContain("─Worktrees");
+  expect(await tui.getScreenText()).toContain("· Worktrees");
 
   // ctrl-v: no terminal emulator in the container, so the launch error pops up.
   await tui.sendKey("Control+v");

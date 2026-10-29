@@ -14,7 +14,7 @@ export const LATE_SESSION_URL = process.env.TUI_LATE_SESSION_URL || "http://loca
 
 /**
  * TuiPage plus helpers for the native (ratatui) dashboard. Layout reminder:
- * one full-width `─Worktrees` pane (bottom-right `N of M`), then the key bar
+ * one full-width `am v… · Worktrees` pane (bottom-right `N of M`), then the key bar
  * on the last terminal row (` ⏎ open  │ g PR … h help  q quit`) with any
  * transient notice / offline hint right-aligned on it. The selected worktree
  * row starts with `▌` just inside the pane border (`│▌<tree>◆ main …`).
@@ -29,7 +29,7 @@ export class RustTui extends TuiPage {
   /** Open the seeded dashboard and wait for its first data frame. */
   async open(): Promise<void> {
     await this.goto();
-    await this.waitForText("─Worktrees", 10_000);
+    await this.waitForText("· Worktrees", 10_000);
     await this.waitForText(" of ", 10_000); // "N of M" footer = rows loaded
   }
 

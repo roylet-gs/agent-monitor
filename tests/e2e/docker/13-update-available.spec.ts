@@ -34,7 +34,7 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
 
   // (a) The notice sits right-aligned on the pane's top border.
   await tui.waitForText(NOTICE);
-  const top = (await tui.lines()).find((l) => l.includes("─Worktrees")) ?? "";
+  const top = (await tui.lines()).find((l) => l.includes("· Worktrees")) ?? "";
   expect(top).toContain(NOTICE);
   expect((await tui.lines())[0]).toContain(NOTICE);
   await tui.screenshot("update-available");
@@ -53,7 +53,7 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
   await tui.waitForGone(NOTICE);
-  expect((await tui.lines())[0]).toContain("─Worktrees");
+  expect((await tui.lines())[0]).toContain("· Worktrees");
   await tui.screenshot("update-available-off");
 
   // Restore: turning it back on shows the notice again.

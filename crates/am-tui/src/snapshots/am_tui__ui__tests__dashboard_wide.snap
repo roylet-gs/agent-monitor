@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&fixture(), 120, 16)"
 ---
-╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ feature/refactor ◆ 2 subagents                                      ENG-412 #127✓ approved ↑2 ±3  4m █░░░░░░░ 121k │
 │ ◐ fix/offline-cache                                                                                 4m █▒░░░░░░ 185k │
@@ -17,4 +17,4 @@ expression: "render(&fixture(), 120, 16)"
 │                                                                                                                      │
 │                                                                                                                      │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  f filter  │ v reviews  s settings  r refresh  │ h help  q quit

@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "fixed_plugin_count(&render(&app, 100, 24))"
 ---
-╭─Worktrees ─────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available ╮
+╭─am v0.0.0 · Worktrees ─────────────────────────────────────────────────────── ⬆ v2.2.0 available ╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ ⬆ am v2.2.0 is available (you have v2.1.1)                                       │░ 121k │
 │ ◐ fix/│ Update: brew update && brew upgrade agent-monitor                                │░ 185k │
@@ -25,4 +25,4 @@ expression: "fixed_plugin_count(&render(&app, 100, 24))"
 │       │                                                                                  │       │
 │       │ reviews: open straight to the review page and hide the agent/worktree settings   │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ v reviews  s settings  r refresh  │ h help  q quit

@@ -1657,6 +1657,8 @@ pub enum Key {
     Left,
     Right,
     Backspace,
+    /// Forward delete (⌦).
+    Delete,
     Tab,
     BackTab,
     Enter,

@@ -292,6 +292,8 @@ impl Command {
     pub fn fixed_keys(self) -> &'static [Key] {
         match self {
             Command::Quit => &[Key::Esc, Key::CtrlC],
+            // ⌦, and the Mac keyboard's "delete" (Backspace).
+            Command::Delete => &[Key::Delete, Key::Backspace],
             Command::MoveDown => &[Key::Down],
             Command::MoveUp => &[Key::Up],
             Command::PageDown => &[Key::PageDown],
@@ -379,6 +381,7 @@ pub fn display(key: Key) -> String {
         Key::Home => "home".into(),
         Key::End => "end".into(),
         Key::Backspace => "backspace".into(),
+        Key::Delete => "del".into(),
         Key::Tab => "⇥".into(),
         Key::BackTab => "shift-⇥".into(),
         Key::Esc => "esc".into(),
