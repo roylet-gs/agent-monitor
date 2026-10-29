@@ -49,8 +49,8 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 28 32 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 ;;
-    crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 33 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 34 ;;
+    crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 33 34 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/reviews_ui.rs | crates/am-tui/src/review_groups_ui.rs) echo 28 31 32 ;;    # the review-requests page and its groups
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
     crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 24 28 ;; # Settings → Repositories, add-repo browser
