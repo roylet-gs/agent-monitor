@@ -40,7 +40,7 @@ test("f filters the worktree list on top of the base filters and F turns only th
   // F: every row back, and the border says the filters are off (the base
   // filters still listed).
   await tui.sendKey("F");
-  await tui.waitForText("filters off · F · main shown");
+  await tui.waitForText("filters off · main shown");
   await tui.waitForText("feature/to-delete");
   await tui.screenshot("worktree-filters-off");
   await tui.sendKey("F");

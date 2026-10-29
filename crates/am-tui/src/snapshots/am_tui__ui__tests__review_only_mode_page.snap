@@ -1,9 +1,8 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 4626
 expression: screen
 ---
-╭─Review requests ──────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
+╭─am v0.0.0 · Review requests ──────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ Batch the PR queries  @alice ✓ pulled                                               you           #51✓ review   0s │
 │ Typo in README  @outsider fork                                                        @docs         #48✓ review   0s │
@@ -16,4 +15,4 @@ expression: screen
 │                                                                                                                      │
 │                                                                                                                      │
 ╰ you + your teams ──────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc quit
+ ⏎ open  g PR  l ticket  d remove  f filter  │ r refresh  │ T pull + run script  │ h help  esc quit

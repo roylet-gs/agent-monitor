@@ -50,7 +50,7 @@ test("the jobs pane stays in view on the review page, Settings and help", async 
 
   await tui.sendKey("Escape");
   await tui.waitForGone("─Review requests");
-  await tui.waitForText("─Worktrees");
+  await tui.waitForText("· Worktrees");
 
   // Settings is drawn beside the pane, not over it.
   await tui.sendKey("s");

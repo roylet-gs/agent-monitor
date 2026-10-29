@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 20)"
 ---
-╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────────────────────────╮
 │agent-m╭─Settings ────────────────────────────────────────────────────────────────────────╮───────│
 │▌◑ feat│ Repositories — a add · x remove · s scripts · esc back                           │░ 121k │
 │ ◐ fix/│                                                                                  │░ 185k │
@@ -21,4 +21,4 @@ expression: "render(&app, 100, 20)"
 │       │                                                                                  │       │
 │       │ Stop tracking website? Files stay on disk · y confirm, any other key cancels     │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ v reviews  s settings  r refresh  │ h help  q quit

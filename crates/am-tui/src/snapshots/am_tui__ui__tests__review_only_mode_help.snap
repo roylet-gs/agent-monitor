@@ -1,9 +1,8 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 4634
 expression: help
 ---
-╭─Review requests ──────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
+╭─am v0.0.0 · Review requests ──────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ Batch the PR queries  @alice ✓ pulled                                               you           #51✓ review   0s │
 │ Typo in README  @outsider fork                                                        @docs         #48✓ review   0s │
@@ -16,7 +15,7 @@ expression: help
 │                   │               l  the PR's ticket                                             │                   │
 │                   │               t  pull into Reviewing                                         │                   │
 │                   │      T / ctrl-⏎  pull + run the review script (in a new terminal window)     │                   │
-│                   │               d  remove the pulled worktree                                  │                   │
+│                   │         d / del  remove the pulled worktree                                  │                   │
 │                   │               f  review filters                                              │                   │
 │                   │               r  clear cache and refetch                                     │                   │
 │                   │               s  settings (Mode: full brings the agent dashboard back)       │                   │
@@ -32,4 +31,4 @@ expression: help
 │                                                                                                                      │
 │                                                                                                                      │
 ╰ you + your teams ──────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc quit
+ ⏎ open  g PR  l ticket  d remove  f filter  │ r refresh  │ T pull + run script  │ h help  esc quit

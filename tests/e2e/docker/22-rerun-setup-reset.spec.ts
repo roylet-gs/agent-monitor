@@ -71,7 +71,7 @@ test("run setup again starts from the current settings and esc cancels", async (
   }
   await tui.waitForGone("Asked your team");
   await tui.press("Escape", 3); // groups page, filters, review page
-  await tui.waitForText("─Worktrees");
+  await tui.waitForText("· Worktrees");
 });
 
 test("reset settings asks first, then reopens setup", async ({ page }) => {

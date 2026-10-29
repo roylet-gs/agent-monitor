@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 66, 34)"
 ---
-╭─Worktrees ─────────────────────────────────────────────────────╮
+╭─am v0.0.0 · Worktrees ─────────────────────────────────────────╮
 │╭─Settings ────────────────────────────────────────────────────╮│
 ││ Key bindings — ⏎ change · x reset · R reset all · esc back   ││
 ││                                                              ││

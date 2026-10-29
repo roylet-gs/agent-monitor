@@ -2,14 +2,16 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 20)"
 ---
-╭─Worktree╭ Keys ────────────────────────────────────────────────────────────────────────╮─────────╮
+╭─am v0.0.╭ Keys ────────────────────────────────────────────────────────────────────────╮─────────╮
 │agent-mon│    j / k  ↑ / ↓  move                                                        │─────────│
 │▌◑ featur│        home / G  top / bottom                                                │░░░ 121k │
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │░░░ 185k │
 │         │               ⏎  open (IDE; resumes last agent session)                      │         │
 │gridsight│       g / l / p  open PR / Linear ticket / Linear project                    │─────────│
 │ · main  │               w  toggle log pane (Settings → View logs… opens the file)      │         │
-│         │     n / d / tab  new / delete worktree / focus jobs pane                     │         │
+│         │               n  new worktree                                                │         │
+│         │         d / del  delete worktree (asks first)                                │         │
+│         │             tab  focus the jobs pane                                         │         │
 │         │  v / V / ctrl-v  PRs to review: page / beside the list / new window          │         │
 │         │  t / T / ctrl-⏎  review page: pull into Reviewing / + run script             │         │
 │         │               A  add repository                                              │         │
@@ -18,7 +20,5 @@ expression: "render(&app, 100, 20)"
 │         │               r  refresh now (bypasses backoff)                              │         │
 │         │               h  toggle help                                                 │         │
 │         │          q  esc  quit                                                        │         │
-│         │                                                                              │         │
-│         │● executing  ◇ planning  ◐ waiting  ◑ delegating  ✓ done  ○ idle              │         │
-╰─────────│PR approved=CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting        │─ 1 of 3 ╯
- ⏎ open  │╰──────────────────────────────────────────────────────────────────────────────╯q quit
+╰─────────│   hold ⇧ / ctrl  the key bar swaps to the keys they add (where supported)    │─ 1 of 3 ╯
+ ⏎ open  │╰──────────────────────────────────────────────────────────────────────────────╯  q quit

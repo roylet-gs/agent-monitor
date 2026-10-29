@@ -18,7 +18,7 @@ const GROUP = "late-repo ─";
 
 async function openLate(tui: RustTui): Promise<void> {
   await tui.openUrl(LATE_SESSION_URL);
-  await tui.waitForText("─Worktrees", 10_000);
+  await tui.waitForText("· Worktrees", 10_000);
   await tui.waitForText(" of ", 10_000);
 }
 

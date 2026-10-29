@@ -162,19 +162,21 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `l` | Open the Linear ticket |
 | `p` | Open the Linear project |
 | `n` | New worktree (adds a repository first if none is tracked) |
-| `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
+| `d` / `Delete` / `Backspace` | Delete the worktree; on an "Other sessions" row, stop tracking it |
 | `v` | Review requests: the PRs waiting on your review, in place of the list (see [Review Requests](#review-requests)) |
-| `V` | Review requests beside the list (in terminals with the kitty keyboard protocol — kitty, Ghostty, WezTerm, recent iTerm2 — holding Shift shows this on the key bar, and holding Ctrl shows `Ctrl+V`'s); `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
+| `V` | Review requests beside the list; `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
 | `Ctrl+V` | Review requests in a new terminal window (`am-tui --reviews`; leaving the page there closes it) |
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list. With the review page beside the list, `Tab` goes list → review page → Jobs pane. The Jobs pane stays in view on every page (Settings, help, dialogs) while it has jobs; on the review page only while a job needs an answer |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
-| `f` | Worktree filters: text search, agent status (a checklist: tick any of `waiting`, `executing`, `planning`, `delegating`, `done`, `idle`, `no agent`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `─Worktrees` border sums up what's filtered (`"auth" · waiting · no main · 3 hidden`; a click opens the box) |
-| `F` | Turn the `f` filters off, and back on (`worktreeFiltersEnabled`; the border reads `filters off · F` meanwhile). The base filters stay on |
+| `f` | Worktree filters: text search, agent status (a checklist: tick any of `waiting`, `executing`, `planning`, `delegating`, `done`, `idle`, `no agent`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `Worktrees` border sums up what's filtered (`filters on: "auth" · waiting · no main · 3 hidden`; a click opens the box) |
+| `F` | Turn the `f` filters off, and back on (`worktreeFiltersEnabled`; the border reads `filters off` meanwhile). The base filters stay on |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
 | `h` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
+
+The key bar keeps to the plain keys. In terminals with the kitty keyboard protocol (kitty, Ghostty, WezTerm, recent iTerm2), holding Shift swaps it to the Shift keys (`F`, `V`, `A`, `G`) and holding Ctrl to the Ctrl ones (`Ctrl+V`), on the review page too (`T`, `V`, `Ctrl+⏎`, `Ctrl+V`); the plain bar ends in `⇧/ctrl more` to say so. Elsewhere those keys join the plain bar when there's room. The pane title names the tool, its version and the page (`am v2.1.67 · Worktrees`).
 
 These are the defaults. To change them, open **Settings → Key bindings…**. It lists the actions by section (Worktrees, Review requests, General, Moving), each with its key, its default when you changed it, and what the key does on the review page, which uses the same keys (`⏎` pulls a PR or opens the pulled worktree, `f` opens the review filters, `r` clears the review cache and fetches again, `q` goes back; `—` means the key does nothing there). Pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `h` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "filter": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`, `ctrl-v`; `none` unbinds the action.
 
@@ -314,7 +316,7 @@ Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking o
 | `l` | Open its Linear ticket |
 | `t` | Pull its branch into **Reviewing**. You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard (beside the list, the list takes the keys); a PR from a fork can't be pulled |
 | `T` / `Ctrl+⏎` | **Pull + run script**: pull it like `t`, then run the repo's [review script](#startup-and-review-scripts) in the new worktree (it opens in a new terminal window, and a popup says so). If the repo has no review script yet, am asks whether to add one: `y` creates it from a template and opens it in your editor while the PR is pulled, and it runs once you save it (or press `⏎` on the question in the Jobs pane to run it as is). Only on a PR that isn't pulled yet. `Ctrl+⏎` needs a terminal that reports it (the kitty keyboard protocol: kitty, Ghostty, WezTerm, iTerm2 with the option on…); elsewhere use `T` |
-| `d` | Remove the pulled worktree (the usual delete dialog), staying on the page |
+| `d` / `Delete` / `Backspace` | Remove the pulled worktree (the usual delete dialog), staying on the page |
 | `f` | Filters: who's asked, the groups (each with its own order and filters), the badge's GitHub total, **Reset filters…** (who's asked, the default group's filters and the GitHub total back to defaults; groups kept) and **Reset groups…** (removes every group), both asking `y` first, in a small box over the page (changes save at once). The page's bottom border sums up what's in force; clicking it opens the box too |
 | `r` | Clear the review caches (the list, group matches, GitHub total, autocomplete people) and search again now |
 | `Esc` / `q` / `v` | Back to the dashboard (beside the list: `Esc`/`q`/`V` close the page and `v` gives it the whole screen) |

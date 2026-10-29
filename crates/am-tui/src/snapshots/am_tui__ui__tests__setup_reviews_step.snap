@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 22)"
 ---
-╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ featu╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮░░ 121k │
 │ ◐ fix/o│                                                                                │░░ 185k │
@@ -23,4 +23,4 @@ expression: "render(&app, 100, 22)"
 │        │                                                                                │        │
 │        ╰─────────────────────────────────────── ↑↓ move  space toggle  ⏎ next  esc back ╯        │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ v reviews  s settings  r refresh  │ h help  q quit
