@@ -25,4 +25,4 @@ expression: screen
 │                 │ all: you or a team you're on; direct: you by name; teams: only your teams        │                 │
 │                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │
 ╰ you + your teams · no drafts · not yet reviewed ───────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc back
+ ⏎ open  g PR  l ticket  d remove  f filter  │ r refresh  │ h help  esc back

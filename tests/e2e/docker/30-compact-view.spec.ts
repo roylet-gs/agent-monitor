@@ -24,7 +24,7 @@ test("compact view: top lines only, jobs pane and split reviews open below", asy
 
   // The list keeps only its top line, which also carries `N of M`.
   let lines = await tui.lines();
-  expect(lines[0]).toMatch(/^─Worktrees .* \d+ of \d+/);
+  expect(lines[0]).toMatch(/^─am v[\d.]+ · Worktrees .* \d+ of \d+/);
   // No side or bottom borders (the key bar's `│` separators aside).
   expect(lines.slice(0, -1).some((l) => l.startsWith("│") || l.startsWith("╰"))).toBe(false);
   await tui.screenshot("compact-dashboard");
@@ -39,7 +39,7 @@ test("compact view: top lines only, jobs pane and split reviews open below", asy
   await tui.sendKey("Enter");
   await tui.waitForText("Run the repo's startup script?", 30_000);
   lines = await tui.lines();
-  const list = lines.findIndex((l) => l.startsWith("─Worktrees"));
+  const list = lines.findIndex((l) => l.startsWith("─am ") && l.includes("· Worktrees"));
   const jobs = lines.findIndex((l) => l.startsWith("─Jobs"));
   expect(list).toBe(0);
   expect(jobs).toBeGreaterThan(list);

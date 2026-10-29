@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: screen
 ---
-╭─Worktrees ───────────────────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
+╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────││ ✗ Create feature/broken              │
 │▌◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││   ✗ Adding worktree…                 │
 │ ◐ fix/offline-cache                                            4m ▓░░░░ 185k ││   git: fatal: invalid reference: nope│
@@ -17,4 +17,4 @@ expression: screen
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 ╰────────────────────────────────────────────────────────────────────── 1 of 3 ╯╰──────────────────────────────────────╯
- ⇥ jobs  │ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
+ ⇥ jobs  │ ⏎ open  │ g PR  l linear  │ n new  d delete  f filter  │ v reviews  s settings  r refresh  │ h help  q quit

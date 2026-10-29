@@ -6,6 +6,7 @@
 
 am_core::silence_unit_tests!();
 
+mod actions;
 mod app;
 mod cmux_sync;
 mod data;
@@ -96,6 +97,7 @@ fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
         KeyCode::Left => Key::Left,
         KeyCode::Right => Key::Right,
         KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
         KeyCode::Down => Key::Down,
         KeyCode::PageUp => Key::PageUp,
         KeyCode::PageDown => Key::PageDown,

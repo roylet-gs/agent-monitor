@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 80, 16)"
 ---
-╭─Worktrees ────────────────────────────────────────────────────── 3 to review ╮
+╭─am v0.0.0 · Worktrees ────────────────────────────────────────── 3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────│
 │▏◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
 │ ◐ fix/offline-cache                                            4m ▓░░░░ 185k │
@@ -17,4 +17,4 @@ expression: "render(&app, 80, 16)"
 │gridsight ────────────────────────────────────────────────────────────────────│
 │ Feeder load forecast v2  @alice                    you +1 ENG-77 #902✗ …  0s │
 ╰ you + your teams ──────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  │ r refresh  ⇥ list  esc close
+ ⏎ open  g PR  l ticket  │ r refresh  ⇥ list  │ esc close

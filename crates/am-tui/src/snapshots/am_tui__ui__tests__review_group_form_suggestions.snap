@@ -31,4 +31,4 @@ expression: screen
 │                 │ ⇥ olga                                                                           │                 │
 │                 ╰───────────────────────────────────────── ⇥ complete  ↑↓ pick  ⏎ save  esc cancel ╯                 │
 ╰ you + your teams · 1 group ────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc back
+ ⏎ open PR  l ticket  d remove  f filter  │ r refresh  │ h help  esc back

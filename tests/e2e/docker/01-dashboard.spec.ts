@@ -11,7 +11,7 @@ test("dashboard renders the worktree pane and key bar with the seeded repo", asy
   await tui.waitForText("feature/to-delete");
 
   const text = await tui.getScreenText();
-  expect(text).toContain("─Worktrees");
+  expect(text).toContain("· Worktrees");
   expect(text).toMatch(/ \d of \d+ /);
   // The Subagents pane and the mode pill are gone.
   expect(text).not.toContain("Subagents");
@@ -44,7 +44,7 @@ test("c is no longer bound: no popup or notice, dashboard stays", async ({ page 
 
   for (const key of ["c"]) {
     await tui.sendKey(key);
-    await tui.waitForText("─Worktrees");
+    await tui.waitForText("· Worktrees");
     const text = await tui.getScreenText();
     expect(text).not.toContain("Copied");
     expect(text).not.toMatch(/terminal|resum/i);

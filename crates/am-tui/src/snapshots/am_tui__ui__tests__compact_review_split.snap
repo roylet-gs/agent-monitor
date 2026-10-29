@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: screen
 ---
-─Worktrees ─────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ─ 3 to review
+─am v0.0.0 · Worktrees ─────────────────────────────────────────────────────────────────────────── 1 of 3 ─ 3 to review
 agent-monitor ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 ▏◑ feature/refactor ◆2                                                                            ENG-412 #127✓ ✔ ▒░░░░
  ◐ fix/offline-cache                                                                                              ▓░░░░
@@ -17,4 +17,4 @@ agent-monitor ──────────────────────
 gridsight ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Feeder load forecast v2  @alice                                                              you +1 ENG-77 #902✗ …  0s
 
- ⏎ open  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  ⇥ list  esc close
+ ⏎ open  g PR  l ticket  d remove  f filter  │ r refresh  ⇥ list  │ h help  esc close

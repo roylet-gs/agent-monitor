@@ -12,7 +12,7 @@ test.beforeEach(async () => {
 /** Rows inside the `─Worktrees` pane, between its top and bottom borders. */
 async function paneRows(tui: RustTui): Promise<string[]> {
   const lines = await tui.lines();
-  const top = lines.findIndex((l) => l.includes("─Worktrees"));
+  const top = lines.findIndex((l) => l.includes("· Worktrees"));
   const bottom = lines.findIndex((l, i) => i > top && /^[└╰]/.test(l));
   return lines.slice(top + 1, bottom);
 }
