@@ -220,13 +220,8 @@ pub fn matches_picked_filters(v: &WorktreeView, settings: &Settings) -> bool {
             return false;
         }
     }
-    let status = v.status();
-    let status_ok = match settings.worktree_filter_status.as_str() {
-        "waiting" => status == Some(Status::Waiting),
-        "active" => matches!(status, Some(Status::Waiting | Status::Executing | Status::Planning | Status::Delegating)),
-        "idle" => matches!(status, None | Some(Status::Idle | Status::Done)),
-        _ => true,
-    };
+    let picks = crate::settings::worktree_status_picks(&settings.worktree_filter_status);
+    let status_ok = picks.is_empty() || picks.contains(&v.status().map_or("none", Status::as_str));
     let pr_ok = match settings.worktree_filter_pr.as_str() {
         "open" => v.pr.as_ref().is_some_and(|p| p.state == "OPEN"),
         "none" => v.pr.is_none(),
@@ -765,7 +760,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn status_filter_picks_waiting_active_or_idle_rows() {
+    fn status_filter_shows_any_mix_of_picked_statuses() {
         let v = || {
             vec![
                 wt("waiting").agent(Status::Waiting, "2025-01-01 00:00:00", true),
@@ -776,8 +771,9 @@ pub(crate) mod tests {
         };
         let with = |f: &str| Settings { worktree_filter_status: f.into(), ..no_filters() };
         assert_eq!(filtered(v(), &with("waiting")), ["waiting"]);
+        assert_eq!(filtered(v(), &with("waiting,done")), ["waiting", "done"]);
+        assert_eq!(filtered(v(), &with("executing,none")), ["busy", "none"]);
         assert_eq!(filtered(v(), &with("active")), ["waiting", "busy"]);
-        assert_eq!(filtered(v(), &with("idle")), ["done", "none"]);
         assert_eq!(filtered(v(), &with("any")).len(), 4);
     }
 

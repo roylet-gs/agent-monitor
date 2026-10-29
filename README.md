@@ -170,7 +170,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
-| `f` | Worktree filters: text search, agent status (`waiting` / `active` / `idle`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `─Worktrees` border sums up what's filtered (`"auth" · waiting · no main · 3 hidden`; a click opens the box) |
+| `f` | Worktree filters: text search, agent status (a checklist: tick any of `waiting`, `executing`, `planning`, `delegating`, `done`, `idle`, `no agent`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `─Worktrees` border sums up what's filtered (`"auth" · waiting · no main · 3 hidden`; a click opens the box) |
 | `F` | Turn the `f` filters off, and back on (`worktreeFiltersEnabled`; the border reads `filters off · F` meanwhile). The base filters stay on |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
 | `h` | Help overlay with every key and the status legend |
@@ -401,7 +401,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `hideWithoutLinearTicket` | `false` | Hide worktrees with no Linear ticket |
 | `worktreeFiltersEnabled` | `true` | Switch for the `worktreeFilter*` filters (`F`); off leaves only the base `hide*` filters |
 | `worktreeFilterText` | `""` | Only worktrees whose name, branch or ticket contains this (any case) |
-| `worktreeFilterStatus` | `"any"` | `waiting`, `active` (an agent working or waiting) or `idle` (idle, done or no agent) |
+| `worktreeFilterStatus` | `"any"` | Agent statuses to show, comma-separated: any of `waiting`, `executing`, `planning`, `delegating`, `done`, `idle`, `none` (no agent), e.g. `"waiting,done"` |
 | `worktreeFilterPr` | `"any"` | `open` (an open PR), `none` (no PR) or `failing` (CI failing) |
 | `worktreeFilterGit` | `"any"` | `changes` (uncommitted or unpushed work) or `clean` |
 

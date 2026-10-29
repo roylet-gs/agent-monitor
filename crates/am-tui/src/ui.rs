@@ -152,6 +152,8 @@ pub enum Target {
 pub enum List {
     Settings,
     Sort,
+    /// A `Kind::Multi` field's checklist.
+    Multi,
     Plugins,
     Repos,
     /// The script chooser for one repository.
@@ -376,6 +378,7 @@ fn contains(r: Rect, x: u16, y: u16) -> bool {
 
 const SETTINGS_HINT: &str = " ⏎/space change  ←→ adjust  e edit file  esc close ";
 const FILTERS_HINT: &str = " ⏎/space change  ←→ adjust  esc close ";
+const MULTI_HINT: &str = " space pick  x any  esc back ";
 /// While typing a review group's list (authors, teams, repos).
 const AUTHORS_HINT: &str = " ⇥ complete  ↑↓ pick  ⏎ save  esc cancel ";
 
@@ -394,7 +397,13 @@ fn draw_settings(
     let form = ed.groups.as_ref().and_then(|g| g.form.as_ref());
     let typing_list =
         form.is_some_and(|f| f.editing.is_some() && matches!(f.field().kind, crate::review_groups_ui::FormKind::List(_)));
-    let hint = if typing_list { AUTHORS_HINT } else { hint };
+    let hint = if typing_list {
+        AUTHORS_HINT
+    } else if ed.multi.is_some() {
+        MULTI_HINT
+    } else {
+        hint
+    };
     let (rect, [banner, list, help]) = if filters {
         // The groups page needs room for a group's whole form, wrapped.
         let rows = match ed.groups.as_ref() {
@@ -405,7 +414,10 @@ fn draw_settings(
                 }
                 None => g.groups.len() + 4,
             },
-            None => ed.fields().len(),
+            None => match &ed.multi {
+                Some(m) => m.options.len() + 2,
+                None => ed.fields().len(),
+            },
         };
         // At the bottom of the page, so the groups above show the edits.
         let (rect, parts) = settings_areas(area, None, rows as u16, 4);
@@ -464,6 +476,23 @@ fn draw_settings(
         return;
     }
 
+    if let Some(m) = &ed.multi {
+        hits.clear();
+        let header = format!(" {}: show worktrees in any of the ticked; none ticked shows all", m.label);
+        let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
+        for (i, (id, on)) in m.options.iter().zip(&m.picked).enumerate() {
+            let sel = i == m.cursor;
+            let line = Line::from(vec![
+                Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
+                Span::styled(if *on { "[x] " } else { "[ ] " }, theme.fg(if *on { theme.green } else { theme.faint })),
+                Span::styled(crate::settings_ui::multi_label(id).to_string(), if *on { theme.fg(theme.text) } else { theme.faint() }),
+            ]);
+            push_row(hits, list, lines.len(), Target::Item(List::Multi, i), sel);
+            lines.push(if sel { line.style(theme.selected()) } else { line });
+        }
+        f.render_widget(Paragraph::new(lines), list);
+        return;
+    }
     if let Some(sort) = &ed.sort {
         hits.clear();
         let header = " Sort order — space on/off · d direction · J/K move · ⏎ save · esc cancel";
@@ -2119,7 +2148,8 @@ fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
 fn picks_filters(s: &am_core::settings::Settings) -> bool {
     s.worktree_filters_enabled
         && (!s.worktree_filter_text.trim().is_empty()
-            || [&s.worktree_filter_status, &s.worktree_filter_pr, &s.worktree_filter_git].iter().any(|f| f.as_str() != "any"))
+            || !am_core::settings::worktree_status_picks(&s.worktree_filter_status).is_empty()
+            || [&s.worktree_filter_pr, &s.worktree_filter_git].iter().any(|f| f.as_str() != "any"))
 }
 
 /// The dashboard's filters in a few words, e.g. `"auth" · waiting · CI
@@ -2133,11 +2163,9 @@ fn worktree_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> Op
         if !text.is_empty() {
             parts.push(format!("\"{text}\""));
         }
-        match s.worktree_filter_status.as_str() {
-            "waiting" => parts.push("waiting".into()),
-            "active" => parts.push("active agents".into()),
-            "idle" => parts.push("idle agents".into()),
-            _ => {}
+        let picks = am_core::settings::worktree_status_picks(&s.worktree_filter_status);
+        if !picks.is_empty() {
+            parts.push(picks.into_iter().map(crate::settings_ui::multi_label).collect::<Vec<_>>().join("/"));
         }
         match s.worktree_filter_pr.as_str() {
             "open" => parts.push("open PR".into()),
@@ -3654,6 +3682,29 @@ mod tests {
         // Only the defaults: nothing on the border.
         app.settings = am_core::settings::Settings { worktree_sort: vec![], ..Default::default() };
         assert!(!render(&app, 120, 16).contains("hidden"));
+    }
+
+    #[test]
+    fn agent_status_checklist() {
+        // Ticking saves settings.json: into the tests' temp data dir.
+        let (_guard, _) = crate::settings_ui::tests::data_dir();
+        let mut app = fixture();
+        app.settings.worktree_filter_status = "waiting,done".into();
+        app.snapshot.hidden_worktrees = 2;
+        assert!(render(&app, 120, 16).contains(" waiting/done · no main · 2 hidden "));
+        let mut ed = crate::settings_ui::SettingsEditor::only(&app.settings, crate::settings_ui::WORKTREE_FILTERS);
+        ed.cursor = crate::settings_ui::FIELDS.iter().position(|f| f.key == "worktreeFilterStatus").unwrap();
+        assert_eq!(ed.display(&crate::settings_ui::FIELDS[ed.cursor]), "waiting, done");
+        app.settings_editor = Some(ed);
+        app.on_key(Key::Enter);
+        let screen = render(&app, 120, 24);
+        assert!(screen.contains("[x] waiting") && screen.contains("[ ] no agent"), "{screen}");
+        // A click on a row moves there; a second ticks it.
+        let at = find(&app, 120, 24, "no agent");
+        click(&mut app, 120, 24, at, false);
+        click(&mut app, 120, 24, at, false);
+        assert!(app.settings_editor.as_ref().unwrap().multi.as_ref().unwrap().picked[6]);
+        insta::assert_snapshot!(render(&app, 120, 24));
     }
 
     fn update(latest: &str) -> am_core::update_check::Update {

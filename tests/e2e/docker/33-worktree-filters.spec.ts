@@ -1,7 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { RustTui, resetMock } from "./helpers/rust-tui";
 
-// `f` opens the Worktree filters box (text, agent status, PR, git); `F` turns
+// `f` opens the Worktree filters box (text, agent statuses (a checklist, any
+// number ticked), PR, git); `F` turns
 // those off and back on, while the base `hide*` filters (Settings → Base
 // filters) always apply. The seed sets `hideMainBranch: false`, which the
 // border names as `main shown`.
@@ -46,8 +47,9 @@ test("f filters the worktree list on top of the base filters and F turns only th
   await tui.waitForGone("feature/to-delete");
   await tui.waitForGone("filters off");
 
-  // Clear the text, then show only rows with a working agent: main (delegating)
-  // and feature/pair (executing) stay, feature/to-delete (no agent) goes.
+  // Clear the text, then pick two agent statuses in the checklist: main
+  // (delegating) and feature/pair (executing) stay, feature/to-delete (no
+  // agent) goes.
   await tui.sendKey("f");
   await tui.waitForText("Worktree filters");
   await tui.sendKey("j");
@@ -55,13 +57,23 @@ test("f filters the worktree list on top of the base filters and F turns only th
   await tui.press("Backspace", 4);
   await tui.sendKey("Enter");
   await tui.sendKey("j");
-  await tui.press("ArrowRight", 2);
-  await tui.waitForText("active");
+  await tui.sendKey("Enter");
+  await tui.waitForText("[ ] executing");
+  await tui.sendKey("j");
+  await tui.sendKey(" ");
+  await tui.waitForText("[x] executing");
+  await tui.press("j", 2);
+  await tui.sendKey(" ");
+  await tui.waitForText("[x] delegating");
+  await tui.screenshot("worktree-filters-status-checklist");
+  await tui.sendKey("Escape");
+  await tui.waitForMatch(/Agent status\s+executing, delegating/);
   await tui.sendKey("Escape");
   await tui.waitForGone("Worktree filters");
-  await tui.waitForMatch(/active agents · main shown · \d+ hidden/);
+  await tui.waitForMatch(/executing\/delegating · main shown · \d+ hidden/);
   const rows = (await worktreeRows(tui)).join("\n");
   expect(rows).toContain("feature/pair");
+  expect(rows).toContain("main");
   expect(rows).not.toContain("feature/to-delete");
   await tui.screenshot("worktree-filters-status");
 
@@ -79,5 +91,5 @@ test("f filters the worktree list on top of the base filters and F turns only th
   await tui.waitForGone("Worktree filters");
   await tui.waitForText("feature/to-delete");
   await tui.waitForText("main shown");
-  await tui.waitForGone("active agents");
+  await tui.waitForGone("executing/delegating");
 });

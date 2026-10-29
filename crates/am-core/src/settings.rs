@@ -73,7 +73,8 @@ pub struct Settings {
     pub worktree_filters_enabled: bool,
     /// Only rows whose name, branch or ticket contains this (any case).
     pub worktree_filter_text: String,
-    /// `WORKTREE_STATUS_FILTERS`: which agent statuses the list shows.
+    /// Which agent statuses the list shows: `WORKTREE_STATUS_FILTERS` ids
+    /// joined with `,` (`any` = every row; see `worktree_status_picks`).
     pub worktree_filter_status: String,
     /// `WORKTREE_PR_FILTERS`: which PR states the list shows.
     pub worktree_filter_pr: String,
@@ -368,10 +369,33 @@ pub fn split_logins(raw: &str) -> Vec<String> {
     out
 }
 
-/// `worktreeFilterStatus` values: every row, rows waiting on you, rows with
-/// a working agent (waiting, executing, planning, delegating), or rows whose
-/// agent is idle, done or absent.
-pub const WORKTREE_STATUS_FILTERS: [&str; 4] = ["any", "waiting", "active", "idle"];
+/// `worktreeFilterStatus` ids, any number of which can be picked: the agent
+/// statuses, plus `none` for a worktree with no agent.
+pub const WORKTREE_STATUS_FILTERS: [&str; 7] = ["waiting", "executing", "planning", "delegating", "done", "idle", "none"];
+
+/// The statuses a `worktreeFilterStatus` value picks, in
+/// `WORKTREE_STATUS_FILTERS` order; empty = every row (`any`, `""`). Unknown
+/// ids are dropped; `active` (2.1.66's working-or-waiting) still reads as
+/// the four working statuses.
+pub fn worktree_status_picks(raw: &str) -> Vec<&'static str> {
+    let mut picked = Vec::new();
+    for part in raw.split(',').map(str::trim) {
+        let ids: &[&str] = match part {
+            "active" => &["waiting", "executing", "planning", "delegating"],
+            p => &[p],
+        };
+        picked.extend(ids.iter().filter_map(|id| WORKTREE_STATUS_FILTERS.iter().find(|s| *s == id).copied()));
+    }
+    WORKTREE_STATUS_FILTERS.into_iter().filter(|s| picked.contains(s)).collect()
+}
+
+/// A `worktreeFilterStatus` value for `picks`: `any` when none (or all) are
+/// picked, else the ids joined with `,`.
+pub fn worktree_status_value(picks: &[&str]) -> String {
+    let picks = worktree_status_picks(&picks.join(","));
+    if picks.is_empty() || picks.len() == WORKTREE_STATUS_FILTERS.len() { "any".into() } else { picks.join(",") }
+}
+
 /// `worktreeFilterPr` values: every row, an open PR, no PR, CI failing.
 pub const WORKTREE_PR_FILTERS: [&str; 4] = ["any", "open", "none", "failing"];
 /// `worktreeFilterGit` values: every row, uncommitted or unpushed work, none.
@@ -596,12 +620,22 @@ mod tests {
         assert!(d.worktree_filters_enabled && d.worktree_filter_text.is_empty());
         assert_eq!((d.worktree_filter_status.as_str(), d.worktree_filter_pr.as_str(), d.worktree_filter_git.as_str()), ("any", "any", "any"));
         let s = Settings::parse(
-            r#"{"worktreeFiltersEnabled":false,"worktreeFilterText":"auth","worktreeFilterStatus":"waiting","worktreeFilterPr":"failing","worktreeFilterGit":"changes"}"#,
+            r#"{"worktreeFiltersEnabled":false,"worktreeFilterText":"auth","worktreeFilterStatus":"waiting,done","worktreeFilterPr":"failing","worktreeFilterGit":"changes"}"#,
         );
         assert!(!s.worktree_filters_enabled);
         assert_eq!(s.worktree_filter_text, "auth");
         let back = Settings::parse(&serde_json::to_string(&s).unwrap());
-        assert_eq!((back.worktree_filter_status.as_str(), back.worktree_filter_pr.as_str(), back.worktree_filter_git.as_str()), ("waiting", "failing", "changes"));
+        assert_eq!((back.worktree_filter_status.as_str(), back.worktree_filter_pr.as_str(), back.worktree_filter_git.as_str()), ("waiting,done", "failing", "changes"));
+    }
+
+    #[test]
+    fn worktree_status_picks_read_lists_any_and_the_old_active() {
+        assert!(worktree_status_picks("any").is_empty() && worktree_status_picks("").is_empty());
+        assert_eq!(worktree_status_picks("done, waiting,bogus"), ["waiting", "done"]);
+        assert_eq!(worktree_status_picks("active"), ["waiting", "executing", "planning", "delegating"]);
+        assert_eq!(worktree_status_value(&["idle", "waiting"]), "waiting,idle");
+        assert_eq!(worktree_status_value(&[]), "any");
+        assert_eq!(worktree_status_value(&WORKTREE_STATUS_FILTERS), "any");
     }
 
     #[test]

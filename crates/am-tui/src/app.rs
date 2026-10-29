@@ -981,11 +981,12 @@ impl App {
                 let outcome = e.on_key(key);
                 return self.editor_outcome(outcome);
             }
-            L::Sort | L::Plugins | L::Repos | L::RepoScripts | L::Keys | L::ThemeTokens | L::Palette => {
+            L::Sort | L::Multi | L::Plugins | L::Repos | L::RepoScripts | L::Keys | L::ThemeTokens | L::Palette => {
                 let Some(e) = &mut self.settings_editor else { return Action::None };
                 let at = |cursor: &mut usize| std::mem::replace(cursor, i) == i;
                 match list {
                     L::Sort => e.sort.as_mut().and_then(|s| at(&mut s.cursor).then_some(Key::Char(' '))),
+                    L::Multi => e.multi.as_mut().and_then(|m| at(&mut m.cursor).then_some(Key::Char(' '))),
                     L::Plugins => e.plugins.as_mut().and_then(|p| at(&mut p.cursor).then_some(Key::Char(' '))),
                     L::RepoScripts => e.repos.as_mut().and_then(|r| {
                         r.message = None;
@@ -1111,6 +1112,7 @@ impl App {
             let groups = e.groups.take();
             let keys = e.keys.take();
             let repos = e.repos.take();
+            let multi = e.multi.take();
             let repo_count = e.repo_count;
             let filter_box = e.is_filter_box().then_some(e.only).flatten();
             *e = crate::settings_ui::SettingsEditor::new(&self.settings);
@@ -1122,6 +1124,7 @@ impl App {
             e.plugins = plugins;
             e.keys = keys;
             e.repos = repos;
+            e.multi = multi;
             e.groups = groups;
             e.repo_count = repo_count;
         }
