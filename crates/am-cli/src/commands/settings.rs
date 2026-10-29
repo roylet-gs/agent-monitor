@@ -127,8 +127,16 @@ pub fn set(key: &str, value: &str) {
     }
 
     use am_core::settings::{WORKTREE_GIT_FILTERS, WORKTREE_PR_FILTERS, WORKTREE_STATUS_FILTERS};
+    if key == "worktreeFilterStatus"
+        && value != "any"
+        && value.split(',').map(str::trim).any(|id| id != "active" && !WORKTREE_STATUS_FILTERS.contains(&id))
+    {
+        fail(&format!(
+            "Invalid value for worktreeFilterStatus: {value}. Use any, or a comma-separated list of: {}.",
+            WORKTREE_STATUS_FILTERS.join(", ")
+        ));
+    }
     for (name, ids) in [
-        ("worktreeFilterStatus", &WORKTREE_STATUS_FILTERS[..]),
         ("worktreeFilterPr", &WORKTREE_PR_FILTERS[..]),
         ("worktreeFilterGit", &WORKTREE_GIT_FILTERS[..]),
     ] {

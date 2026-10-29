@@ -18,6 +18,9 @@ use crate::theme_builder::{BuilderOutcome, ThemeBuilder};
 pub enum Kind {
     Bool,
     Choice(&'static [&'static str]),
+    /// Any number of the ids, kept as a `,`-joined string (`any` = none
+    /// picked); ⏎ opens a checklist. Only `worktreeFilterStatus` so far.
+    Multi(&'static [&'static str]),
     Number { step: u64, min: u64 },
     /// A token count: shown as `200k`/`1.0M`, typed as `128k`/`1m`, ←→ step
     /// through `TOKEN_PRESETS`.
@@ -91,17 +94,17 @@ pub const FIELDS: &[Field] = &[
     Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Bar scale; a session past it doubles the scale until it fits (⏎ to type, e.g. 128k)", section: "Dashboard", kind: Kind::Tokens { min: context::MIN_WINDOW } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only show processes and agent commands whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
-    Field { key: "worktreeFiltersEnabled", label: "Filters on", help: "Off shows every worktree whatever the filters below say (F on the list)", section: "Filters", kind: Kind::Bool },
+    Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout; always applied (F doesn't turn it off)", section: "Base filters", kind: Kind::Bool },
+    Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Always applied, unless the agent session is open", section: "Base filters", kind: Kind::Bool },
+    Field { key: "hideIdleDoneAgents", label: "Hide idle/done agents", help: "Always applied: only worktrees with active agents", section: "Base filters", kind: Kind::Bool },
+    Field { key: "hideWithoutLinearTicket", label: "Hide without Linear ticket", help: "Always applied, unless the session is open", section: "Base filters", kind: Kind::Bool },
+    Field { key: "worktreeFiltersEnabled", label: "Filters on", help: "Off ignores the filters below (F on the list); the base filters stay", section: "Filters", kind: Kind::Bool },
     Field { key: "worktreeFilterText", label: "Text search", help: "Only worktrees whose name, branch or ticket contains this (any case)", section: "Filters", kind: Kind::Text { secret: false } },
-    Field { key: "worktreeFilterStatus", label: "Agent status", help: "waiting: needs you; active: working or waiting; idle: idle, done or no agent", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_STATUS_FILTERS) },
+    Field { key: "worktreeFilterStatus", label: "Agent status", help: "Only worktrees whose agent is in one of the picked statuses (⏎ to pick)", section: "Filters", kind: Kind::Multi(&am_core::settings::WORKTREE_STATUS_FILTERS) },
     Field { key: "worktreeFilterPr", label: "PR", help: "open: has an open PR; none: no PR; failing: CI failing", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_PR_FILTERS) },
     Field { key: "worktreeFilterGit", label: "Git", help: "changes: uncommitted or unpushed work; clean: none", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_GIT_FILTERS) },
-    Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout from the list", section: "Filters", kind: Kind::Bool },
-    Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Unless the agent session is open", section: "Filters", kind: Kind::Bool },
-    Field { key: "hideIdleDoneAgents", label: "Hide idle/done agents", help: "Only show worktrees with active agents", section: "Filters", kind: Kind::Bool },
-    Field { key: "hideWithoutLinearTicket", label: "Hide without Linear ticket", help: "Unless the session is open", section: "Filters", kind: Kind::Bool },
     // An action, not a setting: its key is never written.
-    Field { key: "resetWorktreeFilters", label: "Reset filters…", help: "Every filter above back to its default (only the main branch hidden)", section: "Filters", kind: Kind::ResetFilters },
+    Field { key: "resetWorktreeFilters", label: "Reset filters…", help: "Every filter above back to its default (the base filters kept)", section: "Filters", kind: Kind::ResetFilters },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
     Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
     Field { key: "cmuxSync", label: "cmux sidebar", help: "Inside cmux: PR, ticket and context on each worktree's workspace; review requests as notifications", section: "Notifications", kind: Kind::Bool },
@@ -134,17 +137,15 @@ pub const FIELDS: &[Field] = &[
     Field { key: "resetSettings", label: "Reset settings…", help: "Defaults for every setting, then setup (repos, themes, scripts, hooks kept)", section: "Setup", kind: Kind::Reset },
 ];
 
-/// The rows of the dashboard's filter box (`f`), a cut-down editor.
+/// The rows of the dashboard's filter box (`f`), a cut-down editor: the
+/// filters `F` turns on and off, on top of the base filters (`hide*`, only
+/// in Settings → Base filters, always applied).
 pub const WORKTREE_FILTERS: &[&str] = &[
     "worktreeFiltersEnabled",
     "worktreeFilterText",
     "worktreeFilterStatus",
     "worktreeFilterPr",
     "worktreeFilterGit",
-    "hideMainBranch",
-    "hideMergedClosedPrs",
-    "hideIdleDoneAgents",
-    "hideWithoutLinearTicket",
     "resetWorktreeFilters",
 ];
 
@@ -208,6 +209,8 @@ pub struct SettingsEditor {
     pub cursor: usize,
     pub editing: Option<String>,
     pub sort: Option<SortEditor>,
+    /// A `Kind::Multi` field's checklist.
+    pub multi: Option<MultiEditor>,
     pub builder: Option<ThemeBuilder>,
     pub plugins: Option<PluginEditor>,
     pub keys: Option<KeyEditor>,
@@ -238,7 +241,7 @@ impl SettingsEditor {
             _ => Map::new(),
         };
         let only = settings.reviews_mode().then_some(REVIEW_MODE_FIELDS);
-        SettingsEditor { cursor: 0, editing: None, sort: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, confirm: None, only, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default(), scroll: Default::default() }
+        SettingsEditor { cursor: 0, editing: None, sort: None, multi: None, builder: None, plugins: None, keys: None, repos: None, repo_count: 0, values, error: None, confirm: None, only, groups: None, candidates: Candidates::default(), group_counts: GroupCounts::default(), scroll: Default::default() }
     }
 
     /// An editor showing only the `keys` fields, starting on the first.
@@ -280,6 +283,7 @@ impl SettingsEditor {
             || self.keys.is_some()
             || self.repos.is_some()
             || self.sort.is_some()
+            || self.multi.is_some()
             || self.builder.is_some()
             || !self.fields().contains(&i)
         {
@@ -343,6 +347,10 @@ impl SettingsEditor {
                 let on = am_core::harness::enabled(&s).len();
                 format!("{on} of {} on · default {}", am_core::harness::all().len(), s.default_agent().id())
             }
+            Kind::Multi(_) => {
+                let picks = am_core::settings::worktree_status_picks(v.and_then(Value::as_str).unwrap_or(""));
+                if picks.is_empty() { "any".into() } else { picks.into_iter().map(multi_label).collect::<Vec<_>>().join(", ") }
+            }
             Kind::Sort => {
                 let crits: Vec<SortCriterion> = v.cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                 let on: Vec<&str> = crits.iter().filter(|c| c.enabled).map(|c| sort_label(c.key)).collect();
@@ -405,6 +413,19 @@ impl SettingsEditor {
                 },
             }
             return Outcome::None;
+        }
+        if let Some(m) = &mut self.multi {
+            return match m.on_key(key) {
+                MultiOutcome::Stay => Outcome::None,
+                MultiOutcome::Close => {
+                    self.multi = None;
+                    Outcome::None
+                }
+                MultiOutcome::Save(value) => {
+                    let key = m.key;
+                    self.set(key, Value::from(value))
+                }
+            };
         }
         if let Some(sort) = &mut self.sort {
             match sort.on_key(key) {
@@ -478,6 +499,11 @@ impl SettingsEditor {
                 self.set(f.key, Value::Bool(!cur))
             }
             Kind::Choice(_) | Kind::Theme => self.step(1),
+            Kind::Multi(options) => {
+                let picks = am_core::settings::worktree_status_picks(self.values.get(f.key).and_then(Value::as_str).unwrap_or(""));
+                self.multi = Some(MultiEditor::new(f.key, f.label, options, &picks));
+                Outcome::None
+            }
             Kind::ThemeBuilder => {
                 self.builder = Some(open_builder(self.values.get("theme").and_then(Value::as_str).unwrap_or("ansi")));
                 Outcome::None
@@ -595,8 +621,8 @@ impl SettingsEditor {
 }
 
 impl SettingsEditor {
-    /// Run a confirmed reset: `resetWorktreeFilters` (every worktree filter
-    /// back to its default), `resetReviewFilters` (scope, the default group,
+    /// Run a confirmed reset: `resetWorktreeFilters` (the `f` filters back
+    /// to their defaults; the base `hide*` filters kept), `resetReviewFilters` (scope, the default group,
     /// the GitHub total back to defaults; groups kept) or `resetReviewGroups`
     /// (every review group removed).
     fn reset_filters(&mut self, which: &str) -> Outcome {
@@ -608,10 +634,6 @@ impl SettingsEditor {
                 ("worktreeFilterStatus", Value::from(d.worktree_filter_status)),
                 ("worktreeFilterPr", Value::from(d.worktree_filter_pr)),
                 ("worktreeFilterGit", Value::from(d.worktree_filter_git)),
-                ("hideMainBranch", Value::Bool(d.hide_main_branch)),
-                ("hideMergedClosedPrs", Value::Bool(d.hide_merged_closed_prs)),
-                ("hideIdleDoneAgents", Value::Bool(d.hide_idle_done_agents)),
-                ("hideWithoutLinearTicket", Value::Bool(d.hide_without_linear_ticket)),
             ],
             "resetReviewFilters" => vec![
                 ("reviewRequestsScope", Value::from(d.review_requests_scope)),
@@ -791,6 +813,57 @@ pub fn sort_label(k: SortKey) -> &'static str {
         SortKey::BranchName => "branch",
         SortKey::PrStatus => "PR status",
         SortKey::GitDirty => "uncommitted",
+    }
+}
+
+/// How a `Kind::Multi` id reads on screen.
+pub fn multi_label(id: &str) -> &str {
+    if id == "none" { "no agent" } else { id }
+}
+
+pub enum MultiOutcome {
+    Stay,
+    Close,
+    /// A pick changed: save this value (the checklist stays open).
+    Save(String),
+}
+
+/// A `Kind::Multi` field's checklist: space (or ⏎) ticks, `x` clears,
+/// esc/q close. Each change saves at once, so the list behind updates.
+pub struct MultiEditor {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub options: &'static [&'static str],
+    pub picked: Vec<bool>,
+    pub cursor: usize,
+}
+
+impl MultiEditor {
+    fn new(key: &'static str, label: &'static str, options: &'static [&'static str], picks: &[&str]) -> MultiEditor {
+        let picked = options.iter().map(|o| picks.contains(o)).collect();
+        MultiEditor { key, label, options, picked, cursor: 0 }
+    }
+
+    fn value(&self) -> String {
+        let picks: Vec<&str> = self.options.iter().zip(&self.picked).filter(|(_, on)| **on).map(|(o, _)| *o).collect();
+        am_core::settings::worktree_status_value(&picks)
+    }
+
+    fn on_key(&mut self, key: Key) -> MultiOutcome {
+        match key {
+            Key::Esc | Key::Char('q') => return MultiOutcome::Close,
+            k if let Some(to) = crate::nav::step(k, true, self.cursor, self.options.len()) => self.cursor = to,
+            Key::Char(' ') | Key::Enter => {
+                self.picked[self.cursor] ^= true;
+                return MultiOutcome::Save(self.value());
+            }
+            Key::Char('x') => {
+                self.picked.iter_mut().for_each(|p| *p = false);
+                return MultiOutcome::Save(self.value());
+            }
+            _ => {}
+        }
+        MultiOutcome::Stay
     }
 }
 
@@ -1241,22 +1314,59 @@ pub(crate) mod tests {
         let (_lock, dir) = data_dir();
         let mut app = crate::app::App::new(Settings::default());
         app.on_key(Key::Char('f'));
-        goto(app.settings_editor.as_mut().unwrap(), "worktreeFilterStatus");
+        goto(app.settings_editor.as_mut().unwrap(), "worktreeFilterPr");
         app.on_key(Key::Right);
-        assert_eq!(app.settings.worktree_filter_status, "waiting");
+        assert_eq!(app.settings.worktree_filter_pr, "open");
         assert_eq!(app.settings_editor.as_ref().unwrap().only, Some(WORKTREE_FILTERS), "rebuilt as the same box");
         let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
-        assert_eq!(file["worktreeFilterStatus"], "waiting");
+        assert_eq!(file["worktreeFilterPr"], "open");
         // Reset asks, then puts everything back.
         goto(app.settings_editor.as_mut().unwrap(), "resetWorktreeFilters");
         app.on_key(Key::Enter);
         app.on_key(Key::Char('y'));
-        assert_eq!(app.settings.worktree_filter_status, "any");
-        assert!(app.settings.hide_main_branch);
+        assert_eq!(app.settings.worktree_filter_pr, "any");
+        // The base filters aren't in the box, and the reset leaves them be.
+        assert!(!WORKTREE_FILTERS.iter().any(|k| k.starts_with("hide")));
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(file["hideMainBranch"], Value::Null);
     }
 
     #[test]
-    fn capital_f_turns_every_filter_off_and_on() {
+    fn agent_status_takes_several_statuses_from_a_checklist() {
+        let (_lock, dir) = data_dir();
+        let mut app = crate::app::App::new(Settings::default());
+        app.on_key(Key::Char('f'));
+        goto(app.settings_editor.as_mut().unwrap(), "worktreeFilterStatus");
+        assert_eq!(app.settings_editor.as_ref().unwrap().display(&FIELDS[app.settings_editor.as_ref().unwrap().cursor]), "any");
+        app.on_key(Key::Enter);
+        assert!(app.settings_editor.as_ref().unwrap().multi.is_some(), "⏎ opens the checklist");
+        // waiting (first), then done (fifth): each tick saves, the checklist stays.
+        app.on_key(Key::Char(' '));
+        app.on_key(Key::Char('j'));
+        app.on_key(Key::Char('j'));
+        app.on_key(Key::Char('j'));
+        app.on_key(Key::Char('j'));
+        app.on_key(Key::Char(' '));
+        assert_eq!(app.settings.worktree_filter_status, "waiting,done");
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(file["worktreeFilterStatus"], "waiting,done");
+        let ed = app.settings_editor.as_ref().unwrap();
+        assert!(ed.multi.as_ref().is_some_and(|m| m.cursor == 4), "still open on the same row after the save");
+        // The last row reads `no agent`; x clears back to any; esc returns to the box.
+        app.on_key(Key::Char('G'));
+        app.on_key(Key::Char(' '));
+        assert_eq!(app.settings.worktree_filter_status, "waiting,done,none");
+        app.on_key(Key::Esc);
+        let ed = app.settings_editor.as_ref().unwrap();
+        assert!(ed.multi.is_none() && ed.only == Some(WORKTREE_FILTERS));
+        assert_eq!(ed.display(&FIELDS[ed.cursor]), "waiting, done, no agent");
+        app.on_key(Key::Enter);
+        app.on_key(Key::Char('x'));
+        assert_eq!(app.settings.worktree_filter_status, "any");
+    }
+
+    #[test]
+    fn capital_f_turns_the_picked_filters_off_and_on() {
         let (_lock, dir) = data_dir();
         let mut app = crate::app::App::new(Settings::default());
         assert!(matches!(app.on_key(Key::Char('F')), crate::app::Action::SettingsChanged));

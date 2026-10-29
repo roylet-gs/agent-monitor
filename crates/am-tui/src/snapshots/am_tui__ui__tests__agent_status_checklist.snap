@@ -1,0 +1,28 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 120, 24)"
+---
+╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ feature/refactor ◆ 2 subagents                                      ENG-412 #127✓ approved ↑2 ±3  4m █░░░░░░░ 121k │
+│ ◐ fix/offline-cache                                                                                 4m █▒░░░░░░ 185k │
+│                                                                                                                      │
+│gridsight ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│ · main                                                                                       ↑2 ±3  4m               │
+│                                                                                                                      │
+│                                                                                                                      │
+│                 ╭─Worktree filters ────────────────────────────────────────────────────────────────╮                 │
+│                 │ Agent status: show worktrees in any of the ticked; none ticked shows all         │                 │
+│                 │                                                                                  │                 │
+│                 │ [x] waiting                                                                      │                 │
+│                 │ [ ] executing                                                                    │                 │
+│                 │ [ ] planning                                                                     │                 │
+│                 │ [ ] delegating                                                                   │                 │
+│                 │ [x] done                                                                         │                 │
+│                 │ [ ] idle                                                                         │                 │
+│                 │▌[x] no agent                                                                     │                 │
+│                 │                                                                                  │                 │
+│                 │                                                                                  │                 │
+│                 ╰───────────────────────────────────────────────────── space pick  x any  esc back ╯                 │
+╰ waiting/done/no agent · no main · 2 hidden ────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
