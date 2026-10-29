@@ -310,6 +310,45 @@ pub fn detect_git_activity(command: &str) -> Option<&'static str> {
     None
 }
 
+/// What a tool call blocks the turn on, when it waits for something outside
+/// the agent rather than working: `Monitor`, a blocking `TaskOutput`, or a
+/// foreground shell `gh run watch`, `gh pr checks --watch`, `sleep N` or
+/// `wait`. The agent is busy but needs nobody, so the dashboard shows it as
+/// watching. Returns a short label (`gh run watch 123`), `None` otherwise.
+pub fn waits_on_event(tool: &str, input: Option<&Value>) -> Option<String> {
+    let pick = |k: &str| input.and_then(|i| i.get(k));
+    match tool {
+        "Monitor" => {
+            let what = pick("description").and_then(Value::as_str).unwrap_or("monitor");
+            Some(truncate(what.lines().next().unwrap_or("").trim(), 60))
+        }
+        "TaskOutput" if pick("block").and_then(Value::as_bool) != Some(false) => Some("task output".into()),
+        "Bash" if pick("run_in_background").and_then(Value::as_bool) != Some(true) => {
+            let command = pick("command").and_then(Value::as_str)?;
+            command.split(['\n', ';', '&', '|']).map(str::trim).find_map(waiting_command)
+        }
+        _ => None,
+    }
+}
+
+/// One shell command (`timeout 600 gh run watch 1` too) that only waits.
+fn waiting_command(segment: &str) -> Option<String> {
+    let mut words: Vec<&str> = segment.split_whitespace().collect();
+    // `timeout 600 …` / `timeout -k 5 10m …` wrap the real command.
+    if words.first() == Some(&"timeout") {
+        let skip = 1 + words[1..].iter().take_while(|w| w.starts_with('-') || w.starts_with(|c: char| c.is_ascii_digit())).count();
+        words.drain(..skip);
+    }
+    let waits = match words.as_slice() {
+        ["gh", "run", "watch", ..] => true,
+        ["gh", "pr", "checks", rest @ ..] => rest.contains(&"--watch"),
+        ["sleep", n, ..] => n.trim_end_matches(['s', 'm', 'h']).parse::<f64>().is_ok(),
+        ["wait"] | ["wait", ..] => true,
+        _ => false,
+    };
+    waits.then(|| truncate(&words.join(" "), 60))
+}
+
 /// A short, single-line summary of a tool's input for display
 /// (`Bash: pnpm test`, `Read: src/lib/db.ts`). Never the full payload.
 pub fn summarize_tool_input(tool: &str, input: Option<&Value>, cwd: Option<&str>) -> Option<String> {
@@ -561,5 +600,26 @@ mod tests {
         assert_eq!(summarize_tool_input("Read", Some(&v), Some("/x")).as_deref(), Some("/a/b.rs"));
         assert_eq!(summarize_tool_input("Mystery", Some(&v), None), None);
         assert_eq!(truncate("abcdef", 4), "abc…");
+    }
+
+    #[test]
+    fn waits_on_event_spots_turns_blocked_on_something_outside() {
+        let bash = |c: &str| waits_on_event("Bash", Some(&serde_json::json!({ "command": c })));
+        assert_eq!(bash("gh run watch 123 --exit-status").as_deref(), Some("gh run watch 123 --exit-status"));
+        assert_eq!(bash("gh pr checks 42 --watch").as_deref(), Some("gh pr checks 42 --watch"));
+        assert_eq!(bash("gh pr checks 42"), None);
+        assert_eq!(bash("cd x && sleep 300 && gh pr view").as_deref(), Some("sleep 300"));
+        assert_eq!(bash("sleep 5m").as_deref(), Some("sleep 5m"));
+        assert_eq!(bash("timeout 600 gh run watch 9").as_deref(), Some("gh run watch 9"));
+        assert_eq!(bash("timeout -k 5 10m sleep 60").as_deref(), Some("sleep 60"));
+        assert_eq!(bash("pnpm test"), None);
+        assert_eq!(bash("echo sleep 300"), None);
+        let bg = serde_json::json!({ "command": "gh run watch 1", "run_in_background": true });
+        assert_eq!(waits_on_event("Bash", Some(&bg)), None);
+        let monitor = serde_json::json!({ "description": "CI on #42" });
+        assert_eq!(waits_on_event("Monitor", Some(&monitor)).as_deref(), Some("CI on #42"));
+        assert_eq!(waits_on_event("TaskOutput", Some(&serde_json::json!({ "task_id": "b1" }))).as_deref(), Some("task output"));
+        assert_eq!(waits_on_event("TaskOutput", Some(&serde_json::json!({ "block": false }))), None);
+        assert_eq!(waits_on_event("Read", Some(&serde_json::json!({ "file_path": "x" }))), None);
     }
 }

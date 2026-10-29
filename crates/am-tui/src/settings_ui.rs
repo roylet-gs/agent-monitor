@@ -108,6 +108,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
     Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
     Field { key: "cmuxSync", label: "cmux sidebar", help: "Inside cmux: PR, ticket and context on each worktree's workspace; review requests as notifications", section: "Notifications", kind: Kind::Bool },
+    Field { key: "cmuxNotify", label: "cmux alerts", help: "Inside cmux: changes posted as notifications on the worktree's own workspace (⏎ to pick)", section: "Notifications", kind: Kind::Multi(&am_core::settings::CMUX_NOTIFY_KINDS) },
     Field { key: "audioWaitingSound", label: "Waiting sound", help: "Played when an agent needs you", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "audioDoneSound", label: "Done sound", help: "Played when an agent finishes", section: "Notifications", kind: Kind::Choice(SOUNDS) },
     Field { key: "ghPrStatus", label: "Fetch PRs", help: "GitHub PR and CI status via gh", section: "GitHub", kind: Kind::Bool },
@@ -347,9 +348,13 @@ impl SettingsEditor {
                 let on = am_core::harness::enabled(&s).len();
                 format!("{on} of {} on · default {}", am_core::harness::all().len(), s.default_agent().id())
             }
-            Kind::Multi(_) => {
-                let picks = am_core::settings::worktree_status_picks(v.and_then(Value::as_str).unwrap_or(""));
-                if picks.is_empty() { "any".into() } else { picks.into_iter().map(multi_label).collect::<Vec<_>>().join(", ") }
+            Kind::Multi(options) => {
+                let picks = multi_picks(options, v.and_then(Value::as_str).unwrap_or(""));
+                if picks.is_empty() {
+                    multi_none(options).into()
+                } else {
+                    picks.into_iter().map(|id| multi_label(options, id)).collect::<Vec<_>>().join(", ")
+                }
             }
             Kind::Sort => {
                 let crits: Vec<SortCriterion> = v.cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
@@ -500,7 +505,7 @@ impl SettingsEditor {
             }
             Kind::Choice(_) | Kind::Theme => self.step(1),
             Kind::Multi(options) => {
-                let picks = am_core::settings::worktree_status_picks(self.values.get(f.key).and_then(Value::as_str).unwrap_or(""));
+                let picks = multi_picks(options, self.values.get(f.key).and_then(Value::as_str).unwrap_or(""));
                 self.multi = Some(MultiEditor::new(f.key, f.label, options, &picks));
                 Outcome::None
             }
@@ -816,9 +821,41 @@ pub fn sort_label(k: SortKey) -> &'static str {
     }
 }
 
-/// How a `Kind::Multi` id reads on screen.
-pub fn multi_label(id: &str) -> &str {
-    if id == "none" { "no agent" } else { id }
+fn is_status_filter(options: &[&str]) -> bool {
+    options == am_core::settings::WORKTREE_STATUS_FILTERS
+}
+
+/// The ids a `Kind::Multi` value picks, in `options` order.
+pub fn multi_picks(options: &'static [&'static str], raw: &str) -> Vec<&'static str> {
+    if is_status_filter(options) {
+        return am_core::settings::worktree_status_picks(raw);
+    }
+    options.iter().copied().filter(|o| raw.split(',').any(|p| p.trim() == *o)).collect()
+}
+
+/// The stored value for `picks` of `options`.
+fn multi_value(options: &[&str], picks: &[&str]) -> String {
+    if is_status_filter(options) { am_core::settings::worktree_status_value(picks) } else { picks.join(",") }
+}
+
+/// What nothing ticked means: a filter shows every row, alerts none.
+pub fn multi_none(options: &[&str]) -> &'static str {
+    if is_status_filter(options) { "any" } else { "none" }
+}
+
+/// How a `Kind::Multi` id of `options` reads on screen.
+pub fn multi_label<'a>(options: &[&str], id: &'a str) -> &'a str {
+    if is_status_filter(options) {
+        return if id == "none" { "no agent" } else { id };
+    }
+    match id {
+        "waiting" => "agent waiting for you",
+        "done" => "agent finished",
+        "ci" => "CI started failing",
+        "review" => "approved / changes requested",
+        "conflicts" => "merge conflicts",
+        other => other,
+    }
 }
 
 pub enum MultiOutcome {
@@ -846,7 +883,7 @@ impl MultiEditor {
 
     fn value(&self) -> String {
         let picks: Vec<&str> = self.options.iter().zip(&self.picked).filter(|(_, on)| **on).map(|(o, _)| *o).collect();
-        am_core::settings::worktree_status_value(&picks)
+        multi_value(self.options, &picks)
     }
 
     fn on_key(&mut self, key: Key) -> MultiOutcome {

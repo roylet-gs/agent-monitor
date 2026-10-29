@@ -172,7 +172,7 @@ fn assistant_usage(v: &Value) -> Option<ContextUsage> {
     let usage = msg.get("usage")?;
     let n = |k: &str| usage.get(k).and_then(Value::as_u64).unwrap_or(0);
     let tokens = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
-    (tokens > 0).then_some(ContextUsage { tokens, model })
+    (tokens > 0).then_some(ContextUsage { tokens, model, window: None })
 }
 
 #[cfg(test)]

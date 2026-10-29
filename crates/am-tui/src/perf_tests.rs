@@ -65,7 +65,7 @@ pub(super) fn big_fixture(worktrees: usize, reviews: usize) -> App {
                 pr_attachment: None,
             });
         }
-        v.context = Some(ContextUsage { tokens: 10_000 * (i as u64 % 90), model: None });
+        v.context = Some(ContextUsage { tokens: 10_000 * (i as u64 % 90), model: None, window: None });
         if i % 7 == 0 {
             v.sessions = (0..3)
                 .map(|k| SessionView {
@@ -76,6 +76,8 @@ pub(super) fn big_fixture(worktrees: usize, reviews: usize) -> App {
                     started_at: "2025-10-11 09:00:00".into(),
                     updated_at: "2025-10-11 09:59:00".into(),
                     context: None,
+                    cmux: None,
+                    waiting_on: None,
                 })
                 .collect();
         }

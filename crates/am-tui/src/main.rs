@@ -245,7 +245,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             if !alerts.is_empty() && am_core::cmux::inside() && cmux_sync::role::owned() {
                 std::thread::spawn(move || {
                     for (title, body) in alerts {
-                        let _ = am_core::cmux::notify(&am_core::cmux::SystemCmux, &title, &body, None);
+                        let _ = am_core::cmux::notify(&am_core::cmux::SystemCmux, &title, &body, None, None);
                     }
                 });
             }

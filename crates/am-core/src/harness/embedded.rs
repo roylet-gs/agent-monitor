@@ -18,6 +18,8 @@
 //!   [`with_block_placement`](Embedded::with_block_placement),
 //!   [`with_hook_companion`](Embedded::with_hook_companion): non-JSON hook
 //!   config and the state kept beside it.
+//! - [`with_context`](Embedded::with_context): context-window usage read
+//!   from the CLI's own session files.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -47,7 +49,12 @@ pub struct Embedded {
     place_block: Option<PlaceBlock>,
     /// State kept beside the hook config ([`Harness::hook_companion`]).
     companion: Option<HookCompanion>,
+    /// Context usage ([`Harness::context_usage`]).
+    context: Option<ContextFn>,
 }
+
+/// [`Embedded::with_context`]: `(worktree root, session id) → usage`.
+pub type ContextFn = fn(&Path, &str) -> Option<crate::context::ContextUsage>;
 
 /// [`Embedded::with_normalize`]: `(manifest, payload, --event) → event`.
 /// Call `manifest.normalize(payload, event_override)` for the declarative
@@ -66,6 +73,7 @@ impl Embedded {
             normalize: None,
             place_block: None,
             companion: None,
+            context: None,
         }
     }
 
@@ -113,6 +121,12 @@ impl Embedded {
     /// ([`Harness::hook_companion`]).
     pub const fn with_hook_companion(mut self, f: HookCompanion) -> Embedded {
         self.companion = Some(f);
+        self
+    }
+
+    /// Read a session's context-window usage ([`Harness::context_usage`]).
+    pub const fn with_context(mut self, f: ContextFn) -> Embedded {
+        self.context = Some(f);
         self
     }
 
@@ -214,6 +228,10 @@ impl Harness for Embedded {
             Some(f) => f(root),
             None => HarnessKind::get(self.id()).map(|k| recorded_sessions(k, root)).unwrap_or_default(),
         }
+    }
+
+    fn context_usage(&self, root: &Path, session_id: &str) -> Option<crate::context::ContextUsage> {
+        self.context.and_then(|f| f(root, session_id))
     }
 
     fn resume_args(&self, session_id: Option<&str>, continue_latest: bool) -> Vec<String> {

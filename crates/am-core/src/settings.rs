@@ -127,6 +127,11 @@ pub struct Settings {
     /// cmux workspace's sidebar row, and post new review requests as cmux
     /// notifications (`crate::cmux`). Does nothing outside cmux.
     pub cmux_sync: bool,
+    /// Which changes `cmuxSync` posts as notifications (and sidebar log
+    /// lines) on the worktree's own cmux workspace: [`CMUX_NOTIFY_KINDS`]
+    /// ids joined with `,`; empty = none. The agent ones are off by default
+    /// since cmux's own agent integration may already notify.
+    pub cmux_notify: String,
     /// What `am` opens to (see [`AppMode`]): `full` (the dashboard) or
     /// `reviews` (only the review-requests page). Unknown values are `full`.
     pub app_mode: String,
@@ -243,6 +248,7 @@ impl Default for Settings {
             daily_tokens_mode: "tokens".into(),
             check_for_updates: true,
             cmux_sync: true,
+            cmux_notify: "ci,review,conflicts".into(),
             app_mode: "full".into(),
             startup_script_mode: "pane".into(),
             key_bindings: Default::default(),
@@ -394,6 +400,17 @@ pub fn worktree_status_picks(raw: &str) -> Vec<&'static str> {
 pub fn worktree_status_value(picks: &[&str]) -> String {
     let picks = worktree_status_picks(&picks.join(","));
     if picks.is_empty() || picks.len() == WORKTREE_STATUS_FILTERS.len() { "any".into() } else { picks.join(",") }
+}
+
+/// `cmuxNotify` ids: an agent starts waiting / finishes, a PR's CI starts
+/// failing, it's approved or gets changes requested, it hits conflicts.
+pub const CMUX_NOTIFY_KINDS: [&str; 5] = ["waiting", "done", "ci", "review", "conflicts"];
+
+impl Settings {
+    /// `cmuxNotify` includes `kind` (a [`CMUX_NOTIFY_KINDS`] id).
+    pub fn cmux_notifies(&self, kind: &str) -> bool {
+        self.cmux_notify.split(',').any(|k| k.trim() == kind)
+    }
 }
 
 /// `worktreeFilterPr` values: every row, an open PR, no PR, CI failing.
@@ -785,6 +802,11 @@ mod tests {
         assert!(Settings::parse("{}").cmux_sync);
         assert!(!Settings::parse(r#"{"cmuxSync":false}"#).cmux_sync);
         assert_eq!(Settings::default().to_file_json()["cmuxSync"], true);
+        let d = Settings::default();
+        assert!(d.cmux_notifies("ci") && d.cmux_notifies("review") && !d.cmux_notifies("waiting"));
+        let s = Settings::parse(r#"{"cmuxNotify":"waiting, done"}"#);
+        assert!(s.cmux_notifies("done") && !s.cmux_notifies("ci"));
+        assert!(!Settings::parse(r#"{"cmuxNotify":""}"#).cmux_notifies("ci"));
     }
 
     #[test]

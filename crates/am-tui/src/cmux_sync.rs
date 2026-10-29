@@ -11,15 +11,25 @@
 //! The collector computes what each worktree should show ([`desired`]) and
 //! sends it on change; a `cmux-sync` thread maps workspaces to worktrees and
 //! runs `cmux set-status`/`clear-status`/`set-progress` only for what differs
-//! from what it last pushed. It re-lists workspaces every [`RELIST`], so a
-//! workspace opened in a worktree picks its pills up without a change in am.
+//! from what it last pushed. A workspace an agent's hooks reported running in
+//! (`CMUX_WORKSPACE_ID`, `Desired::pinned`) belongs to that agent's worktree
+//! whatever directory its focused pane is in; any other goes by directory.
+//! Workspaces are listed again when cmux's event stream says one opened,
+//! closed or moved (`cmux events`, [`cmux::WORKSPACE_EVENTS`]), and every
+//! [`RELIST`] in case the stream isn't there.
+//!
+//! Changes worth a look ([`alerts`], per `cmuxNotify`: an agent waiting or
+//! done, CI starting to fail, a PR approved or given changes, conflicts) go
+//! to the worktree's own workspace as a notification (on the agent's pane
+//! when known) plus a sidebar log line.
 //! Only inside cmux (`am_core::cmux::inside`): elsewhere the socket refuses.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
-use am_core::cmux::{self, CmuxRunner, Pill, Workspace};
+use am_core::cmux::{self, CmuxRunner, LogLevel, Pill, Workspace};
+use am_core::db::CmuxPane;
 use am_core::model::{ChecksStatus, Repository, ReviewRequest, WorktreeView};
 use am_core::review_groups::QueryHits;
 use am_core::status::Status;
@@ -54,6 +64,8 @@ pub struct Desired {
     pub worktrees: BTreeMap<String, WorktreePills>,
     /// am's own workspace: the summary, whatever directory it is in.
     pub own: WorktreePills,
+    /// Workspace id → the worktree path an agent in it reported from.
+    pub pinned: BTreeMap<String, String>,
 }
 
 fn pill(value: String, icon: &'static str, color: Option<&'static str>, priority: i32) -> Pill {
@@ -108,7 +120,7 @@ pub fn worktree_pills(v: &WorktreeView, settings: &Settings) -> WorktreePills {
     if settings.show_context_window
         && let Some(c) = &v.context
     {
-        let window = am_core::context::window_for(c.tokens, settings.context_window_tokens);
+        let window = c.window(settings.context_window_tokens);
         let f = am_core::context::fraction(c.tokens, window);
         out.progress = Some((f, format!("ctx {}%", (f * 100.0).round() as u32)));
     }
@@ -185,10 +197,111 @@ pub fn to_review(list: Option<&[ReviewRequest]>, repos: &[Repository], settings:
 /// Every worktree (empty pills for one with nothing to show), plus am's own
 /// workspace's summary.
 pub fn desired(views: &[WorktreeView], to_review: Option<ReviewCount>, settings: &Settings) -> Desired {
+    let mut pinned = BTreeMap::new();
+    // Oldest activity first, so the newest session's worktree wins a workspace.
+    let mut panes: Vec<(&str, &str, &str)> = views
+        .iter()
+        .flat_map(|v| v.sessions.iter().filter_map(move |s| Some((s.updated_at.as_str(), s.cmux.as_ref()?.workspace.as_str(), v.worktree.path.as_str()))))
+        .collect();
+    panes.sort();
+    for (_, ws, path) in panes {
+        pinned.insert(ws.to_owned(), path.to_owned());
+    }
     Desired {
         worktrees: views.iter().map(|v| (v.worktree.path.clone(), worktree_pills(v, settings))).collect(),
         own: own_pills(views, to_review),
+        pinned,
     }
+}
+
+/// A change worth a notification on a worktree's workspace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Alert {
+    /// The worktree's path, to find its workspace by directory.
+    pub path: String,
+    /// The pane its agent runs in, when the hooks reported one.
+    pub pane: Option<CmuxPane>,
+    pub title: String,
+    pub body: String,
+    pub level: LogLevel,
+}
+
+/// What [`alerts`] remembers of a worktree between snapshots.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Seen {
+    status: Option<Status>,
+    /// PR number, CI failing, review verdict (`APPROVED`/`CHANGES_REQUESTED`), conflicts.
+    pr: Option<(u64, bool, Option<String>, bool)>,
+}
+
+fn seen(v: &WorktreeView) -> Seen {
+    Seen {
+        status: v.status(),
+        pr: v.pr.as_ref().filter(|p| p.state == "OPEN").map(|p| {
+            let verdict = matches!(p.review_decision.as_str(), "APPROVED" | "CHANGES_REQUESTED").then(|| p.review_decision.clone());
+            (p.number, p.checks_status == ChecksStatus::Failing, verdict, p.mergeable.as_deref() == Some("CONFLICTING"))
+        }),
+    }
+}
+
+/// The alerts `views` raise against what was seen before (`prev`, updated in
+/// place), per `cmuxNotify`. Nothing on the first call (`prev` empty): that
+/// only records the starting point. A PR only alerts while it stays the same
+/// PR, so a fetch filling it in for the first time says nothing.
+pub fn alerts(prev: &mut Option<HashMap<String, Seen>>, views: &[WorktreeView], settings: &Settings) -> Vec<Alert> {
+    let now: HashMap<String, Seen> = views.iter().map(|v| (v.worktree.id.clone(), seen(v))).collect();
+    let Some(before) = prev.replace(now) else { return Vec::new() };
+    let mut out = Vec::new();
+    for v in views {
+        let (Some(was), Some(is)) = (before.get(&v.worktree.id), prev.as_ref().and_then(|p| p.get(&v.worktree.id))) else { continue };
+        let name = v.worktree.display_name();
+        let mut alert = |title: String, body: String, level| {
+            out.push(Alert { path: v.worktree.path.clone(), pane: v.cmux_pane().cloned(), title, body, level });
+        };
+        let said = || {
+            let s = v.agent.as_ref().and_then(|a| a.last_response.as_deref()).unwrap_or("").trim();
+            am_core::status::truncate(s.lines().next().unwrap_or(""), 160)
+        };
+        if was.status != is.status {
+            match is.status {
+                Some(Status::Waiting) if settings.cmux_notifies("waiting") => {
+                    let body = said();
+                    alert(format!("{name} needs you"), if body.is_empty() { "Waiting for input".into() } else { body }, LogLevel::Warning);
+                }
+                Some(Status::Done)
+                    if settings.cmux_notifies("done")
+                        && matches!(was.status, Some(Status::Executing | Status::Planning | Status::Delegating)) =>
+                {
+                    alert(format!("{name} finished"), said(), LogLevel::Success);
+                }
+                _ => {}
+            }
+        }
+        let (Some((n, was_failing, was_verdict, was_conflicts)), Some((m, failing, verdict, conflicts))) = (&was.pr, &is.pr) else { continue };
+        if n != m {
+            continue;
+        }
+        let title = v.pr.as_ref().map(|p| p.title.clone()).unwrap_or_default();
+        if *failing && !was_failing && settings.cmux_notifies("ci") {
+            let check = v.pr.as_ref().and_then(|p| p.active_check_name.clone());
+            let body = match check {
+                Some(c) => format!("{c} — {title}"),
+                None => title.clone(),
+            };
+            alert(format!("CI failing on #{m} ({name})"), body, LogLevel::Error);
+        }
+        if verdict != was_verdict && settings.cmux_notifies("review") {
+            match verdict.as_deref() {
+                Some("APPROVED") => alert(format!("#{m} approved ({name})"), title.clone(), LogLevel::Success),
+                Some("CHANGES_REQUESTED") => alert(format!("Changes requested on #{m} ({name})"), title.clone(), LogLevel::Warning),
+                _ => {}
+            }
+        }
+        if *conflicts && !was_conflicts && settings.cmux_notifies("conflicts") {
+            alert(format!("#{m} has merge conflicts ({name})"), title.clone(), LogLevel::Warning);
+        }
+    }
+    out
 }
 
 /// The pushing side: what each workspace was last given.
@@ -227,6 +340,8 @@ impl<R: CmuxRunner> Sync<R> {
         for w in &self.workspaces {
             let want = if self.own.as_deref() == Some(w.id.as_str()) {
                 &desired.own
+            } else if let Some(path) = desired.pinned.get(&w.id) {
+                desired.worktrees.get(path).unwrap_or(&none)
             } else {
                 w.directory.as_deref().and_then(|d| cmux::owner_of(d, &roots)).and_then(|r| desired.worktrees.get(r)).unwrap_or(&none)
             };
@@ -258,6 +373,52 @@ impl<R: CmuxRunner> Sync<R> {
         Ok(())
     }
 
+    /// List workspaces again on the next [`apply`](Sync::apply); after a
+    /// sidebar reset, push every pill again too.
+    pub fn on_event(&mut self, ev: &cmux::Event) {
+        debug!("cmux", "Event {} (workspace {:?}): listing workspaces again", ev.name, ev.workspace);
+        self.listed = None;
+        if ev.name == "sidebar.reset" {
+            match &ev.workspace {
+                Some(ws) => {
+                    self.pushed.remove(ws);
+                }
+                None => self.pushed.clear(),
+            }
+        }
+    }
+
+    /// Post `alert` on its worktree's workspace (the agent's pane's, else
+    /// the one whose directory is in the worktree), else on am's own: a
+    /// notification plus a line in that workspace's sidebar log.
+    pub fn deliver(&mut self, alert: &Alert, desired: &Desired, now: Instant) {
+        if self.listed.is_none_or(|t| now.duration_since(t) >= RELIST)
+            && let Ok(list) = cmux::list_workspaces(&self.runner)
+        {
+            self.workspaces = list;
+            self.listed = Some(now);
+        }
+        let listed = |id: &str| self.workspaces.iter().any(|w| w.id == id);
+        let roots: Vec<&str> = desired.worktrees.keys().map(String::as_str).collect();
+        let (ws, surface) = match alert.pane.as_ref().filter(|p| listed(&p.workspace)) {
+            Some(p) => (Some(p.workspace.clone()), p.surface.clone()),
+            None => {
+                let by_dir = self.workspaces.iter().find(|w| {
+                    self.own.as_deref() != Some(w.id.as_str())
+                        && w.directory.as_deref().and_then(|d| cmux::owner_of(d, &roots)) == Some(alert.path.as_str())
+                });
+                (by_dir.map(|w| w.id.clone()), None)
+            }
+        };
+        let _ = cmux::notify(&self.runner, &alert.title, &alert.body, ws.as_deref(), surface.as_deref());
+        if let Some(ws) = ws.as_deref().or(self.own.as_deref()) {
+            let line = if alert.body.is_empty() { alert.title.clone() } else { format!("{}: {}", alert.title, alert.body) };
+            if let Err(e) = cmux::log(&self.runner, alert.level, &line, ws) {
+                debug!("cmux", "Couldn't log to workspace {ws}: {e}");
+            }
+        }
+    }
+
     /// Take every pill am put up down again (on exit or `cmuxSync` off).
     pub fn clear_all(&mut self) {
         let none = WorktreePills::default();
@@ -267,24 +428,40 @@ impl<R: CmuxRunner> Sync<R> {
     }
 }
 
+/// What the `cmux-sync` thread is told.
+enum Msg {
+    Desired(Desired),
+    Alerts(Vec<Alert>),
+    Event(cmux::Event),
+    /// The collector is done (the events follower holds a sender too, so
+    /// the channel never closes on its own).
+    Quit,
+}
+
 /// The running `cmux-sync` thread.
 pub struct Handle {
-    tx: Sender<Desired>,
+    tx: Sender<Msg>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Handle {
     /// Hand it the latest [`Desired`]; an empty one clears everything.
     pub fn send(&self, desired: Desired) {
-        let _ = self.tx.send(desired);
+        let _ = self.tx.send(Msg::Desired(desired));
+    }
+
+    /// Post these on their workspaces.
+    pub fn alert(&self, alerts: Vec<Alert>) {
+        if !alerts.is_empty() {
+            let _ = self.tx.send(Msg::Alerts(alerts));
+        }
     }
 
     /// Stop it and wait (at most `wait`) for it to take its pills down, so
     /// they don't outlive am when the process exits right after.
-    pub fn stop(self, wait: Duration) {
-        let Handle { tx, thread } = self;
-        drop(tx);
-        let Some(thread) = thread else { return };
+    pub fn stop(mut self, wait: Duration) {
+        let _ = self.tx.send(Msg::Quit);
+        let Some(thread) = self.thread.take() else { return };
         let deadline = Instant::now() + wait;
         while !thread.is_finished() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -297,11 +474,62 @@ impl Handle {
     }
 }
 
+impl Drop for Handle {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Msg::Quit);
+    }
+}
+
 /// Start the `cmux-sync` thread. It clears what it put up when stopped.
 pub fn spawn() -> Handle {
-    let (tx, rx) = std::sync::mpsc::channel::<Desired>();
-    let thread = std::thread::Builder::new().name("cmux-sync".into()).spawn(move || run(rx)).ok();
+    let (tx, rx) = std::sync::mpsc::channel::<Msg>();
+    let events = tx.clone();
+    let thread = std::thread::Builder::new().name("cmux-sync".into()).spawn(move || run(rx, events)).ok();
     Handle { tx, thread }
+}
+
+/// The `cmux events` child [`follow_events`] reads, so [`run`] can stop it.
+type Follower = std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>;
+
+/// Follow `cmux events` for [`cmux::WORKSPACE_EVENTS`] on a `cmux-events`
+/// thread, handing each to the sync thread until that is gone (it kills the
+/// child on the way out). A stream that ends or can't start is tried again
+/// after [`RELIST`]; the periodic listing covers the gap.
+fn follow_events(tx: Sender<Msg>, child: Follower) {
+    use std::io::BufRead;
+    loop {
+        match cmux::spawn_events(cmux::WORKSPACE_EVENTS) {
+            Ok(mut c) => {
+                debug!("cmux", "Following cmux events");
+                let out = c.stdout.take();
+                match child.lock() {
+                    Ok(mut slot) => *slot = Some(c),
+                    Err(_) => return,
+                }
+                for line in out.into_iter().flat_map(|o| std::io::BufReader::new(o).lines()) {
+                    let Ok(line) = line else { break };
+                    if let Some(ev) = cmux::parse_event(&line)
+                        && tx.send(Msg::Event(ev)).is_err()
+                    {
+                        return;
+                    }
+                }
+                if let Ok(mut slot) = child.lock()
+                    && let Some(mut c) = slot.take()
+                {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                debug!("cmux", "cmux events stream ended");
+            }
+            Err(e) => debug!("cmux", "Couldn't follow cmux events: {e}"),
+        }
+        std::thread::sleep(RELIST);
+        // The sync thread is gone: stop retrying.
+        if tx.send(Msg::Alerts(Vec::new())).is_err() {
+            return;
+        }
+    }
 }
 
 /// Only one am-tui per data dir talks to cmux (pills and review
@@ -367,27 +595,56 @@ pub mod role {
     }
 }
 
-fn run(rx: Receiver<Desired>) {
+fn run(rx: Receiver<Msg>, events: Sender<Msg>) {
     info!("cmux", "Syncing worktree pills to cmux");
+    let child: Follower = Default::default();
+    // Outside cmux the stream can't connect (tests never spawn the real CLI).
+    if cmux::inside() {
+        let child = child.clone();
+        let _ = std::thread::Builder::new().name("cmux-events".into()).spawn(move || follow_events(events, child));
+    } else {
+        drop(events);
+    }
     let mut sync = Sync::new(cmux::SystemCmux);
     let mut desired = Desired::default();
     loop {
+        let mut alerts = Vec::new();
+        let mut quit = false;
+        let mut take = |m: Msg, sync: &mut Sync<cmux::SystemCmux>| match m {
+            Msg::Desired(d) => desired = d,
+            Msg::Alerts(a) => alerts.extend(a),
+            Msg::Event(e) => sync.on_event(&e),
+            Msg::Quit => quit = true,
+        };
         match rx.recv_timeout(RELIST) {
-            Ok(d) => {
+            Ok(m) => {
+                take(m, &mut sync);
                 // Coalesce to the newest.
-                desired = rx.try_iter().last().unwrap_or(d);
+                for m in rx.try_iter() {
+                    take(m, &mut sync);
+                }
             }
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                sync.clear_all();
-                return;
-            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+        if quit {
+            break;
         }
         let started = Instant::now();
         sync.apply(&desired, started);
+        for a in &alerts {
+            sync.deliver(a, &desired, started);
+        }
         if started.elapsed() > Duration::from_secs(2) {
             warn!("cmux", "Pill sync took {:?}", started.elapsed());
         }
+    }
+    sync.clear_all();
+    if let Ok(mut slot) = child.lock()
+        && let Some(mut c) = slot.take()
+    {
+        let _ = c.kill();
+        let _ = c.wait();
     }
 }
 
@@ -637,5 +894,125 @@ mod tests {
         d.worktrees.insert("/r/repo".into(), wp("#1", None));
         sync.apply(&d, Instant::now());
         assert!(sync.pushed.is_empty());
+    }
+
+    fn in_pane(mut v: WorktreeView, ws: &str) -> WorktreeView {
+        v.sessions = vec![am_core::model::SessionView {
+            agent: Default::default(),
+            session_id: v.worktree.id.clone(),
+            status: v.status().unwrap_or(Status::Idle),
+            last_response: None,
+            started_at: "2026-10-01 00:00:00".into(),
+            updated_at: "2026-10-01 00:00:00".into(),
+            context: None,
+            cmux: Some(CmuxPane { workspace: ws.into(), surface: Some(format!("{ws}-s")) }),
+            waiting_on: None,
+        }];
+        v
+    }
+
+    #[test]
+    fn a_workspace_an_agent_reported_from_shows_that_worktree() {
+        // A's focused pane is at the repo root, but feat's agent runs there.
+        let mut sync = Sync::new(fake());
+        let mut d = desired(&[in_pane(view("feat", Some(Status::Executing), None), "A")], None, &Settings::default());
+        assert_eq!(d.pinned.get("A").map(String::as_str), Some("/r/feat"));
+        d.worktrees.insert("/r/repo".into(), wp("#1 ✓", None));
+        d.worktrees.insert("/r/feat".into(), wp("#2 ◌", None));
+        sync.apply(&d, Instant::now());
+        let calls = sync.runner.take();
+        assert!(calls.iter().any(|c| c.starts_with("set-status am_pr #2 ◌ --workspace A")), "{calls:?}");
+        assert!(!calls.iter().any(|c| c.contains("#1 ✓ --workspace A")), "{calls:?}");
+    }
+
+    #[test]
+    fn workspace_events_relist_and_a_sidebar_reset_repushes() {
+        let t0 = Instant::now();
+        let mut sync = Sync::new(fake());
+        let mut d = Desired::default();
+        d.worktrees.insert("/r/repo".into(), wp("#1 ✓", None));
+        sync.apply(&d, t0);
+        sync.runner.take();
+        // A workspace opened: listed again at once, not after RELIST.
+        sync.on_event(&cmux::Event { name: "workspace.created".into(), workspace: Some("D".into()) });
+        sync.apply(&d, t0 + Duration::from_secs(1));
+        assert_eq!(sync.runner.take().len(), 2, "relisted, nothing to push");
+        // The sidebar was reset: A's pills are gone, so they go up again.
+        sync.on_event(&cmux::Event { name: "sidebar.reset".into(), workspace: Some("A".into()) });
+        sync.apply(&d, t0 + Duration::from_secs(2));
+        assert!(sync.runner.take().iter().any(|c| c.starts_with("set-status am_pr #1 ✓ --workspace A")));
+    }
+
+    #[test]
+    fn alerts_fire_on_transitions_per_cmux_notify() {
+        let settings = Settings { cmux_notify: "waiting,done,ci,review,conflicts".into(), ..Settings::default() };
+        let mut seen = None;
+        let base = [view("a", Some(Status::Executing), Some(ChecksStatus::Pending)), view("b", Some(Status::Executing), None)];
+        assert!(alerts(&mut seen, &base, &settings).is_empty(), "the first snapshot only sets the baseline");
+        assert!(alerts(&mut seen, &base, &settings).is_empty());
+
+        let mut a = in_pane(view("a", Some(Status::Done), Some(ChecksStatus::Failing)), "A");
+        a.agent.as_mut().unwrap().last_response = Some("All tests pass.\nMore".into());
+        let pr = a.pr.as_mut().unwrap();
+        pr.title = "Add sync".into();
+        pr.active_check_name = Some("test (ubuntu)".into());
+        pr.review_decision = "CHANGES_REQUESTED".into();
+        pr.mergeable = Some("CONFLICTING".into());
+        let b = view("b", Some(Status::Waiting), None);
+        let got = alerts(&mut seen, &[a.clone(), b.clone()], &settings);
+        let titles: Vec<&str> = got.iter().map(|x| x.title.as_str()).collect();
+        assert_eq!(titles, ["a finished", "CI failing on #1 (a)", "Changes requested on #1 (a)", "#1 has merge conflicts (a)", "b needs you"]);
+        assert_eq!(got[0].body, "All tests pass.");
+        assert_eq!(got[1].body, "test (ubuntu) — Add sync");
+        assert_eq!(got[0].pane.as_ref().map(|p| p.workspace.as_str()), Some("A"));
+        assert_eq!(got[4].body, "Waiting for input");
+        assert!(alerts(&mut seen, &[a.clone(), b.clone()], &settings).is_empty(), "nothing new");
+
+        // A different PR on the branch, or one fetched for the first time, says nothing.
+        let mut other = a.clone();
+        other.pr.as_mut().unwrap().number = 2;
+        other.pr.as_mut().unwrap().checks_status = ChecksStatus::Pending;
+        alerts(&mut seen, &[other.clone(), b.clone()], &settings);
+        other.pr.as_mut().unwrap().number = 3;
+        other.pr.as_mut().unwrap().checks_status = ChecksStatus::Failing;
+        assert!(alerts(&mut seen, &[other, b.clone()], &settings).is_empty());
+
+        // The defaults leave the agent ones out.
+        let mut seen = None;
+        alerts(&mut seen, &base, &Settings::default());
+        let got = alerts(&mut seen, &[a, b], &Settings::default());
+        assert_eq!(got.len(), 3, "{got:?}");
+    }
+
+    #[test]
+    fn alerts_land_on_the_agents_pane_else_the_worktrees_workspace_else_ams() {
+        let mut sync = Sync::new(fake());
+        sync.own = Some("C".into());
+        let mut d = Desired::default();
+        d.worktrees.insert("/r/repo".into(), WorktreePills::default());
+        d.worktrees.insert("/r/repo/.claude/worktrees/feat".into(), WorktreePills::default());
+        let alert = |path: &str, pane: Option<&str>| Alert {
+            path: path.into(),
+            pane: pane.map(|w| CmuxPane { workspace: w.into(), surface: Some("S".into()) }),
+            title: "CI failing on #2".into(),
+            body: "test".into(),
+            level: LogLevel::Error,
+        };
+        let now = Instant::now();
+        sync.deliver(&alert("/r/repo/.claude/worktrees/feat", Some("A")), &d, now);
+        sync.deliver(&alert("/r/repo/.claude/worktrees/feat", None), &d, now);
+        sync.deliver(&alert("/r/nowhere", Some("gone")), &d, now);
+        let calls: Vec<String> = sync.runner.take().into_iter().filter(|c| !c.starts_with("rpc")).collect();
+        assert_eq!(
+            calls,
+            [
+                "notify --title CI failing on #2 --body test --workspace A --surface S",
+                "log --level error --source am --workspace A CI failing on #2: test",
+                "notify --title CI failing on #2 --body test --workspace B",
+                "log --level error --source am --workspace B CI failing on #2: test",
+                "notify --title CI failing on #2 --body test",
+                "log --level error --source am --workspace C CI failing on #2: test",
+            ]
+        );
     }
 }

@@ -194,6 +194,16 @@ pub fn workspace_for<'w>(workspaces: &'w [Workspace], root: &str, roots: &[&str]
     workspaces.iter().find(|w| w.directory.as_deref().and_then(|d| owner_of(d, roots)) == Some(root))
 }
 
+/// Where to switch to for the worktree at `root`: the workspace (and
+/// surface) its agent reported running in, when cmux still lists it, else
+/// [`workspace_for`] by directory.
+pub fn target_for(workspaces: &[Workspace], pane: Option<&crate::db::CmuxPane>, root: &str, roots: &[&str]) -> Option<(String, Option<String>)> {
+    if let Some(p) = pane.filter(|p| workspaces.iter().any(|w| w.id == p.workspace)) {
+        return Some((p.workspace.clone(), p.surface.clone()));
+    }
+    workspace_for(workspaces, root, roots).map(|w| (w.id.clone(), None))
+}
+
 pub fn select_workspace(r: &dyn CmuxRunner, id: &str) -> Result<(), String> {
     r.run(&["workspace".into(), "select".into(), id.into()]).into_result().map(drop)
 }
@@ -277,11 +287,15 @@ pub fn set_progress(r: &dyn CmuxRunner, workspace: &str, value: Option<(f64, &st
     r.run(&args).into_result().map(drop)
 }
 
-/// A cmux notification, on `workspace` or (when `None`) the caller's own.
-pub fn notify(r: &dyn CmuxRunner, title: &str, body: &str, workspace: Option<&str>) -> Result<(), String> {
+/// A cmux notification, on `workspace` (and its `surface`: the pane gets
+/// the ring) or, when `None`, the caller's own.
+pub fn notify(r: &dyn CmuxRunner, title: &str, body: &str, workspace: Option<&str>, surface: Option<&str>) -> Result<(), String> {
     let mut args: Vec<String> = vec!["notify".into(), "--title".into(), title.into(), "--body".into(), body.into()];
     if let Some(w) = workspace {
         args.extend(["--workspace".into(), w.into()]);
+        if let Some(s) = surface {
+            args.extend(["--surface".into(), s.into()]);
+        }
     }
     let result = r.run(&args).into_result().map(drop);
     match &result {
@@ -289,6 +303,88 @@ pub fn notify(r: &dyn CmuxRunner, title: &str, body: &str, workspace: Option<&st
         Err(e) => warn!("cmux", "Couldn't notify ({title}): {e}"),
     }
     result
+}
+
+/// Severity of a sidebar log line (`cmux log --level`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+impl LogLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            LogLevel::Info => "info",
+            LogLevel::Success => "success",
+            LogLevel::Warning => "warning",
+            LogLevel::Error => "error",
+        }
+    }
+}
+
+/// A line in `workspace`'s sidebar log, from `am`.
+pub fn log(r: &dyn CmuxRunner, level: LogLevel, message: &str, workspace: &str) -> Result<(), String> {
+    let args: Vec<String> = vec![
+        "log".into(),
+        "--level".into(),
+        level.as_str().into(),
+        "--source".into(),
+        "am".into(),
+        "--workspace".into(),
+        workspace.into(),
+        message.into(),
+    ];
+    r.run(&args).into_result().map(drop)
+}
+
+/// Focus one surface (pane tab) of `workspace`, after selecting the workspace.
+pub fn focus_surface(r: &dyn CmuxRunner, workspace: &str, surface: &str) -> Result<(), String> {
+    r.run(&["focus-panel".into(), "--panel".into(), surface.into(), "--workspace".into(), workspace.into()]).into_result().map(drop)
+}
+
+/// cmux events that change which workspace shows what: one opened, closed
+/// or moved, a terminal moved between workspaces, or the sidebar reset
+/// (which drops am's pills).
+pub const WORKSPACE_EVENTS: &[&str] =
+    &["workspace.created", "workspace.closed", "workspace.moved", "surface.moved", "pane.broken", "sidebar.reset"];
+
+/// `cmux events` for `names`, reconnecting by itself, as a child whose
+/// stdout carries one JSON frame per line ([`parse_event`]).
+pub fn spawn_events(names: &[&str]) -> std::io::Result<std::process::Child> {
+    let cli = cli_path().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "cmux isn't installed"))?;
+    let mut cmd = Command::new(cli);
+    cmd.arg("events");
+    for n in names {
+        cmd.args(["--name", n]);
+    }
+    cmd.args(["--reconnect", "--no-heartbeat"])
+        .env("CMUX_QUIET", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+}
+
+/// One event from the `cmux events` stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Event {
+    pub name: String,
+    pub workspace: Option<String>,
+}
+
+/// An `event` frame (`ack`/`heartbeat` frames and noise are `None`).
+pub fn parse_event(line: &str) -> Option<Event> {
+    let v: Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("type").and_then(Value::as_str) != Some("event") {
+        return None;
+    }
+    Some(Event {
+        name: v.get("name")?.as_str()?.to_owned(),
+        workspace: v.get("workspace_id").and_then(Value::as_str).map(str::to_owned),
+    })
 }
 
 /// `~/.config/cmux/dock.json` (personal) or `<dir>/.cmux/dock.json` (a
@@ -425,9 +521,50 @@ pub mod tests {
     }
 
     #[test]
+    fn an_agents_own_pane_beats_the_directory_match() {
+        let ws = list_workspaces(&listing()).unwrap();
+        let roots = ["/r/repo", "/r/repo/.claude/worktrees/feat"];
+        let pane = |w: &str| crate::db::CmuxPane { workspace: w.into(), surface: Some("S".into()) };
+        // The agent runs in A, though A's focused pane is at the repo root.
+        let feat = "/r/repo/.claude/worktrees/feat";
+        assert_eq!(target_for(&ws, Some(&pane("A")), feat, &roots), Some(("A".into(), Some("S".into()))));
+        // A workspace cmux no longer lists falls back to the directory match.
+        assert_eq!(target_for(&ws, Some(&pane("gone")), feat, &roots), Some(("B".into(), None)));
+        assert_eq!(target_for(&ws, None, "/r/elsewhere", &roots), None);
+    }
+
+    #[test]
     fn socket_errors_come_back_readable() {
         let fake = FakeCmux::default().with("rpc window.list", CmuxOutput::failure("Error: Failed to write to socket (Broken pipe, errno 32)\n"));
         assert_eq!(list_workspaces(&fake).unwrap_err(), "Failed to write to socket (Broken pipe, errno 32)");
+    }
+
+    #[test]
+    fn notifications_and_log_lines_go_to_a_workspace_and_its_pane() {
+        let fake = FakeCmux::default();
+        notify(&fake, "CI failing", "#42", Some("A"), Some("S1")).unwrap();
+        notify(&fake, "t", "b", None, Some("ignored without a workspace")).unwrap();
+        log(&fake, LogLevel::Error, "CI failing on #42", "A").unwrap();
+        focus_surface(&fake, "A", "S1").unwrap();
+        let calls: Vec<String> = fake.calls().iter().map(|c| c.join(" ")).collect();
+        assert_eq!(
+            calls,
+            [
+                "notify --title CI failing --body #42 --workspace A --surface S1",
+                "notify --title t --body b",
+                "log --level error --source am --workspace A CI failing on #42",
+                "focus-panel --panel S1 --workspace A",
+            ]
+        );
+    }
+
+    #[test]
+    fn event_frames_parse_and_others_are_skipped() {
+        let ev = r#"{"type":"event","seq":3,"name":"workspace.created","category":"workspace","workspace_id":"W9","payload":{}}"#;
+        assert_eq!(parse_event(ev), Some(Event { name: "workspace.created".into(), workspace: Some("W9".into()) }));
+        assert_eq!(parse_event(r#"{"type":"ack","protocol":"cmux-events"}"#), None);
+        assert_eq!(parse_event(r#"{"type":"heartbeat"}"#), None);
+        assert_eq!(parse_event("not json"), None);
     }
 
     #[test]

@@ -12,9 +12,17 @@
 //!
 //! Sessions: `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`, whose
 //! first line is `{"type":"session_meta","payload":{"id","cwd",…}}`.
+//!
+//! Context: each turn appends an `event_msg` of type `token_count` whose
+//! `info.last_token_usage` is the last request's usage and
+//! `info.model_context_window` the model's window, so the bar uses Codex's
+//! own window rather than the setting.
 
-use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use serde_json::Value;
@@ -22,9 +30,11 @@ use serde_json::Value;
 use super::embedded::Embedded;
 use super::manifest::Manifest;
 use super::{HarnessKind, home_join, is_within};
+use crate::context::ContextUsage;
 use crate::launch::Session;
 
-pub static CODEX: Embedded = Embedded::new(|| Manifest::builtin(include_str!("codex.json")), Some(discover));
+pub static CODEX: Embedded =
+    Embedded::new(|| Manifest::builtin(include_str!("codex.json")), Some(discover)).with_context(context_usage);
 
 /// Day directories scanned, newest first; older sessions aren't offered.
 const MAX_DAYS: usize = 60;
@@ -93,6 +103,93 @@ fn session_meta(file: &Path) -> Option<(String, String)> {
     Some((id, cwd))
 }
 
+/// Rollouts read, so the collector can ask on every sweep: session id →
+/// rollout file, and rollout → `(len, mtime)` when read plus what it held.
+type Stamp = (u64, SystemTime);
+type Rollouts = (HashMap<String, PathBuf>, HashMap<PathBuf, (Stamp, Option<ContextUsage>)>);
+static ROLLOUTS: Mutex<Option<Rollouts>> = Mutex::new(None);
+/// How much of a rollout's end is read for its last `token_count`.
+const TAIL: u64 = 512 * 1024;
+
+fn context_usage(_root: &Path, session_id: &str) -> Option<ContextUsage> {
+    let known = ROLLOUTS.lock().ok().and_then(|c| c.as_ref()?.0.get(session_id).cloned()).filter(|p| p.is_file());
+    let path = match known {
+        Some(p) => p,
+        None => {
+            let p = rollout_for(&home_join(".codex/sessions"), session_id)?;
+            if let Ok(mut c) = ROLLOUTS.lock() {
+                c.get_or_insert_with(Default::default).0.insert(session_id.to_owned(), p.clone());
+            }
+            p
+        }
+    };
+    let meta = std::fs::metadata(&path).ok()?;
+    let stamp = (meta.len(), meta.modified().ok()?);
+    if let Some((at, usage)) = ROLLOUTS.lock().ok().and_then(|c| c.as_ref()?.1.get(&path).cloned())
+        && at == stamp
+    {
+        return usage;
+    }
+    let usage = read_rollout_usage(&path);
+    if let Ok(mut c) = ROLLOUTS.lock() {
+        let c = c.get_or_insert_with(Default::default);
+        if c.1.len() > 500 {
+            c.1.clear();
+        }
+        c.1.insert(path, (stamp, usage.clone()));
+    }
+    usage
+}
+
+/// `rollout-<time>-<id>.jsonl` under the newest day directories.
+pub fn rollout_for(sessions_dir: &Path, session_id: &str) -> Option<PathBuf> {
+    if session_id.is_empty() || session_id.contains('/') {
+        return None;
+    }
+    let suffix = format!("-{session_id}.jsonl");
+    day_dirs(sessions_dir).into_iter().take(MAX_DAYS).find_map(|day| {
+        std::fs::read_dir(day).ok()?.flatten().map(|f| f.path()).find(|p| {
+            p.file_name().map(|n| n.to_string_lossy()).is_some_and(|n| n.starts_with("rollout-") && n.ends_with(&suffix))
+        })
+    })
+}
+
+/// The last `token_count` in a rollout: the context in use (the last
+/// request's tokens, less reasoning, which isn't carried into the next
+/// turn) and the model's window.
+pub fn read_rollout_usage(path: &Path) -> Option<ContextUsage> {
+    let mut file = File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let start = len.saturating_sub(TAIL);
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    file.take(len - start).read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let text = if start > 0 { text.split_once('\n').map_or("", |(_, rest)| rest) } else { &text };
+    let mut model = None;
+    let mut found = None;
+    for line in text.lines().rev() {
+        if model.is_none() && line.contains("\"turn_context\"") {
+            let v: Value = serde_json::from_str(line).ok().unwrap_or_default();
+            model = v.pointer("/payload/model").and_then(Value::as_str).map(str::to_owned);
+        }
+        if found.is_none() && line.contains("\"token_count\"") {
+            let v: Value = serde_json::from_str(line).ok().unwrap_or_default();
+            if let Some(info) = v.pointer("/payload/info").filter(|i| !i.is_null()) {
+                let last = info.get("last_token_usage")?;
+                let n = |k: &str| last.get(k).and_then(Value::as_u64).unwrap_or(0);
+                let tokens = n("total_tokens").saturating_sub(n("reasoning_output_tokens"));
+                found = Some((tokens, info.get("model_context_window").and_then(Value::as_u64)));
+            }
+        }
+        if found.is_some() && model.is_some() {
+            break;
+        }
+    }
+    let (tokens, window) = found?;
+    (tokens > 0).then_some(ContextUsage { tokens, model, window })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,5 +250,33 @@ mod tests {
         assert_eq!(ids, ["bbb", "aaa"]);
         assert_eq!(s[0].cwd, "/w/repo/pkg");
         assert!(discover_sessions_in(&dir.path().join("missing"), Path::new("/w/repo")).is_empty());
+    }
+
+    #[test]
+    fn context_comes_from_the_last_token_count_with_codexs_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = dir.path().join("2026/10/13");
+        std::fs::create_dir_all(&day).unwrap();
+        let count = |total: u64, reasoning: u64| {
+            json!({"type": "event_msg", "payload": {"type": "token_count", "info": {
+                "last_token_usage": {"input_tokens": total - 900, "cached_input_tokens": 1000, "output_tokens": 900, "reasoning_output_tokens": reasoning, "total_tokens": total},
+                "model_context_window": 272000
+            }}})
+            .to_string()
+        };
+        let lines = [
+            json!({"type": "session_meta", "payload": {"id": "t-9", "cwd": "/w"}}).to_string(),
+            json!({"type": "turn_context", "payload": {"model": "gpt-5-codex"}}).to_string(),
+            count(40_000, 0),
+            json!({"type": "event_msg", "payload": {"type": "token_count", "info": null}}).to_string(),
+            count(61_000, 1_000),
+        ];
+        let file = day.join("rollout-2026-10-13T09-00-00-t-9.jsonl");
+        std::fs::write(&file, lines.join("\n")).unwrap();
+        assert_eq!(rollout_for(dir.path(), "t-9"), Some(file.clone()));
+        assert_eq!(rollout_for(dir.path(), "t-1"), None);
+        let u = read_rollout_usage(&file).unwrap();
+        assert_eq!((u.tokens, u.window, u.model.as_deref()), (60_000, Some(272_000), Some("gpt-5-codex")));
+        assert_eq!(u.window(1_000_000), 272_000, "Codex's window beats the setting");
     }
 }
