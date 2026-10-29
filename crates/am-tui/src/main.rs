@@ -27,6 +27,7 @@ mod setup;
 mod theme;
 mod theme_builder;
 mod ui;
+mod usage_reports;
 
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
@@ -117,6 +118,7 @@ fn main() -> io::Result<()> {
     }
     let settings = settings::load();
     am_core::log::init(settings.log_level(), settings.max_log_size_mb);
+    let _telemetry = am_core::telemetry::init(am_core::telemetry::Binary::Tui, &settings);
     info!("tui", "am-tui {} starting (theme={})", env!("CARGO_PKG_VERSION"), settings.theme);
 
 
@@ -151,6 +153,14 @@ fn main() -> io::Result<()> {
     if std::mem::take(&mut app.review_fetch_due) {
         collector.refresh_reviews();
     }
+    // Set up before usage reports existed: ask once (not in a review window,
+    // which sits beside a dashboard that asks; not when the environment opts out).
+    if !first_run
+        && !reviews_window
+        && am_core::telemetry::consent(&app.settings, |n| std::env::var(n).ok()) == am_core::telemetry::Consent::Ask
+    {
+        app.modal = Some(modals::Modal::Telemetry);
+    }
     // Hooks pointing at a deleted am-hook (removed worktree, upgraded install)
     // fail on every agent event; re-point them at the current binary.
     let repaired = am_core::hooks_installer::repair_dangling_hooks();
@@ -177,11 +187,44 @@ fn main() -> io::Result<()> {
     app.modifiers_reported = enhanced;
     set_keyboard(true);
     let result = run(&mut terminal, &mut app, &collector);
+    record_features(&mut app);
     set_keyboard(false);
     set_mouse(false);
     ratatui::restore();
     collector.shutdown();
     result
+}
+
+/// The day's `am.heartbeat`, once the first snapshot of the day is in.
+fn record_heartbeat(app: &App) {
+    use am_core::telemetry::{public, upload};
+    if !public::is_on() {
+        return;
+    }
+    // Snapshots come often: the day is checked in memory, the file once a day.
+    static DONE_DAY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let today = usage_reports::today();
+    let Ok(mut done) = DONE_DAY.lock() else { return };
+    if *done == today {
+        return;
+    }
+    *done = today.clone();
+    let mut state = upload::state();
+    if state.last_heartbeat_day.as_deref() == Some(today.as_str()) {
+        return;
+    }
+    let terminal = std::env::var("TERM_PROGRAM").ok();
+    let event = usage_reports::heartbeat(&app.settings, &app.snapshot, am_core::cmux::inside(), terminal.as_deref(), public::now_ms());
+    am_core::telemetry::record(event);
+    state.last_heartbeat_day = Some(today);
+    upload::save_state(&state);
+}
+
+/// `am.features` for the commands run since the last one.
+fn record_features(app: &mut App) {
+    for e in usage_reports::features(&mut app.command_counts, am_core::telemetry::public::now_ms()) {
+        am_core::telemetry::record(e);
+    }
 }
 
 /// Names of the registered repositories, listed as already added by the
@@ -235,9 +278,14 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     let mut notice_since: Option<(Instant, String)> = None;
     let mut last_click: Option<(u16, Instant)> = None;
     let mut settings_mtime = settings_file_mtime();
+    // Usage reports: what `telemetry` was last applied, and when features were last recorded.
+    let mut telemetry_applied = app.settings.telemetry.clone();
+    let mut features_at = Instant::now();
+    usage_reports::spawn_uploader();
     loop {
         while let Some(snapshot) = collector.try_recv() {
             app.apply(snapshot);
+            record_heartbeat(app);
             for sound in app.sounds.drain(..) {
                 play_sound(&sound);
             }
@@ -402,6 +450,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             // Elapsed/age labels tick once a second; the diff renderer only
             // rewrites the cells that actually changed.
             last_second = now;
+            // Usage reports follow the setting however it changed (Settings, the
+            // wizard, the prompt, an edited file).
+            if app.settings.telemetry != telemetry_applied {
+                telemetry_applied = app.settings.telemetry.clone();
+                am_core::telemetry::public::apply(&app.settings);
+            }
+            if features_at.elapsed() >= usage_reports::EVERY {
+                features_at = Instant::now();
+                record_features(app);
+            }
             // settings.json edited outside the TUI (e.g. `e` opened it in the IDE).
             let mtime = settings_file_mtime();
             if mtime != settings_mtime {

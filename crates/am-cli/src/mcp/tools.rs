@@ -412,6 +412,14 @@ pub static TOOLS: &[Tool] = &[
         build: |a| with(with(with(cmd(&["logs"]), a, "lines", "-n"), a, "level", "--level"), a, "module", "--module"),
     },
     Tool {
+        name: "telemetry_status",
+        description: "Whether am's anonymous usage reports are on, where they go and how many events wait to be sent. Turning them on or off is the user's choice (`am telemetry on|off`), so there is no tool for it.",
+        params: &[],
+        hints: READ,
+        timeout: SHORT,
+        build: |_| cmd(&["telemetry", "status", "--json"]),
+    },
+    Tool {
         name: "perf",
         description: "How long each part of am has been taking (UI frames, collector, git, GitHub/Linear, hooks), from its log, against per-stage budgets.",
         params: &[opt("since", Kind::Str, "Window: 30m, 1h, 2d or all (default 24h)")],

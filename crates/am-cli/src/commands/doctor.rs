@@ -203,6 +203,23 @@ pub fn run(as_json: bool) {
         },
     });
 
+    // Usage reports: never a failure, only a hint when sending keeps failing.
+    {
+        use am_core::telemetry::{self, Consent, public, spool, upload};
+        let st = upload::state();
+        let pending = spool::pending(&public::dir()).len();
+        let (status, message) = match telemetry::consent(&s, |n| std::env::var(n).ok()) {
+            Consent::On if st.last_error.is_some() => (
+                "warn",
+                format!("on; {pending} event(s) waiting, last send failed: {}", st.last_error.unwrap_or_default()),
+            ),
+            Consent::On => ("ok", format!("on; {pending} event(s) waiting (am telemetry show)")),
+            Consent::Off(why) => ("ok", format!("off ({why})")),
+            Consent::Ask => ("ok", "not decided; nothing is recorded (am telemetry on|off)".into()),
+        };
+        checks.push(Check { name: "Usage reports".into(), status, message });
+    }
+
     if as_json {
         let rows: Vec<Value> =
             checks.iter().map(|c| json!({ "name": c.name, "status": c.status, "message": c.message })).collect();

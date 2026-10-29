@@ -1,0 +1,21 @@
+# The am usage-report relay (see README.md). Deploy: `npx wrangler@4 deploy`.
+name = "am-telemetry-relay"
+main = "src/worker.js"
+compatibility_date = "2026-10-01"
+# No logs of request bodies or headers: the relay keeps nothing.
+observability = { enabled = false }
+
+[vars]
+# Your stack's OTLP endpoint: Grafana Cloud → your stack → OpenTelemetry → Configure.
+GRAFANA_OTLP_ENDPOINT = "https://otlp-gateway-prod-REGION.grafana.net/otlp"
+# Secrets (never in this file): `npx wrangler@4 secret put GRAFANA_INSTANCE_ID`
+# and `npx wrangler@4 secret put GRAFANA_API_TOKEN` (an access-policy token
+# with only the logs:write scope).
+
+# A client sends at most every 15 minutes; this only stops floods.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "4318"
+  [ratelimits.simple]
+  limit = 30
+  period = 60

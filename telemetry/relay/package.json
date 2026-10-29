@@ -1,0 +1,10 @@
+{
+  "name": "am-telemetry-relay",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker that forwards am's anonymous usage reports to Grafana Cloud (see README.md).",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "deploy": "wrangler deploy"
+  }
+}

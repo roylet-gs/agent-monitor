@@ -22,7 +22,7 @@ test("first run in review-only mode: setup, the page alone, pull and remove, bac
   await tui.waitForText("What do you want am for?");
   await tui.sendKey("j");
   await tui.waitForText("● Review requests only");
-  await tui.waitForText("Mode › Editor › Repos › GitHub › Reviews");
+  await tui.waitForText("Mode › Editor › Repos › GitHub › Reviews › Privacy");
   await tui.screenshot("review-mode-setup-mode");
   await tui.sendKey("Enter");
 
@@ -45,9 +45,13 @@ test("first run in review-only mode: setup, the page alone, pull and remove, bac
   await tui.screenshot("review-mode-setup-github");
   await tui.sendKey("Enter");
 
-  // Reviews: no on/off row; ⏎ finishes.
+  // Reviews: no on/off row.
   await tui.waitForText("Which pull requests are waiting on your review?");
   expect(await tui.getScreenText()).not.toContain("Show PRs waiting for my review");
+  await tui.sendKey("Enter");
+
+  // Privacy, last in this mode too: ⏎ finishes.
+  await tui.waitForText("Help improve am with anonymous usage reports?");
   await tui.waitForText("⏎ finish");
   await tui.sendKey("Enter");
 

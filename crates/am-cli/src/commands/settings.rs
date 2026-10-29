@@ -122,6 +122,13 @@ pub fn set(key: &str, value: &str) {
         ));
     }
 
+    if key == "telemetry" && am_core::settings::TelemetryChoice::parse(value).is_none() {
+        fail(&format!(
+            "Invalid value for telemetry: {value}. Use one of: {}.",
+            am_core::settings::TelemetryChoice::IDS.join(", ")
+        ));
+    }
+
     if key == "appMode" && am_core::settings::AppMode::parse(value).is_none() {
         fail(&format!("Invalid value for appMode: {value}. Use one of: {}.", am_core::settings::AppMode::IDS.join(", ")));
     }

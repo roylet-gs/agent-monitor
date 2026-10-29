@@ -11,6 +11,15 @@ serde_json.workspace = true
 time.workspace = true
 uuid.workspace = true
 ureq.workspace = true
+# Instrumentation: every log line is a `tracing` event; `log.rs` is the layer that writes debug.log.
+tracing.workspace = true
+tracing-subscriber.workspace = true
+opentelemetry.workspace = true
+opentelemetry_sdk.workspace = true
+opentelemetry-otlp.workspace = true
+opentelemetry-http.workspace = true
+opentelemetry-appender-tracing.workspace = true
+tracing-opentelemetry.workspace = true
 # usage: localtime_r/mktime for the local day. procscan (macOS): libproc calls
 # (proc_pidinfo, proc_pidpath, KERN_PROCARGS2); Linux reads /proc.
 libc.workspace = true
