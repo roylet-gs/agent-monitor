@@ -1876,6 +1876,10 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
         let msg = match (app.loaded, app.snapshot.hidden_worktrees) {
             (false, _) => "Loading…".to_string(),
             (true, 0) => "No worktrees yet — press A to add a repository".to_string(),
+            // Only the base filters at work: F wouldn't bring anything back.
+            (true, n) if !picks_filters(&app.settings) => {
+                format!("{n} hidden by the base filters (Settings → Base filters)")
+            }
             (true, n) => {
                 let key = |c| app.keymap.key(c).map_or("?".into(), crate::keymap::display);
                 format!("{n} filtered out — {} changes the filters, {} turns them off", key(Command::Filter), key(Command::ToggleFilters))
@@ -2111,31 +2115,43 @@ fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
     }
 }
 
+/// Whether an `f` filter is in force (`F` on and something picked).
+fn picks_filters(s: &am_core::settings::Settings) -> bool {
+    s.worktree_filters_enabled
+        && (!s.worktree_filter_text.trim().is_empty()
+            || [&s.worktree_filter_status, &s.worktree_filter_pr, &s.worktree_filter_git].iter().any(|f| f.as_str() != "any"))
+}
+
 /// The dashboard's filters in a few words, e.g. `"auth" · waiting · CI
-/// failing · no main · 3 hidden`; `filters off · F` while `F` has them off;
-/// `None` while only the defaults apply.
+/// failing · no main · 3 hidden`: the `f` filters (`filters off · F` while
+/// `F` has them off), then the base `hide*` ones, which always apply; `None`
+/// while only the defaults apply.
 fn worktree_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> Option<String> {
     let mut parts = Vec::new();
-    let text = s.worktree_filter_text.trim();
-    if !text.is_empty() {
-        parts.push(format!("\"{text}\""));
-    }
-    match s.worktree_filter_status.as_str() {
-        "waiting" => parts.push("waiting".into()),
-        "active" => parts.push("active agents".into()),
-        "idle" => parts.push("idle agents".into()),
-        _ => {}
-    }
-    match s.worktree_filter_pr.as_str() {
-        "open" => parts.push("open PR".into()),
-        "none" => parts.push("no PR".into()),
-        "failing" => parts.push("CI failing".into()),
-        _ => {}
-    }
-    match s.worktree_filter_git.as_str() {
-        "changes" => parts.push("changes".into()),
-        "clean" => parts.push("clean".into()),
-        _ => {}
+    if s.worktree_filters_enabled {
+        let text = s.worktree_filter_text.trim();
+        if !text.is_empty() {
+            parts.push(format!("\"{text}\""));
+        }
+        match s.worktree_filter_status.as_str() {
+            "waiting" => parts.push("waiting".into()),
+            "active" => parts.push("active agents".into()),
+            "idle" => parts.push("idle agents".into()),
+            _ => {}
+        }
+        match s.worktree_filter_pr.as_str() {
+            "open" => parts.push("open PR".into()),
+            "none" => parts.push("no PR".into()),
+            "failing" => parts.push("CI failing".into()),
+            _ => {}
+        }
+        match s.worktree_filter_git.as_str() {
+            "changes" => parts.push("changes".into()),
+            "clean" => parts.push("clean".into()),
+            _ => {}
+        }
+    } else {
+        parts.push("filters off · F".into());
     }
     for (on, label) in [
         (s.hide_merged_closed_prs, "no merged/closed"),
@@ -2152,9 +2168,6 @@ fn worktree_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> Op
         parts.push("main shown".into());
     } else if !parts.is_empty() {
         parts.push("no main".into());
-    }
-    if !s.worktree_filters_enabled {
-        return Some("filters off · F".into());
     }
     if parts.is_empty() {
         return None;
@@ -3634,10 +3647,10 @@ mod tests {
         click(&mut app, 120, 16, at, false);
         assert_eq!(app.settings_editor.as_ref().map(|e| e.only), Some(Some(crate::settings_ui::WORKTREE_FILTERS)));
         insta::assert_snapshot!(render(&app, 120, 24));
-        // Off: the summary says so, whatever is set.
         app.settings_editor = None;
+        // Off: the summary says so; the base filters still show.
         app.settings.worktree_filters_enabled = false;
-        assert!(render(&app, 120, 16).contains(" filters off · F "));
+        assert!(render(&app, 120, 16).contains(" filters off · F · no main · 3 hidden "));
         // Only the defaults: nothing on the border.
         app.settings = am_core::settings::Settings { worktree_sort: vec![], ..Default::default() };
         assert!(!render(&app, 120, 16).contains("hidden"));

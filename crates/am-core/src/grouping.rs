@@ -243,13 +243,10 @@ pub fn matches_picked_filters(v: &WorktreeView, settings: &Settings) -> bool {
 }
 
 fn apply_filters_with_cutoff(views: Vec<WorktreeView>, settings: &Settings, cutoff: &str) -> Vec<WorktreeView> {
-    if !settings.worktree_filters_enabled {
-        return views;
-    }
     views
         .into_iter()
         .filter(|v| {
-            if !matches_picked_filters(v, settings) {
+            if settings.worktree_filters_enabled && !matches_picked_filters(v, settings) {
                 return false;
             }
             let open = is_effectively_open(v.agent.as_ref(), cutoff);
@@ -277,11 +274,12 @@ fn apply_filters_with_cutoff(views: Vec<WorktreeView>, settings: &Settings, cuto
         .collect()
 }
 
-/// Apply the dashboard's visibility filters: `hideMainBranch`,
-/// `hideMergedClosedPrs`, `hideIdleDoneAgents`, `hideWithoutLinearTicket`
-/// (a worktree with an effectively-open session is never hidden by these),
-/// then the picked ones (`worktreeFilterText`/`Status`/`Pr`/`Git`, which
-/// hide any row). `worktreeFiltersEnabled: false` turns them all off.
+/// Apply the dashboard's visibility filters: the base ones (`hideMainBranch`,
+/// `hideMergedClosedPrs`, `hideIdleDoneAgents`, `hideWithoutLinearTicket`;
+/// always applied, and a worktree with an effectively-open session is never
+/// hidden by them), then on top the picked ones (`worktreeFilterText`/
+/// `Status`/`Pr`/`Git`, which hide any row). `worktreeFiltersEnabled: false`
+/// (`F`) turns only the picked ones off.
 pub fn apply_filters(views: Vec<WorktreeView>, settings: &Settings) -> Vec<WorktreeView> {
     apply_filters_with_cutoff(views, settings, &now_sqlite_minus_grace())
 }
@@ -812,7 +810,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn filters_off_shows_everything() {
+    fn filters_off_drops_the_picked_filters_but_keeps_the_base_ones() {
         let s = Settings {
             worktree_filters_enabled: false,
             hide_main_branch: true,
@@ -821,7 +819,7 @@ pub(crate) mod tests {
             ..Settings::default()
         };
         let v = vec![wt("a").main().branch("main"), wt("b")];
-        assert_eq!(filtered(v, &s), ["a", "b"]);
+        assert_eq!(filtered(v, &s), ["b"]);
     }
 
     #[test]

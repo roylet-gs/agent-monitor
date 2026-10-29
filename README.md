@@ -170,8 +170,8 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
-| `f` | Worktree filters: text search, agent status (`waiting` / `active` / `idle`), PR (`open` / `none` / `failing`), git (`changes` / `clean`) and the hide toggles. The `─Worktrees` border sums up what's filtered (`"auth" · waiting · no main · 3 hidden`; a click opens the box) |
-| `F` | Turn every worktree filter off, and back on (`worktreeFiltersEnabled`; the border reads `filters off · F` meanwhile) |
+| `f` | Worktree filters: text search, agent status (`waiting` / `active` / `idle`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `─Worktrees` border sums up what's filtered (`"auth" · waiting · no main · 3 hidden`; a click opens the box) |
+| `F` | Turn the `f` filters off, and back on (`worktreeFiltersEnabled`; the border reads `filters off · F` meanwhile). The base filters stay on |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
 | `h` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
@@ -399,13 +399,13 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `hideMergedClosedPrs` | `false` | Hide worktrees whose PR is merged or closed |
 | `hideIdleDoneAgents` | `false` | Hide worktrees whose agent is idle, done or absent |
 | `hideWithoutLinearTicket` | `false` | Hide worktrees with no Linear ticket |
-| `worktreeFiltersEnabled` | `true` | Master switch for the worktree filters (`F`); off shows every worktree |
+| `worktreeFiltersEnabled` | `true` | Switch for the `worktreeFilter*` filters (`F`); off leaves only the base `hide*` filters |
 | `worktreeFilterText` | `""` | Only worktrees whose name, branch or ticket contains this (any case) |
 | `worktreeFilterStatus` | `"any"` | `waiting`, `active` (an agent working or waiting) or `idle` (idle, done or no agent) |
 | `worktreeFilterPr` | `"any"` | `open` (an open PR), `none` (no PR) or `failing` (CI failing) |
 | `worktreeFilterGit` | `"any"` | `changes` (uncommitted or unpushed work) or `clean` |
 
-The `hide*` toggles never hide a worktree with a live agent session; the `worktreeFilter*` ones do, since you asked for them. All of them are in the `f` box and in Settings → Filters.
+The `hide*` toggles are the base filters: they always apply (`F` doesn't turn them off) and never hide a worktree with a live agent session; they live in Settings → Base filters. The `worktreeFilter*` ones add on top, hide live rows too, since you asked for them, and are in the `f` box and Settings → Filters.
 | `showPrStatus` | `true` | Show the PR column |
 | `showLinearTicket` | `true` | Show the ticket column |
 | `showGitAheadBehind` | `true` | Show the ahead/behind/dirty column |

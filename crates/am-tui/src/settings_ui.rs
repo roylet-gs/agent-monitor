@@ -91,17 +91,17 @@ pub const FIELDS: &[Field] = &[
     Field { key: "contextWindowTokens", label: "Context window (tokens)", help: "Bar scale; a session past it doubles the scale until it fits (⏎ to type, e.g. 128k)", section: "Dashboard", kind: Kind::Tokens { min: context::MIN_WINDOW } },
     Field { key: "showRunningProcesses", label: "Detect dev servers", help: "Show processes running inside each worktree", section: "Dashboard", kind: Kind::Bool },
     Field { key: "runningProcessFilter", label: "Process filter", help: "Only show processes and agent commands whose command line contains this", section: "Dashboard", kind: Kind::Text { secret: false } },
-    Field { key: "worktreeFiltersEnabled", label: "Filters on", help: "Off shows every worktree whatever the filters below say (F on the list)", section: "Filters", kind: Kind::Bool },
+    Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout; always applied (F doesn't turn it off)", section: "Base filters", kind: Kind::Bool },
+    Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Always applied, unless the agent session is open", section: "Base filters", kind: Kind::Bool },
+    Field { key: "hideIdleDoneAgents", label: "Hide idle/done agents", help: "Always applied: only worktrees with active agents", section: "Base filters", kind: Kind::Bool },
+    Field { key: "hideWithoutLinearTicket", label: "Hide without Linear ticket", help: "Always applied, unless the session is open", section: "Base filters", kind: Kind::Bool },
+    Field { key: "worktreeFiltersEnabled", label: "Filters on", help: "Off ignores the filters below (F on the list); the base filters stay", section: "Filters", kind: Kind::Bool },
     Field { key: "worktreeFilterText", label: "Text search", help: "Only worktrees whose name, branch or ticket contains this (any case)", section: "Filters", kind: Kind::Text { secret: false } },
     Field { key: "worktreeFilterStatus", label: "Agent status", help: "waiting: needs you; active: working or waiting; idle: idle, done or no agent", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_STATUS_FILTERS) },
     Field { key: "worktreeFilterPr", label: "PR", help: "open: has an open PR; none: no PR; failing: CI failing", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_PR_FILTERS) },
     Field { key: "worktreeFilterGit", label: "Git", help: "changes: uncommitted or unpushed work; clean: none", section: "Filters", kind: Kind::Choice(&am_core::settings::WORKTREE_GIT_FILTERS) },
-    Field { key: "hideMainBranch", label: "Hide main branch", help: "Hide the main/master checkout from the list", section: "Filters", kind: Kind::Bool },
-    Field { key: "hideMergedClosedPrs", label: "Hide merged/closed PRs", help: "Unless the agent session is open", section: "Filters", kind: Kind::Bool },
-    Field { key: "hideIdleDoneAgents", label: "Hide idle/done agents", help: "Only show worktrees with active agents", section: "Filters", kind: Kind::Bool },
-    Field { key: "hideWithoutLinearTicket", label: "Hide without Linear ticket", help: "Unless the session is open", section: "Filters", kind: Kind::Bool },
     // An action, not a setting: its key is never written.
-    Field { key: "resetWorktreeFilters", label: "Reset filters…", help: "Every filter above back to its default (only the main branch hidden)", section: "Filters", kind: Kind::ResetFilters },
+    Field { key: "resetWorktreeFilters", label: "Reset filters…", help: "Every filter above back to its default (the base filters kept)", section: "Filters", kind: Kind::ResetFilters },
     Field { key: "audioNotifications", label: "Sounds", help: "Play a sound when an agent is waiting or done", section: "Notifications", kind: Kind::Bool },
     Field { key: "checkForUpdates", label: "Check for updates", help: "Show a notice when a newer am release is on GitHub", section: "Notifications", kind: Kind::Bool },
     Field { key: "cmuxSync", label: "cmux sidebar", help: "Inside cmux: PR, ticket and context on each worktree's workspace; review requests as notifications", section: "Notifications", kind: Kind::Bool },
@@ -134,17 +134,15 @@ pub const FIELDS: &[Field] = &[
     Field { key: "resetSettings", label: "Reset settings…", help: "Defaults for every setting, then setup (repos, themes, scripts, hooks kept)", section: "Setup", kind: Kind::Reset },
 ];
 
-/// The rows of the dashboard's filter box (`f`), a cut-down editor.
+/// The rows of the dashboard's filter box (`f`), a cut-down editor: the
+/// filters `F` turns on and off, on top of the base filters (`hide*`, only
+/// in Settings → Base filters, always applied).
 pub const WORKTREE_FILTERS: &[&str] = &[
     "worktreeFiltersEnabled",
     "worktreeFilterText",
     "worktreeFilterStatus",
     "worktreeFilterPr",
     "worktreeFilterGit",
-    "hideMainBranch",
-    "hideMergedClosedPrs",
-    "hideIdleDoneAgents",
-    "hideWithoutLinearTicket",
     "resetWorktreeFilters",
 ];
 
@@ -595,8 +593,8 @@ impl SettingsEditor {
 }
 
 impl SettingsEditor {
-    /// Run a confirmed reset: `resetWorktreeFilters` (every worktree filter
-    /// back to its default), `resetReviewFilters` (scope, the default group,
+    /// Run a confirmed reset: `resetWorktreeFilters` (the `f` filters back
+    /// to their defaults; the base `hide*` filters kept), `resetReviewFilters` (scope, the default group,
     /// the GitHub total back to defaults; groups kept) or `resetReviewGroups`
     /// (every review group removed).
     fn reset_filters(&mut self, which: &str) -> Outcome {
@@ -608,10 +606,6 @@ impl SettingsEditor {
                 ("worktreeFilterStatus", Value::from(d.worktree_filter_status)),
                 ("worktreeFilterPr", Value::from(d.worktree_filter_pr)),
                 ("worktreeFilterGit", Value::from(d.worktree_filter_git)),
-                ("hideMainBranch", Value::Bool(d.hide_main_branch)),
-                ("hideMergedClosedPrs", Value::Bool(d.hide_merged_closed_prs)),
-                ("hideIdleDoneAgents", Value::Bool(d.hide_idle_done_agents)),
-                ("hideWithoutLinearTicket", Value::Bool(d.hide_without_linear_ticket)),
             ],
             "resetReviewFilters" => vec![
                 ("reviewRequestsScope", Value::from(d.review_requests_scope)),
@@ -1252,11 +1246,14 @@ pub(crate) mod tests {
         app.on_key(Key::Enter);
         app.on_key(Key::Char('y'));
         assert_eq!(app.settings.worktree_filter_status, "any");
-        assert!(app.settings.hide_main_branch);
+        // The base filters aren't in the box, and the reset leaves them be.
+        assert!(!WORKTREE_FILTERS.iter().any(|k| k.starts_with("hide")));
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(file["hideMainBranch"], Value::Null);
     }
 
     #[test]
-    fn capital_f_turns_every_filter_off_and_on() {
+    fn capital_f_turns_the_picked_filters_off_and_on() {
         let (_lock, dir) = data_dir();
         let mut app = crate::app::App::new(Settings::default());
         assert!(matches!(app.on_key(Key::Char('F')), crate::app::Action::SettingsChanged));

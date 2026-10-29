@@ -68,8 +68,8 @@ pub struct Settings {
     pub hide_merged_closed_prs: bool,
     pub hide_idle_done_agents: bool,
     pub hide_without_linear_ticket: bool,
-    /// Master switch for the dashboard's worktree filters (`F`): off shows
-    /// every worktree whatever the `hide*` and `worktreeFilter*` keys say.
+    /// Switch for the dashboard's picked worktree filters (`F`): off ignores
+    /// the `worktreeFilter*` keys. The `hide*` base filters always apply.
     pub worktree_filters_enabled: bool,
     /// Only rows whose name, branch or ticket contains this (any case).
     pub worktree_filter_text: String,

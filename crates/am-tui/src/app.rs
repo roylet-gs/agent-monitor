@@ -1073,7 +1073,8 @@ impl App {
     }
 
     /// Swap in new settings and re-derive rows (header style depends on sort).
-    /// `F`: every worktree filter off, or back on (`worktreeFiltersEnabled`).
+    /// `F`: the `f` filters off, or back on (`worktreeFiltersEnabled`); the
+    /// base `hide*` filters always apply.
     fn toggle_filters(&mut self) -> Action {
         let on = !self.settings.worktree_filters_enabled;
         match crate::settings_ui::persist("worktreeFiltersEnabled", serde_json::Value::Bool(on)) {
@@ -1083,7 +1084,7 @@ impl App {
                 self.notice = Some(if on {
                     "Filters on".into()
                 } else {
-                    format!("Filters off — showing every worktree ({key} turns them back on)")
+                    format!("Filters off — base filters only ({key} turns them back on)")
                 });
                 self.set_settings(s);
                 Action::SettingsChanged

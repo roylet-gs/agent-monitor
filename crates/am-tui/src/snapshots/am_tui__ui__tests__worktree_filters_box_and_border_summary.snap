@@ -10,19 +10,19 @@ expression: "render(&app, 120, 24)"
 │gridsight ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │ · main                                                                                       ↑2 ±3  4m               │
 │                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
 │                 ╭─Worktree filters ────────────────────────────────────────────────────────────────╮                 │
 │                 │▌  Filters on                    on                                               │                 │
 │                 │   Text search                   auth                                             │                 │
 │                 │   Agent status                  waiting                                          │                 │
 │                 │   PR                            any                                              │                 │
 │                 │   Git                           any                                              │                 │
-│                 │   Hide main branch              on                                               │                 │
-│                 │   Hide merged/closed PRs        off                                              │                 │
-│                 │   Hide idle/done agents         off                                              │                 │
-│                 │   Hide without Linear ticket    off                                              │                 │
 │                 │   Reset filters…                ⏎ reset                                          │                 │
 │                 │                                                                                  │                 │
-│                 │ Off shows every worktree whatever the filters below say (F on the list)          │                 │
+│                 │ Off ignores the filters below (F on the list); the base filters stay             │                 │
 │                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │
 ╰ "auth" · waiting · no main · 3 hidden ─────────────────────────────────────────────────────────────────────── 1 of 3 ╯
  ⏎ open  │ g PR  l linear  p project  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
