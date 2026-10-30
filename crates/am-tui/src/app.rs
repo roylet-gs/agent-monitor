@@ -127,6 +127,10 @@ pub enum Action {
     RunSetup,
     /// Settings → Reset settings, confirmed: reset settings.json, then run setup.
     ResetSettings,
+    /// Run the upgrade as job `.0` (a click on the update notice, confirmed).
+    Update(u64, am_core::update_check::InstallMethod),
+    /// Quit and start the (newly installed) am-tui in this terminal.
+    Restart,
 }
 
 pub struct App {
@@ -143,6 +147,12 @@ pub struct App {
     /// Newer release found by the update check: top right of the pane, and
     /// a banner with the upgrade command at the top of Settings.
     pub update_available: Option<am_core::update_check::Update>,
+    /// The release the update job installed: the check (still running the
+    /// old binary) mustn't advertise it again.
+    pub installed_update: Option<String>,
+    /// `Action::Restart` ran: once the terminal is restored, main.rs starts
+    /// the new am-tui in its place.
+    pub restart: bool,
     /// Centered message box (e.g. "copied resume command"); any key closes it.
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
@@ -218,6 +228,8 @@ impl App {
             loaded: false,
             notice: None,
             update_available: None,
+            installed_update: None,
+            restart: false,
             popup: None,
             show_log: false,
             settings_editor: None,
@@ -693,6 +705,25 @@ impl App {
                         }
                     }
                 }
+                Effect::Update => {
+                    let Some(crate::modals::Modal::ConfirmUpdate(u)) = self.modal.take() else { return Action::None };
+                    let job = self.jobs.start_update(&u.latest);
+                    Action::Update(job, u.method)
+                }
+                Effect::Restart(now) => {
+                    let Some(crate::modals::Modal::Restart { latest }) = self.modal.take() else { return Action::None };
+                    match self.jobs.busy() {
+                        _ if !now => {
+                            self.notice = Some(format!("Restart am to use v{latest}"));
+                            Action::None
+                        }
+                        0 => Action::Restart,
+                        n => {
+                            self.notice = Some(format!("Restart am to use v{latest} once {} done", if n == 1 { "the job is" } else { "the jobs are" }));
+                            Action::None
+                        }
+                    }
+                }
                 Effect::AddReviewScript(r) => {
                     self.modal = None;
                     match self.start_review_pull(&r) {
@@ -951,6 +982,10 @@ impl App {
         match hit.target {
             Target::Key(k) => self.on_key(k),
             Target::Command(c) => self.run_command(c),
+            Target::Update => {
+                self.update_prompt();
+                Action::None
+            }
             Target::JobsPane => {
                 self.focus_jobs();
                 Action::None
@@ -1231,6 +1266,19 @@ impl App {
 
     /// The review page, in place of the list or (`split`) beside it, with
     /// the keys.
+    /// A click on the `⬆ vX.Y.Z available` notice: ask before running the
+    /// upgrade, or say how to update where am can't do it itself.
+    pub fn update_prompt(&mut self) {
+        let Some(u) = self.update_available.clone() else { return };
+        if let Some(latest) = self.jobs.updating() {
+            self.notice = Some(format!("Already updating to v{latest}"));
+        } else if u.method.upgrade_steps().is_none() {
+            self.popup = Some(format!("am v{} is available (you have v{}).\n\nTo update: {}", u.latest, u.current, u.hint));
+        } else {
+            self.modal = Some(crate::modals::Modal::ConfirmUpdate(u));
+        }
+    }
+
     pub fn open_reviews(&mut self, split: bool) -> Action {
         if self.reviews_refused() {
             return Action::None;

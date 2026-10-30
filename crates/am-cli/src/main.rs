@@ -108,6 +108,8 @@ enum Cmd {
     Logs(LogsArgs),
     /// How long each part of the app has been taking (from the log), against its budget
     Perf(PerfArgs),
+    /// Install the latest release (Homebrew, npm or pnpm installs)
+    Update(UpdateArgs),
     /// Run the setup wizard
     Setup,
     /// Open only the review-requests page (appMode stays as it is)
@@ -420,6 +422,16 @@ enum ThemeCmd {
 }
 
 #[derive(Args)]
+struct UpdateArgs {
+    /// Only say whether a newer release exists
+    #[arg(long)]
+    check: bool,
+    /// Report as JSON (implies --check)
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 struct PerfArgs {
     /// Window to report: 30m, 1h, 2d, or all
     #[arg(long, value_name = "window", default_value = "24h")]
@@ -592,6 +604,7 @@ fn main() {
             open: a.open,
         }),
         Some(Cmd::Perf(a)) => perf::run(&a.since, a.json),
+        Some(Cmd::Update(a)) => update::run(a.check, a.json),
         Some(Cmd::Status { worktree, set }) => status::run(&worktree, set.as_deref()),
         // Normally caught by the fast path above (e.g. reached via `am --watch hook-event`).
         Some(Cmd::HookEvent { worktree, event, managed: _, agent }) => {

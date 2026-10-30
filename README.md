@@ -127,6 +127,10 @@ The binaries land in `~/.cargo/bin`, which must be on your `PATH`.
 
 Prebuilt tarballs for each platform (with `SHA256SUMS`) are also attached to every [GitHub Release](https://github.com/roylet-gs/agent-monitor/releases). Keep the three binaries in the same directory.
 
+### Updating
+
+When a newer release is out, the dashboard shows `⬆ vX.Y.Z available` at its top right. **Click it** to update: am asks first, showing the command it will run for how you installed it (`brew update && brew upgrade agent-monitor`, `npm install -g @roylet-gs/agent-monitor@latest` or `pnpm add -g @roylet-gs/agent-monitor@latest`), runs it in the jobs pane with its output, and then offers to restart the dashboard into the new version. Agent hooks pick up the new `am-hook` on their own. From a shell, `am update` does the same (`am update --check` only reports). A source install or a downloaded tarball can't be updated this way: clicking the notice and `am update` say what to do instead.
+
 ---
 
 ## First Run
@@ -192,6 +196,7 @@ The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
 - **Hover** over anything clickable to highlight it (a softer tint than the selection).
 - The mouse works everywhere: in Settings and its pages (repositories, harness plugins, key bindings, sort order, theme builder), dialogs, the folder browser, the setup wizard and the jobs pane. Click a row to select it, and click it again to act on it, as `Enter` or `space` would. Key hints such as `⏎ save` or `esc cancel` are clickable buttons.
 - **Click a key-bar hint** (`n new`, `s settings`, `? help`…) to run that action.
+- **Click `⬆ vX.Y.Z available`** to update am (see [Updating](#updating)).
 - **Click the Jobs pane** to focus it (scrolling then moves through the jobs); click a worktree row to go back to the list.
 - In **Settings**, scroll to move, click a field to select it, and click it again to change it.
 - Any click closes a popup or the help overlay.
@@ -426,7 +431,7 @@ The `hide*` toggles are the base filters: they always apply (`F` doesn't turn th
 | `audioDoneSound` | `"Funk"` | Sound for done |
 | `appMode` | `"full"` | `full` (the dashboard) or `reviews` ([review-only mode](#review-only-mode): `am` opens to the review page alone) |
 | `cmuxSync` | `true` | Inside [cmux](#use-am-in-cmux): show each worktree's PR, Linear ticket and running agent commands as pills on its cmux workspace, its context use as the workspace's progress bar, a summary (agents waiting/working/done, reviews, failing CI) on am's own workspace, and post new review requests as cmux notifications. Does nothing outside cmux |
-| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
+| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps). Click the notice to run it (see [Updating](#updating)) |
 | `telemetry` | `ask` | Anonymous usage and error reports: `on`, `off`, or `ask` (not decided; nothing is recorded, and setup or a one-time prompt asks). See [Usage Reports](#usage-reports) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
@@ -562,6 +567,7 @@ am --version
 | `am cmux dock` | Add am to the [cmux](#use-am-in-cmux) Dock (`~/.config/cmux/dock.json`; an existing file is backed up; `--project` writes plain `am` and no backup) | `--reviews` (also the review page), `--project` (the repo's `.cmux/dock.json`), `--remove` |
 | `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear, usage reports | `--json` |
 | `am telemetry status\|on\|off\|show\|reset-id\|flush` | Anonymous usage reports ([Usage Reports](#usage-reports)): whether they're on, turn them on/off, every event waiting (`show --json`: the exact request body), forget the install id, send now | `--json` (`status`, `show`) |
+| `am update` | Install the latest release the way am was installed (Homebrew, npm or pnpm), printing the upgrade command's output | `--check` (only report), `--json` (report as JSON) |
 | `am perf` | How long each part of am has been taking (UI frames, the collector, git, GitHub/Linear, hooks), from the log, against per-stage budgets | `--since <window>` (`30m`, `1h`, `2d`, `all`; default `24h`), `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear`, `--open` (in your editor, or the folder once rotated) |
 | `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run; also Settings → Run setup again…) | |

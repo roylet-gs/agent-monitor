@@ -57,12 +57,12 @@ specs_for() {
     crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 24 28 ;; # Settings → Repositories, add-repo browser
     crates/am-tui/src/nav.rs) echo 01 03 23 28 29 ;; # list movement: dashboard, Settings, folder browser, review page, scrolling
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
-    crates/am-tui/src/modals.rs) echo 09 10 22 23 27 34 ;;
-    crates/am-tui/src/jobs.rs) echo 09 10 22 27 28 31 ;;
+    crates/am-tui/src/modals.rs) echo 09 10 13 22 23 27 34 ;;
+    crates/am-tui/src/jobs.rs) echo 09 10 13 22 27 28 31 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 28 ;;
     crates/am-tui/src/data.rs | crates/am-tui/src/gitwork.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 32 33 ;;
     crates/am-tui/src/cmux_sync.rs) echo - ;; # only runs inside cmux; unit tests cover it
-    crates/am-tui/src/launcher.rs) echo 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window
+    crates/am-tui/src/launcher.rs) echo 13 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window, 13 the update job
 
     # --- am-core ----------------------------------------------------------
     crates/am-core/src/lib.rs | crates/am-core/src/db.rs | crates/am-core/src/settings.rs | \
@@ -84,7 +84,7 @@ specs_for() {
     crates/am-core/src/mcp_installer.rs) echo - ;; # am mcp install; cli.rs covers it
     crates/am-core/src/context.rs) echo 14 ;;      # context-window bar
     crates/am-core/src/usage.rs) echo 17 ;;        # today's token total
-    crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice
+    crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice, clicking it to update
     crates/am-core/src/themes.rs | crates/am-core/src/themes/*) echo 12 ;;
     crates/am-core/src/integrations/github.rs) echo 04 28 ;;
     crates/am-core/src/integrations/reviews.rs | crates/am-core/src/review_groups.rs) echo 28 ;;

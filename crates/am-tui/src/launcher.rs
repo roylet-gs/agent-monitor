@@ -31,6 +31,8 @@ pub enum Msg {
     RepoAdded(String, Result<String, String>),
     /// A newer release exists.
     UpdateAvailable(am_core::update_check::Update),
+    /// The update job finished.
+    Updated(u64, Result<(), String>),
 }
 
 /// Long enough for the popup to register before the editor steals focus.
@@ -198,6 +200,20 @@ pub fn spawn_update_check(tx: Sender<Msg>) {
     if let Err(e) = spawned {
         am_core::debug!("update", "could not spawn update-check thread: {e}");
     }
+}
+
+/// Install the latest release (the update job), streaming the upgrade
+/// command's output into the jobs pane.
+pub fn run_update(method: am_core::update_check::InstallMethod, job: u64, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        if let Some(steps) = method.upgrade_steps() {
+            let _ = tx.send(Msg::JobStep(job, format!("Running {}", am_core::update_check::shell_text(&steps))));
+        }
+        let result = am_core::update_check::run_upgrade(method, |line| {
+            let _ = tx.send(Msg::JobLog(job, crate::jobs::strip_ansi(line)));
+        });
+        let _ = tx.send(Msg::Updated(job, result));
+    });
 }
 
 #[cfg(test)]

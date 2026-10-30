@@ -118,6 +118,8 @@ impl Env {
             .env_remove("AM_HOOK_BIN")
             .env_remove("AM_NO_NATIVE_HOOK")
             .env_remove("AM_LINEAR_API_URL")
+            .env_remove("AM_INSTALL_METHOD")
+            .env_remove("AM_RELEASES_API_URL")
             .current_dir(cwd.unwrap_or(&self.root()))
             .stdin(Stdio::null());
         // Whatever the machine running the tests has: agent config dirs come
@@ -2160,4 +2162,50 @@ fn telemetry_flush_posts_otlp_json_to_the_relay() {
     let status: Value = serde_json::from_str(&env.ok(&["telemetry", "status", "--json"]).stdout).unwrap();
     assert_eq!(status["pending"], 0);
     assert!(status["lastUploadMs"].is_u64());
+}
+
+#[test]
+fn update_installs_the_latest_release_the_way_am_was_installed() {
+    let mut env = Env::new();
+    // No GitHub: the release check falls back to a fresh cached answer.
+    env.extra_env.push(("AM_RELEASES_API_URL".into(), "http://127.0.0.1:9/releases/latest".into()));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let cache_path = env.data().join("update-check.json");
+    let cache = |latest: &str| std::fs::write(&cache_path, json!({ "checkedAt": now, "latest": latest }).to_string()).unwrap();
+    cache("99.0.0");
+    env.fake_bin("brew", "echo \"brew $*\" >> \"$HOME/brew.log\"; echo \"==> $*\"");
+    env.extra_env.push(("AM_INSTALL_METHOD".into(), "homebrew".into()));
+
+    let o = env.ok(&["update", "--check"]);
+    assert!(o.stdout.contains("am v99.0.0 is available") && o.stdout.contains("brew update && brew upgrade agent-monitor"), "{}", o.stdout);
+    assert!(!env.home().join("brew.log").exists(), "--check installs nothing");
+
+    let j = env.ok(&["update", "--json"]).json();
+    assert_eq!(j["latest"], "99.0.0");
+    assert_eq!(j["updateAvailable"], true);
+    assert_eq!(j["installMethod"], "homebrew");
+    assert_eq!(j["command"], "brew update && brew upgrade agent-monitor");
+
+    let o = env.ok(&["update"]);
+    assert!(o.stdout.contains("==> update") && o.stdout.contains("==> upgrade agent-monitor"), "{}", o.stdout);
+    assert!(o.stderr.contains("Updated to am v99.0.0"), "{}", o.stderr);
+    let log = std::fs::read_to_string(env.home().join("brew.log")).unwrap();
+    assert_eq!(log, "brew update\nbrew upgrade agent-monitor\n");
+
+    // A failing step fails the command.
+    env.fake_bin("brew", "echo nope >&2; exit 2");
+    let o = env.run(&["update"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stdout.contains("nope") && o.stderr.contains("Update failed"), "{}{}", o.stdout, o.stderr);
+
+    // An install am can't update itself only says how.
+    env.extra_env.retain(|(k, _)| k != "AM_INSTALL_METHOD");
+    env.extra_env.push(("AM_INSTALL_METHOD".into(), "cargo".into()));
+    let o = env.run(&["update"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("can't update this install itself") && o.stderr.contains("cargo install"), "{}", o.stderr);
+
+    // Up to date.
+    cache("0.0.1");
+    assert!(env.ok(&["update"]).stdout.contains("is up to date"));
 }
