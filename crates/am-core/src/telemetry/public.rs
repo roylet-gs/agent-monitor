@@ -95,22 +95,38 @@ pub fn init(binary: Binary, settings: &Settings) {
             previous(info);
         }));
     });
-    apply(settings);
+    // Quietly: every process (a hook per agent event) starts here, so "on"
+    // isn't news; only a change in a running process is logged (`apply`).
+    set(settings, false);
 }
 
 /// Follow a settings change (the TUI reloads settings live): turning reports
 /// off deletes whatever was waiting to be sent.
 pub fn apply(settings: &Settings) {
+    set(settings, true);
+}
+
+fn set(settings: &Settings, announce: bool) {
     let consent = consent(settings, |name| std::env::var(name).ok());
     let on = consent == Consent::On;
     let was = ON.swap(on, Ordering::Relaxed);
     // Off however it got there (Settings, `am settings set`, an edited file,
     // `DO_NOT_TRACK`): whatever was waiting goes.
     if matches!(consent, Consent::Off(_)) && spool::has_pending(&dir()) {
-        spool::clear(&dir());
+        forget_pending(&dir());
         info!(MODULE, "Usage reports off ({consent:?}); pending reports deleted");
-    } else if on && !was {
+    } else if announce && on && !was {
         info!(MODULE, "Usage reports on");
+    }
+}
+
+/// Delete what was waiting to be sent, and forget that today's heartbeat was
+/// recorded (it was just deleted), so turning reports back on records a new one.
+pub fn forget_pending(dir: &std::path::Path) {
+    spool::clear(dir);
+    let mut state = super::upload::state_in(dir);
+    if state.last_heartbeat_day.take().is_some() {
+        super::upload::save_state_in(dir, &state);
     }
 }
 
@@ -216,6 +232,17 @@ mod tests {
         assert_eq!(consent_with("on", &[("AM_TELEMETRY", "off")]), Consent::Off("AM_TELEMETRY is off"));
         assert_eq!(consent_with("on", &[("CI", "true")]), Consent::Off("running in CI"));
         assert_eq!(consent_with("on", &[("CI", "")]), Consent::On);
+    }
+
+    #[test]
+    fn deleting_pending_reports_forgets_the_heartbeat_day() {
+        let dir = tempfile::tempdir().unwrap();
+        spool::append(dir.path(), &Event::heartbeat(1));
+        let state = super::super::upload::State { last_heartbeat_day: Some("2026-10-30".into()), ..Default::default() };
+        super::super::upload::save_state_in(dir.path(), &state);
+        forget_pending(dir.path());
+        assert!(spool::pending(dir.path()).is_empty());
+        assert_eq!(super::super::upload::state_in(dir.path()).last_heartbeat_day, None);
     }
 
     #[test]

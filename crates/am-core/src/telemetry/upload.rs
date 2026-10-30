@@ -44,15 +44,23 @@ pub struct State {
 }
 
 pub fn state() -> State {
-    fs::read_to_string(dir().join("state.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    state_in(&dir())
 }
 
 pub fn save_state(state: &State) {
-    let _ = fs::create_dir_all(dir());
+    save_state_in(&dir(), state);
+}
+
+pub fn state_in(dir: &Path) -> State {
+    fs::read_to_string(dir.join("state.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+pub fn save_state_in(dir: &Path, state: &State) {
+    let _ = fs::create_dir_all(dir);
     if let Ok(text) = serde_json::to_string_pretty(state) {
-        let tmp = dir().join(format!("state.json.{}.tmp", std::process::id()));
+        let tmp = dir.join(format!("state.json.{}.tmp", std::process::id()));
         if fs::write(&tmp, text).is_ok() {
-            let _ = fs::rename(tmp, dir().join("state.json"));
+            let _ = fs::rename(tmp, dir.join("state.json"));
         }
     }
 }

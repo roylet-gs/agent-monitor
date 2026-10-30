@@ -223,15 +223,18 @@ fn restart() {
 }
 
 /// The day's `am.heartbeat`, once the first snapshot of the day is in.
+/// The UTC day `record_heartbeat` last checked, so snapshots (which come
+/// often) read `state.json` once a day; emptied when the `telemetry` setting
+/// changes, since turning reports off deletes that day's heartbeat.
+static HEARTBEAT_DAY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 fn record_heartbeat(app: &App) {
     use am_core::telemetry::{public, upload};
     if !public::is_on() {
         return;
     }
-    // Snapshots come often: the day is checked in memory, the file once a day.
-    static DONE_DAY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
     let today = usage_reports::today();
-    let Ok(mut done) = DONE_DAY.lock() else { return };
+    let Ok(mut done) = HEARTBEAT_DAY.lock() else { return };
     if *done == today {
         return;
     }
@@ -504,6 +507,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             if app.settings.telemetry != telemetry_applied {
                 telemetry_applied = app.settings.telemetry.clone();
                 am_core::telemetry::public::apply(&app.settings);
+                if let Ok(mut day) = HEARTBEAT_DAY.lock() {
+                    day.clear();
+                }
             }
             if features_at.elapsed() >= usage_reports::EVERY {
                 features_at = Instant::now();
