@@ -63,6 +63,7 @@ pub(super) fn big_fixture(worktrees: usize, reviews: usize) -> App {
                 assignee: None,
                 project: None,
                 pr_attachment: None,
+                parent: None,
             });
         }
         v.context = Some(ContextUsage { tokens: 10_000 * (i as u64 % 90), model: None, window: None });
@@ -113,6 +114,7 @@ pub(super) fn big_fixture(worktrees: usize, reviews: usize) -> App {
         subagents,
         health: Default::default(),
         stack,
+        stack_base: Default::default(),
         today_tokens: None,
         reviews: Some(reviews),
         review_error: None,

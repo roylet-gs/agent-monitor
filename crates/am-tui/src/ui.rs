@@ -2097,6 +2097,11 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
                 Span::styled(" ═", theme.fg(theme.magenta)),
             ]),
             Row::Ticket(t) => Line::styled(format!("  — {} —", truncate(t, inner.width as usize - 6)), theme.faint()),
+            // The stack below is built on this branch, which has no worktree.
+            Row::Base(b) => Line::styled(
+                format!(" ┌ {} · no worktree", truncate(b, (inner.width as usize).saturating_sub(17))),
+                theme.faint(),
+            ),
             Row::Worktree(i) => {
                 worktree_line(app, theme, &app.flat[*i], &app.tree[*i], *i == app.selected, focused, &cols, inner.width, now)
             }
@@ -2610,12 +2615,18 @@ fn worktree_line<'a>(
             badge.push_str(&format!(" ◆{subagents}"));
         }
     }
+    // Collapsed (←): how many stacked rows it hides.
+    let fold_badge = match app.folded.get(&v.worktree.id) {
+        Some(n) if wide(width) => format!(" ▸ {n} stacked"),
+        Some(n) => format!(" ▸{n}"),
+        None => String::new(),
+    };
     // The tmp space mixes repos: name the row's own when several are tracked.
     let repo_tag = match app.snapshot.repos.iter().find(|r| r.id == v.worktree.repo_id) {
         Some(r) if v.worktree.tmp_space && app.snapshot.repos.len() > 1 => format!(" ({})", r.name),
         _ => String::new(),
     };
-    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + repo_tag.width() + tree.width());
+    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + fold_badge.width() + repo_tag.width() + tree.width());
     // Nickname (e.g. from the Linear ticket) first, then the branch, dimmed.
     // When space is short they share it so the branch never disappears.
     let w = &v.worktree;
@@ -2679,6 +2690,7 @@ fn worktree_line<'a>(
         rest = r;
     }
     left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
+    left.push(Span::styled(fold_badge, theme.faint()));
     left.push(Span::raw(" ".repeat(fill)));
 
     let ctx_range = ctx_range.start + left.len()..ctx_range.end + left.len();
@@ -3558,6 +3570,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::MoveDown, C::MoveUp], "  ↑ / ↓", "move"),
         (&[C::Top, C::Bottom], "", "top / bottom"),
         (&[C::PageDown, C::PageUp], "", "page down / up"),
+        (&[C::Collapse, C::Expand], "", "fold / unfold stacked branches (▸ N stacked)"),
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
@@ -3756,6 +3769,7 @@ mod tests {
             assignee: None,
             project: None,
             pr_attachment: None,
+            parent: None,
         });
         refactor.context = Some(ContextUsage { tokens: 121_000, model: Some("claude-opus-5-5".into()), window: None });
         let mut waiting = view("w2", "r1", "fix/offline-cache", Some(Status::Waiting));
@@ -3781,6 +3795,7 @@ mod tests {
             ],
             health: Default::default(),
             stack: Default::default(),
+            stack_base: Default::default(),
             today_tokens: None,
             reviews: None,
             review_error: None,
@@ -4507,6 +4522,7 @@ mod tests {
             assignee: None,
             project: None,
             pr_attachment: None,
+            parent: None,
         });
         snap.reviews = Some(vec![fork, ticket, pulled]);
         app.apply(snap);
@@ -4932,7 +4948,7 @@ mod tests {
             let mut app = by_repo();
             app.on_key(Key::Char('v'));
             let before = render(&app, 120, 20);
-            let key = app.keymap.key(cmd).unwrap();
+            let key = app.keymap.key(cmd).or_else(|| cmd.fixed_keys().first().copied()).unwrap();
             assert_eq!(app.on_key(key), crate::app::Action::None, "{cmd:?}");
             assert!(app.reviews.is_some() && app.modal.is_none() && app.settings_editor.is_none(), "{cmd:?}");
             assert_eq!(render(&app, 120, 20), before, "{cmd:?}");
@@ -6559,6 +6575,7 @@ mod tests {
                 Row::Repo(_) => "repo",
                 Row::Project(_) => "project",
                 Row::Ticket(_) => "ticket",
+                Row::Base(_) => "base",
                 Row::Worktree(_) => "wt",
                 Row::Pending(_) => "pending",
                 Row::Session(..) => "session",
@@ -6587,6 +6604,7 @@ mod tests {
                 Row::Repo(_) => "repo",
                 Row::Project(_) => "project",
                 Row::Ticket(_) => "ticket",
+                Row::Base(_) => "base",
                 Row::Worktree(_) => "wt",
                 Row::Pending(_) => "pending",
                 Row::Session(..) => "session",
@@ -6617,12 +6635,164 @@ mod tests {
                 Row::Repo(_) => "repo",
                 Row::Project(_) => "project",
                 Row::Ticket(_) => "ticket",
+                Row::Base(_) => "base",
                 Row::Worktree(_) => "wt",
                 Row::Pending(_) => "pending",
                 Row::Session(..) => "session",
             })
             .collect();
         assert_eq!(kinds, ["repo", "wt", "spacer", "ticket", "wt", "wt", "spacer", "repo", "wt"]);
+    }
+
+    fn row_kinds(app: &App) -> Vec<String> {
+        app.rows
+            .iter()
+            .map(|r| match r {
+                Row::Spacer => "spacer".to_string(),
+                Row::Repo(_) => "repo".into(),
+                Row::Project(_) => "project".into(),
+                Row::Ticket(t) => format!("ticket {}", t.split(' ').next().unwrap_or("")),
+                Row::Base(b) => format!("base {b}"),
+                Row::Worktree(i) => app.flat[*i].worktree.id.clone(),
+                Row::Pending(_) => "pending".into(),
+                Row::Session(..) => "session".into(),
+            })
+            .collect()
+    }
+
+    /// Three stacks in one repo, listed interleaved: `a` (ENG-1 → ENG-2) and
+    /// `d` (ENG-7) under epic EPIC-A, `b` (rooted on a branch named after
+    /// another epic's ticket, ENG-5, with two EPIC-B tickets on it) and `c`
+    /// (ENG-5 → ENG-6, epic EPIC-C).
+    fn epic_stacks() -> App {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        let ticket = |id: &str, parent: Option<&str>| {
+            let mut l = snap.groups[0].worktrees[0].linear.clone().unwrap();
+            l.identifier = id.into();
+            l.title = format!("Ticket {id}");
+            l.parent = parent.map(|p| am_core::model::LinearParent { identifier: p.into(), title: format!("Epic {p}") });
+            l
+        };
+        let mut rows = Vec::new();
+        for (id, t, parent) in [
+            ("a1", "ENG-1", Some("EPIC-A")),
+            ("b1", "ENG-5", Some("EPIC-C")),
+            ("c1", "ENG-5", Some("EPIC-C")),
+            ("d1", "ENG-7", Some("EPIC-A")),
+            ("a2", "ENG-2", Some("EPIC-A")),
+            ("b2", "ENG-8", Some("EPIC-B")),
+            ("b3", "ENG-9", Some("EPIC-B")),
+            ("c2", "ENG-6", Some("EPIC-C")),
+        ] {
+            let mut v = view(id, "r1", &format!("feature/{id}"), None);
+            v.linear = Some(ticket(t, parent));
+            rows.push(v);
+        }
+        snap.groups[0].worktrees = rows;
+        snap.stack = [("a2", "a1"), ("b2", "b1"), ("b3", "b2"), ("c2", "c1")]
+            .into_iter()
+            .map(|(c, p)| (c.to_string(), p.to_string()))
+            .collect();
+        app.apply(snap);
+        app
+    }
+
+    #[test]
+    fn stacks_group_under_the_parent_ticket_most_of_their_tickets_have() {
+        let app = epic_stacks();
+        assert_eq!(
+            row_kinds(&app),
+            [
+                "repo", "ticket EPIC-A", "a1", "a2", "d1", "spacer",
+                // b's root is on ENG-5 (EPIC-C) but its stack is EPIC-B's.
+                "ticket EPIC-B", "b1", "b2", "b3", "spacer",
+                "ticket EPIC-C", "c1", "c2", "spacer",
+                "repo", "w3",
+            ],
+        );
+        assert!(app.rows.contains(&Row::Ticket("EPIC-A Epic EPIC-A".into())));
+        let order: Vec<&str> = app.flat.iter().map(|v| v.worktree.id.as_str()).collect();
+        assert_eq!(order, ["a1", "a2", "d1", "b1", "b2", "b3", "c1", "c2", "w3"], "flat follows the rows");
+    }
+
+    #[test]
+    fn grouping_stacks_by_ticket_can_be_turned_off() {
+        let mut app = epic_stacks();
+        let mut s = app.settings.clone();
+        s.group_stacks_by_ticket = false;
+        app.set_settings(s);
+        assert_eq!(row_kinds(&app), ["repo", "a1", "a2", "b1", "b2", "b3", "c1", "c2", "d1", "spacer", "repo", "w3"]);
+    }
+
+    #[test]
+    fn stack_ticket_without_parents_is_the_roots_own() {
+        let app = fixture();
+        let v = &app.snapshot.groups[0].worktrees[0];
+        let t = crate::app::stack_ticket(&[v]).unwrap();
+        assert_eq!((t.id.as_str(), t.parent), ("ENG-412", false));
+        // A lone stack on its own ticket gets no header (nothing shares it).
+        assert!(!row_kinds(&app).iter().any(|k| k.starts_with("ticket")));
+        let mut child = v.clone();
+        child.linear.as_mut().unwrap().parent =
+            Some(am_core::model::LinearParent { identifier: "ENG-412".into(), title: "Refactor grouping core".into() });
+        let t = crate::app::stack_ticket(&[v, &child]).unwrap();
+        assert_eq!((t.id.as_str(), t.parent), ("ENG-412", true), "the root is the epic of its children");
+    }
+
+    #[test]
+    fn a_stack_on_a_branch_without_a_worktree_gets_a_faint_base_line() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.stack_base.insert("w1".into(), "feature/not-pulled".into());
+        app.apply(snap);
+        let kinds = row_kinds(&app);
+        let at = kinds.iter().position(|k| k == "w1").unwrap();
+        assert_eq!(kinds[at - 1], "base feature/not-pulled");
+        assert_eq!(app.flat.len(), 3, "the base line takes no selection index");
+        assert!(render(&app, 100, 10).contains("┌ feature/not-pulled · no worktree"));
+    }
+
+    #[test]
+    fn left_and_right_fold_and_unfold_stacks() {
+        let mut app = epic_stacks();
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "b1").unwrap();
+        app.on_key(Key::Left);
+        assert_eq!(app.folded.get("b1"), Some(&2));
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b1", "the selection stays");
+        assert!(!app.flat.iter().any(|v| v.worktree.id == "b2" || v.worktree.id == "b3"));
+        assert!(render(&app, 120, 24).contains("▸ 2 stacked"));
+        // Folded: survives a refresh, and ← again has no parent to go to.
+        app.apply(app.snapshot.clone());
+        app.on_key(Key::Left);
+        assert!(app.folded.contains_key("b1") && app.selected_view().unwrap().worktree.id == "b1");
+        app.on_key(Key::Right);
+        assert!(app.folded.is_empty());
+        // → on an unfolded row goes to the first stacked one; ← on a leaf
+        // goes to its parent, and again folds that.
+        app.on_key(Key::Right);
+        app.on_key(Key::Right);
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b3");
+        app.on_key(Key::Left);
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b2");
+        app.on_key(Key::Left);
+        assert_eq!(app.folded.get("b2"), Some(&1));
+        // A worktree created under a folded row unfolds it to show up.
+        app.pending_select = Some("b3".into());
+        app.apply(app.snapshot.clone());
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b3");
+        assert!(app.folded.is_empty());
+    }
+
+    #[test]
+    fn grouped_and_folded_stacks_render() {
+        let mut app = epic_stacks();
+        let mut snap = app.snapshot.clone();
+        snap.stack_base.insert("c1".into(), "feature/connect-1787".into());
+        app.apply(snap);
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "b1").unwrap();
+        app.on_key(Key::Left);
+        insta::assert_snapshot!(render(&app, 110, 20));
     }
 
     #[test]

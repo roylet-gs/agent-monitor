@@ -6,6 +6,10 @@
 //! 2. Git: another worktree branch's tip is among this branch's commits that
 //!    aren't on the trunk yet. The closest such branch (most unmerged commits)
 //!    is the parent.
+//!
+//! A stack's root can also be built on a branch that isn't a worktree:
+//! [`base_branch`] names it (the PR's base, else the closest `origin/*`
+//! branch in its unmerged commits) so the dashboard can say so.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -26,6 +30,8 @@ pub struct Branch {
 pub struct GitView {
     pub tips: HashMap<String, String>,
     pub unmerged: HashMap<String, HashSet<String>>,
+    /// The same commits, newest first (`git rev-list` order).
+    pub order: HashMap<String, Vec<String>>,
 }
 
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
@@ -63,7 +69,7 @@ pub fn trunk_ref(repo: &Path, main: &str) -> String {
 /// One `git rev-list` per non-main branch.
 pub fn collect(repo: &Path, branches: &[Branch], trunk: &str, tips: HashMap<String, String>) -> GitView {
     let max = format!("--max-count={MAX_COMMITS}");
-    let unmerged = branches
+    let order: HashMap<String, Vec<String>> = branches
         .iter()
         .filter(|b| !b.is_main && tips.contains_key(&b.name))
         .map(|b| {
@@ -71,7 +77,46 @@ pub fn collect(repo: &Path, branches: &[Branch], trunk: &str, tips: HashMap<Stri
             (b.name.clone(), range.lines().map(str::to_owned).collect())
         })
         .collect();
-    GitView { tips, unmerged }
+    let unmerged = order.iter().map(|(b, c)| (b.clone(), c.iter().cloned().collect())).collect();
+    GitView { tips, unmerged, order }
+}
+
+/// `origin/*` branch tips in one call: commit → branch name (without
+/// `origin/`; the alphabetically first when several share a commit).
+pub fn remote_tips(repo: &Path) -> HashMap<String, String> {
+    let out = git(repo, &["for-each-ref", "--format=%(refname:lstrip=3) %(objectname)", "refs/remotes/origin"]).unwrap_or_default();
+    parse_remote_tips(&out)
+}
+
+fn parse_remote_tips(out: &str) -> HashMap<String, String> {
+    let mut tips: HashMap<String, String> = HashMap::new();
+    for (name, sha) in out.lines().filter_map(|l| l.split_once(' ')) {
+        if name == "HEAD" || name.is_empty() {
+            continue;
+        }
+        let e = tips.entry(sha.to_string()).or_insert_with(|| name.to_string());
+        if name < e.as_str() {
+            *e = name.to_string();
+        }
+    }
+    tips
+}
+
+/// The branch `branch` was built on when that isn't the trunk: its open PR's
+/// base (`pr_base`), else the newest of its unmerged commits that is the tip
+/// of another `origin/*` branch (`remote`, from [`remote_tips`]). `None` for
+/// the trunk (`main`) or when nothing says. Pure.
+pub fn base_branch(branch: &str, main: &str, pr_base: Option<&str>, git: &GitView, remote: &HashMap<String, String>) -> Option<String> {
+    if let Some(base) = pr_base {
+        return (base != main && base != branch).then(|| base.to_string());
+    }
+    let commits = git.order.get(branch)?;
+    let tip = git.tips.get(branch);
+    commits
+        .iter()
+        .filter(|c| Some(*c) != tip)
+        .find_map(|c| remote.get(c).filter(|n| n.as_str() != branch && n.as_str() != main))
+        .cloned()
 }
 
 /// child worktree id → parent worktree id. `pr_base` maps worktree id to its
@@ -136,7 +181,31 @@ mod tests {
         GitView {
             tips: tips.iter().map(|(b, s)| (b.to_string(), s.to_string())).collect(),
             unmerged: unmerged.iter().map(|(b, c)| (b.to_string(), c.iter().map(|s| s.to_string()).collect())).collect(),
+            order: unmerged.iter().map(|(b, c)| (b.to_string(), c.iter().map(|s| s.to_string()).collect())).collect(),
         }
+    }
+
+    #[test]
+    fn remote_tips_skip_head_and_keep_the_first_name_per_commit() {
+        let t = parse_remote_tips("HEAD 1\nmain 1\nfeature/b 2\nfeature/a 2\n");
+        assert_eq!(t.get("1").map(String::as_str), Some("main"));
+        assert_eq!(t.get("2").map(String::as_str), Some("feature/a"));
+    }
+
+    #[test]
+    fn base_branch_prefers_the_pr_then_the_closest_remote_branch() {
+        // c(3) ← b(2) ← a(1) ← main; b and a are on origin, c is pushed too.
+        let g = view(&[("c", "3")], &[("c", &["3", "2", "1"])]);
+        let remote = HashMap::from([
+            ("3".to_string(), "c".to_string()),
+            ("2".to_string(), "b".to_string()),
+            ("1".to_string(), "a".to_string()),
+        ]);
+        assert_eq!(base_branch("c", "main", None, &g, &remote).as_deref(), Some("b"), "closest, not own tip");
+        assert_eq!(base_branch("c", "main", Some("x"), &g, &remote).as_deref(), Some("x"), "PR base wins");
+        assert_eq!(base_branch("c", "main", Some("main"), &g, &remote), None, "on the trunk");
+        assert_eq!(base_branch("c", "main", None, &g, &HashMap::new()), None, "nothing on origin");
+        assert_eq!(base_branch("unknown", "main", None, &g, &remote), None);
     }
 
     #[test]
@@ -207,5 +276,11 @@ mod tests {
         let gv = collect(r, &branches, &trunk, branch_tips(r));
         let p = infer_parents(&branches, &gv, &HashMap::new());
         assert_eq!(p, HashMap::from([("B".to_string(), "A".to_string())]));
+        // Only `stacked` is a worktree now; its base is on origin (faked as a ref).
+        g(&["update-ref", "refs/remotes/origin/base-feature", "base-feature"]);
+        g(&["update-ref", "refs/remotes/origin/stacked", "stacked"]);
+        let branches = [br("B", "stacked")];
+        let gv = collect(r, &branches, &trunk, branch_tips(r));
+        assert_eq!(base_branch("stacked", "main", None, &gv, &remote_tips(r)).as_deref(), Some("base-feature"));
     }
 }

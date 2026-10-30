@@ -21,7 +21,7 @@ use serde_json::Value;
 use super::FetchResult;
 use super::breaker::{is_network_error, summarize_error};
 use crate::debug;
-use crate::model::{ChecksStatus, LinearInfo, LinearPrAttachment, LinearProject, LinearState, PrInfo};
+use crate::model::{ChecksStatus, LinearInfo, LinearParent, LinearPrAttachment, LinearProject, LinearState, PrInfo};
 
 pub const DEFAULT_LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 pub const LINEAR_CHUNK: usize = 25;
@@ -102,7 +102,7 @@ impl HttpTransport for UreqTransport {
 // ---------------------------------------------------------------------------
 
 const ISSUE_FIELDS: &str = "identifier title url state { name color type } priorityLabel assignee { name } \
-     project { id name color url } attachments { nodes { url title sourceType metadata } }";
+     project { id name color url } parent { identifier title } attachments { nodes { url title sourceType metadata } }";
 
 fn build_query(n: usize) -> String {
     let vars: Vec<String> = (0..n).map(|i| format!("$b{i}: String!")).collect();
@@ -144,6 +144,8 @@ struct RawIssue {
     project: Option<LinearProject>,
     #[serde(default)]
     attachments: Option<RawAttachments>,
+    #[serde(default)]
+    parent: Option<LinearParent>,
 }
 
 #[derive(Deserialize)]
@@ -184,6 +186,7 @@ fn to_linear_info(issue: RawIssue) -> LinearInfo {
         priority_label: issue.priority_label.unwrap_or_default(),
         assignee: issue.assignee.and_then(|a| a.name),
         project: issue.project,
+        parent: issue.parent,
         pr_attachment: pr_attachment.map(|a| LinearPrAttachment {
             url: a.url.unwrap_or_default(),
             title: a.title.unwrap_or_default(),
@@ -480,6 +483,20 @@ pub(crate) mod tests {
         let FetchResult::Ok(Some(info)) = one(&http) else { panic!() };
         assert!(info.project.is_none());
         assert!(info.pr_attachment.is_none());
+    }
+
+    #[test]
+    fn parent_issue_is_mapped_and_optional() {
+        let mut i = issue("ENG-2");
+        i["parent"] = serde_json::json!({"identifier": "ENG-1", "title": "Epic"});
+        let http = FakeHttp::new(vec![ok(aliased(vec![i, issue("ENG-3")]))]);
+        let batch = fetch_linear_batch(&http, "http://x", "key", &["a".into(), "b".into()]);
+        let FetchResult::Ok(Some(with)) = &batch.results[0].1 else { panic!() };
+        assert_eq!(with.parent, Some(LinearParent { identifier: "ENG-1".into(), title: "Epic".into() }));
+        let FetchResult::Ok(Some(without)) = &batch.results[1].1 else { panic!() };
+        assert_eq!(without.parent, None);
+        let body: Value = serde_json::from_str(&http.bodies.lock().unwrap()[0]).unwrap();
+        assert!(body["query"].as_str().unwrap().contains("parent { identifier title }"));
     }
 
     #[test]

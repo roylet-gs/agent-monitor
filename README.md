@@ -163,6 +163,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `j` / `k`, `↑` / `↓` | Move the selection |
 | `Home` / `G` (`End`) | Jump to top / bottom |
 | `Ctrl-d` / `Ctrl-u` (`PgDn` / `PgUp`) | Page down / up |
+| `←` / `→` | Fold / unfold the branches stacked on the selected one (see [Stacked Branches](#stacked-branches)) |
 | `Enter` | Open the worktree in your editor (and resume its last agent session, see below) |
 | `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
 | `l` | Open the Linear ticket |
@@ -184,7 +185,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 
 The key bar keeps to the plain keys. In terminals with the kitty keyboard protocol (kitty, Ghostty, WezTerm, recent iTerm2), holding Shift swaps it to the Shift keys (`F`, `V`, `A`, `G`) and holding Ctrl to the Ctrl ones (`Ctrl+V`), on the review page too (`T`, `V`, `Ctrl+⏎`, `Ctrl+V`); the plain bar ends in `⇧/ctrl more` to say so. Elsewhere those keys join the plain bar when there's room. The pane title names the tool, its version and the page (`am v2.1.67 · Worktrees`).
 
-These are the defaults. To change them, open **Settings → Key bindings…**. It lists the actions by section (Worktrees, Review requests, General, Moving), each with its key, its default when you changed it, and what the key does on the review page, which uses the same keys (`⏎` pulls a PR or opens the pulled worktree, `f` opens the review filters, `r` clears the review cache and fetches again, `q` goes back; `—` means the key does nothing there). Pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `h` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "filter": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`, `ctrl-v`; `none` unbinds the action.
+These are the defaults. To change them, open **Settings → Key bindings…**. It lists the actions by section (Worktrees, Review requests, General, Moving), each with its key, its default when you changed it, and what the key does on the review page, which uses the same keys (`⏎` pulls a PR or opens the pulled worktree, `f` opens the review filters, `r` clears the review cache and fetches again, `q` goes back; `—` means the key does nothing there). Pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `h` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows (`←`/`→` fold stacks), `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "filter": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`, `ctrl-v`; `none` unbinds the action.
 
 Every other list moves the same way: Settings and its pages (repositories, harness plugins, key bindings, sort order, review groups, theme builder), the review page and the folder browser take `↑`/`↓`, `PgUp`/`PgDn`, `Home`/`End`, and (except where letters are typed, like the folder browser) `j`/`k`, `Ctrl-d`/`Ctrl-u` and `G`. Like the worktree list, they scroll only when the selection leaves the view, so moving within the visible rows never shifts the page.
 
@@ -254,7 +255,7 @@ At the bottom right of the list, `today 182M` is the number of tokens your agent
 
 It is read incrementally from the session transcripts, so a refresh costs a few milliseconds. With `dailyTokensScope` set to `visible` it counts only sessions under a row on screen (`today (visible) 4.1M`), so filters and hidden rows change it. Turn it off with `showDailyTokens`.
 
-When several adjacent worktrees share a Linear ticket, a `— ENG-123 Ticket title —` line groups them. When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
+Stacks of branches are grouped by their Linear ticket under a `— ENG-123 Ticket title —` line (see [Stacked Branches](#stacked-branches)). When "project" is the first enabled sort criterion, `═ Project name ═` headers group rows by Linear project. Headers are never selectable.
 
 ### Several Agents in One Worktree
 
@@ -281,6 +282,18 @@ If a worktree's branch is built on top of another worktree's branch, it's listed
 ```
 
 The parent comes from the open PR's base branch when it targets another worktree's branch (works with Graphite, `gh` stacks or manual stacks, and survives squash-rebases). Without such a PR, am uses git: the closest other worktree branch whose tip is among this branch's commits that aren't on `origin/<main>` yet.
+
+When the bottom of a stack is built on a branch you haven't checked out as a worktree, a faint line above it names that branch. It comes from the open PR's base, or else from the closest `origin/*` branch among the commits that aren't on `origin/<main>` yet. The line can't be selected:
+
+```
+ ┌ feature/connect-1787 · no worktree
+● feature/connect-1788
+└─ ○ feature/connect-1789
+```
+
+`←` folds away the branches stacked on the selected row, which then reads `▸ 3 stacked`. On a row with nothing to fold, `←` goes to the branch it's stacked on. `→` unfolds the row, or goes to its first stacked branch. Folds last until you quit, and a worktree created inside a fold opens it.
+
+With `groupStacksByTicket` on (the default; **Settings → Dashboard → Group stacks by ticket**), stacks sit together under the Linear ticket they belong to, with a `— EPIC-12 Epic title —` header. That ticket is the parent issue that most of the stack's tickets have. A stack root without a parent counts its own ticket, and a tie goes to the root's. So a stack whose sub-issues share an epic is filed under that epic, even when its root branch is named after another ticket. Stacks under the same ticket are moved next to the first of them (within their Linear project section, when you sort by project). A ticket that is only some stack's own gets a header only when two or more stacks share it. With the setting off, stacks follow their branches only, with no ticket headers.
 
 ---
 
@@ -397,7 +410,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
 | `defaultAgent` | `"claude"` | Harness plugin `Enter` starts in a worktree with no session yet (set it in Settings → Harness plugins) |
 | `disabledAgents` | `[]` | Harness plugins switched off: no hooks, no session discovery (Settings → Harness plugins) |
-| `keyBindings` | `{}` | Dashboard keys you changed: action id (`open`, `openPr`, `openLinear`, `openProject`, `newWorktree`, `deleteWorktree`, `addRepo`, `filter`, `toggleFilters`, `reviewRequests`, `reviewSplit`, `reviewWindow`, `pullToTmpSpace`, `toggleLog`, `settings`, `refresh`, `help`, `quit`, `moveDown`, `moveUp`, `pageDown`, `pageUp`, `top`, `bottom`) → key. Edit it in Settings → Key bindings…; see [Keyboard Shortcuts](#keyboard-shortcuts) |
+| `keyBindings` | `{}` | Dashboard keys you changed: action id (`open`, `openPr`, `openLinear`, `openProject`, `newWorktree`, `deleteWorktree`, `addRepo`, `filter`, `toggleFilters`, `reviewRequests`, `reviewSplit`, `reviewWindow`, `pullToTmpSpace`, `toggleLog`, `settings`, `refresh`, `help`, `quit`, `moveDown`, `moveUp`, `pageDown`, `pageUp`, `top`, `bottom`, `collapse`, `expand`) → key. Edit it in Settings → Key bindings…; see [Keyboard Shortcuts](#keyboard-shortcuts) |
 | `mouseEnabled` | `true` | Mouse support (click, double-click, scroll, hover highlight); off restores the terminal's own text selection |
 | `startupScriptMode` | `"pane"` | Where the repo's startup script runs after creating a worktree: `pane` streams its output into the Jobs pane, `window` opens a new terminal window |
 | `defaultBranchPrefix` | `"feature/"` | Prefix for new branch names |
@@ -423,6 +436,7 @@ The `hide*` toggles are the base filters: they always apply (`F` doesn't turn th
 | `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
 | `contextWindowTokens` | `1000000` | Context window the bar is scaled to, unless the agent records its own (Codex). A session past it is shown against this value doubled until it fits. In the settings editor `⏎` takes `128k`/`1m` and `←→` step through common sizes; `am settings set contextWindowTokens 200k` works too |
 | `showDailyTokens` | `true` | Show today's token usage at the bottom right of the list |
+| `groupStacksByTicket` | `true` | Group stacks under the Linear ticket they belong to (their tickets' parent issue), with a header; off: stacks follow their branches only |
 | `compactView` | `false` | Compact view for small panes: panes keep only their top line, no blank rows, glyphs instead of words, no git/age columns, and the jobs pane and `V` review split open below the list |
 | `dailyTokensScope` | `"all"` | What that total counts: `all` (every session today) or `visible` (only sessions under a row on screen) |
 | `showRunningProcesses` | `false` | Detect processes (dev servers etc.) running inside each worktree (`▶`) |

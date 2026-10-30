@@ -6,9 +6,10 @@ expression: "render(&app, 100, 20)"
 │agent-mon│    j / k  ↑ / ↓  move                                                        │─────────│
 │▌◑ featur│        home / G  top / bottom                                                │░░░ 121k │
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │░░░ 185k │
-│         │               ⏎  open (IDE; resumes last agent session)                      │         │
-│gridsight│       g / l / p  open PR / Linear ticket / Linear project                    │─────────│
-│ · main  │               w  toggle log pane (Settings → View logs… opens the file)      │         │
+│         │           ← / →  fold / unfold stacked branches (▸ N stacked)                │         │
+│gridsight│               ⏎  open (IDE; resumes last agent session)                      │─────────│
+│ · main  │       g / l / p  open PR / Linear ticket / Linear project                    │         │
+│         │               w  toggle log pane (Settings → View logs… opens the file)      │         │
 │         │               n  new worktree                                                │         │
 │         │         d / del  delete worktree (asks first)                                │         │
 │         │             tab  focus the jobs pane                                         │         │
@@ -19,6 +20,5 @@ expression: "render(&app, 100, 20)"
 │         │               s  settings (Key bindings… changes these keys)                 │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
 │         │               h  toggle help                                                 │         │
-│         │          q  esc  quit                                                        │         │
-╰─────────│   hold ⇧ / ctrl  the key bar swaps to the keys they add (where supported)    │─ 1 of 3 ╯
+╰─────────│          q  esc  quit                                                        │─ 1 of 3 ╯
  ⏎ open  │╰──────────────────────────────────────────────────────────────────────────────╯  q quit
