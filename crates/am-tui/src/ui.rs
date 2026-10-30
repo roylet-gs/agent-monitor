@@ -2092,10 +2092,12 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
             ]),
             Row::Ticket(t) => Line::styled(format!("  — {} —", truncate(t, inner.width as usize - 6)), theme.faint()),
             // The stack below is built on this branch, which has no worktree.
-            Row::Base(b) => Line::styled(
-                format!(" ┌ {} · no worktree", truncate(b, (inner.width as usize).saturating_sub(17))),
-                theme.faint(),
-            ),
+            Row::Base(b) => {
+                // Over the root's status glyph (past the fold gutter).
+                let lead = if app.fold_gutter { "   " } else { " " };
+                let room = (inner.width as usize).saturating_sub(16 + lead.len());
+                Line::styled(format!("{lead}┌ {} · no worktree", truncate(b, room)), theme.faint())
+            }
             Row::Worktree(i) => {
                 worktree_line(app, theme, &app.flat[*i], &app.tree[*i], *i == app.selected, focused, &cols, inner.width, now)
             }
@@ -2724,8 +2726,10 @@ fn worktree_line<'a>(
         rest = r;
     }
     left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
+    let mut pill_at = None;
     if let Some(pill) = fold_badge.strip_prefix(' ') {
         left.push(Span::raw(" "));
+        pill_at = Some(left.len());
         left.push(Span::styled(pill.to_string(), theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
     }
     left.push(Span::raw(" ".repeat(fill)));
@@ -2746,6 +2750,10 @@ fn worktree_line<'a>(
                 .map(|(i, s)| {
                     if ctx_range.contains(&i) {
                         Span::styled(s.content, s.style.remove_modifier(Modifier::REVERSED))
+                    } else if pill_at == Some(i) {
+                        // Reversed inside the reversed row it would vanish:
+                        // un-reverse it so it still stands out.
+                        Span::styled(s.content, theme.bold(theme.yellow).remove_modifier(Modifier::REVERSED))
                     } else {
                         Span::raw(s.content)
                     }

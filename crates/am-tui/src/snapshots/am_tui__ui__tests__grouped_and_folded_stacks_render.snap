@@ -13,7 +13,7 @@ expression: "render(&app, 110, 20)"
 │▌▸ · feature/b1  +2 stacked hidden                                                          ENG-5 ↑2 ±3  4m │
 │                                                                                                            │
 │  — EPIC-C Epic EPIC-C —                                                                                    │
-│ ┌ feature/connect-1787 · no worktree                                                                       │
+│   ┌ feature/connect-1787 · no worktree                                                                     │
 │ ▾ · feature/c1                                                                             ENG-5 ↑2 ±3  4m │
 │   └─ · feature/c2                                                                          ENG-6 ↑2 ±3  4m │
 │                                                                                                            │

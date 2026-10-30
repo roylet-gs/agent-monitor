@@ -220,6 +220,9 @@ pub struct App {
     pub list_scroll: std::cell::Cell<usize>,
     /// Worktrees whose stacked branches are folded away (←/→).
     pub collapsed: std::collections::HashSet<String>,
+    /// Rows start with a 2-column gutter for stack roots' fold arrows (any
+    /// stack is listed).
+    pub fold_gutter: bool,
     /// Collapsed worktree id → how many stacked rows it hides.
     pub folded: std::collections::HashMap<String, usize>,
 }
@@ -265,6 +268,7 @@ impl App {
             list_scroll: Default::default(),
             collapsed: Default::default(),
             folded: Default::default(),
+            fold_gutter: false,
         }
     }
 
@@ -440,6 +444,7 @@ impl App {
         let listed_ids: std::collections::HashSet<&str> =
             self.snapshot.groups.iter().flat_map(|g| &g.worktrees).map(|v| v.worktree.id.as_str()).collect();
         let gutter = self.snapshot.stack.iter().any(|(c, p)| listed_ids.contains(c.as_str()) && listed_ids.contains(p.as_str()));
+        self.fold_gutter = gutter;
         self.flat.clear();
         self.rows.clear();
         self.tree.clear();

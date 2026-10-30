@@ -72,11 +72,12 @@ export class RustTui extends TuiPage {
   }
 
   /**
-   * Name (branch / nickname / path) on the selected row: after the `▌`, any
-   * stack-tree prefix (`├─`/`└─`/`│`), then the status glyph and a space.
+   * Name (branch / nickname / path) on the selected row: after the `▌`, a
+   * stack root's fold arrow (`▾`/`▸`), any stack-tree prefix (`├─`/`└─`/`│`),
+   * then the status glyph and a space.
    */
   async selectedName(): Promise<string> {
-    const m = /│▌[│├└─\s]*\S (\S+)/.exec(await this.selectedRow());
+    const m = /│▌[▾▸]?[│├└─\s]*\S (\S+)/.exec(await this.selectedRow());
     return m ? m[1] : "";
   }
 
