@@ -6,6 +6,7 @@
 
 am_core::silence_unit_tests!();
 
+mod actions;
 mod app;
 mod cmux_sync;
 mod data;
@@ -27,6 +28,7 @@ mod setup;
 mod theme;
 mod theme_builder;
 mod ui;
+mod usage_reports;
 
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
@@ -96,6 +98,7 @@ fn map_key(code: KeyCode, mods: KeyModifiers) -> Option<Key> {
         KeyCode::Left => Key::Left,
         KeyCode::Right => Key::Right,
         KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
         KeyCode::Down => Key::Down,
         KeyCode::PageUp => Key::PageUp,
         KeyCode::PageDown => Key::PageDown,
@@ -117,6 +120,7 @@ fn main() -> io::Result<()> {
     }
     let settings = settings::load();
     am_core::log::init(settings.log_level(), settings.max_log_size_mb);
+    let _telemetry = am_core::telemetry::init(am_core::telemetry::Binary::Tui, &settings);
     info!("tui", "am-tui {} starting (theme={})", env!("CARGO_PKG_VERSION"), settings.theme);
 
 
@@ -151,6 +155,14 @@ fn main() -> io::Result<()> {
     if std::mem::take(&mut app.review_fetch_due) {
         collector.refresh_reviews();
     }
+    // Set up before usage reports existed: ask once (not in a review window,
+    // which sits beside a dashboard that asks; not when the environment opts out).
+    if !first_run
+        && !reviews_window
+        && am_core::telemetry::consent(&app.settings, |n| std::env::var(n).ok()) == am_core::telemetry::Consent::Ask
+    {
+        app.modal = Some(modals::Modal::Telemetry);
+    }
     // Hooks pointing at a deleted am-hook (removed worktree, upgraded install)
     // fail on every agent event; re-point them at the current binary.
     let repaired = am_core::hooks_installer::repair_dangling_hooks();
@@ -177,11 +189,69 @@ fn main() -> io::Result<()> {
     app.modifiers_reported = enhanced;
     set_keyboard(true);
     let result = run(&mut terminal, &mut app, &collector);
+    record_features(&mut app);
     set_keyboard(false);
     set_mouse(false);
     ratatui::restore();
     collector.shutdown();
+    if app.restart {
+        // exec skips destructors: flush the telemetry exporters first.
+        drop(_telemetry);
+        restart();
+    }
     result
+}
+
+/// Replace this process with the am-tui just installed, with the same
+/// arguments (`--reviews`…). `am-tui` on `$PATH` first: an upgrade can remove
+/// the running binary's own directory (Homebrew's `Cellar/<old version>`).
+fn restart() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    let exec = |p: &std::path::Path| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+    let on_path = std::env::var_os("PATH")
+        .and_then(|path| std::env::split_paths(&path).map(|d| d.join("am-tui")).find(|p| exec(p)));
+    let Some(bin) = on_path.or_else(|| std::env::current_exe().ok().filter(|p| exec(p))) else {
+        eprintln!("am was updated, but no am-tui was found to restart: run am again");
+        std::process::exit(1);
+    };
+    info!("tui", "Restarting into {}", bin.display());
+    let err = std::process::Command::new(&bin).args(std::env::args_os().skip(1)).exec();
+    am_core::warn!("tui", "Restart into {} failed: {err}", bin.display());
+    eprintln!("Couldn't restart am ({}): {err}", bin.display());
+    std::process::exit(1);
+}
+
+/// The day's `am.heartbeat`, once the first snapshot of the day is in.
+fn record_heartbeat(app: &App) {
+    use am_core::telemetry::{public, upload};
+    if !public::is_on() {
+        return;
+    }
+    // Snapshots come often: the day is checked in memory, the file once a day.
+    static DONE_DAY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let today = usage_reports::today();
+    let Ok(mut done) = DONE_DAY.lock() else { return };
+    if *done == today {
+        return;
+    }
+    *done = today.clone();
+    let mut state = upload::state();
+    if state.last_heartbeat_day.as_deref() == Some(today.as_str()) {
+        return;
+    }
+    let terminal = std::env::var("TERM_PROGRAM").ok();
+    let event = usage_reports::heartbeat(&app.settings, &app.snapshot, am_core::cmux::inside(), terminal.as_deref(), public::now_ms());
+    am_core::telemetry::record(event);
+    state.last_heartbeat_day = Some(today);
+    upload::save_state(&state);
+}
+
+/// `am.features` for the commands run since the last one.
+fn record_features(app: &mut App) {
+    for e in usage_reports::features(&mut app.command_counts, am_core::telemetry::public::now_ms()) {
+        am_core::telemetry::record(e);
+    }
 }
 
 /// Names of the registered repositories, listed as already added by the
@@ -235,9 +305,14 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     let mut notice_since: Option<(Instant, String)> = None;
     let mut last_click: Option<(u16, Instant)> = None;
     let mut settings_mtime = settings_file_mtime();
+    // Usage reports: what `telemetry` was last applied, and when features were last recorded.
+    let mut telemetry_applied = app.settings.telemetry.clone();
+    let mut features_at = Instant::now();
+    usage_reports::spawn_uploader();
     loop {
         while let Some(snapshot) = collector.try_recv() {
             app.apply(snapshot);
+            record_heartbeat(app);
             for sound in app.sounds.drain(..) {
                 play_sound(&sound);
             }
@@ -362,7 +437,29 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                         _ => app.popup = Some(format!("✗ Couldn't add {path}: {e}")),
                     },
                 },
-                launcher::Msg::UpdateAvailable(update) => app.update_available = Some(update),
+                launcher::Msg::UpdateAvailable(update) if app.installed_update.as_ref() != Some(&update.latest) => {
+                    app.update_available = Some(update)
+                }
+                launcher::Msg::UpdateAvailable(_) => {}
+                launcher::Msg::Updated(job, result) => {
+                    let latest = match app.jobs.get(job).map(|j| &j.kind) {
+                        Some(jobs::JobKind::Update { latest }) => latest.clone(),
+                        _ => String::new(),
+                    };
+                    match &result {
+                        Ok(()) => {
+                            app.update_available = None;
+                            app.installed_update = Some(latest.clone());
+                            if app.modal.is_none() && app.setup.is_none() {
+                                app.modal = Some(modals::Modal::Restart { latest });
+                            } else {
+                                app.notice = Some(format!("Updated — restart am to use v{latest}"));
+                            }
+                        }
+                        Err(e) => app.notice = Some(format!("Update failed: {e}")),
+                    }
+                    app.jobs.finish(job, result, Instant::now());
+                }
                 launcher::Msg::Deleted(job, id, label, result) => {
                     app.finish_delete(&id, result.is_ok());
                     match result {
@@ -402,6 +499,16 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             // Elapsed/age labels tick once a second; the diff renderer only
             // rewrites the cells that actually changed.
             last_second = now;
+            // Usage reports follow the setting however it changed (Settings, the
+            // wizard, the prompt, an edited file).
+            if app.settings.telemetry != telemetry_applied {
+                telemetry_applied = app.settings.telemetry.clone();
+                am_core::telemetry::public::apply(&app.settings);
+            }
+            if features_at.elapsed() >= usage_reports::EVERY {
+                features_at = Instant::now();
+                record_features(app);
+            }
             // settings.json edited outside the TUI (e.g. `e` opened it in the IDE).
             let mtime = settings_file_mtime();
             if mtime != settings_mtime {
@@ -568,6 +675,11 @@ fn dispatch(
     let mouse_before = app.settings.mouse_enabled;
     match action {
         Action::Quit => return Ok(true),
+        Action::Update(job, method) => launcher::run_update(method, job, launch_tx.clone()),
+        Action::Restart => {
+            app.restart = true;
+            return Ok(true);
+        }
         Action::Refresh => collector.refresh(true),
         Action::RefreshReviews => collector.refresh_reviews(),
         Action::ReloadReviews => collector.reload_reviews(),

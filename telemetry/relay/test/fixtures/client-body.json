@@ -1,0 +1,367 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "am"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "2.2.0"
+            }
+          },
+          {
+            "key": "am.binary",
+            "value": {
+              "stringValue": "am"
+            }
+          },
+          {
+            "key": "os.type",
+            "value": {
+              "stringValue": "darwin"
+            }
+          },
+          {
+            "key": "host.arch",
+            "value": {
+              "stringValue": "arm64"
+            }
+          },
+          {
+            "key": "am.install_method",
+            "value": {
+              "stringValue": "homebrew"
+            }
+          },
+          {
+            "key": "am.install_id",
+            "value": {
+              "stringValue": "3f0c1f5e-1d2b-4c1e-9a55-0d7a1c2b3e4f"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "am"
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "1793312213923000000",
+              "severityNumber": 9,
+              "severityText": "INFO",
+              "eventName": "am.command",
+              "body": {
+                "stringValue": "am.command"
+              },
+              "attributes": [
+                {
+                  "key": "command",
+                  "value": {
+                    "stringValue": "worktree.create"
+                  }
+                },
+                {
+                  "key": "via",
+                  "value": {
+                    "stringValue": "mcp"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "am"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "2.2.0"
+            }
+          },
+          {
+            "key": "am.binary",
+            "value": {
+              "stringValue": "am-hook"
+            }
+          },
+          {
+            "key": "os.type",
+            "value": {
+              "stringValue": "darwin"
+            }
+          },
+          {
+            "key": "host.arch",
+            "value": {
+              "stringValue": "arm64"
+            }
+          },
+          {
+            "key": "am.install_method",
+            "value": {
+              "stringValue": "homebrew"
+            }
+          },
+          {
+            "key": "am.install_id",
+            "value": {
+              "stringValue": "3f0c1f5e-1d2b-4c1e-9a55-0d7a1c2b3e4f"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "am"
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "1793312213923000000",
+              "severityNumber": 21,
+              "severityText": "FATAL",
+              "eventName": "am.crash",
+              "body": {
+                "stringValue": "am.crash"
+              },
+              "attributes": [
+                {
+                  "key": "code.filepath",
+                  "value": {
+                    "stringValue": "crates/am-hook/src/lib.rs"
+                  }
+                },
+                {
+                  "key": "code.lineno",
+                  "value": {
+                    "intValue": "88"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "am"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "2.2.0"
+            }
+          },
+          {
+            "key": "am.binary",
+            "value": {
+              "stringValue": "am-tui"
+            }
+          },
+          {
+            "key": "os.type",
+            "value": {
+              "stringValue": "darwin"
+            }
+          },
+          {
+            "key": "host.arch",
+            "value": {
+              "stringValue": "arm64"
+            }
+          },
+          {
+            "key": "am.install_method",
+            "value": {
+              "stringValue": "homebrew"
+            }
+          },
+          {
+            "key": "am.install_id",
+            "value": {
+              "stringValue": "3f0c1f5e-1d2b-4c1e-9a55-0d7a1c2b3e4f"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": {
+            "name": "am"
+          },
+          "logRecords": [
+            {
+              "timeUnixNano": "1793312213923000000",
+              "severityNumber": 9,
+              "severityText": "INFO",
+              "eventName": "am.features",
+              "body": {
+                "stringValue": "am.features"
+              },
+              "attributes": [
+                {
+                  "key": "command",
+                  "value": {
+                    "stringValue": "newWorktree"
+                  }
+                },
+                {
+                  "key": "count",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ]
+            },
+            {
+              "timeUnixNano": "1793312213923000000",
+              "severityNumber": 9,
+              "severityText": "INFO",
+              "eventName": "am.heartbeat",
+              "body": {
+                "stringValue": "am.heartbeat"
+              },
+              "attributes": [
+                {
+                  "key": "github",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "ide",
+                  "value": {
+                    "stringValue": "vscode"
+                  }
+                },
+                {
+                  "key": "mode",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "repos",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "sessions.claude",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ]
+            },
+            {
+              "timeUnixNano": "1793312213923000000",
+              "severityNumber": 9,
+              "severityText": "INFO",
+              "eventName": "am.perf",
+              "body": {
+                "stringValue": "am.perf"
+              },
+              "attributes": [
+                {
+                  "key": "max_us",
+                  "value": {
+                    "intValue": "735160"
+                  }
+                },
+                {
+                  "key": "n",
+                  "value": {
+                    "intValue": "91"
+                  }
+                },
+                {
+                  "key": "p50_us",
+                  "value": {
+                    "intValue": "17380"
+                  }
+                },
+                {
+                  "key": "p95_us",
+                  "value": {
+                    "intValue": "77110"
+                  }
+                },
+                {
+                  "key": "stage",
+                  "value": {
+                    "stringValue": "collector.git"
+                  }
+                }
+              ]
+            },
+            {
+              "timeUnixNano": "1793312213923000000",
+              "severityNumber": 13,
+              "severityText": "WARN",
+              "eventName": "am.error",
+              "body": {
+                "stringValue": "am.error"
+              },
+              "attributes": [
+                {
+                  "key": "code.filepath",
+                  "value": {
+                    "stringValue": "crates/am-core/src/integrations/github.rs"
+                  }
+                },
+                {
+                  "key": "code.lineno",
+                  "value": {
+                    "intValue": "120"
+                  }
+                },
+                {
+                  "key": "error.kind",
+                  "value": {
+                    "stringValue": "rate_limited"
+                  }
+                },
+                {
+                  "key": "level",
+                  "value": {
+                    "stringValue": "WARN"
+                  }
+                },
+                {
+                  "key": "module",
+                  "value": {
+                    "stringValue": "github"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

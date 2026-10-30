@@ -12,9 +12,12 @@ export const FRESH_URL = process.env.TUI_FRESH_URL || "http://localhost:7682";
  */
 export const LATE_SESSION_URL = process.env.TUI_LATE_SESSION_URL || "http://localhost:7683";
 
+/** ttyd serving the seeded dashboard as an npm install (`AM_INSTALL_METHOD=npm`) with a fake `npm`. */
+export const NPM_URL = process.env.TUI_NPM_URL || "http://localhost:7684";
+
 /**
  * TuiPage plus helpers for the native (ratatui) dashboard. Layout reminder:
- * one full-width `─Worktrees` pane (bottom-right `N of M`), then the key bar
+ * one full-width `am v… · Worktrees` pane (bottom-right `N of M`), then the key bar
  * on the last terminal row (` ⏎ open  │ g PR … h help  q quit`) with any
  * transient notice / offline hint right-aligned on it. The selected worktree
  * row starts with `▌` just inside the pane border (`│▌<tree>◆ main …`).
@@ -29,7 +32,7 @@ export class RustTui extends TuiPage {
   /** Open the seeded dashboard and wait for its first data frame. */
   async open(): Promise<void> {
     await this.goto();
-    await this.waitForText("─Worktrees", 10_000);
+    await this.waitForText("· Worktrees", 10_000);
     await this.waitForText(" of ", 10_000); // "N of M" footer = rows loaded
   }
 
@@ -245,6 +248,18 @@ export class RustTui extends TuiPage {
     await this.waitForText("esc close");
     for (let i = 0; i < max && !(await this.getScreenText()).includes(help); i++) {
       await this.sendKey("j");
+    }
+    await this.waitForText(help);
+  }
+
+  /** Like `openSetting`, for rows near the end of Settings (Privacy, Setup):
+   *  End, then up, instead of walking down the whole list. */
+  async openSettingFromEnd(help: string, max = 20): Promise<void> {
+    await this.sendKey("s");
+    await this.waitForText("esc close");
+    await this.sendKey("End");
+    for (let i = 0; i < max && !(await this.getScreenText()).includes(help); i++) {
+      await this.sendKey("k");
     }
     await this.waitForText(help);
   }

@@ -37,7 +37,7 @@ test("key-bar hints are clickable and a click closes help", async ({ page }) => 
   await tui.clickText("h help");
   await tui.waitForText("toggle help");
   await tui.screenshot("mouse-keybar-help");
-  await tui.clickText("─Worktrees");
+  await tui.clickText("· Worktrees");
   await tui.waitForGone("toggle help", 5_000);
 });
 

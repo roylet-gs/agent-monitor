@@ -127,6 +127,10 @@ pub enum Action {
     RunSetup,
     /// Settings → Reset settings, confirmed: reset settings.json, then run setup.
     ResetSettings,
+    /// Run the upgrade as job `.0` (a click on the update notice, confirmed).
+    Update(u64, am_core::update_check::InstallMethod),
+    /// Quit and start the (newly installed) am-tui in this terminal.
+    Restart,
 }
 
 pub struct App {
@@ -143,6 +147,12 @@ pub struct App {
     /// Newer release found by the update check: top right of the pane, and
     /// a banner with the upgrade command at the top of Settings.
     pub update_available: Option<am_core::update_check::Update>,
+    /// The release the update job installed: the check (still running the
+    /// old binary) mustn't advertise it again.
+    pub installed_update: Option<String>,
+    /// `Action::Restart` ran: once the terminal is restored, main.rs starts
+    /// the new am-tui in its place.
+    pub restart: bool,
     /// Centered message box (e.g. "copied resume command"); any key closes it.
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
@@ -156,6 +166,9 @@ pub struct App {
     /// `am-tui --reviews` (the window `ctrl-v` opens, or `am reviews`): only
     /// the review page, whatever `appMode` says. See [`App::reviews_only`].
     pub reviews_window: bool,
+    /// How often each dashboard command ran since the last usage report
+    /// (`Command::id` → count); main.rs drains it into `am.features`.
+    pub command_counts: std::collections::BTreeMap<&'static str, u64>,
     /// The review page was opened by a mode change and wants a fetch (main
     /// takes it and asks the collector).
     pub review_fetch_due: bool,
@@ -215,6 +228,8 @@ impl App {
             loaded: false,
             notice: None,
             update_available: None,
+            installed_update: None,
+            restart: false,
             popup: None,
             show_log: false,
             settings_editor: None,
@@ -222,6 +237,7 @@ impl App {
             setup: None,
             reviews: None,
             reviews_window: false,
+            command_counts: Default::default(),
             review_fetch_due: false,
             group_preview: None,
             pending_select: None,
@@ -670,6 +686,44 @@ impl App {
                     self.modal = None;
                     Action::ResetSettings
                 }
+                Effect::SetTelemetry(on) => {
+                    self.modal = None;
+                    let choice = if on { am_core::settings::TelemetryChoice::On } else { am_core::settings::TelemetryChoice::Off };
+                    match crate::settings_ui::persist("telemetry", serde_json::Value::from(choice.id())) {
+                        Ok(s) => {
+                            self.set_settings(s);
+                            self.notice = Some(if on {
+                                "Thanks! Usage reports on (Settings → Usage reports)".into()
+                            } else {
+                                "No usage reports (Settings → Usage reports)".into()
+                            });
+                            Action::SettingsChanged
+                        }
+                        Err(e) => {
+                            self.notice = Some(e);
+                            Action::None
+                        }
+                    }
+                }
+                Effect::Update => {
+                    let Some(crate::modals::Modal::ConfirmUpdate(u)) = self.modal.take() else { return Action::None };
+                    let job = self.jobs.start_update(&u.latest);
+                    Action::Update(job, u.method)
+                }
+                Effect::Restart(now) => {
+                    let Some(crate::modals::Modal::Restart { latest }) = self.modal.take() else { return Action::None };
+                    match self.jobs.busy() {
+                        _ if !now => {
+                            self.notice = Some(format!("Restart am to use v{latest}"));
+                            Action::None
+                        }
+                        0 => Action::Restart,
+                        n => {
+                            self.notice = Some(format!("Restart am to use v{latest} once {} done", if n == 1 { "the job is" } else { "the jobs are" }));
+                            Action::None
+                        }
+                    }
+                }
                 Effect::AddReviewScript(r) => {
                     self.modal = None;
                     match self.start_review_pull(&r) {
@@ -790,6 +844,8 @@ impl App {
     /// Run a dashboard command (from its key, a key-bar click or a double-click).
     pub fn run_command(&mut self, cmd: crate::keymap::Command) -> Action {
         use crate::keymap::Command as C;
+        // For the `am.features` usage report (main.rs drains it).
+        *self.command_counts.entry(cmd.id()).or_default() += 1;
         if cmd.is_row_action() && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
             self.notice = Some("Deleting in the background…".into());
             return Action::None;
@@ -926,6 +982,10 @@ impl App {
         match hit.target {
             Target::Key(k) => self.on_key(k),
             Target::Command(c) => self.run_command(c),
+            Target::Update => {
+                self.update_prompt();
+                Action::None
+            }
             Target::JobsPane => {
                 self.focus_jobs();
                 Action::None
@@ -1037,6 +1097,11 @@ impl App {
                 let Some(s) = &mut self.setup else { return Action::None };
                 // A click picks; a second one goes on.
                 (std::mem::replace(&mut s.reviews_mode, i == 1) == (i == 1)).then_some(Key::Enter)
+            }
+            L::SetupPrivacy => {
+                let Some(s) = &mut self.setup else { return Action::None };
+                // A click picks; a second one finishes.
+                (std::mem::replace(&mut s.telemetry, i == 0) == (i == 0)).then_some(Key::Enter)
             }
             L::SetupReviews => {
                 let Some(s) = &mut self.setup else { return Action::None };
@@ -1201,6 +1266,19 @@ impl App {
 
     /// The review page, in place of the list or (`split`) beside it, with
     /// the keys.
+    /// A click on the `⬆ vX.Y.Z available` notice: ask before running the
+    /// upgrade, or say how to update where am can't do it itself.
+    pub fn update_prompt(&mut self) {
+        let Some(u) = self.update_available.clone() else { return };
+        if let Some(latest) = self.jobs.updating() {
+            self.notice = Some(format!("Already updating to v{latest}"));
+        } else if u.method.upgrade_steps().is_none() {
+            self.popup = Some(format!("am v{} is available (you have v{}).\n\nTo update: {}", u.latest, u.current, u.hint));
+        } else {
+            self.modal = Some(crate::modals::Modal::ConfirmUpdate(u));
+        }
+    }
+
     pub fn open_reviews(&mut self, split: bool) -> Action {
         if self.reviews_refused() {
             return Action::None;
@@ -1627,6 +1705,8 @@ pub enum Key {
     Left,
     Right,
     Backspace,
+    /// Forward delete (⌦).
+    Delete,
     Tab,
     BackTab,
     Enter,

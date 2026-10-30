@@ -1,6 +1,5 @@
 ---
 source: crates/am-tui/src/ui.rs
-assertion_line: 4583
 expression: screen
 ---
 ╭─Review requests ──────────────────────────────────────────────── 3 to review ╮╭─Jobs ────────────────────────────────╮
@@ -18,4 +17,4 @@ expression: screen
 │                                                                              ││                                      │
 │                                                                              ││                                      │
 ╰ you + your teams ──────────────────────────────────────────────────── 3 of 3 ╯╰──────────────────────────── ⇥ answer ╯
- ⏎ pull  g PR  l ticket  │ r refresh  ⇥ answer  esc back                            Pulling feature/902 into Reviewing…
+ ⏎ pull  g PR  l ticket  │ r refresh  ⇥ answer  │ esc back                          Pulling feature/902 into Reviewing…

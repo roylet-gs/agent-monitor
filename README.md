@@ -39,6 +39,7 @@
 - [Use am in cmux](#use-am-in-cmux)
 - [How It Works](#how-it-works)
   - [Supported harnesses](#supported-harnesses)
+- [Usage Reports](#usage-reports)
 - [Upgrading from 1.x](#upgrading-from-1x)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
@@ -126,6 +127,10 @@ The binaries land in `~/.cargo/bin`, which must be on your `PATH`.
 
 Prebuilt tarballs for each platform (with `SHA256SUMS`) are also attached to every [GitHub Release](https://github.com/roylet-gs/agent-monitor/releases). Keep the three binaries in the same directory.
 
+### Updating
+
+When a newer release is out, the dashboard shows `⬆ vX.Y.Z available` at its top right. **Click it** to update: am asks first, showing the command it will run for how you installed it (`brew update && brew upgrade agent-monitor`, `npm install -g @roylet-gs/agent-monitor@latest` or `pnpm add -g @roylet-gs/agent-monitor@latest`), runs it in the jobs pane with its output, and then offers to restart the dashboard into the new version. Agent hooks pick up the new `am-hook` on their own. From a shell, `am update` does the same (`am update --check` only reports). A source install or a downloaded tarball can't be updated this way: clicking the notice and `am update` say what to do instead.
+
 ---
 
 ## First Run
@@ -139,6 +144,7 @@ Run `am`. If `settings.json` has no `setupCompleted` flag, the setup wizard walk
 4. **Integrations**: GitHub PR status (needs `gh`) and an optional Linear API key
 5. **Review requests** (with GitHub on): show the PRs waiting on your review, whose requests count (you and your teams, only you, or only your teams), and whether to hide drafts and PRs you've already reviewed. Your choice sets up the review page's groups: an **Asked you** group and/or an **Asked your team** group, each hiding drafts and reviewed PRs if you said so (running setup again replaces only groups it made itself)
 6. **Context window**: the token count the context bar is measured against: 1M (the default), 200k, or a custom value such as `128k`
+7. **Privacy**: whether to send anonymous [usage reports](#usage-reports) (off unless you pick them; review-only mode asks this too)
 
 Everything can be changed later (the mode too: **Settings → Mode**): `s` for settings (**Repositories…** manages the tracked repos), `A` to add a repository, `am hooks install` for the hooks. To run the wizard again, use **Settings → Run setup again…** or `am setup`. It starts from your current settings and repositories, nothing is saved until you finish it, and `Esc` on the first step closes it. **Settings → Reset settings…** (confirm with `y`) puts every setting back to its default and then opens the wizard. Repositories, worktrees, history, custom themes, startup scripts and agent hooks are kept. Run `am doctor` to check the setup.
 
@@ -162,19 +168,21 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `l` | Open the Linear ticket |
 | `p` | Open the Linear project |
 | `n` | New worktree (adds a repository first if none is tracked) |
-| `d` | Delete the worktree; on an "Other sessions" row, stop tracking it |
+| `d` / `Delete` / `Backspace` | Delete the worktree; on an "Other sessions" row, stop tracking it |
 | `v` | Review requests: the PRs waiting on your review, in place of the list (see [Review Requests](#review-requests)) |
-| `V` | Review requests beside the list (in terminals with the kitty keyboard protocol — kitty, Ghostty, WezTerm, recent iTerm2 — holding Shift shows this on the key bar, and holding Ctrl shows `Ctrl+V`'s); `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
+| `V` | Review requests beside the list; `Tab` moves between them, and `V` again (or `Esc` on the review side) closes it |
 | `Ctrl+V` | Review requests in a new terminal window (`am-tui --reviews`; leaving the page there closes it) |
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list. With the review page beside the list, `Tab` goes list → review page → Jobs pane. The Jobs pane stays in view on every page (Settings, help, dialogs) while it has jobs; on the review page only while a job needs an answer |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
 | `s` | Settings |
-| `f` | Worktree filters: text search, agent status (a checklist: tick any of `waiting`, `executing`, `planning`, `delegating`, `done`, `idle`, `no agent`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `─Worktrees` border sums up what's filtered (`"auth" · waiting · no main · 3 hidden`; a click opens the box) |
-| `F` | Turn the `f` filters off, and back on (`worktreeFiltersEnabled`; the border reads `filters off · F` meanwhile). The base filters stay on |
+| `f` | Worktree filters: text search, agent status (a checklist: tick any of `waiting`, `executing`, `planning`, `delegating`, `done`, `idle`, `no agent`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `Worktrees` border sums up what's filtered (`filters on: "auth" · waiting · no main · 3 hidden`; a click opens the box) |
+| `F` | Turn the `f` filters off, and back on (`worktreeFiltersEnabled`; the border reads `filters off` meanwhile). The base filters stay on |
 | `r` | Refresh now, including GitHub/Linear (bypasses offline backoff) |
 | `h` | Help overlay with every key and the status legend |
 | `q` / `Esc` / `Ctrl-c` | Quit |
+
+The key bar keeps to the plain keys. In terminals with the kitty keyboard protocol (kitty, Ghostty, WezTerm, recent iTerm2), holding Shift swaps it to the Shift keys (`F`, `V`, `A`, `G`) and holding Ctrl to the Ctrl ones (`Ctrl+V`), on the review page too (`T`, `V`, `Ctrl+⏎`, `Ctrl+V`); the plain bar ends in `⇧/ctrl more` to say so. Elsewhere those keys join the plain bar when there's room. The pane title names the tool, its version and the page (`am v2.1.67 · Worktrees`).
 
 These are the defaults. To change them, open **Settings → Key bindings…**. It lists the actions by section (Worktrees, Review requests, General, Moving), each with its key, its default when you changed it, and what the key does on the review page, which uses the same keys (`⏎` pulls a PR or opens the pulled worktree, `f` opens the review filters, `r` clears the review cache and fetches again, `q` goes back; `—` means the key does nothing there). Pick an action, press `Enter`, then press the new key. If another action already has that key, the two swap. `x` puts one key back to its default and `R` resets them all. The key bar and the `h` overlay always show the keys you chose. Some keys can't be rebound, so the dashboard always stays usable: the arrows, `PgUp`/`PgDn`, `Home`/`End`, `Tab`, `Esc` and `Ctrl-c`. `o` keeps opening the PR unless you give it to another action. Only your changes are saved, under `keyBindings` in `settings.json`, e.g. `"keyBindings": { "newWorktree": "N", "filter": "none" }`. A key can be one character, or one of `space`, `enter`, `backspace`, `left`, `right`, `ctrl-d`, `ctrl-u`, `ctrl-s`, `ctrl-v`; `none` unbinds the action.
 
@@ -188,6 +196,7 @@ The mouse is on by default (`mouseEnabled`, or `s` → General → Mouse):
 - **Hover** over anything clickable to highlight it (a softer tint than the selection).
 - The mouse works everywhere: in Settings and its pages (repositories, harness plugins, key bindings, sort order, theme builder), dialogs, the folder browser, the setup wizard and the jobs pane. Click a row to select it, and click it again to act on it, as `Enter` or `space` would. Key hints such as `⏎ save` or `esc cancel` are clickable buttons.
 - **Click a key-bar hint** (`n new`, `s settings`, `? help`…) to run that action.
+- **Click `⬆ vX.Y.Z available`** to update am (see [Updating](#updating)).
 - **Click the Jobs pane** to focus it (scrolling then moves through the jobs); click a worktree row to go back to the list.
 - In **Settings**, scroll to move, click a field to select it, and click it again to change it.
 - Any click closes a popup or the help overlay.
@@ -315,7 +324,7 @@ Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking o
 | `l` | Open its Linear ticket |
 | `t` | Pull its branch into **Reviewing**. You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard (beside the list, the list takes the keys); a PR from a fork can't be pulled |
 | `T` / `Ctrl+⏎` | **Pull + run script**: pull it like `t`, then run the repo's [review script](#startup-and-review-scripts) in the new worktree (it opens in a new terminal window, and a popup says so). If the repo has no review script yet, am asks whether to add one: `y` creates it from a template and opens it in your editor while the PR is pulled, and it runs once you save it (or press `⏎` on the question in the Jobs pane to run it as is). Only on a PR that isn't pulled yet. `Ctrl+⏎` needs a terminal that reports it (the kitty keyboard protocol: kitty, Ghostty, WezTerm, iTerm2 with the option on…); elsewhere use `T` |
-| `d` | Remove the pulled worktree (the usual delete dialog), staying on the page |
+| `d` / `Delete` / `Backspace` | Remove the pulled worktree (the usual delete dialog), staying on the page |
 | `f` | Filters: who's asked, the groups (each with its own order and filters), the badge's GitHub total, **Reset filters…** (who's asked, the default group's filters and the GitHub total back to defaults; groups kept) and **Reset groups…** (removes every group), both asking `y` first, in a small box over the page (changes save at once). The page's bottom border sums up what's in force; clicking it opens the box too |
 | `r` | Clear the review caches (the list, group matches, GitHub total, autocomplete people) and search again now |
 | `Esc` / `q` / `v` | Back to the dashboard (beside the list: `Esc`/`q`/`V` close the page and `v` gives it the whole screen) |
@@ -424,7 +433,8 @@ The `hide*` toggles are the base filters: they always apply (`F` doesn't turn th
 | `appMode` | `"full"` | `full` (the dashboard) or `reviews` ([review-only mode](#review-only-mode): `am` opens to the review page alone) |
 | `cmuxSync` | `true` | Inside [cmux](#use-am-in-cmux): show each worktree's PR, Linear ticket and running agent commands as pills on its cmux workspace, its context use as the workspace's progress bar, a summary (agents waiting/working/done, reviews, failing CI) on am's own workspace, and post new review requests as cmux notifications. Does nothing outside cmux |
 | `cmuxNotify` | `"ci,review,conflicts"` | Inside cmux with `cmuxSync` on: which changes become a notification (and a sidebar log line) on the worktree's own workspace: `waiting` (an agent needs you), `done` (an agent finished), `ci` (CI started failing), `review` (approved / changes requested), `conflicts`. Settings → Notifications → cmux alerts picks them |
-| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps) |
+| `checkForUpdates` | `true` | Check GitHub Releases (at most every 6 h) and show `⬆ vX.Y.Z available` at the top right of the dashboard, plus a banner at the top of Settings with the upgrade command for how you installed am (`brew update && brew upgrade agent-monitor`, `npm install -g …@latest`, `pnpm add -g …@latest`, or the source steps). Click the notice to run it (see [Updating](#updating)) |
+| `telemetry` | `ask` | Anonymous usage and error reports: `on`, `off`, or `ask` (not decided; nothing is recorded, and setup or a one-time prompt asks). See [Usage Reports](#usage-reports) |
 | `ghPrStatus` | `true` | Fetch GitHub PR and CI status |
 | `ghPollingIntervalMs` | `180000` | GitHub refresh interval (min 30000) |
 | `ghRefreshOnManual` | `true` | Include GitHub when you press `r` |
@@ -557,7 +567,9 @@ am --version
 | `am theme import <file>` | Validate a theme file and copy it into `~/.agent-monitor/themes/` | `--name <name>`, `--force` |
 | `am theme remove <name>` | Delete a custom theme (switches back to `ansi` if it was active) | |
 | `am cmux dock` | Add am to the [cmux](#use-am-in-cmux) Dock (`~/.config/cmux/dock.json`; an existing file is backed up; `--project` writes plain `am` and no backup) | `--reviews` (also the review page), `--project` (the repo's `.cmux/dock.json`), `--remove` |
-| `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear | `--json` |
+| `am doctor` | Check the app directory, database, settings, hooks, `am-hook`, `gh`, `ttyd`, theme, Linear, usage reports | `--json` |
+| `am telemetry status\|on\|off\|show\|reset-id\|flush` | Anonymous usage reports ([Usage Reports](#usage-reports)): whether they're on, turn them on/off, every event waiting (`show --json`: the exact request body), forget the install id, send now | `--json` (`status`, `show`) |
+| `am update` | Install the latest release the way am was installed (Homebrew, npm or pnpm), printing the upgrade command's output | `--check` (only report), `--json` (report as JSON) |
 | `am perf` | How long each part of am has been taking (UI frames, the collector, git, GitHub/Linear, hooks), from the log, against per-stage budgets | `--since <window>` (`30m`, `1h`, `2d`, `all`; default `24h`), `--json` |
 | `am logs` | Show recent log lines | `-n, --lines <n>` (default 50), `-f, --follow`, `--level <level>` (that level and above), `--module <name>`, `--clear`, `--open` (in your editor, or the folder once rotated) |
 | `am setup` | Open the dashboard with the setup wizard (it also runs automatically on first run; also Settings → Run setup again…) | |
@@ -610,6 +622,7 @@ Each tool runs the matching `am` command (with `--json` where it has one) in the
 | `hooks_status`, `hooks_install`, `hooks_uninstall` | `am hooks …` |
 | `script_show`, `script_remove` | `am script …` |
 | `doctor`, `logs`, `perf` | `am doctor`, `am logs`, `am perf` |
+| `telemetry_status` | `am telemetry status` (read-only: turning usage reports on or off is left to you) |
 
 Each tool is marked read-only, destructive or open-world (it talks to GitHub/Linear or opens an app), so your agent CLI can ask before running the risky ones. Commands that need the terminal (the dashboard, `agent attach`, `script edit`, `logs --follow`) have no tool. Calls are logged under the `mcp` module (`am logs --module mcp`).
 
@@ -671,6 +684,18 @@ Any other CLI whose hooks run a command with a JSON payload on stdin can be adde
 
 ---
 
+## Usage Reports
+
+am can send anonymous usage and error reports (versions, features used, timings, and where in am's own code errors happen), so problems get fixed before anyone has to report them. They are **off unless you turn them on**: setup asks, and if you set am up before they existed, it asks once. They never hold your code, log text, paths, or repository, branch, PR or user names. `am telemetry show` prints every event waiting to be sent, exactly as it will be sent.
+
+```sh
+am telemetry status   # on/off, why, and what's waiting
+am telemetry on       # or: Settings → Privacy → Usage reports
+am telemetry off      # also deletes anything waiting
+```
+
+`DO_NOT_TRACK=1`, `AM_TELEMETRY=0` and `CI` always turn them off. The full list of what is and isn't sent is in [TELEMETRY.md](./TELEMETRY.md).
+
 ## Upgrading from 1.x
 
 Version 2 is a native rewrite (Rust) of the TypeScript app. Install it the same way (`npm install -g @roylet-gs/agent-monitor`) or switch to Homebrew, then **run this once**:
@@ -705,6 +730,15 @@ am logs --open                  # the whole file in your editor
 ```
 
 You can also press `w` in the dashboard to see the log live, or use **Settings → View logs…** to open it in your editor (the `Open in` setting; once the log has rotated into `debug.log.1`, it opens the log folder in Finder instead).
+
+**Send logs, traces and metrics to your own collector.** `am` and `am-tui` speak OpenTelemetry (OTLP over HTTP). Set the standard variables and they export every log line the log level lets through, spans for collector cycles, GitHub/Linear/review refreshes and CLI commands, and the `am.stage.duration` histogram that `am perf` summarises. Nothing is exported unless an endpoint is set, and the hook never exports. For example, with a local Grafana:
+
+```bash
+docker run --rm -p 3000:3000 -p 4318:4318 grafana/otel-lgtm
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 am
+```
+
+`OTEL_EXPORTER_OTLP_{LOGS,TRACES,METRICS}_ENDPOINT` export one signal only, `OTEL_EXPORTER_OTLP_HEADERS` adds auth, `OTEL_RESOURCE_ATTRIBUTES` adds attributes, and `OTEL_SDK_DISABLED=true` turns it off.
 
 **The dashboard feels slow.** `am perf` shows how long each part has been taking against its budget, and `am doctor` warns when one was over budget in the last hour:
 

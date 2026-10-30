@@ -27,6 +27,8 @@ pub enum JobKind {
     /// exists ("pull + run script" on the review page).
     Create { repo: Repository, req: CreateRequest, worktree_id: Option<String>, review_script: Option<Vec<(String, String)>> },
     Delete { worktree_id: String },
+    /// Installing release `latest` (a click on the update notice).
+    Update { latest: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +136,23 @@ impl Jobs {
 
     pub fn start_delete(&mut self, worktree_id: String, name: &str) -> u64 {
         self.push(JobKind::Delete { worktree_id }, format!("Delete {name}"))
+    }
+
+    pub fn start_update(&mut self, latest: &str) -> u64 {
+        self.push(JobKind::Update { latest: latest.to_string() }, format!("Update am to v{latest}"))
+    }
+
+    /// The release an update job is installing right now, if any.
+    pub fn updating(&self) -> Option<&str> {
+        self.list.iter().find_map(|j| match &j.kind {
+            JobKind::Update { latest } if j.state == JobState::Running => Some(latest.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Jobs still running or waiting for an answer (a restart would drop them).
+    pub fn busy(&self) -> usize {
+        self.list.iter().filter(|j| matches!(j.state, JobState::Running | JobState::Waiting)).count()
     }
 
     pub fn get(&self, id: u64) -> Option<&Job> {

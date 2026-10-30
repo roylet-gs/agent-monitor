@@ -28,7 +28,7 @@ test("Settings → View logs… opens debug.log in the default ide: the failed l
 
   // L no longer views the logs on the dashboard.
   await tui.sendKey("L");
-  await tui.waitForText("─Worktrees");
+  await tui.waitForText("· Worktrees");
   expect(await tui.getScreenText()).not.toContain("Couldn't open");
 
   // The seeded data dir has a debug.log (no rotated .1), so View logs… opens
@@ -37,14 +37,14 @@ test("Settings → View logs… opens debug.log in the default ide: the failed l
   await tui.waitForText("View logs…");
   await tui.sendKey("Enter");
   await tui.waitForText("✗ Couldn't open");
-  expect(await tui.getScreenText()).toContain("─Worktrees");
+  expect(await tui.getScreenText()).toContain("· Worktrees");
   await tui.screenshot("view-logs-error");
 
   await tui.sendKey("Escape");
   await tui.waitForGone("Couldn't open");
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
-  expect(await tui.getScreenText()).toContain("─Worktrees");
+  expect(await tui.getScreenText()).toContain("· Worktrees");
 });
 
 test("e with the default ide reports the failed launch and keeps the TUI", async ({ page }) => {
@@ -59,7 +59,7 @@ test("e with the default ide reports the failed launch and keeps the TUI", async
   // error shows as a popup; the dashboard and settings are still on screen.
   await tui.waitForText("✗ Couldn't open");
   const screen = await tui.getScreenText();
-  expect(screen).toContain("─Worktrees");
+  expect(screen).toContain("· Worktrees");
   expect(screen).not.toContain("~\n~"); // not vi's empty-buffer tildes
   await tui.screenshot("edit-settings-file-error");
 
@@ -70,7 +70,7 @@ test("e with the default ide reports the failed launch and keeps the TUI", async
   await tui.screenshot("edit-settings-file-after");
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
-  expect(await tui.getScreenText()).toContain("─Worktrees");
+  expect(await tui.getScreenText()).toContain("· Worktrees");
 });
 
 test("settings.json changed by another process is reloaded live", async ({ page }) => {
@@ -90,7 +90,7 @@ test("settings.json changed by another process is reloaded live", async ({ page 
 
     // The first process notices the new mtime within ~1 s and hides the notice.
     await watcher.waitForGone(NOTICE);
-    expect((await watcher.lines())[0]).toContain("─Worktrees");
+    expect((await watcher.lines())[0]).toContain("· Worktrees");
     await watcher.screenshot("edit-settings-file-live-reload");
 
     // Restore from the second process; the first picks that up too.

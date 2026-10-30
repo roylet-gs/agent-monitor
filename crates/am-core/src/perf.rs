@@ -9,10 +9,17 @@
 //! - WARN only when a stage's p95 goes over its [`budget`] (ok → slow), INFO
 //!   when it comes back under; nothing per sample.
 //!
+//! Every sample also goes to the `am.stage.duration` histogram (seconds,
+//! attribute `stage`) when OpenTelemetry metrics are on ([`crate::telemetry`]).
+//!
 //! Time is passed in explicitly (`record_at`) so the rules are unit-testable.
 
 use std::collections::VecDeque;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::Histogram;
 
 use crate::{info, warn};
 
@@ -41,6 +48,22 @@ pub const BUDGETS: &[(&str, u64)] = &[
     ("integrations.reviews", 10_000),
     ("hook.event", 50),
 ];
+
+/// Bucket bounds (seconds) for `am.stage.duration`, spanning the budgets.
+const BUCKETS: &[f64] = &[0.001, 0.0025, 0.005, 0.01, 0.016, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0];
+
+/// Created on first use, which is after `telemetry::init` set the meter provider.
+fn stage_histogram() -> &'static Histogram<f64> {
+    static HISTOGRAM: OnceLock<Histogram<f64>> = OnceLock::new();
+    HISTOGRAM.get_or_init(|| {
+        opentelemetry::global::meter("am")
+            .f64_histogram("am.stage.duration")
+            .with_description("How long each stage of am takes")
+            .with_unit("s")
+            .with_boundaries(BUCKETS.to_vec())
+            .build()
+    })
+}
 
 pub fn budget(stage: &str) -> Option<Duration> {
     BUDGETS.iter().find(|(s, _)| *s == stage).map(|(_, ms)| Duration::from_millis(*ms))
@@ -112,6 +135,9 @@ impl Perf {
                 self.stages.len() - 1
             }
         };
+        if crate::telemetry::metrics_on() {
+            stage_histogram().record(elapsed.as_secs_f64(), &[KeyValue::new("stage", stage)]);
+        }
         let s = &mut self.stages[i];
         if s.window.len() == WINDOW {
             s.window.pop_front();
@@ -148,10 +174,28 @@ impl Perf {
         (!parts.is_empty()).then(|| parts.join("; "))
     }
 
-    /// Write the summary line and start a new period.
+    /// Write the summary line (and an `am.perf` usage-report event per
+    /// budgeted stage, when reports are on) and start a new period.
     pub fn report(&mut self, now: Instant) {
         if let Some(line) = self.summary_line() {
             info!(MODULE, "{line}");
+        }
+        if crate::telemetry::public::is_on() {
+            let ts = crate::telemetry::public::now_ms();
+            for s in self.stages.iter().filter(|s| budget(s.name).is_some()) {
+                if let Some(sum) = summarize(s.period.iter().copied()) {
+                    let us = |d: Duration| d.as_micros() as u64;
+                    crate::telemetry::record(crate::telemetry::schema::Event::perf(
+                        crate::telemetry::public::binary(),
+                        ts,
+                        s.name,
+                        sum.n as u64,
+                        us(sum.p50),
+                        us(sum.p95),
+                        us(sum.max),
+                    ));
+                }
+            }
         }
         for s in &mut self.stages {
             s.period.clear();

@@ -1,0 +1,28 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: "render(&app, 100, 24)"
+---
+╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────────────────────────╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
+│ ◐ fix/offline-cache                                                                4m ▓░░░░ 185k │
+│                                                                                                  │
+│gridsight ────────────────────────────────────────────────────────────────────────────────────────│
+│ · main                                                                      ↑2 ±3  4m            │
+│             ╭─Usage reports ───────────────────────────────────────────────────────╮             │
+│             │ Help improve am with anonymous usage reports?                        │             │
+│             │ They hold am's version and OS, how it was installed, which features  │             │
+│             │ you use, how long things take, and where in am's code errors happen. │             │
+│             │ Never your code, log text, paths, or repository, branch, PR or user  │             │
+│             │ names. am telemetry show lists what would be sent.                   │             │
+│             │                                                                      │             │
+│             │     ⏎ / y  Send anonymous reports                                    │             │
+│             │   n / esc  Don't send anything                                       │             │
+│             ╰──────────────────────────────────────────────────────────────────────╯             │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ v reviews  s settings  r refresh  │ h help  q quit

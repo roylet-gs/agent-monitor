@@ -1,8 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { RustTui, resetMock } from "./helpers/rust-tui";
+import { NPM_URL, RustTui, resetMock } from "./helpers/rust-tui";
 
 // The entrypoint seeds a fresh `update-check.json` with `latest: 9.9.9`, so the
 // background update check reports a newer release without touching the network.
+// The container's binaries aren't a Homebrew/npm/pnpm install, so on 7681 the
+// notice can only say how to update; 7684 runs am-tui as an npm install
+// (`AM_INSTALL_METHOD=npm`) with a fake `npm` that only prints.
 
 test.beforeEach(async () => {
   await resetMock();
@@ -34,7 +37,7 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
 
   // (a) The notice sits right-aligned on the pane's top border.
   await tui.waitForText(NOTICE);
-  const top = (await tui.lines()).find((l) => l.includes("─Worktrees")) ?? "";
+  const top = (await tui.lines()).find((l) => l.includes("· Worktrees")) ?? "";
   expect(top).toContain(NOTICE);
   expect((await tui.lines())[0]).toContain(NOTICE);
   await tui.screenshot("update-available");
@@ -53,7 +56,7 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
   await tui.waitForGone(NOTICE);
-  expect((await tui.lines())[0]).toContain("─Worktrees");
+  expect((await tui.lines())[0]).toContain("· Worktrees");
   await tui.screenshot("update-available-off");
 
   // Restore: turning it back on shows the notice again.
@@ -65,4 +68,65 @@ test("update notice shows in the Worktrees title and hides when turned off", asy
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
   await tui.waitForText(NOTICE);
+});
+
+test("clicking the notice says how to update an install am can't update itself", async ({ page }) => {
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.waitForText(NOTICE);
+  await tui.clickText(NOTICE);
+  await tui.waitForText("am v9.9.9 is available");
+  // The popup wraps the URL onto its own line.
+  const popup = await tui.getScreenText();
+  expect(popup).toContain("To update: see");
+  expect(popup).toContain("releases/latest");
+  await tui.screenshot("update-click-instructions");
+  await tui.sendKey("x");
+  await tui.waitForGone("To update:");
+  expect(await tui.getScreenText()).toContain(NOTICE);
+});
+
+test("clicking the notice runs the upgrade in the jobs pane, then restarts am", async ({ page }) => {
+  const tui = new RustTui(page);
+  await tui.openUrl(NPM_URL);
+  await tui.waitForText("· Worktrees", 10_000);
+  await tui.waitForText(NOTICE);
+
+  // Asks first, naming the command.
+  await tui.clickText(NOTICE);
+  await tui.waitForText("Update am v");
+  expect(await tui.getScreenText()).toContain("Runs: npm install -g @roylet-gs/agent-monitor@latest");
+  await tui.screenshot("update-confirm");
+
+  // ⏎ runs it as a job, its output in the ─Jobs pane; then offers a restart.
+  await tui.sendKey("Enter");
+  await tui.waitForText("Update am to v9.9.9");
+  // The fake npm's output (the pane wraps long lines).
+  await tui.waitForText("fake npm install -g");
+  await tui.waitForText("added 1 package");
+  await tui.waitForText("am v9.9.9 is installed. Restart now");
+  await tui.screenshot("update-restart-prompt");
+  expect(await tui.getScreenText()).not.toContain(NOTICE);
+
+  // `n` leaves it for later.
+  await tui.sendKey("n");
+  await tui.waitForGone("Restart now");
+  await tui.waitForText("Restart am to use v9.9.9");
+
+  // A restarted am-tui (still the old binary here) finds the release again;
+  // this time restart from the prompt and the dashboard comes back.
+  await page.reload();
+  await tui.waitForText("· Worktrees", 10_000);
+  await tui.waitForText(NOTICE);
+  await tui.clickText(NOTICE);
+  await tui.waitForText("Update am v");
+  await tui.sendKey("y");
+  await tui.waitForText("am v9.9.9 is installed. Restart now");
+  await tui.sendKey("y");
+  await tui.waitForGone("Restart now");
+  await tui.waitForText("· Worktrees", 10_000);
+  await tui.waitForText(NOTICE);
+  // A fresh process: the update job's pane went with the old one.
+  expect(await tui.getScreenText()).not.toContain("Update am to v9.9.9");
+  await tui.screenshot("update-restarted");
 });

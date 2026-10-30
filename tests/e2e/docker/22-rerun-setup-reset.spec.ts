@@ -18,7 +18,7 @@ test("run setup again starts from the current settings and esc cancels", async (
   await tui.open();
   await tui.waitForText("ENG-123", 15_000);
 
-  await tui.openSetting(RERUN_HELP, 80);
+  await tui.openSettingFromEnd(RERUN_HELP);
   await tui.waitForText("Run setup again…");
   await tui.sendKey("Enter");
   await tui.waitForText(WELCOME);
@@ -32,7 +32,7 @@ test("run setup again starts from the current settings and esc cancels", async (
 
   // Walk it to the end: the repo is listed as added, and the Linear key
   // survives (the ticket column stays).
-  await tui.openSetting(RERUN_HELP, 80);
+  await tui.openSettingFromEnd(RERUN_HELP);
   await tui.sendKey("Enter");
   await tui.waitForText("What do you want am for?");
   await tui.sendKey("Enter");
@@ -51,6 +51,9 @@ test("run setup again starts from the current settings and esc cancels", async (
   await tui.waitForText("Groups: Asked you, Asked your team");
   await tui.sendKey("Enter");
   await tui.waitForText("How many tokens of context should the bar measure against?");
+  await tui.sendKey("Enter");
+  // The seeded "off" is kept.
+  await tui.waitForText("● Don't send anything");
   await tui.sendKey("Enter");
   await tui.waitForGone(WELCOME);
   await tui.waitForText("Setup complete");
@@ -71,7 +74,7 @@ test("run setup again starts from the current settings and esc cancels", async (
   }
   await tui.waitForGone("Asked your team");
   await tui.press("Escape", 3); // groups page, filters, review page
-  await tui.waitForText("─Worktrees");
+  await tui.waitForText("· Worktrees");
 });
 
 test("reset settings asks first, then reopens setup", async ({ page }) => {
@@ -93,9 +96,11 @@ test("reset settings asks first, then reopens setup", async ({ page }) => {
   await tui.sendKey("Enter");
   await tui.waitForText("How many tokens of context should the bar measure against?");
   await tui.sendKey("Enter");
+  await tui.waitForText("Help improve am with anonymous usage reports?");
+  await tui.sendKey("Enter");
   await tui.waitForGone(WELCOME);
 
-  await tui.openSetting(RESET_HELP, 80);
+  await tui.openSettingFromEnd(RESET_HELP);
   await tui.sendKey("Enter");
   await tui.waitForText("Put every setting back to its default");
   await tui.screenshot("reset-settings-confirm");

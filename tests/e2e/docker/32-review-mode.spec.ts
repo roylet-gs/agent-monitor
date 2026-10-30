@@ -22,7 +22,7 @@ test("first run in review-only mode: setup, the page alone, pull and remove, bac
   await tui.waitForText("What do you want am for?");
   await tui.sendKey("j");
   await tui.waitForText("● Review requests only");
-  await tui.waitForText("Mode › Editor › Repos › GitHub › Reviews");
+  await tui.waitForText("Mode › Editor › Repos › GitHub › Reviews › Privacy");
   await tui.screenshot("review-mode-setup-mode");
   await tui.sendKey("Enter");
 
@@ -45,24 +45,28 @@ test("first run in review-only mode: setup, the page alone, pull and remove, bac
   await tui.screenshot("review-mode-setup-github");
   await tui.sendKey("Enter");
 
-  // Reviews: no on/off row; ⏎ finishes.
+  // Reviews: no on/off row.
   await tui.waitForText("Which pull requests are waiting on your review?");
   expect(await tui.getScreenText()).not.toContain("Show PRs waiting for my review");
+  await tui.sendKey("Enter");
+
+  // Privacy, last in this mode too: ⏎ finishes.
+  await tui.waitForText("Help improve am with anonymous usage reports?");
   await tui.waitForText("⏎ finish");
   await tui.sendKey("Enter");
 
   // The review page, alone.
   await tui.waitForGone(WELCOME);
-  await tui.waitForText("─Review requests");
+  await tui.waitForText("· Review requests");
   await tui.waitForText("Add retry to the sync job", 20_000);
-  expect(await tui.getScreenText()).not.toContain("─Worktrees");
+  expect(await tui.getScreenText()).not.toContain("· Worktrees");
   expect(await tui.keyBar()).toContain("esc quit");
   await tui.screenshot("review-mode-page");
 
   // Help: the page's keys only.
   await tui.sendKey("h");
   await tui.waitForText("focus the jobs pane");
-  expect(await tui.getScreenText()).not.toContain("new / delete worktree");
+  expect(await tui.getScreenText()).not.toContain("delete worktree (asks first)");
   await tui.screenshot("review-mode-help");
   await tui.sendKey("Escape");
   await tui.waitForGone("focus the jobs pane", 5_000);
@@ -101,7 +105,7 @@ test("first run in review-only mode: setup, the page alone, pull and remove, bac
   await tui.waitForGone("esc close");
   expect(await tui.keyBar()).toContain("esc back");
   await tui.sendKey("Escape");
-  await tui.waitForText("─Worktrees", 10_000);
+  await tui.waitForText("· Worktrees", 10_000);
   await tui.screenshot("review-mode-back-to-full");
 });
 
@@ -117,9 +121,9 @@ test("switching the seeded dashboard to review-only mode and back", async ({ pag
   await tui.waitForMatch(/Mode\s+reviews/);
   await tui.waitForGone("Sort order");
   await tui.sendKey("Escape");
-  await tui.waitForText("─Review requests");
+  await tui.waitForText("· Review requests");
   await tui.waitForText("Add retry to the sync job", 20_000);
-  expect(await tui.getScreenText()).not.toContain("─Worktrees");
+  expect(await tui.getScreenText()).not.toContain("· Worktrees");
 
   // Restore: back to full, then leave the page for the dashboard.
   await tui.sendKey("s");
@@ -129,7 +133,7 @@ test("switching the seeded dashboard to review-only mode and back", async ({ pag
   await tui.sendKey("Escape");
   await tui.waitForGone("esc close");
   await tui.sendKey("Escape");
-  await tui.waitForText("─Worktrees", 10_000);
+  await tui.waitForText("· Worktrees", 10_000);
 
   // Leave nothing cached for the specs that follow.
   await setupMock({ reviews: false });

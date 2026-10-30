@@ -54,10 +54,12 @@ SH
 
 # Skip the setup wizard, show main, enable Linear against the mock.
 # linearAutoNickname is off so rows keep their branch names (the mock links
-# every branch to the same ticket, which would rename them all).
+# every branch to the same ticket, which would rename them all). Usage reports
+# are answered (off), so the one-time prompt stays away (spec 34 brings it back).
 cat > "$AM_DATA_DIR/settings.json" <<'JSON'
 {
   "setupCompleted": true,
+  "telemetry": "off",
   "hideMainBranch": false,
   "linearEnabled": true,
   "linearApiKey": "lin_api_mock",
@@ -232,6 +234,23 @@ exec am-tui
 SH
 chmod +x /usr/local/bin/am-tui-late-session
 ttyd -p 7683 --writable -t disableLeaveAlert=true am-tui-late-session &
+
+# 7684: the seeded dashboard as an npm install, with a fake `npm` that only
+# prints (13-update-available.spec.ts: click the notice → update → restart).
+mkdir -p /opt/fake-npm
+cat > /opt/fake-npm/npm <<'SH'
+#!/bin/sh
+echo "fake npm $*"
+echo "added 1 package in 0.1s"
+SH
+chmod +x /opt/fake-npm/npm
+cat > /usr/local/bin/am-tui-npm <<'SH'
+#!/bin/bash
+export AM_INSTALL_METHOD=npm PATH="/opt/fake-npm:$PATH"
+exec am-tui
+SH
+chmod +x /usr/local/bin/am-tui-npm
+ttyd -p 7684 --writable -t disableLeaveAlert=true am-tui-npm &
 
 # 7681: the seeded dashboard. ttyd spawns a new am-tui per connection.
 exec ttyd -p 7681 --writable -t disableLeaveAlert=true am-tui

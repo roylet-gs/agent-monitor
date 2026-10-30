@@ -126,9 +126,18 @@ pub enum Modal {
     AddRepo(crate::folder_browser::FolderBrowser),
     /// Settings → Reset settings: `y` resets, any other key cancels.
     ConfirmReset,
+    /// Once, for a user who set am up before usage reports existing
+    /// (`telemetry: "ask"`): `y`/⏎ turns them on, `n`/esc off.
+    Telemetry,
     /// "Pull + run script" on a PR whose repo (named `repo`) has no review
     /// script: `y` adds one and pulls, any other key cancels.
     AddReviewScript { review: Box<am_core::model::ReviewRequest>, repo: String },
+    /// A click on the `⬆ vX.Y.Z available` notice: `y`/⏎ runs the upgrade
+    /// command (shown) as a job, any other key cancels.
+    ConfirmUpdate(am_core::update_check::Update),
+    /// The upgrade worked: `y`/⏎ restarts am-tui into it, any other key
+    /// leaves that for later.
+    Restart { latest: String },
 }
 
 pub enum Effect {
@@ -139,8 +148,14 @@ pub enum Effect {
     AddRepo(String),
     /// Put settings.json back to defaults, then run setup.
     ResetSettings,
+    /// Save the `telemetry` choice (true = on).
+    SetTelemetry(bool),
     /// Add the repo's review script, then pull + run it for this PR.
     AddReviewScript(Box<am_core::model::ReviewRequest>),
+    /// Run the upgrade.
+    Update,
+    /// Restart into the new version (true), or later (false).
+    Restart(bool),
 }
 
 /// Expand `~` and complete the last path component to the longest common
@@ -207,9 +222,23 @@ impl Modal {
                 Key::Char('y') | Key::Char('Y') => Effect::ResetSettings,
                 _ => Effect::Close,
             },
+            Modal::Telemetry => match key {
+                Key::Char('y') | Key::Char('Y') | Key::Enter => Effect::SetTelemetry(true),
+                Key::Char('n') | Key::Char('N') | Key::Esc => Effect::SetTelemetry(false),
+                // A real answer only: a stray key mustn't decide.
+                _ => Effect::None,
+            },
             Modal::AddReviewScript { review, .. } => match key {
                 Key::Char('y') | Key::Char('Y') | Key::Enter => Effect::AddReviewScript(review.clone()),
                 _ => Effect::Close,
+            },
+            Modal::ConfirmUpdate(_) => match key {
+                Key::Char('y') | Key::Char('Y') | Key::Enter => Effect::Update,
+                _ => Effect::Close,
+            },
+            Modal::Restart { .. } => match key {
+                Key::Char('y') | Key::Char('Y') | Key::Enter => Effect::Restart(true),
+                _ => Effect::Restart(false),
             },
             Modal::New(f) => {
                 let fields = f.fields();
@@ -307,6 +336,26 @@ impl Modal {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn telemetry_prompt_needs_a_real_answer() {
+        assert!(matches!(Modal::Telemetry.on_key(Key::Char('y')), Effect::SetTelemetry(true)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Enter), Effect::SetTelemetry(true)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Char('n')), Effect::SetTelemetry(false)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Esc), Effect::SetTelemetry(false)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Char('j')), Effect::None));
+    }
+
+    #[test]
+    fn update_and_restart_prompts() {
+        let update = am_core::update_check::Update::new("9.9.9".into(), am_core::update_check::InstallMethod::Npm);
+        assert!(matches!(Modal::ConfirmUpdate(update.clone()).on_key(Key::Char('y')), Effect::Update));
+        assert!(matches!(Modal::ConfirmUpdate(update.clone()).on_key(Key::Enter), Effect::Update));
+        assert!(matches!(Modal::ConfirmUpdate(update).on_key(Key::Esc), Effect::Close));
+        let restart = || Modal::Restart { latest: "9.9.9".into() };
+        assert!(matches!(restart().on_key(Key::Enter), Effect::Restart(true)));
+        assert!(matches!(restart().on_key(Key::Char('n')), Effect::Restart(false)));
+    }
     use super::*;
 
     fn repos() -> Vec<Repository> {

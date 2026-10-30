@@ -592,8 +592,24 @@ pub(crate) mod tests {
         let addr = listener.local_addr().unwrap();
         std::thread::spawn(move || {
             if let Ok((mut s, _)) = listener.accept() {
+                // Read the whole request (headers and body may come in
+                // separate reads) before answering, or closing early can
+                // fail the client's write.
+                let mut req = Vec::new();
                 let mut buf = [0u8; 8192];
-                let _ = s.read(&mut buf);
+                while let Ok(n @ 1..) = s.read(&mut buf) {
+                    req.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&req);
+                    if let Some(end) = text.find("\r\n\r\n") {
+                        let len = text[..end]
+                            .lines()
+                            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap_or(0)))
+                            .unwrap_or(0);
+                        if req.len() >= end + 4 + len {
+                            break;
+                        }
+                    }
+                }
                 let _ = s.write_all(response.as_bytes());
             }
         });

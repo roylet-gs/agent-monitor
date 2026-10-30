@@ -17,6 +17,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use std::cell::Cell;
 use unicode_width::UnicodeWidthStr;
 
+use crate::actions::{ActionBar, BarHit, Entry};
 use crate::app::{App, Key, Row};
 use crate::keymap::Command;
 use crate::theme::{Theme, status_glyph, status_label};
@@ -138,6 +139,8 @@ pub enum Target {
     Command(Command),
     /// A worktree (or one of its session rows) in the dashboard list.
     Worktree(usize),
+    /// The `⬆ vX.Y.Z available` notice: offer to update.
+    Update,
     /// Anywhere in the jobs pane: focus it.
     JobsPane,
     /// A key answering job `.0`'s question, as if pressed with it selected.
@@ -163,6 +166,7 @@ pub enum List {
     Palette,
     Browser,
     SetupMode,
+    SetupPrivacy,
     SetupIde,
     SetupIntegrations,
     SetupReviews,
@@ -1412,6 +1416,19 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             marks.push((4, Target::Key(Key::Esc), false));
             ("Reset settings".into(), theme.red, "", lines)
         }
+        Modal::Telemetry => {
+            let lines = vec![
+                Line::raw("Help improve am with anonymous usage reports?"),
+                Line::styled("They hold am's version and OS, how it was installed, which features you use, how long things take, and where in am's code errors happen.", theme.faint()),
+                Line::styled("Never your code, log text, paths, or repository, branch, PR or user names. am telemetry show lists what would be sent.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "⏎ / y", "Send anonymous reports", true),
+                key_line(theme, "n / esc", "Don't send anything", false),
+            ];
+            marks.push((4, Target::Key(Key::Char('y')), false));
+            marks.push((5, Target::Key(Key::Char('n')), false));
+            ("Usage reports".into(), theme.border_focus, "", lines)
+        }
         Modal::AddReviewScript { repo, .. } => {
             let lines = vec![
                 Line::raw(format!("{repo} has no review script yet. Add one?")),
@@ -1423,6 +1440,32 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             marks.push((3, Target::Key(Key::Char('y')), false));
             marks.push((4, Target::Key(Key::Esc), false));
             ("Add a review script".into(), theme.yellow, "", lines)
+        }
+        Modal::ConfirmUpdate(u) => {
+            let command = u.method.upgrade_steps().map(|s| am_core::update_check::shell_text(&s)).unwrap_or_default();
+            let lines = vec![
+                Line::raw(format!("Update am v{} → v{}?", u.current, u.latest)),
+                Line::styled(format!("Runs: {command}"), theme.faint()),
+                Line::styled("Its output shows in the jobs pane; am offers to restart once it's done.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "⏎ / y", "Update now", true),
+                key_line(theme, "any key", "Cancel", false),
+            ];
+            marks.push((4, Target::Key(Key::Char('y')), false));
+            marks.push((5, Target::Key(Key::Esc), false));
+            ("Update am".into(), theme.green, "", lines)
+        }
+        Modal::Restart { latest } => {
+            let lines = vec![
+                Line::raw(format!("am v{latest} is installed. Restart now to use it?")),
+                Line::styled("Agent hooks pick it up on their own; only this dashboard runs the old version.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "⏎ / y", "Restart am", true),
+                key_line(theme, "any key", "Later", false),
+            ];
+            marks.push((3, Target::Key(Key::Char('y')), false));
+            marks.push((4, Target::Key(Key::Esc), false));
+            ("Updated".into(), theme.green, "", lines)
         }
         Modal::AddRepo(_) => unreachable!("drawn by draw_browser"),
     };
@@ -1466,6 +1509,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
         Step::Integrations => "Integrations",
         Step::Reviews => "Reviews",
         Step::Context => "Context",
+        Step::Privacy => "Privacy",
     };
     let steps = s.steps();
     let mut crumbs = vec![Span::raw(" ")];
@@ -1650,7 +1694,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
                 if s.reviews_mode { "More groups and filters: f → Groups…" } else { "More groups and filters: v, then f → Groups…" },
                 theme.faint(),
             ));
-            hint = if s.reviews_mode { "↑↓ move  space toggle  ⏎ finish  esc back" } else { "↑↓ move  space toggle  ⏎ next  esc back" };
+            hint = "↑↓ move  space toggle  ⏎ next  esc back";
         }
         Step::Context => {
             lines.push(Line::raw("How many tokens of context should the bar measure against?"));
@@ -1677,11 +1721,37 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             if let Some(e) = &s.ctx_error {
                 lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
             }
+            hint = "↑↓ choose  ⏎ next  esc back";
+        }
+        Step::Privacy => {
+            lines.push(Line::raw("Help improve am with anonymous usage reports?"));
+            lines.push(Line::raw(""));
+            let choices: [(&str, &[&str]); 2] = [
+                (
+                    "Send anonymous reports",
+                    &["am's version and OS, how it was installed, which features you use,", "how long things take, and where in am's code errors happen"],
+                ),
+                ("Don't send anything", &["nothing is recorded"]),
+            ];
+            for (i, (label, what)) in choices.into_iter().enumerate() {
+                let sel = (i == 0) == s.telemetry;
+                marks.push((lines.len(), Target::Item(List::SetupPrivacy, i), false));
+                lines.push(Line::from(vec![
+                    Span::styled(if sel { "  ● " } else { "  ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
+                    Span::styled(label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
+                ]));
+                for line in what {
+                    lines.push(Line::styled(format!("    {line}"), theme.faint()));
+                }
+            }
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Never your code, log text, paths, or repository, branch, PR or user names.", theme.faint()));
+            lines.push(Line::styled("am telemetry show lists what would be sent; Settings → Usage reports changes it later.", theme.faint()));
             hint = "↑↓ choose  ⏎ finish  esc back";
         }
     }
-    // 82 columns fits the seven breadcrumbs on one line.
-    let rect = modal_rect(area, 82, lines.len() as u16 + 4);
+    // 96 columns fits the eight breadcrumbs on one line.
+    let rect = modal_rect(area, 96, lines.len() as u16 + 4);
     clear(f, theme, rect);
     bottom_hint_hits(hits, &format!(" {hint} "), rect);
     // Inside the border and the padding (1 left/right, 1 top).
@@ -1755,7 +1825,40 @@ fn title<'a>(name: &'a str, theme: &Theme) -> Line<'a> {
     ])
 }
 
+/// The version in page titles; fixed under test so snapshots survive releases.
+const VERSION: &str = if cfg!(test) { "0.0.0" } else { env!("CARGO_PKG_VERSION") };
+
+/// A page title's text, `am v2.1.67 · Worktrees`, shortened to `am ·
+/// Worktrees`, then `Worktrees`, when it (with its leading `─` and trailing
+/// space) doesn't fit in `room` columns.
+fn page_title_text(page: &str, room: usize) -> String {
+    [format!("am v{VERSION} · {page}"), format!("am · {page}")]
+        .into_iter()
+        .find(|t| t.width() + 2 <= room)
+        .unwrap_or_else(|| page.to_string())
+}
+
+/// A page title from [`page_title_text`]: the tool and version in the
+/// border colour, the page name bold.
+fn page_title<'a>(text: String, page: &str, theme: &Theme) -> Line<'a> {
+    let tool = text.strip_suffix(page).unwrap_or("").to_string();
+    Line::from(vec![
+        Span::styled("─", theme.bold(theme.border_focus)),
+        Span::styled(tool, theme.fg(theme.border_focus)),
+        Span::styled(page.to_string(), theme.bold(theme.border_focus)),
+        Span::raw(" "),
+    ])
+}
+
 // ---------------------------------------------------------------- worktrees
+
+/// The `─Worktrees` pane's title text: as long as the corner's update
+/// notice and review badge leave room for (two corners and one border cell
+/// between).
+fn worktrees_title(app: &App, width: u16) -> String {
+    let corner = update_label(app, width).map_or(0, |l| l.width()) + review_badge(app, width).map_or(0, |b| b.width());
+    page_title_text("Worktrees", (width as usize).saturating_sub(2 + corner + 1))
+}
 
 /// The update to advertise, unless `checkForUpdates` was turned off.
 fn shown_update(app: &App) -> Option<&am_core::update_check::Update> {
@@ -1766,11 +1869,21 @@ fn shown_update(app: &App) -> Option<&am_core::update_check::Update> {
 /// when it would run into the `─Worktrees` title.
 fn update_label(app: &App, width: u16) -> Option<String> {
     let latest = &shown_update(app)?.latest;
-    // Two corners, `─Worktrees `, the review badge beside it, and one border
-    // cell between the titles.
+    let room = |badge: usize| (width as usize).saturating_sub(2 + "─Worktrees ".width() + badge + 1);
+    // Two corners, the shortest title (`─Worktrees `, which gives way to
+    // it), the review badge beside it, and one border cell between the titles.
     let badge = review_badge(app, width).map_or(0, |b| b.width());
-    let room = (width as usize).saturating_sub(2 + "─Worktrees ".width() + badge + 1);
-    [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room)
+    update_forms(app, latest).into_iter().find(|l| l.width() <= room(badge))
+}
+
+/// The update notice, longest first: ` ⬆ v2.2.0 available `, or
+/// ` ⬆ updating to v2.2.0… ` while the upgrade job runs.
+fn update_forms(app: &App, latest: &str) -> [String; 2] {
+    if app.jobs.updating().is_some() {
+        [format!(" ⬆ updating to v{latest}… "), format!(" ⬆ v{latest}… ")]
+    } else {
+        [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")]
+    }
 }
 
 /// Top-right ` 3 to review ` in the `─Worktrees` border's corner (`⚑3` on
@@ -1854,7 +1967,10 @@ struct Columns {
 
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
     let focused = !app.jobs.focused && !app.review_focused();
-    let mut block = pane_block(theme, title("Worktrees", theme), focused);
+    let heading = worktrees_title(app, area.width);
+    // `─` + title + space.
+    let title_w = heading.width() + 2;
+    let mut block = pane_block(theme, page_title(heading, "Worktrees", theme), focused);
     // Footer before the corner: compact puts both on the top line, and the
     // last right-aligned title is the rightmost.
     let mut used = 0;
@@ -1865,7 +1981,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     }
     let corner_w = update_label(app, area.width).map_or(0, |l| l.width() + 1) + review_badge(app, area.width).map_or(0, |b| b.width());
     if let Some(label) = tokens_label(app, area.width)
-        .filter(|l| !compact() || "─Worktrees ".width() + used + l.width() + 1 + corner_w <= area.width as usize)
+        .filter(|l| !compact() || title_w + used + l.width() + 1 + corner_w <= area.width as usize)
     {
         used += label.width() + 1;
         block = foot(block, Line::styled(label, theme.faint()).alignment(Alignment::Right));
@@ -1874,7 +1990,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     if let Some(summary) = worktree_filter_summary(&app.settings, app.snapshot.hidden_worktrees) {
         let summary = format!(" {summary} ");
         // Compact: on the top line after the title, so it shares the row.
-        let lead = if compact() { "─Worktrees ".width() + 1 } else { 0 };
+        let lead = if compact() { title_w + 1 } else { 0 };
         let taken = if compact() { used + corner_w } else { 0 };
         let room = (area.width as usize).saturating_sub(16 + lead + taken);
         if room > 10 {
@@ -1883,13 +1999,22 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
                 let rect = Rect::new(area.x + edge() + lead as u16, foot_y(area), summary.width() as u16, 1);
                 hits.push(Hit { rect, target: Target::Key(k), selected: false });
             }
-            let style = if app.settings.worktree_filters_enabled { theme.faint() } else { theme.fg(theme.yellow) };
+            let style = match () {
+                _ if !app.settings.worktree_filters_enabled => theme.fg(theme.yellow),
+                _ if picks_filters(&app.settings) => theme.fg(theme.accent),
+                _ => theme.faint(),
+            };
             block = foot(block, Line::styled(summary, style).alignment(Alignment::Left));
         }
     }
     // Top right: the update notice, then the review badge in the corner.
     let mut corner: Vec<Span> = Vec::new();
     if let Some(label) = update_label(app, area.width) {
+        // Clickable: offers to update. It sits just left of the badge.
+        let badge = review_badge(app, area.width).map_or(0, |b| b.width() as u16);
+        let w = label.width() as u16;
+        let rect = Rect::new((area.x + area.width).saturating_sub(edge() + badge + w), area.y, w, 1).intersection(area);
+        hits.push(Hit { rect, target: Target::Update, selected: false });
         corner.push(Span::styled(label, theme.bold(theme.green)));
     }
     if let Some(badge) = review_badge(app, area.width) {
@@ -1992,7 +2117,14 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let grouping = app.grouping();
     let ordered = order(list, &app.snapshot.repos, grouping);
     let cursor = app.reviews.as_ref().map_or(0, |p| p.cursor);
-    let mut block = pane_block(theme, title("Review requests", theme), app.review_focused());
+    // Review-only, the page is all there is, so it names the tool too
+    // (leaving the corner room for a badge).
+    let heading = match app.reviews_only() {
+        true => page_title_text("Review requests", (area.width as usize).saturating_sub(2 + 1 + 24)),
+        false => "Review requests".to_string(),
+    };
+    let title_w = heading.width() + 2;
+    let mut block = pane_block(theme, page_title(heading, "Review requests", theme), app.review_focused());
     if !ordered.is_empty() {
         block = foot(block, Line::styled(format!(" {} of {} ", cursor + 1, ordered.len()), theme.faint()).alignment(Alignment::Right));
     }
@@ -2000,7 +2132,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let hidden = crate::reviews_ui::counts(list, &app.snapshot.repos, grouping).1;
     let summary = format!(" {} ", review_filter_summary(&app.settings, hidden));
     // Compact: on the top line after the title, so it shares the row.
-    let lead = if compact() { "─Review requests ".width() + 1 } else { 0 };
+    let lead = if compact() { title_w + 1 } else { 0 };
     let room = (area.width as usize).saturating_sub(16 + lead);
     if room > 10 {
         let summary = truncate(&summary, room);
@@ -2027,7 +2159,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     if let Some((wide, narrow)) = review_badge_forms(app).filter(|_| !split) {
         // Two corners, `─Review requests `, the warning and one border cell.
         let used = corner.iter().map(|s| s.content.width()).sum::<usize>();
-        let room = (area.width as usize).saturating_sub(2 + "─Review requests ".width() + used + 1);
+        let room = (area.width as usize).saturating_sub(2 + title_w + used + 1);
         if let Some(badge) = [wide, narrow].into_iter().find(|b| b.width() <= room) {
             corner.push(Span::styled(badge, theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
         }
@@ -2036,8 +2168,11 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     // goes first here when it fits.
     if let Some(latest) = shown_update(app).map(|u| &u.latest).filter(|_| app.reviews_only()) {
         let used = corner.iter().map(|s| s.content.width()).sum::<usize>();
-        let room = (area.width as usize).saturating_sub(2 + "─Review requests ".width() + used + 1);
-        if let Some(label) = [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room) {
+        let room = (area.width as usize).saturating_sub(2 + title_w + used + 1);
+        if let Some(label) = update_forms(app, latest).into_iter().find(|l| l.width() <= room) {
+            let w = label.width() as u16;
+            let rect = Rect::new((area.x + area.width).saturating_sub(edge() + used as u16 + w), area.y, w, 1).intersection(area);
+            hits.push(Hit { rect, target: Target::Update, selected: false });
             corner.insert(0, Span::styled(label, theme.bold(theme.green)));
         }
     }
@@ -2156,10 +2291,10 @@ fn picks_filters(s: &am_core::settings::Settings) -> bool {
             || [&s.worktree_filter_pr, &s.worktree_filter_git].iter().any(|f| f.as_str() != "any"))
 }
 
-/// The dashboard's filters in a few words, e.g. `"auth" · waiting · CI
-/// failing · no main · 3 hidden`: the `f` filters (`filters off · F` while
-/// `F` has them off), then the base `hide*` ones, which always apply; `None`
-/// while only the defaults apply.
+/// The dashboard's filters in a few words, e.g. `filters on: "auth" ·
+/// waiting · CI failing · no main · 3 hidden`: the `f` filters (`filters
+/// off` while `F` has them off), then the base `hide*` ones, which always
+/// apply; `None` while only the defaults apply.
 fn worktree_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> Option<String> {
     let mut parts = Vec::new();
     if s.worktree_filters_enabled {
@@ -2182,8 +2317,12 @@ fn worktree_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> Op
             "clean" => parts.push("clean".into()),
             _ => {}
         }
+        // Say so, ahead of what they pick.
+        if let Some(first) = parts.first_mut() {
+            *first = format!("filters on: {first}");
+        }
     } else {
-        parts.push("filters off · F".into());
+        parts.push("filters off".into());
     }
     for (on, label) in [
         (s.hide_merged_closed_prs, "no merged/closed"),
@@ -3076,41 +3215,36 @@ fn git_spans<'a>(v: &WorktreeView, theme: &Theme, width: usize) -> Vec<Span<'a>>
 
 
 
-/// Every key-bar command, grouped (`None` = a `│` separator). Lower
-/// `priority` survives narrower widths; what doesn't fit is still in the help overlay.
+/// The dashboard's key-bar commands, grouped (`None` = a `│` separator).
+/// Lower priority survives narrower widths; what doesn't fit is still in the
+/// help overlay. Each lands in its key's layer (`actions::Layer`), so `F`,
+/// `V`, `A` and `G` only show while Shift is held, `ctrl-v` with Ctrl; where
+/// held keys aren't reported they join the plain bar, last to fit.
 const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::Open), 0),
     (None, 0),
     (Some(Command::OpenPr), 0),
     (Some(Command::OpenLinear), 0),
-    (Some(Command::OpenProject), 2),
+    (Some(Command::OpenProject), 3),
     (None, 0),
     (Some(Command::NewWorktree), 1),
     (Some(Command::Delete), 1),
-    (Some(Command::ReviewRequests), 1),
-    (Some(Command::ReviewSplit), 3),
+    (Some(Command::Filter), 2),
+    (Some(Command::ToggleFilters), 3),
     (Some(Command::AddRepo), 3),
     (None, 0),
-    (Some(Command::ToggleLog), 3),
+    (Some(Command::ReviewRequests), 1),
+    (Some(Command::ReviewSplit), 3),
+    (Some(Command::ReviewWindow), 3),
     (Some(Command::Settings), 1),
-    (Some(Command::Filter), 3),
+    (Some(Command::ToggleLog), 3),
     (Some(Command::Refresh), 1),
-    (Some(Command::Help), 0),
-    (Some(Command::Quit), 0),
+    (Some(Command::Bottom), 3),
 ];
-
-/// What a click on a key-bar hint does.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BarHit {
-    /// Press this key (jobs-pane hints, `⇥`).
-    Key(Key),
-    /// Run this dashboard command.
-    Command(Command),
-}
 
 /// A key-bar entry: a key hint or a `│` separator.
 enum KeyItem {
-    Key { key: String, label: &'static str, hit: Option<BarHit>, available: bool },
+    Key { key: String, label: std::borrow::Cow<'static, str>, hit: Option<BarHit>, available: bool },
     Sep,
 }
 
@@ -3123,126 +3257,132 @@ impl KeyItem {
     }
 }
 
+/// The dashboard's actions.
+fn dashboard_actions(app: &App) -> ActionBar {
+    let mut bar = ActionBar::new();
+    if app.reviews.is_some() {
+        bar.key(Key::Tab, "reviews", 0);
+        bar.sep();
+    } else if app.jobs.visible() {
+        bar.key(Key::Tab, if app.jobs.waiting() { "answer" } else { "jobs" }, 0);
+        bar.sep();
+    }
+    for &(cmd, prio) in KEYS {
+        match cmd {
+            None => bar.sep(),
+            Some(Command::ToggleFilters) => {
+                let label = if app.settings.worktree_filters_enabled { "filters off" } else { "filters on" };
+                bar.command(&app.keymap, Command::ToggleFilters, label, prio);
+            }
+            Some(Command::ReviewSplit) => bar.command(&app.keymap, Command::ReviewSplit, "reviews beside list", prio),
+            Some(Command::ReviewWindow) => bar.command(&app.keymap, Command::ReviewWindow, "reviews in new window", prio),
+            Some(Command::Bottom) => bar.command(&app.keymap, Command::Bottom, "bottom", prio),
+            Some(c) => {
+                if let Some(label) = c.bar_label() {
+                    bar.command(&app.keymap, c, label, prio);
+                }
+            }
+        }
+    }
+    bar.tail_command(&app.keymap, Command::Help, "help", 0);
+    bar.tail_command(&app.keymap, Command::Quit, "quit", 0);
+    bar
+}
+
+/// The review page's actions: the page's own meaning for each key, pressed
+/// as keys (`App::review_key`).
+fn review_actions(app: &App) -> ActionBar {
+    let mut bar = ActionBar::pressing_keys();
+    let km = &app.keymap;
+    let split = app.reviews.as_ref().is_some_and(|p| p.split);
+    // ⏎ opens a pulled PR's worktree, pulls one that isn't, and opens a fork's PR.
+    let enter = match app.selected_review() {
+        _ if app.review_worktree().is_some() => "open",
+        Some(r) if !r.is_cross_repository => "pull",
+        _ => "open PR",
+    };
+    bar.key(Key::Enter, enter, 0);
+    if enter != "open PR" {
+        bar.command(km, Command::OpenPr, "PR", 1);
+    }
+    bar.command(km, Command::OpenLinear, "ticket", 0);
+    bar.command(km, Command::Delete, "remove", 2);
+    bar.command(km, Command::Filter, "filter", 2);
+    // What a held key adds: pull + run the review script, the page beside
+    // the list or in a new window.
+    bar.command(km, Command::PullAndRunScript, "pull + run script", 3);
+    bar.key(Key::CtrlEnter, "pull + run script", 0);
+    if !app.reviews_only() {
+        bar.command(km, Command::ReviewSplit, if split { "close" } else { "beside list" }, 3);
+        bar.command(km, Command::ReviewWindow, "new window", 3);
+    }
+    bar.sep();
+    bar.command(km, Command::Refresh, "refresh", 1);
+    if split {
+        bar.key(Key::Tab, if app.jobs.visible() { "jobs" } else { "list" }, 0);
+    } else if app.jobs.waiting() {
+        // The pane only shows here while a job waits for an answer.
+        bar.key(Key::Tab, "answer", 0);
+    }
+    bar.tail_command(km, Command::Help, "help", 2);
+    let esc = match () {
+        _ if split => "close",
+        _ if app.reviews_only() => "quit",
+        _ => "back",
+    };
+    bar.tail_key(Key::Esc, esc, 0);
+    bar
+}
+
+/// The jobs pane's actions, while it has the keys.
+fn jobs_actions(app: &App) -> ActionBar {
+    // Tab moves between the list (or the full review page) and the pane.
+    let back = if app.reviews.as_ref().is_some_and(|p| !p.split) { "back to reviews" } else { "back to list" };
+    let mut bar = ActionBar::new();
+    bar.key(Key::Tab, back, 0);
+    bar.note("j/k", "select job", 1);
+    bar.key(Key::Char('x'), "dismiss", 1);
+    bar.tail_key(Key::Char('q'), "quit", 0);
+    bar
+}
+
 /// The hints that fit in `width` (lower-priority ones drop first), after a
-/// one-cell left margin. Shared by drawing and click hit-testing. Keys come
-/// from the keymap; an unbound command is left out.
+/// one-cell left margin, for whichever of the list, the review page and the
+/// jobs pane has the keys, and whatever modifier is held. Shared by drawing
+/// and click hit-testing.
 fn keybar_items(app: &App, width: usize) -> Vec<KeyItem> {
-    // (key, label, click, priority); an empty key is a separator.
-    let mut keys: Vec<(String, &'static str, Option<BarHit>, u8)> = Vec::new();
-    let raw = |k: &str, label, hit: Option<Key>, prio| (k.to_string(), label, hit.map(BarHit::Key), prio);
-    if app.review_focused() {
-        // The review page takes the dashboard's own keys for these.
-        let cmd = |c: Command, label, prio| {
-            app.keymap.key(c).map(|k| (crate::keymap::display(k), label, Some(BarHit::Key(k)), prio))
-        };
-        // ⏎ opens a pulled PR's worktree, pulls one that isn't, and opens a fork's PR.
-        let enter = match app.selected_review() {
-            _ if app.review_worktree().is_some() => "open",
-            Some(r) if !r.is_cross_repository => "pull",
-            _ => "open PR",
-        };
-        // Holding Shift or Ctrl shows what the held key adds (pull + run
-        // the review script, a new window) in place of ⏎'s plain meaning.
-        if app.held.ctrl {
-            keys.push(raw("ctrl-⏎", "pull + run script", Some(Key::CtrlEnter), 0));
-            keys.extend(cmd(Command::ReviewWindow, "new window", 0).filter(|_| !app.reviews_only()));
-        } else if app.held.shift {
-            keys.extend(cmd(Command::PullAndRunScript, "pull + run script", 0));
-            keys.extend(cmd(Command::ReviewSplit, if app.reviews.as_ref().is_some_and(|p| p.split) { "close" } else { "beside list" }, 0).filter(|_| !app.reviews_only()));
-        } else {
-            keys.push(raw("⏎", enter, Some(Key::Enter), 0));
-        }
-        keys.extend(cmd(Command::OpenPr, "PR", 1).filter(|_| enter != "open PR"));
-        keys.extend(cmd(Command::OpenLinear, "ticket", 0));
-        // Where held keys aren't reported, `T` has to be on the bar.
-        if !app.modifiers_reported && !app.held.shift && !app.held.ctrl {
-            keys.extend(cmd(Command::PullAndRunScript, "pull + script", 3));
-        }
-        keys.extend(cmd(Command::Delete, "remove", 2));
-        keys.extend(cmd(Command::Filter, "filter", 2));
-        keys.push(raw("", "", None, 0));
-        keys.extend(cmd(Command::Refresh, "refresh", 1));
-        keys.extend(cmd(Command::Help, "help", 2));
-        if app.reviews.as_ref().is_some_and(|p| p.split) {
-            keys.push(raw("⇥", if app.jobs.visible() { "jobs" } else { "list" }, Some(Key::Tab), 0));
-            keys.push(raw("esc", "close", Some(Key::Esc), 0));
-        } else {
-            // The pane only shows here while a job waits for an answer.
-            if app.jobs.waiting() {
-                keys.push(raw("⇥", "answer", Some(Key::Tab), 0));
-            }
-            keys.push(raw("esc", if app.reviews_only() { "quit" } else { "back" }, Some(Key::Esc), 0));
-        }
-        if app.modifiers_reported && !app.held.shift && !app.held.ctrl {
-            keys.push(raw("⇧/ctrl", "more", None, 3));
-        }
+    let bar = if app.review_focused() {
+        review_actions(app)
     } else if app.jobs.focused {
-        // While jobs are showing, Tab moves between the list (or the full
-        // review page) and the pane.
-        let back = if app.reviews.as_ref().is_some_and(|p| !p.split) { "back to reviews" } else { "back to list" };
-        keys.extend([
-            raw("⇥", back, Some(Key::Tab), 0),
-            raw("j/k", "select job", None, 1),
-            raw("x", "dismiss", Some(Key::Char('x')), 1),
-            raw("", "", None, 0),
-            raw("q", "quit", Some(Key::Char('q')), 0),
-        ]);
+        jobs_actions(app)
     } else {
-        if app.reviews.is_some() {
-            keys.extend([raw("⇥", "reviews", Some(Key::Tab), 0), raw("", "", None, 0)]);
-        } else if app.jobs.visible() {
-            keys.extend([raw("⇥", if app.jobs.waiting() { "answer" } else { "jobs" }, Some(Key::Tab), 0), raw("", "", None, 0)]);
-        }
-        // Holding Shift or Ctrl (kitty keyboard protocol only) names what
-        // `v` does with it, in place of the plain hint.
-        let held_review = if app.held.ctrl {
-            Some((Command::ReviewWindow, "reviews in new window"))
-        } else if app.held.shift {
-            Some((Command::ReviewSplit, "reviews beside list"))
-        } else {
-            None
-        }
-        .and_then(|(c, label)| app.keymap.key(c).map(|k| (c, k, label)));
-        for &(cmd, prio) in KEYS {
-            match cmd {
-                None => keys.push(raw("", "", None, prio)),
-                Some(Command::ReviewRequests) if let Some((c, k, label)) = held_review => {
-                    keys.push((crate::keymap::display(k), label, Some(BarHit::Command(c)), prio));
-                }
-                // Shown by holding Shift where that's reported.
-                Some(Command::ReviewSplit) if held_review.is_some() || app.modifiers_reported => {}
-                Some(c) => {
-                    if let (Some(k), Some(label)) = (app.keymap.key(c), c.bar_label()) {
-                        keys.push((crate::keymap::display(k), label, Some(BarHit::Command(c)), prio));
-                    }
-                }
-            }
-        }
-    }
-    if !app.review_focused() && !app.jobs.focused && app.modifiers_reported && !app.held.shift && !app.held.ctrl {
-        keys.push(raw("⇧/ctrl", "more", None, 3));
-    }
+        dashboard_actions(app)
+    };
+    let entries = bar.visible(app.held, app.modifiers_reported);
     let pick = |max_prio: u8| -> Vec<KeyItem> {
         let mut items = Vec::new();
         let mut last_sep = true;
-        for (k, label, hit, prio) in &keys {
-            if *prio > max_prio {
-                continue;
-            }
-            if k.is_empty() {
+        for entry in &entries {
+            let Entry::Hint(h) = entry else {
                 if !last_sep {
                     items.push(KeyItem::Sep);
                     last_sep = true;
                 }
                 continue;
+            };
+            if h.prio > max_prio {
+                continue;
             }
-            let available = match hit {
-                Some(BarHit::Command(c)) => app.key_available(*c),
-                Some(BarHit::Key(k)) if app.review_focused() => app.review_key_available(*k),
+            let available = match h.hit {
+                Some(BarHit::Command(c)) => app.key_available(c),
+                Some(BarHit::Key(k)) if app.review_focused() => app.review_key_available(k),
                 _ => true,
             };
-            items.push(KeyItem::Key { key: k.clone(), label, hit: *hit, available });
+            items.push(KeyItem::Key { key: h.key.clone(), label: h.label.clone(), hit: h.hit, available });
             last_sep = false;
+        }
+        if last_sep {
+            items.pop_if(|i| matches!(i, KeyItem::Sep));
         }
         items
     };
@@ -3371,7 +3511,7 @@ fn draw_review_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::ke
         (&[C::OpenLinear], ""),
         (&[C::PullToTmpSpace], ""),
         (&[C::PullAndRunScript], " / ctrl-⏎"),
-        (&[C::Delete], ""),
+        (&[C::Delete], " / del"),
         (&[C::Filter], ""),
         (&[C::Refresh], ""),
         (&[C::Settings], ""),
@@ -3418,7 +3558,9 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
-        (&[C::NewWorktree, C::Delete], " / tab", "new / delete worktree / focus jobs pane"),
+        (&[C::NewWorktree], "", "new worktree"),
+        (&[C::Delete], " / del", "delete worktree (asks first)"),
+        (&[], "tab", "focus the jobs pane"),
         (&[C::ReviewRequests, C::ReviewSplit, C::ReviewWindow], "", "PRs to review: page / beside the list / new window"),
         (&[C::PullToTmpSpace, C::PullAndRunScript], " / ctrl-⏎", "review page: pull into Reviewing / + run script"),
         (&[C::AddRepo], "", "add repository"),
@@ -3447,6 +3589,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         .iter()
         .map(|(k, d)| Line::from(vec![Span::styled(format!("{k:>16}  "), theme.bold(theme.accent)), Span::raw(*d)]))
         .collect();
+    lines.push(Line::from(vec![
+        Span::styled(format!("{:>16}  ", "hold ⇧ / ctrl"), theme.bold(theme.accent)),
+        Span::raw("the key bar swaps to the keys they add (where supported)"),
+    ]));
     lines.push(Line::raw(""));
     lines.push(Line::from(legend));
     lines.push(pr_legend(theme));
@@ -3692,7 +3838,7 @@ mod tests {
         app.settings.worktree_filter_status = "waiting".into();
         app.snapshot.hidden_worktrees = 3;
         let screen = render(&app, 120, 16);
-        assert!(screen.contains(r#" "auth" · waiting · no main · 3 hidden "#), "{screen}");
+        assert!(screen.contains(r#" filters on: "auth" · waiting · no main · 3 hidden "#), "{screen}");
         // A click on the summary opens the box.
         let at = find(&app, 120, 16, "3 hidden");
         click(&mut app, 120, 16, at, false);
@@ -3701,7 +3847,7 @@ mod tests {
         app.settings_editor = None;
         // Off: the summary says so; the base filters still show.
         app.settings.worktree_filters_enabled = false;
-        assert!(render(&app, 120, 16).contains(" filters off · F · no main · 3 hidden "));
+        assert!(render(&app, 120, 16).contains(" filters off · no main · 3 hidden "));
         // Only the defaults: nothing on the border.
         app.settings = am_core::settings::Settings { worktree_sort: vec![], ..Default::default() };
         assert!(!render(&app, 120, 16).contains("hidden"));
@@ -3714,7 +3860,7 @@ mod tests {
         let mut app = fixture();
         app.settings.worktree_filter_status = "waiting,done".into();
         app.snapshot.hidden_worktrees = 2;
-        assert!(render(&app, 120, 16).contains(" waiting/done · no main · 2 hidden "));
+        assert!(render(&app, 120, 16).contains(" filters on: waiting/done · no main · 2 hidden "));
         let mut ed = crate::settings_ui::SettingsEditor::only(&app.settings, crate::settings_ui::WORKTREE_FILTERS);
         ed.cursor = crate::settings_ui::FIELDS.iter().position(|f| f.key == "worktreeFilterStatus").unwrap();
         assert_eq!(ed.display(&crate::settings_ui::FIELDS[ed.cursor]), "waiting, done");
@@ -3735,6 +3881,7 @@ mod tests {
             latest: latest.into(),
             current: "2.1.1".into(),
             hint: am_core::update_check::InstallMethod::Homebrew.upgrade_hint(),
+            method: am_core::update_check::InstallMethod::Homebrew,
         }
     }
 
@@ -3788,6 +3935,70 @@ mod tests {
         let mut app = fixture();
         app.update_available = Some(update("2.2.0"));
         insta::assert_snapshot!(render(&app, 120, 16));
+    }
+
+    #[test]
+    fn clicking_the_update_notice_asks_then_runs_the_upgrade_as_a_job() {
+        use am_core::update_check::InstallMethod;
+        let mut app = fixture();
+        app.update_available = Some(update("2.2.0"));
+        let at = find(&app, 120, 16, "⬆ v2.2.0 available");
+        assert_eq!(target_at(&app, 120, 16, at), Some(Target::Update));
+        assert_eq!(click(&mut app, 120, 16, at, false), crate::app::Action::None);
+        assert!(matches!(&app.modal, Some(crate::modals::Modal::ConfirmUpdate(u)) if u.latest == "2.2.0"));
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("Update am v2.1.1 → v2.2.0?"), "{screen}");
+        assert!(screen.contains("Runs: brew update && brew upgrade agent-monitor"), "{screen}");
+        insta::assert_snapshot!(screen);
+        let crate::app::Action::Update(job, InstallMethod::Homebrew) = app.on_key(Key::Char('y')) else { panic!("expected the upgrade") };
+        assert!(app.modal.is_none());
+        assert_eq!(app.jobs.updating(), Some("2.2.0"));
+        assert!(render(&app, 120, 16).contains("⬆ updating to v2.2.0…"));
+        // A second click while it runs doesn't start another.
+        let at = find(&app, 120, 16, "⬆ updating to v2.2.0…");
+        assert_eq!(click(&mut app, 120, 16, at, false), crate::app::Action::None);
+        assert!(app.modal.is_none());
+        assert_eq!(app.notice.as_deref(), Some("Already updating to v2.2.0"));
+        assert_eq!(app.jobs.get(job).map(|j| j.label.as_str()), Some("Update am to v2.2.0"));
+    }
+
+    #[test]
+    fn the_update_notice_says_how_to_update_where_am_cannot() {
+        use am_core::update_check::{InstallMethod, Update};
+        let mut app = fixture();
+        app.update_available = Some(Update { method: InstallMethod::Cargo, hint: InstallMethod::Cargo.upgrade_hint(), ..update("2.2.0") });
+        let at = find(&app, 120, 16, "⬆ v2.2.0 available");
+        click(&mut app, 120, 16, at, false);
+        assert!(app.modal.is_none());
+        let popup = app.popup.clone().unwrap_or_default();
+        assert!(popup.contains("am v2.2.0 is available") && popup.contains("cargo install --path"), "{popup}");
+    }
+
+    #[test]
+    fn restart_after_an_update_waits_for_other_jobs() {
+        let mut app = fixture();
+        app.modal = Some(crate::modals::Modal::Restart { latest: "2.2.0".into() });
+        insta::assert_snapshot!(render(&app, 120, 16));
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::Restart);
+
+        app.modal = Some(crate::modals::Modal::Restart { latest: "2.2.0".into() });
+        assert_eq!(app.on_key(Key::Char('n')), crate::app::Action::None);
+        assert_eq!(app.notice.as_deref(), Some("Restart am to use v2.2.0"));
+
+        app.jobs.start_delete("w2".into(), "feature/x");
+        app.modal = Some(crate::modals::Modal::Restart { latest: "2.2.0".into() });
+        assert_eq!(app.on_key(Key::Char('y')), crate::app::Action::None, "a restart would drop the delete");
+        assert_eq!(app.notice.as_deref(), Some("Restart am to use v2.2.0 once the job is done"));
+    }
+
+    #[test]
+    fn the_review_only_page_update_notice_is_clickable() {
+        let mut app = by_repo();
+        app.settings.app_mode = "reviews".into();
+        app.update_available = Some(update("2.2.0"));
+        app.enter_reviews_mode();
+        let at = find(&app, 120, 16, "⬆ v2.2.0 available");
+        assert_eq!(target_at(&app, 120, 16, at), Some(Target::Update));
     }
 
     #[test]
@@ -3888,7 +4099,7 @@ mod tests {
         let screen = render(&app, 60, 12);
         insta::assert_snapshot!("compact_dashboard", screen);
         let first = screen.lines().next().unwrap();
-        assert!(first.starts_with("─Worktrees") && first.contains(" of "), "{first}");
+        assert!(first.starts_with("─am v0.0.0 · Worktrees") && first.contains(" of "), "{first}");
         // No side or bottom border (the key bar's `│` separators aside).
         let body = |s: &str| s.lines().rev().skip(1).map(str::to_string).collect::<Vec<_>>().join("\n");
         assert!(!body(&screen).contains('│') && !screen.contains('╰'), "{screen}");
@@ -4091,9 +4302,12 @@ mod tests {
     #[test]
     fn key_bar_and_help_show_rebound_keys() {
         let mut app = rebound(r#"{"newWorktree":"N","filter":"none"}"#);
+        // `N` needs Shift, so it shows with Shift held.
+        app.modifiers_reported = true;
+        app.held.shift = true;
         let screen = render(&app, 120, 16);
         let bar = screen.lines().last().unwrap();
-        assert!(bar.contains("N new") && !bar.contains("filter"), "{bar}");
+        assert!(bar.contains("N new") && !bar.contains("f filter"), "{bar}");
         // Clicking the hint runs the command.
         let hint = find(&app, 120, 16, "N new");
         click(&mut app, 120, 16, hint, false);
@@ -4101,7 +4315,7 @@ mod tests {
         app.modal = None;
         app.on_key(Key::Char('h'));
         let help = render(&app, 100, 24);
-        assert!(help.contains("N / d / tab"), "{help}");
+        assert!(help.contains("N  new worktree") && help.contains("d / del  delete worktree"), "{help}");
         assert!(help.contains("— / F  filter worktrees"), "{help}");
     }
 
@@ -4308,7 +4522,7 @@ mod tests {
         let mut app = with_reviews();
         let screen = render(&app, 120, 10);
         let top = screen.lines().next().unwrap();
-        assert!(top.starts_with("╭─Worktrees ─") && top.ends_with(" 3 to review ╮"), "{screen}");
+        assert!(top.starts_with("╭─am v0.0.0 · Worktrees ─") && top.ends_with(" 3 to review ╮"), "{screen}");
         // Beside an update notice: the notice, then the badge in the corner.
         let mut both = with_reviews();
         both.update_available = Some(update("2.2.0"));
@@ -4671,7 +4885,7 @@ mod tests {
         assert!(app.review_key_available(Key::Char('T')));
         app.notice = None;
         let bar = render(&app, 160, 10).lines().last().unwrap().to_string();
-        assert!(bar.contains("T pull + script"), "{bar}");
+        assert!(bar.contains("T pull + run script"), "{bar}");
         let Action::Create(job, repo, req) = app.on_key(Key::Char('T')) else { panic!("expected a create") };
         assert_eq!((repo.id.as_str(), req.branch.as_str(), req.tmp_space), (ID, "feature/902", true));
         let env = app.jobs.get(job).unwrap().review_script().unwrap().to_vec();
@@ -4867,7 +5081,8 @@ mod tests {
         app.enter_reviews_mode();
         assert!(std::mem::take(&mut app.review_fetch_due), "opening asks for a fetch");
         let screen = render(&app, 120, 14);
-        assert!(screen.contains("─Review requests") && !screen.contains("─Worktrees"), "{screen}");
+        // Review-only, the page names the tool.
+        assert!(screen.contains("─am v0.0.0 · Review requests") && !screen.contains("Worktrees"), "{screen}");
         // No ─Worktrees border to carry it: the update notice is on the page's.
         assert!(screen.lines().next().unwrap().contains("⬆ v2.2.0 available"), "{screen}");
         assert!(screen.lines().last().unwrap().contains("esc quit"));
@@ -4876,7 +5091,7 @@ mod tests {
         app.on_key(Key::Char('h'));
         let help = render(&app, 120, 30);
         assert!(help.contains("pull into Reviewing") && help.contains("quit"), "{help}");
-        assert!(!help.contains("new / delete worktree") && !help.contains("✦ gemini"), "{help}");
+        assert!(!help.contains("delete worktree (asks first)") && !help.contains("✦ gemini"), "{help}");
         insta::assert_snapshot!("review_only_mode_help", help);
         app.on_key(Key::Esc);
         // Settings: the page's settings only, still under section headers.
@@ -4915,7 +5130,7 @@ mod tests {
         assert!(!app.review_fetch_due, "nothing to fetch");
         let screen = render(&app, 120, 10);
         assert!(screen.contains("Review requests are off") && screen.contains("Run setup again"), "{screen}");
-        assert!(!screen.contains("─Worktrees"), "never the dashboard: {screen}");
+        assert!(!screen.contains("Worktrees"), "never the dashboard: {screen}");
     }
 
     #[test]
@@ -4977,7 +5192,51 @@ mod tests {
         // Without the protocol, T stays on the plain bar.
         let mut app = by_repo();
         app.on_key(Key::Char('v'));
-        assert!(bar(&app, 200).contains("T pull + script"));
+        assert!(bar(&app, 200).contains("T pull + run script"));
+    }
+
+    #[test]
+    fn shift_and_ctrl_swap_the_dashboard_bar() {
+        let bar = |app: &App| render(app, 200, 10).lines().last().unwrap().to_string();
+        let mut app = by_repo();
+        app.modifiers_reported = true;
+        let plain = bar(&app);
+        for gone in ["F filters", "A add repo", "V reviews", "ctrl-v"] {
+            assert!(!plain.contains(gone), "{gone}: {plain}");
+        }
+        assert!(plain.contains("f filter") && plain.contains("⇧/ctrl more"), "{plain}");
+        app.held.shift = true;
+        let shifted = bar(&app);
+        assert!(shifted.contains("F filters off") && shifted.contains("A add repo") && !shifted.contains("n new"), "{shifted}");
+        assert!(shifted.contains("h help") && shifted.contains("q quit"), "{shifted}");
+        app.settings.worktree_filters_enabled = false;
+        assert!(bar(&app).contains("F filters on"));
+        app.held = crate::app::Held { ctrl: true, ..Default::default() };
+        assert!(bar(&app).contains("ctrl-v reviews in new window"));
+        // Without the protocol everything shares the plain bar.
+        app.modifiers_reported = false;
+        app.held = crate::app::Held::default();
+        let all = render(&app, 260, 10).lines().last().unwrap().to_string();
+        assert!(all.contains("n new") && all.contains("F filters on") && !all.contains("more"), "{all}");
+    }
+
+    #[test]
+    fn delete_and_backspace_delete_like_d() {
+        for key in [Key::Delete, Key::Backspace] {
+            let mut app = by_repo();
+            app.on_key(Key::Char('j'));
+            app.on_key(key);
+            assert!(matches!(app.modal, Some(crate::modals::Modal::Delete(_))), "{key:?}");
+        }
+    }
+
+    #[test]
+    fn page_title_names_the_tool_and_shortens() {
+        assert_eq!(page_title_text("Worktrees", 40), "am v0.0.0 · Worktrees");
+        assert_eq!(page_title_text("Worktrees", 18), "am · Worktrees");
+        assert_eq!(page_title_text("Worktrees", 10), "Worktrees");
+        let app = by_repo();
+        assert!(render(&app, 120, 10).starts_with("╭─am v0.0.0 · Worktrees ─"));
     }
 
     #[test]
@@ -5735,11 +5994,36 @@ mod tests {
             ctx_choice: crate::setup::CONTEXT_CUSTOM,
             ctx_input: "128k".into(),
             ctx_error: None,
+            context_tokens: None,
+            telemetry: false,
             cancellable: false,
         });
         let out = render(&app, 100, 20);
         assert!(out.contains("✓ Reviews › Context"), "breadcrumbs cut off:\n{out}");
         insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn setup_privacy_step_says_what_is_sent_and_fits_every_breadcrumb() {
+        let mut app = fixture();
+        let mut setup = crate::setup::Setup::new(vec![], &app.settings);
+        setup.step = crate::setup::Step::Privacy;
+        setup.reviews_mode = false;
+        app.setup = Some(setup);
+        let out = render(&app, 100, 22);
+        assert!(out.contains("✓ Context › Privacy"), "breadcrumbs cut off:\n{out}");
+        assert!(out.contains("● Don't send anything"), "off unless picked:\n{out}");
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn telemetry_prompt_asks_once_and_saves_the_answer() {
+        let mut app = fixture();
+        app.modal = Some(crate::modals::Modal::Telemetry);
+        insta::assert_snapshot!(render(&app, 100, 24));
+        // A stray key doesn't decide.
+        app.on_key(Key::Char('j'));
+        assert!(matches!(app.modal, Some(crate::modals::Modal::Telemetry)));
     }
 
     #[test]
@@ -5765,6 +6049,8 @@ mod tests {
             ctx_choice: 0,
             ctx_input: String::new(),
             ctx_error: None,
+            context_tokens: None,
+            telemetry: false,
             cancellable: false,
         });
         let out = render(&app, 100, 22);

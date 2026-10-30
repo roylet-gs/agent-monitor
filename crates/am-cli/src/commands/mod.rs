@@ -12,8 +12,10 @@ pub mod repo;
 pub mod script;
 pub mod settings;
 pub mod status;
+pub mod telemetry;
 pub mod theme;
 pub mod tui;
+pub mod update;
 pub mod worktree;
 
 use std::path::{Path, PathBuf};

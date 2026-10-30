@@ -272,6 +272,7 @@ impl Worker {
                 Err(RecvTimeoutError::Timeout) => {}
             }
             let started = Instant::now();
+            let _span = am_core::tracing::info_span!(target: "am", "collector.cycle", force).entered();
             match self.cycle(force) {
                 Ok(true) => self.perf.record("collector.cycle", started.elapsed()),
                 Ok(false) => {}
@@ -853,6 +854,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         }
         if gh_due {
             let started = Instant::now();
+            let _span = am_core::tracing::info_span!(target: "am", "integrations.github", force).entered();
             let outcome = ints.refresh_github(&conn, &groups, force);
             info!("integrations", "github refresh: {outcome:?} in {:?}", started.elapsed());
             perf.record("integrations.github", started.elapsed());
@@ -860,6 +862,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         }
         if linear_due {
             let started = Instant::now();
+            let _span = am_core::tracing::info_span!(target: "am", "integrations.linear", force).entered();
             let outcome = ints.refresh_linear(&conn, &settings.linear_api_key, &groups, force);
             info!("integrations", "linear refresh: {outcome:?} in {:?}", started.elapsed());
             perf.record("integrations.linear", started.elapsed());
@@ -867,6 +870,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         }
         if reviews_due {
             let started = Instant::now();
+            let _span = am_core::tracing::info_span!(target: "am", "integrations.reviews", force).entered();
             let review_repos: Vec<ReviewRepo> = repos
                 .iter()
                 .map(|r| {

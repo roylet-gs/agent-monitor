@@ -9,12 +9,15 @@ test.beforeEach(async () => {
   await resetMock();
 });
 
-/** Rows inside the `─Worktrees` pane, between its top and bottom borders. */
+/**
+ * Rows inside the `· Worktrees` pane, between its top and bottom borders, with
+ * ages under a minute (`13s`) masked: they tick between two looks at the same row.
+ */
 async function paneRows(tui: RustTui): Promise<string[]> {
   const lines = await tui.lines();
-  const top = lines.findIndex((l) => l.includes("─Worktrees"));
+  const top = lines.findIndex((l) => l.includes("· Worktrees"));
   const bottom = lines.findIndex((l, i) => i > top && /^[└╰]/.test(l));
-  return lines.slice(top + 1, bottom);
+  return lines.slice(top + 1, bottom).map((l) => l.replace(/\b\d{1,2}s\b/g, "Ns"));
 }
 
 /**

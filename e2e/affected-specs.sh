@@ -32,7 +32,7 @@ done
 specs_for() {
   case $1 in
     # --- not covered by E2E (docs, CI, packaging, Rust-only tests) ---------
-    *.md | docs/* | .github/* | npm/* | Formula/* | .claude/* | prompt.md | \
+    *.md | docs/* | .github/* | npm/* | Formula/* | .claude/* | prompt.md | telemetry/* | \
     .gitignore | .mcp.json | .npmrc | \
     crates/*/tests/* | crates/*/examples/* | crates/am-tui/src/snapshots/* | \
     crates/am-tui/src/perf_tests.rs)
@@ -49,19 +49,20 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 28 32 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 34 ;;
-    crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 33 34 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 34 35 ;;
+    crates/am-tui/src/usage_reports.rs) echo 34 ;; # heartbeat, feature counts, the sending thread
+    crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 33 35 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/reviews_ui.rs | crates/am-tui/src/review_groups_ui.rs) echo 28 31 32 ;;    # the review-requests page and its groups
     crates/am-tui/src/plugins_ui.rs) echo 16 ;;   # Settings → Harness plugins
     crates/am-tui/src/repos_ui.rs | crates/am-tui/src/folder_browser.rs) echo 23 24 28 ;; # Settings → Repositories, add-repo browser
     crates/am-tui/src/nav.rs) echo 01 03 23 28 29 ;; # list movement: dashboard, Settings, folder browser, review page, scrolling
     crates/am-tui/src/theme.rs | crates/am-tui/src/theme_builder.rs) echo 12 ;;
-    crates/am-tui/src/modals.rs) echo 09 10 22 23 27 ;;
-    crates/am-tui/src/jobs.rs) echo 09 10 22 27 28 31 ;;
+    crates/am-tui/src/modals.rs) echo 09 10 13 22 23 27 34 ;;
+    crates/am-tui/src/jobs.rs) echo 09 10 13 22 27 28 31 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 28 ;;
     crates/am-tui/src/data.rs | crates/am-tui/src/gitwork.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 32 33 ;;
     crates/am-tui/src/cmux_sync.rs) echo - ;; # only runs inside cmux; unit tests cover it
-    crates/am-tui/src/launcher.rs) echo 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window
+    crates/am-tui/src/launcher.rs) echo 13 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window, 13 the update job
 
     # --- am-core ----------------------------------------------------------
     crates/am-core/src/lib.rs | crates/am-core/src/db.rs | crates/am-core/src/settings.rs | \
@@ -70,6 +71,9 @@ specs_for() {
     crates/am-core/src/gitinfo.rs) echo 01 ;;
     crates/am-core/src/timefmt.rs) echo 01 17 ;;
     crates/am-core/src/log.rs | crates/am-core/src/perf.rs) echo 01 ;; # `w` log pane; perf writes `[perf]` log lines
+    # Usage reports and the OpenTelemetry export: every binary starts them, so
+    # 01 for "it still runs"; 34 the prompt and setting (sending: cli.rs).
+    crates/am-core/src/telemetry/*) echo 01 34 ;;
     crates/am-core/src/status.rs) echo 07 08 16 18 24 ;;
     # Harness plugins: hook normalisation seeds every agent row; the installer
     # runs in the wizard; the plugin page and Gemini row are spec 16.
@@ -80,7 +84,7 @@ specs_for() {
     crates/am-core/src/mcp_installer.rs) echo - ;; # am mcp install; cli.rs covers it
     crates/am-core/src/context.rs) echo 14 ;;      # context-window bar
     crates/am-core/src/usage.rs) echo 17 ;;        # today's token total
-    crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice
+    crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice, clicking it to update
     crates/am-core/src/themes.rs | crates/am-core/src/themes/*) echo 12 ;;
     crates/am-core/src/integrations/github.rs) echo 04 28 ;;
     crates/am-core/src/integrations/reviews.rs | crates/am-core/src/review_groups.rs) echo 28 ;;

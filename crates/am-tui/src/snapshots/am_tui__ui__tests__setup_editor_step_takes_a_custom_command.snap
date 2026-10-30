@@ -2,25 +2,25 @@
 source: crates/am-tui/src/ui.rs
 expression: out
 ---
-╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
-│ ◐ fix/o╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮░░ 185k │
-│        │                                                                                │        │
-│gridsigh│  ✓ Mode › Editor › Hooks › Repos › Integrations › Reviews › Context            │────────│
-│ · main │                                                                                │        │
-│        │ Where should Enter open a worktree?                                            │        │
-│        │                                                                                │        │
-│        │   ○ VS Code                                                                    │        │
-│        │   ○ Cursor                                                                     │        │
-│        │   ○ Zed                                                                        │        │
-│        │   ○ Windsurf                                                                   │        │
-│        │   ○ Terminal                                                                   │        │
-│        │   ○ cmux                                                                       │        │
-│        │   ● Custom command: subl -n▏                                                   │        │
-│        │     Runs with the worktree path appended, or in place of {path}                │        │
-│        │                                                                                │        │
-│        ╰─────────────────────────────────────────────────── ↑↓ choose  ⏎ next  esc back ╯        │
+│ ╭─Welcome to agent-monitor ────────────────────────────────────────────────────────────────────╮ │
+│ │                                                                                              │ │
+│g│  ✓ Mode › Editor › Hooks › Repos › Integrations › Reviews › Context › Privacy                │─│
+│ │                                                                                              │ │
+│ │ Where should Enter open a worktree?                                                          │ │
+│ │                                                                                              │ │
+│ │   ○ VS Code                                                                                  │ │
+│ │   ○ Cursor                                                                                   │ │
+│ │   ○ Zed                                                                                      │ │
+│ │   ○ Windsurf                                                                                 │ │
+│ │   ○ Terminal                                                                                 │ │
+│ │   ○ cmux                                                                                     │ │
+│ │   ● Custom command: subl -n▏                                                                 │ │
+│ │     Runs with the worktree path appended, or in place of {path}                              │ │
+│ │                                                                                              │ │
+│ ╰───────────────────────────────────────────────────────────────── ↑↓ choose  ⏎ next  esc back ╯ │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ v reviews  s settings  r refresh  │ h help  q quit

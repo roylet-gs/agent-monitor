@@ -2,7 +2,7 @@
 source: crates/am-tui/src/ui.rs
 expression: "render(&app, 100, 14)"
 ---
-╭─Worktrees ───────────────────────────────────────────────────────────────────────────────────────╮
+╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
 │ ├─ ● feature/refactor-part-2                                                ↑2 ±3  4m            │
@@ -15,4 +15,4 @@ expression: "render(&app, 100, 14)"
 │                                                                                                  │
 │                                                                                                  │
 ╰────────────────────────────────────────────────────────────────────────────────────────── 1 of 6 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  v reviews  │ s settings  r refresh  h help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ v reviews  s settings  r refresh  │ h help  q quit

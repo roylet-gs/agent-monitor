@@ -52,6 +52,21 @@ const AGENT_ENV: &[&str] = &[
     "CODEBUDDY_CONFIG_DIR",
 ];
 
+/// Telemetry switches from the machine running the tests (GitHub Actions sets
+/// `CI`, which turns usage reports off); a test sets them through `extra_env`.
+const TELEMETRY_ENV: &[&str] = &[
+    "CI",
+    "DO_NOT_TRACK",
+    "AM_TELEMETRY",
+    "AM_TELEMETRY_ENDPOINT",
+    "AM_MCP_CHILD",
+    "OTEL_SDK_DISABLED",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+];
+
 impl Env {
     fn new() -> Env {
         let tmp = tempfile::tempdir().unwrap();
@@ -103,11 +118,13 @@ impl Env {
             .env_remove("AM_HOOK_BIN")
             .env_remove("AM_NO_NATIVE_HOOK")
             .env_remove("AM_LINEAR_API_URL")
+            .env_remove("AM_INSTALL_METHOD")
+            .env_remove("AM_RELEASES_API_URL")
             .current_dir(cwd.unwrap_or(&self.root()))
             .stdin(Stdio::null());
         // Whatever the machine running the tests has: agent config dirs come
         // from $HOME unless a test sets one through `extra_env`.
-        for var in AGENT_ENV {
+        for var in AGENT_ENV.iter().chain(TELEMETRY_ENV) {
             c.env_remove(var);
         }
         for (k, v) in &self.extra_env {
@@ -2066,4 +2083,129 @@ fn cmux_dock_project_names_plain_am_and_remove_creates_nothing() {
     std::fs::write(&dock, r#"{"controls":[{"id":"git","title":"Git","command":"lazygit"}]}"#).unwrap();
     env.run_in(Some(&proj), &["cmux", "dock", "--project", "--remove"]);
     assert_eq!(std::fs::read_to_string(&dock).unwrap(), r#"{"controls":[{"id":"git","title":"Git","command":"lazygit"}]}"#);
+}
+
+#[test]
+fn usage_reports_are_opt_in_and_hold_command_names_only() {
+    let env = Env::new();
+    let status: Value = serde_json::from_str(&env.ok(&["telemetry", "status", "--json"]).stdout).unwrap();
+    assert_eq!(status["consent"], "ask");
+    env.ok(&["repo", "list"]);
+    assert!(!env.data().join("telemetry/spool.jsonl").exists(), "nothing is recorded before the user decides");
+
+    env.ok(&["telemetry", "on"]);
+    env.ok(&["repo", "list"]);
+    // A failing command with a path in it: only the command's name is kept.
+    let _ = env.run(&["worktree", "list", "--repo", "/Users/someone/secret-project"]);
+    let body = env.ok(&["telemetry", "show", "--json"]).stdout;
+    assert!(body.contains("repo.list") && body.contains("worktree.list"), "{body}");
+    assert!(!body.contains("secret-project") && !body.contains("someone"), "{body}");
+    let parsed: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(parsed["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["eventName"], "am.command");
+    assert!(env.ok(&["telemetry", "show"]).stdout.contains("2 event(s) waiting"));
+
+    env.ok(&["telemetry", "off"]);
+    let status: Value = serde_json::from_str(&env.ok(&["telemetry", "status", "--json"]).stdout).unwrap();
+    assert_eq!((status["consent"].as_str(), status["pending"].as_u64()), (Some("off"), Some(0)));
+    env.ok(&["repo", "list"]);
+    assert!(!env.data().join("telemetry/spool.jsonl").exists());
+}
+
+#[test]
+fn environment_opt_outs_beat_the_setting() {
+    let mut env = Env::new();
+    env.ok(&["settings", "set", "telemetry", "on"]);
+    env.extra_env.push(("CI".into(), "true".into()));
+    let status: Value = serde_json::from_str(&env.ok(&["telemetry", "status", "--json"]).stdout).unwrap();
+    assert_eq!((status["consent"].as_str(), status["reason"].as_str()), (Some("off"), Some("running in CI")));
+    env.ok(&["repo", "list"]);
+    assert!(!env.data().join("telemetry/spool.jsonl").exists());
+    assert_ne!(env.run(&["settings", "set", "telemetry", "maybe"]).code, 0);
+}
+
+#[test]
+fn telemetry_flush_posts_otlp_json_to_the_relay() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut env = Env::new();
+    env.extra_env.push(("AM_TELEMETRY_ENDPOINT".into(), format!("http://{}", listener.local_addr().unwrap())));
+    let relay = std::thread::spawn(move || {
+        let (conn, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(conn.try_clone().unwrap());
+        let (mut request, mut len) = (String::new(), 0);
+        reader.read_line(&mut request).unwrap();
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                len = v.trim().parse().unwrap();
+            }
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut body = vec![0; len];
+        reader.read_exact(&mut body).unwrap();
+        let mut conn = conn;
+        conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        (request, String::from_utf8(body).unwrap())
+    });
+    env.ok(&["telemetry", "on"]);
+    env.ok(&["repo", "list"]);
+    assert!(env.ok(&["telemetry", "flush"]).stdout.contains("Sent 1 event(s)"));
+    let (request, body) = relay.join().unwrap();
+    assert!(request.starts_with("POST /v1/logs"), "{request}");
+    let body: Value = serde_json::from_str(&body).unwrap();
+    let resource = body["resourceLogs"][0]["resource"]["attributes"].to_string();
+    assert!(resource.contains("am.install_id") && resource.contains("service.version"), "{resource}");
+    assert_eq!(body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["eventName"], "am.command");
+    let status: Value = serde_json::from_str(&env.ok(&["telemetry", "status", "--json"]).stdout).unwrap();
+    assert_eq!(status["pending"], 0);
+    assert!(status["lastUploadMs"].is_u64());
+}
+
+#[test]
+fn update_installs_the_latest_release_the_way_am_was_installed() {
+    let mut env = Env::new();
+    // No GitHub: the release check falls back to a fresh cached answer.
+    env.extra_env.push(("AM_RELEASES_API_URL".into(), "http://127.0.0.1:9/releases/latest".into()));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let cache_path = env.data().join("update-check.json");
+    let cache = |latest: &str| std::fs::write(&cache_path, json!({ "checkedAt": now, "latest": latest }).to_string()).unwrap();
+    cache("99.0.0");
+    env.fake_bin("brew", "echo \"brew $*\" >> \"$HOME/brew.log\"; echo \"==> $*\"");
+    env.extra_env.push(("AM_INSTALL_METHOD".into(), "homebrew".into()));
+
+    let o = env.ok(&["update", "--check"]);
+    assert!(o.stdout.contains("am v99.0.0 is available") && o.stdout.contains("brew update && brew upgrade agent-monitor"), "{}", o.stdout);
+    assert!(!env.home().join("brew.log").exists(), "--check installs nothing");
+
+    let j = env.ok(&["update", "--json"]).json();
+    assert_eq!(j["latest"], "99.0.0");
+    assert_eq!(j["updateAvailable"], true);
+    assert_eq!(j["installMethod"], "homebrew");
+    assert_eq!(j["command"], "brew update && brew upgrade agent-monitor");
+
+    let o = env.ok(&["update"]);
+    assert!(o.stdout.contains("==> update") && o.stdout.contains("==> upgrade agent-monitor"), "{}", o.stdout);
+    assert!(o.stderr.contains("Updated to am v99.0.0"), "{}", o.stderr);
+    let log = std::fs::read_to_string(env.home().join("brew.log")).unwrap();
+    assert_eq!(log, "brew update\nbrew upgrade agent-monitor\n");
+
+    // A failing step fails the command.
+    env.fake_bin("brew", "echo nope >&2; exit 2");
+    let o = env.run(&["update"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stdout.contains("nope") && o.stderr.contains("Update failed"), "{}{}", o.stdout, o.stderr);
+
+    // An install am can't update itself only says how.
+    env.extra_env.retain(|(k, _)| k != "AM_INSTALL_METHOD");
+    env.extra_env.push(("AM_INSTALL_METHOD".into(), "cargo".into()));
+    let o = env.run(&["update"]);
+    assert_eq!(o.code, 1);
+    assert!(o.stderr.contains("can't update this install itself") && o.stderr.contains("cargo install"), "{}", o.stderr);
+
+    // Up to date.
+    cache("0.0.1");
+    assert!(env.ok(&["update"]).stdout.contains("is up to date"));
 }

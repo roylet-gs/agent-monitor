@@ -17,7 +17,7 @@ test("t on the dashboard does nothing", async ({ page }) => {
 
   expect(await tui.keyBar()).not.toContain("pull");
   await tui.sendKey("t");
-  await tui.waitForText("─Worktrees");
+  await tui.waitForText("· Worktrees");
   const screen = await tui.getScreenText();
   expect(screen).not.toContain("Pull into Reviewing");
   expect(screen).not.toContain("─Jobs");

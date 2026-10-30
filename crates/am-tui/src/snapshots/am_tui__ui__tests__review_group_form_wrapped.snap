@@ -35,4 +35,4 @@ expression: screen
 │                 │ Section header and badge label (empty: Group N)                                  │                 │
 │                 ╰──────────────────────────────────────────── ⏎/space change  ←→ adjust  esc close ╯                 │
 ╰ you + your teams · 1 group ────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ pull  g PR  l ticket  T pull + script  d remove  f filter  │ r refresh  h help  esc back
+ ⏎ pull  g PR  l ticket  d remove  f filter  │ r refresh  │ h help  esc back

@@ -69,6 +69,8 @@ pub fn parse_hook_args(args: impl IntoIterator<Item = String>) -> Result<HookArg
 pub fn run_hook_event(worktree: &str, event: Option<&str>, agent: Option<&str>) {
     let s = settings::load();
     am_core::log::init(s.log_level(), s.max_log_size_mb);
+    // Only the `am.error` spool layer when reports are on; the hook never exports.
+    let _telemetry = am_core::telemetry::init(am_core::telemetry::Binary::Hook, &s);
     let started = Instant::now();
 
     let mut raw = String::new();
