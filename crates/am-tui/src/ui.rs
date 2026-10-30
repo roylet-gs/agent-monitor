@@ -3060,6 +3060,7 @@ pub(crate) enum Review {
     ChangesRequested,
     /// Waiting for a review.
     Pending,
+    /// A draft not yet approved (an approved draft reads `approved`).
     Draft,
     /// Closed without merging (a merged PR shows `⇡` instead).
     Closed,
@@ -3106,7 +3107,9 @@ pub(crate) fn review_state(pr: &am_core::model::PrInfo) -> Option<Review> {
     if pr.state != "OPEN" {
         return None;
     }
-    if pr.is_draft {
+    // An approval shows even on a draft (and whatever CI says); otherwise a
+    // draft just reads `draft`.
+    if pr.is_draft && pr.review_decision != "APPROVED" {
         return Some(Review::Draft);
     }
     Some(match pr.review_decision.as_str() {
@@ -6176,6 +6179,18 @@ mod tests {
         assert_eq!(label(&v, true).unwrap().0, "review");
         set(&mut v, "", ChecksStatus::Passing, None);
         assert_eq!(pr_text(v.pr.as_ref(), true), "#127✓", "unknown review state shows nothing");
+        // An approved draft shows the approval, CI failing or not.
+        v.pr.as_mut().unwrap().is_draft = true;
+        set(&mut v, "APPROVED", ChecksStatus::Passing, Some("MERGEABLE"));
+        assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.green))));
+        set(&mut v, "APPROVED", ChecksStatus::Failing, Some("MERGEABLE"));
+        assert_eq!(label(&v, true), Some(("approved".into(), Some(theme.yellow))));
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✗ approved");
+        set(&mut v, "REVIEW_REQUIRED", ChecksStatus::Passing, None);
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✓ draft");
+        set(&mut v, "", ChecksStatus::Passing, None);
+        assert_eq!(pr_text(v.pr.as_ref(), true), "#127✓ draft");
+        v.pr.as_mut().unwrap().is_draft = false;
         // Narrow terminals get a glyph instead of the word.
         set(&mut v, "APPROVED", ChecksStatus::Passing, None);
         assert_eq!(pr_text(v.pr.as_ref(), false), "#127✓ ✔");
