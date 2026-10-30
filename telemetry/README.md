@@ -52,7 +52,24 @@ The live setup: Grafana Cloud stack `merryartichoke3421` (`au-southeast-1`, inst
 
 ### 4. Dashboards
 
-**Dashboards → New → Import**, upload `grafana/am-usage.json` and `grafana/am-health.json`, and pick your stack's Loki data source for **Logs**.
+**Dashboards → New → Import**, upload `grafana/am-usage.json`, `grafana/am-health.json` and `grafana/am-overview.json`. The data-source variables pick the stack's own Loki (**Logs**) and Prometheus (**Metrics**).
+
+- **am — Usage overview:**
+  - how many use am: opted-in active installs (7 d / 30 d), GitHub's unique cloners (14 d; the repo is the Homebrew tap, so `brew tap`/`update` count, and CI does too), npm and release downloads, stars, and installs over time;
+  - which versions: opted-in installs per version (now and over time), and downloads of the 15 most recent releases, raw and above the crawler baseline (macOS arm64 minus the least-downloaded platform);
+  - channels and engagement: install method, OS/CPU, top dashboard commands, CLI commands per day, repo traffic.
+
+### 4a. GitHub numbers (for the Usage overview)
+
+`.github/workflows/usage-stats.yml` runs `github-stats/collect.mjs` daily (03:17 UTC, or by hand: Actions → Usage stats → Run workflow). It reads release downloads per version and platform, stars, traffic and npm downloads, and pushes them to Grafana as Prometheus gauges (`am_github_*`, `job="am-github-stats"`). What a token can't read is skipped with a warning. It needs these repository secrets:
+
+| Secret | What | Needed for |
+|---|---|---|
+| `GRAFANA_METRICS_TOKEN` | A token from a Grafana access policy with only `metrics:write`, on this stack | sending anything |
+| `STATS_GITHUB_TOKEN` | A fine-grained GitHub token, this repo only, **Administration: read** | clones and views (GitHub only shows traffic to push access) |
+| `STATS_PACKAGES_TOKEN` | Optional: a classic token with only `read:packages` (the Action's own token is tried first) | npm downloads |
+
+The gauges arrive once a day, so the dashboard reads each one with `last_over_time(…[26h])`, and downloads gained over a window as `max_over_time − min_over_time`. Prometheus only looks back 5 minutes for a plain selector, and `increase()` extrapolates across sparse samples. GitHub's daily traffic lags a day or two, so only the rolling 14-day totals are sent. `node --test telemetry/github-stats/test/*.test.js` runs in CI.
 
 - **am — Adoption & usage:**
   - active installs (24 h / 7 d / 30 d, rolling);
@@ -95,7 +112,10 @@ Edit `grafana/generate.py`, not the JSON. To check every panel against real Loki
 podman run -d --name am-lgtm -p 13000:3000 -p 14318:4318 docker.io/grafana/otel-lgtm   # or docker
 node telemetry/grafana/seed-local.mjs "$PWD/telemetry/relay/src/worker.js" telemetry/relay/test/fixtures/client-body.json
 python3 telemetry/grafana/generate.py telemetry/grafana
-python3 telemetry/grafana/check.py telemetry/grafana/*.json     # every query: errors and empty results
+python3 telemetry/grafana/check.py telemetry/grafana/*.json     # every query (Loki and Prometheus): errors and empty results
+# the Usage overview's GitHub panels: push the real numbers to the local stack
+GITHUB_TOKEN=$(gh auth token) STATS_GITHUB_TOKEN=$(gh auth token) GRAFANA_OTLP_ENDPOINT=http://localhost:14318 \
+  GRAFANA_INSTANCE_ID=x GRAFANA_METRICS_TOKEN=x node telemetry/github-stats/collect.mjs
 # import them at http://localhost:13000 (admin/admin) to look at them
 podman rm -f am-lgtm
 ```

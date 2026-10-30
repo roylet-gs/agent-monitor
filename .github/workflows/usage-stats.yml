@@ -1,0 +1,32 @@
+# Daily GitHub numbers (release downloads per version, traffic, stars, npm
+# downloads) for Grafana's am — Usage overview dashboard. See
+# telemetry/github-stats/collect.mjs and telemetry/README.md.
+name: Usage stats
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect and send to Grafana
+        run: node telemetry/github-stats/collect.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Optional: traffic (clones, views) needs a fine-grained token with
+          # Administration: read on this repo; npm counts need read:packages
+          # (the Action's own token is tried when this is unset).
+          STATS_GITHUB_TOKEN: ${{ secrets.STATS_GITHUB_TOKEN }}
+          STATS_PACKAGES_TOKEN: ${{ secrets.STATS_PACKAGES_TOKEN || github.token }}
+          GRAFANA_OTLP_ENDPOINT: https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp
+          GRAFANA_INSTANCE_ID: "1897874"
+          # An access-policy token with only metrics:write on the stack.
+          GRAFANA_METRICS_TOKEN: ${{ secrets.GRAFANA_METRICS_TOKEN }}
