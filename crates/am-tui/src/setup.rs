@@ -30,6 +30,8 @@ pub enum Step {
     /// What counts as a review request (skipped with GitHub off).
     Reviews,
     Context,
+    /// Anonymous usage reports, on or off (`telemetry`); last in both modes.
+    Privacy,
 }
 
 /// The Reviews step's choices: `reviewRequests*`, and the review groups
@@ -156,6 +158,12 @@ pub struct Setup {
     pub ctx_choice: usize,
     pub ctx_input: String,
     pub ctx_error: Option<String>,
+    /// The context window the Context step settled on (`None` until then,
+    /// and in review-only mode).
+    pub context_tokens: Option<u64>,
+    /// The Privacy step's choice: send anonymous usage reports. Off unless
+    /// they already were (opt-in).
+    pub telemetry: bool,
     /// A re-run (setup was done before): Esc on the first step leaves
     /// without changing anything.
     pub cancellable: bool,
@@ -164,9 +172,10 @@ pub struct Setup {
 pub const IDES: [(&str, &str); 7] = am_core::launch::IdeChoice::ALL;
 
 /// The full dashboard's steps (Reviews is skipped with GitHub off).
-pub const STEPS_FULL: &[Step] = &[Step::Mode, Step::Editor, Step::Hooks, Step::Repos, Step::Integrations, Step::Reviews, Step::Context];
+pub const STEPS_FULL: &[Step] =
+    &[Step::Mode, Step::Editor, Step::Hooks, Step::Repos, Step::Integrations, Step::Reviews, Step::Context, Step::Privacy];
 /// Review-only mode's steps: no agent hooks and no context window.
-pub const STEPS_REVIEWS: &[Step] = &[Step::Mode, Step::Editor, Step::Repos, Step::Integrations, Step::Reviews];
+pub const STEPS_REVIEWS: &[Step] = &[Step::Mode, Step::Editor, Step::Repos, Step::Integrations, Step::Reviews, Step::Privacy];
 pub const IDE_CUSTOM: usize = IDES.len() - 1;
 
 /// Context-window presets offered by the wizard; a third row takes a typed value.
@@ -215,6 +224,8 @@ impl Setup {
             ctx_choice: preset.unwrap_or(CONTEXT_CUSTOM),
             ctx_input: if preset.is_some() { String::new() } else { am_core::context::short_tokens(context_window) },
             ctx_error: None,
+            context_tokens: None,
+            telemetry: settings.telemetry() == am_core::settings::TelemetryChoice::On,
             cancellable: rerun,
         }
     }
@@ -246,6 +257,9 @@ impl Setup {
 
     /// On to the next step, or finish after the last one.
     fn next(&mut self, context_tokens: Option<u64>) -> SetupEffect {
+        if context_tokens.is_some() {
+            self.context_tokens = context_tokens;
+        }
         match self.step_from(1) {
             Some(step) => {
                 self.step = step;
@@ -255,7 +269,7 @@ impl Setup {
                 }
                 SetupEffect::None
             }
-            None => self.finish(context_tokens),
+            None => self.finish(),
         }
     }
 
@@ -382,13 +396,20 @@ impl Setup {
                     _ => {}
                 }
             }
+            Step::Privacy => match key {
+                Key::Up | Key::Down | Key::Tab | Key::BackTab | Key::Char('j') | Key::Char('k') => self.telemetry = !self.telemetry,
+                Key::Enter => return self.next(None),
+                Key::Esc => self.back(),
+                _ => {}
+            },
         }
         SetupEffect::None
     }
 
     /// The keys finishing writes (plus the context window when the mode
     /// asked for it). Review-only mode turns GitHub and review requests on.
-    fn finish(&self, context_tokens: Option<u64>) -> SetupEffect {
+    fn finish(&self) -> SetupEffect {
+        let context_tokens = if self.reviews_mode { None } else { self.context_tokens };
         let key = self.linear_key.trim().to_string();
         let mode = if self.reviews_mode { am_core::settings::AppMode::Reviews } else { am_core::settings::AppMode::Full };
         let mut keys = vec![("appMode", Value::from(mode.id())), ("ide", Value::from(IDES[self.ide].0))];
@@ -407,6 +428,8 @@ impl Setup {
         if let Some(tokens) = context_tokens {
             keys.push(("contextWindowTokens", Value::from(tokens)));
         }
+        let telemetry = if self.telemetry { am_core::settings::TelemetryChoice::On } else { am_core::settings::TelemetryChoice::Off };
+        keys.push(("telemetry", Value::from(telemetry.id())));
         keys.push(("setupCompleted", Value::Bool(true)));
         // The review groups follow the step (skipped with GitHub off).
         if gh && let Some(groups) = self.review.groups() {
@@ -456,6 +479,17 @@ pub fn needed(settings: &am_core::settings::Settings) -> bool {
 mod tests {
     use super::*;
 
+    /// Enter on the step before Privacy, which goes on to it, then Privacy's
+    /// Enter, which finishes.
+    fn finish(s: &mut Setup) -> Vec<(&'static str, Value)> {
+        if let SetupEffect::Finish(v) = s.on_key(Key::Enter) {
+            panic!("finished before the Privacy step: {v:?}");
+        }
+        assert_eq!(s.step, Step::Privacy);
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!("Privacy finishes") };
+        v
+    }
+
     fn setup() -> Setup {
         Setup {
             step: Step::Editor,
@@ -477,8 +511,32 @@ mod tests {
             ctx_choice: 0,
             ctx_input: String::new(),
             ctx_error: None,
+            context_tokens: None,
+            telemetry: false,
             cancellable: false,
         }
+    }
+
+    #[test]
+    fn privacy_step_is_opt_in_and_writes_the_choice() {
+        let mut s = setup();
+        s.step = Step::Context;
+        let v = finish(&mut s);
+        assert!(v.contains(&("telemetry", Value::from("off"))), "off unless picked: {v:?}");
+
+        let mut s = setup();
+        s.step = Step::Privacy;
+        s.on_key(Key::Down);
+        assert!(s.telemetry);
+        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        assert!(v.contains(&("telemetry", Value::from("on"))));
+
+        // A re-run starts from what's saved; esc goes back to Context.
+        let mut s = Setup::new(vec![], &am_core::settings::Settings::parse(r#"{"setupCompleted":true,"telemetry":"on"}"#));
+        assert!(s.telemetry);
+        s.step = Step::Privacy;
+        s.on_key(Key::Esc);
+        assert_eq!(s.step, Step::Context);
     }
 
     #[test]
@@ -516,7 +574,7 @@ mod tests {
         s.on_key(Key::Char(' ')); // hide drafts
         s.on_key(Key::Enter);
         assert_eq!(s.step, Step::Context);
-        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        let v = finish(&mut s);
         assert!(v.contains(&("reviewRequestsEnabled", Value::Bool(true))));
         assert!(v.contains(&("reviewRequestsScope", Value::from("direct"))));
         // Only me: one "Asked you" group, with the filters too.
@@ -549,7 +607,7 @@ mod tests {
         s.on_key(Key::Enter);
         assert_eq!(s.step, Step::Hooks);
         s.step = Step::Context;
-        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        let v = finish(&mut s);
         assert!(v.contains(&("ide", Value::from("custom"))));
         assert!(v.contains(&("ideCommand", Value::from("subl -n"))));
     }
@@ -563,7 +621,7 @@ mod tests {
         assert_eq!(s.linear_key, "lin_x");
         assert_eq!(s.repos_added, vec!["work".to_string()]);
         s.step = Step::Context;
-        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        let v = finish(&mut s);
         assert!(v.contains(&("linearEnabled", Value::Bool(true))));
         assert!(v.contains(&("linearApiKey", Value::from("lin_x"))));
         assert!(v.contains(&("ghPrStatus", Value::Bool(false))));
@@ -613,7 +671,7 @@ mod tests {
         s.on_key(Key::Esc);
         assert_eq!(s.step, Step::Editor, "back past the repos, not into hooks");
         s.step = Step::Reviews;
-        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!("the reviews step finishes") };
+        let v = finish(&mut s);
         assert!(v.contains(&("appMode", Value::from("reviews"))));
         assert!(v.contains(&("ghPrStatus", Value::Bool(true))));
         assert!(v.contains(&("reviewRequestsEnabled", Value::Bool(true))));
@@ -629,7 +687,7 @@ mod tests {
         assert_eq!((s.step, s.reviews_mode), (Step::Mode, true));
         s.on_key(Key::Up);
         s.step = Step::Context;
-        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        let v = finish(&mut s);
         assert!(v.contains(&("appMode", Value::from("full"))));
     }
 
@@ -644,7 +702,7 @@ mod tests {
         let mut s = setup();
         s.step = Step::Context;
         s.on_key(Key::Char('j'));
-        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        let v = finish(&mut s);
         assert!(v.contains(&("contextWindowTokens", Value::from(200_000u64))));
 
         let mut s = setup();
@@ -663,7 +721,7 @@ mod tests {
             s.on_key(Key::Char(c)); // `k` is input here, not "up"
         }
         assert_eq!(s.ctx_choice, CONTEXT_CUSTOM);
-        let SetupEffect::Finish(v) = s.on_key(Key::Enter) else { panic!() };
+        let v = finish(&mut s);
         assert!(v.contains(&("contextWindowTokens", Value::from(500_000u64))));
         s.step = Step::Context;
         s.on_key(Key::Esc);

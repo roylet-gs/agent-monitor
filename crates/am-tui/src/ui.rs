@@ -164,6 +164,7 @@ pub enum List {
     Palette,
     Browser,
     SetupMode,
+    SetupPrivacy,
     SetupIde,
     SetupIntegrations,
     SetupReviews,
@@ -1409,6 +1410,19 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             marks.push((4, Target::Key(Key::Esc), false));
             ("Reset settings".into(), theme.red, "", lines)
         }
+        Modal::Telemetry => {
+            let lines = vec![
+                Line::raw("Help improve am with anonymous usage reports?"),
+                Line::styled("They hold am's version and OS, how it was installed, which features you use, how long things take, and where in am's code errors happen.", theme.faint()),
+                Line::styled("Never your code, log text, paths, or repository, branch, PR or user names. am telemetry show lists what would be sent.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "⏎ / y", "Send anonymous reports", true),
+                key_line(theme, "n / esc", "Don't send anything", false),
+            ];
+            marks.push((4, Target::Key(Key::Char('y')), false));
+            marks.push((5, Target::Key(Key::Char('n')), false));
+            ("Usage reports".into(), theme.border_focus, "", lines)
+        }
         Modal::AddReviewScript { repo, .. } => {
             let lines = vec![
                 Line::raw(format!("{repo} has no review script yet. Add one?")),
@@ -1463,6 +1477,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
         Step::Integrations => "Integrations",
         Step::Reviews => "Reviews",
         Step::Context => "Context",
+        Step::Privacy => "Privacy",
     };
     let steps = s.steps();
     let mut crumbs = vec![Span::raw(" ")];
@@ -1647,7 +1662,7 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
                 if s.reviews_mode { "More groups and filters: f → Groups…" } else { "More groups and filters: v, then f → Groups…" },
                 theme.faint(),
             ));
-            hint = if s.reviews_mode { "↑↓ move  space toggle  ⏎ finish  esc back" } else { "↑↓ move  space toggle  ⏎ next  esc back" };
+            hint = "↑↓ move  space toggle  ⏎ next  esc back";
         }
         Step::Context => {
             lines.push(Line::raw("How many tokens of context should the bar measure against?"));
@@ -1674,11 +1689,37 @@ fn draw_setup(f: &mut Frame, theme: &Theme, area: Rect, s: &crate::setup::Setup,
             if let Some(e) = &s.ctx_error {
                 lines.push(Line::styled(e.clone(), theme.fg(theme.red)));
             }
+            hint = "↑↓ choose  ⏎ next  esc back";
+        }
+        Step::Privacy => {
+            lines.push(Line::raw("Help improve am with anonymous usage reports?"));
+            lines.push(Line::raw(""));
+            let choices: [(&str, &[&str]); 2] = [
+                (
+                    "Send anonymous reports",
+                    &["am's version and OS, how it was installed, which features you use,", "how long things take, and where in am's code errors happen"],
+                ),
+                ("Don't send anything", &["nothing is recorded"]),
+            ];
+            for (i, (label, what)) in choices.into_iter().enumerate() {
+                let sel = (i == 0) == s.telemetry;
+                marks.push((lines.len(), Target::Item(List::SetupPrivacy, i), false));
+                lines.push(Line::from(vec![
+                    Span::styled(if sel { "  ● " } else { "  ○ " }, theme.fg(if sel { theme.border_focus } else { theme.faint })),
+                    Span::styled(label, if sel { theme.bold(theme.text) } else { theme.fg(theme.text) }),
+                ]));
+                for line in what {
+                    lines.push(Line::styled(format!("    {line}"), theme.faint()));
+                }
+            }
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Never your code, log text, paths, or repository, branch, PR or user names.", theme.faint()));
+            lines.push(Line::styled("am telemetry show lists what would be sent; Settings → Usage reports changes it later.", theme.faint()));
             hint = "↑↓ choose  ⏎ finish  esc back";
         }
     }
-    // 82 columns fits the seven breadcrumbs on one line.
-    let rect = modal_rect(area, 82, lines.len() as u16 + 4);
+    // 96 columns fits the eight breadcrumbs on one line.
+    let rect = modal_rect(area, 96, lines.len() as u16 + 4);
     clear(f, theme, rect);
     bottom_hint_hits(hits, &format!(" {hint} "), rect);
     // Inside the border and the padding (1 left/right, 1 top).
@@ -5819,11 +5860,36 @@ mod tests {
             ctx_choice: crate::setup::CONTEXT_CUSTOM,
             ctx_input: "128k".into(),
             ctx_error: None,
+            context_tokens: None,
+            telemetry: false,
             cancellable: false,
         });
         let out = render(&app, 100, 20);
         assert!(out.contains("✓ Reviews › Context"), "breadcrumbs cut off:\n{out}");
         insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn setup_privacy_step_says_what_is_sent_and_fits_every_breadcrumb() {
+        let mut app = fixture();
+        let mut setup = crate::setup::Setup::new(vec![], &app.settings);
+        setup.step = crate::setup::Step::Privacy;
+        setup.reviews_mode = false;
+        app.setup = Some(setup);
+        let out = render(&app, 100, 22);
+        assert!(out.contains("✓ Context › Privacy"), "breadcrumbs cut off:\n{out}");
+        assert!(out.contains("● Don't send anything"), "off unless picked:\n{out}");
+        insta::assert_snapshot!(out);
+    }
+
+    #[test]
+    fn telemetry_prompt_asks_once_and_saves_the_answer() {
+        let mut app = fixture();
+        app.modal = Some(crate::modals::Modal::Telemetry);
+        insta::assert_snapshot!(render(&app, 100, 24));
+        // A stray key doesn't decide.
+        app.on_key(Key::Char('j'));
+        assert!(matches!(app.modal, Some(crate::modals::Modal::Telemetry)));
     }
 
     #[test]
@@ -5849,6 +5915,8 @@ mod tests {
             ctx_choice: 0,
             ctx_input: String::new(),
             ctx_error: None,
+            context_tokens: None,
+            telemetry: false,
             cancellable: false,
         });
         let out = render(&app, 100, 22);

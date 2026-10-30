@@ -99,6 +99,9 @@ enum Cmd {
     /// cmux terminal integration (`am cmux dock`)
     #[command(subcommand)]
     Cmux(CmuxCmd),
+    /// Anonymous usage and error reports: status, on, off, show what would be sent
+    #[command(subcommand)]
+    Telemetry(TelemetryCmd),
     /// Check system health (hooks, gh CLI, DB, etc.)
     Doctor(JsonOpt),
     /// Show recent logs
@@ -289,6 +292,22 @@ enum McpCmd {
 }
 
 #[derive(Subcommand)]
+enum TelemetryCmd {
+    /// Whether reports are on, where they go, and what is waiting
+    Status(JsonOpt),
+    /// Turn anonymous usage and error reports on
+    On,
+    /// Turn them off and delete anything waiting to be sent
+    Off,
+    /// Every event waiting to be sent, as it will be sent (--json: the exact request body)
+    Show(JsonOpt),
+    /// Forget the random install id; the next report starts a new one
+    ResetId,
+    /// Send what is waiting now (am-tui otherwise sends it every 15 minutes)
+    Flush,
+}
+
+#[derive(Subcommand)]
 enum CmuxCmd {
     /// Add am to cmux's Dock (its right sidebar): ~/.config/cmux/dock.json, or .cmux/dock.json with --project
     Dock {
@@ -432,6 +451,22 @@ struct LogsArgs {
     open: bool,
 }
 
+/// The subcommand path of `args` by clap's own names (`worktree.create`;
+/// `tui` with none), so aliases and arguments never reach a usage report.
+fn command_path(cmd: &clap::Command, args: impl Iterator<Item = String>) -> String {
+    let mut path: Vec<String> = Vec::new();
+    let mut cur = cmd;
+    for arg in args {
+        if arg.starts_with('-') {
+            continue;
+        }
+        let Some(sub) = cur.find_subcommand(&arg) else { break };
+        path.push(sub.get_name().to_string());
+        cur = sub;
+    }
+    if path.is_empty() { "tui".into() } else { path.join(".") }
+}
+
 fn main() {
     // Fast path: no clap, no settings, no logger before the hook handler.
     let mut argv = std::env::args();
@@ -454,6 +489,18 @@ fn main() {
 
     let s = am_core::settings::load();
     am_core::log::init(s.log_level(), s.max_log_size_mb);
+    let _telemetry = am_core::telemetry::init(am_core::telemetry::Binary::Cli, &s);
+    let command = command_path(&<Cli as clap::CommandFactory>::command(), std::env::args().skip(1));
+    let via = if std::env::var_os("AM_MCP_CHILD").is_some() { "mcp" } else { "cli" };
+    // `am telemetry …` manages the reports; it isn't usage to report.
+    if !command.starts_with("telemetry") {
+        am_core::telemetry::record(am_core::telemetry::schema::Event::command(
+            am_core::telemetry::public::now_ms(),
+            &command,
+            via,
+        ));
+    }
+    let _span = am_core::tracing::info_span!(target: "am", "cli.command", command, via).entered();
 
     use commands::*;
     match cli.command {
@@ -527,6 +574,14 @@ fn main() {
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             commands::cmux::dock(project.then_some(cwd.as_path()), reviews, remove)
         }
+        Some(Cmd::Telemetry(t)) => match t {
+            TelemetryCmd::Status(j) => telemetry::status(j.json),
+            TelemetryCmd::On => telemetry::on(),
+            TelemetryCmd::Off => telemetry::off(),
+            TelemetryCmd::Show(j) => telemetry::show(j.json),
+            TelemetryCmd::ResetId => telemetry::reset_id(),
+            TelemetryCmd::Flush => telemetry::flush(),
+        },
         Some(Cmd::Doctor(j)) => doctor::run(j.json),
         Some(Cmd::Logs(a)) => logs::run(logs::Options {
             lines: a.lines.trim().parse().unwrap_or(50),

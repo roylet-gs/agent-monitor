@@ -7,20 +7,20 @@ expression: full
 │▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
 │ ◐ fix/offline-cache                                                                4m ▓░░░░ 185k │
 │                                                                                                  │
-│gridsigh╭─Welcome to agent-monitor ──────────────────────────────────────────────────────╮────────│
-│ · main │                                                                                │        │
-│        │  Mode › Editor › Hooks › Repos › Integrations › Reviews › Context              │        │
-│        │                                                                                │        │
-│        │ What do you want am for?                                                       │        │
-│        │                                                                                │        │
-│        │   ● Agents & worktrees                                                         │        │
-│        │     the full dashboard: agent status, worktrees, PRs, tickets and reviews      │        │
-│        │   ○ Review requests only                                                       │        │
-│        │     just the PRs waiting on your review, to pull and open                      │        │
-│        │                                                                                │        │
-│        │ Settings → Mode switches later                                                 │        │
-│        │                                                                                │        │
-│        ╰───────────────────────────────────────────────────────────── ↑↓ choose  ⏎ next ╯        │
+│g╭─Welcome to agent-monitor ────────────────────────────────────────────────────────────────────╮─│
+│ │                                                                                              │ │
+│ │  Mode › Editor › Hooks › Repos › Integrations › Reviews › Context › Privacy                  │ │
+│ │                                                                                              │ │
+│ │ What do you want am for?                                                                     │ │
+│ │                                                                                              │ │
+│ │   ● Agents & worktrees                                                                       │ │
+│ │     the full dashboard: agent status, worktrees, PRs, tickets and reviews                    │ │
+│ │   ○ Review requests only                                                                     │ │
+│ │     just the PRs waiting on your review, to pull and open                                    │ │
+│ │                                                                                              │ │
+│ │ Settings → Mode switches later                                                               │ │
+│ │                                                                                              │ │
+│ ╰─────────────────────────────────────────────────────────────────────────── ↑↓ choose  ⏎ next ╯ │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │

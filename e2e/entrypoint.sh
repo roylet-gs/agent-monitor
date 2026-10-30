@@ -54,10 +54,12 @@ SH
 
 # Skip the setup wizard, show main, enable Linear against the mock.
 # linearAutoNickname is off so rows keep their branch names (the mock links
-# every branch to the same ticket, which would rename them all).
+# every branch to the same ticket, which would rename them all). Usage reports
+# are answered (off), so the one-time prompt stays away (spec 34 brings it back).
 cat > "$AM_DATA_DIR/settings.json" <<'JSON'
 {
   "setupCompleted": true,
+  "telemetry": "off",
   "hideMainBranch": false,
   "linearEnabled": true,
   "linearApiKey": "lin_api_mock",

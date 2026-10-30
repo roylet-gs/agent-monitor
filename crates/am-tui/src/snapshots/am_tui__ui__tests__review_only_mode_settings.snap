@@ -42,12 +42,12 @@ expression: settings
 │                 │   Rotate log at (MB)            2                                                │                 │
 │                 │   View logs…                    ⏎ open                                           │                 │
 │                 │                                                                                  │                 │
+│                 │ Privacy                                                                          │                 │
+│                 │   Usage reports                 ask                                              │                 │
+│                 │                                                                                  │                 │
 │                 │ Setup                                                                            │                 │
 │                 │   Run setup again…              ⏎ open                                           │                 │
 │                 │   Reset settings…               ⏎ reset                                          │                 │
-│                 │                                                                                  │                 │
-│                 │                                                                                  │                 │
-│                 │                                                                                  │                 │
 │                 │                                                                                  │                 │
 │                 │ reviews: open straight to the review page and hide the agent/worktree settings   │                 │
 ╰ you + your teams╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯───────── 1 of 3 ╯

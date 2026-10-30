@@ -99,7 +99,7 @@ impl Breaker {
         if self.failing {
             debug!(self.source, "{} still failing: {error}{suffix}", self.source);
         } else {
-            warn!(self.source, "{} failing: {error}{suffix}", self.source);
+            warn!(self.source, kind = error_kind(&error, network), "{} failing: {error}{suffix}", self.source);
         }
         self.failing = true;
         self.last_error = Some(error);
@@ -128,6 +128,20 @@ pub fn backoff_for(consecutive: u32) -> Duration {
 /// Does this error mean "the network/service is unreachable" (back off) rather
 /// than "the request was answered with a problem" (don't)? Works on gh stderr,
 /// ureq error text and our own synthetic messages.
+/// The fixed kind of a failure, for the anonymous usage reports' `am.error`
+/// (the message itself never leaves the machine).
+pub fn error_kind(msg: &str, network: bool) -> &'static str {
+    if is_rate_limit_error(msg) {
+        "rate_limited"
+    } else if is_timeout_error(msg) {
+        "timeout"
+    } else if network {
+        "network"
+    } else {
+        "failed"
+    }
+}
+
 pub fn is_network_error(msg: &str) -> bool {
     let m = msg.to_ascii_lowercase();
     const NEEDLES: &[&str] = &[
@@ -203,6 +217,14 @@ pub fn summarize_error(msg: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn failures_get_a_fixed_kind_for_usage_reports() {
+        assert_eq!(error_kind("GraphQL: API rate limit exceeded for user", true), "rate_limited");
+        assert_eq!(error_kind("gh: HTTP 504: We couldn't respond to your request in time", true), "timeout");
+        assert_eq!(error_kind("error connecting to api.github.com", true), "network");
+        assert_eq!(error_kind("GraphQL: Could not resolve to a Repository", false), "failed");
+    }
     use super::*;
 
     #[test]

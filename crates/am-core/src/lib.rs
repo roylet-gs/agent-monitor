@@ -16,6 +16,7 @@ pub mod mcp_installer;
 pub mod model;
 pub mod paths;
 pub mod perf;
+pub mod telemetry;
 pub mod procscan;
 pub mod review_groups;
 pub mod settings;
@@ -26,3 +27,6 @@ pub mod timefmt;
 pub mod update_check;
 pub mod usage;
 pub mod worktrees;
+
+// Re-exported so the `info!`/`warn!`/`debug!` macros resolve in every crate.
+pub use tracing;

@@ -249,6 +249,18 @@ export class RustTui extends TuiPage {
     await this.waitForText(help);
   }
 
+  /** Like `openSetting`, for rows near the end of Settings (Privacy, Setup):
+   *  End, then up, instead of walking down the whole list. */
+  async openSettingFromEnd(help: string, max = 20): Promise<void> {
+    await this.sendKey("s");
+    await this.waitForText("esc close");
+    await this.sendKey("End");
+    for (let i = 0; i < max && !(await this.getScreenText()).includes(help); i++) {
+      await this.sendKey("k");
+    }
+    await this.waitForText(help);
+  }
+
   /** Press a key `n` times. */
   async press(key: string, n = 1): Promise<void> {
     for (let i = 0; i < n; i++) await this.sendKey(key);

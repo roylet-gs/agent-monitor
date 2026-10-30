@@ -12,6 +12,8 @@ path = "src/main.rs"
 am-core.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
+# usage_reports: the UTC day of the daily heartbeat.
+time.workspace = true
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 unicode-width = "0.2"
 

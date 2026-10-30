@@ -1,0 +1,1054 @@
+{
+  "uid": "am-usage",
+  "title": "am \u2014 Adoption & usage",
+  "description": "Anonymous usage reports from am (TELEMETRY.md): installs, versions, setup and features.",
+  "tags": [
+    "am",
+    "usage-reports"
+  ],
+  "schemaVersion": 39,
+  "editable": true,
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "",
+  "timezone": "utc",
+  "graphTooltip": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "loki",
+        "label": "Logs",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "version",
+        "label": "Version",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "${loki}"
+        },
+        "query": {
+          "label": "service_version",
+          "stream": "{service_name=\"am\"}",
+          "type": 1
+        },
+        "definition": "label_values({service_name=\"am\"}, service_version)",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": {},
+        "refresh": 2,
+        "sort": 4
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Adoption",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Active installs (last 24 h)",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [24h])))",
+          "legendFormat": "",
+          "queryType": "instant"
+        }
+      ],
+      "description": "Installs that sent a daily heartbeat in the last day (distinct random install ids)."
+    },
+    {
+      "id": 3,
+      "title": "Active installs (last 7 d)",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [7d])))",
+          "legendFormat": "",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Active installs (last 30 d)",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [30d])))",
+          "legendFormat": "",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Active installs (rolling 24 h)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [1d])))",
+          "legendFormat": "installs",
+          "queryType": "range"
+        }
+      ],
+      "description": "Distinct installs with a heartbeat in the 24 hours before each point."
+    },
+    {
+      "id": 6,
+      "title": "Versions",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (service_version) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" [$__interval]))",
+          "legendFormat": "{{service_version}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "OS / CPU",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 5,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (os_type, host_arch) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "{{os_type}} {{host_arch}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Installed with",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 5,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (am_install_method) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "{{am_install_method}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Setup",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "title": "Mode",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (mode) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "{{mode}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Opens worktrees in",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 14,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (ide) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "{{ide}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Terminal",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 14,
+        "w": 4,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (terminal) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | terminal!=\"\" [$__interval]))",
+          "legendFormat": "{{terminal}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Integrations and options on (share of heartbeats)",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "(sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | github=\"true\" [$__range])) or vector(0)) / sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__range]))",
+          "legendFormat": "github",
+          "queryType": "instant"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "(sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | linear=\"true\" [$__range])) or vector(0)) / sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__range]))",
+          "legendFormat": "linear",
+          "queryType": "instant"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "(sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | reviews=\"true\" [$__range])) or vector(0)) / sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__range]))",
+          "legendFormat": "reviews",
+          "queryType": "instant"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "(sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | compact=\"true\" [$__range])) or vector(0)) / sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__range]))",
+          "legendFormat": "compact",
+          "queryType": "instant"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "(sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | cmux=\"true\" [$__range])) or vector(0)) / sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__range]))",
+          "legendFormat": "cmux",
+          "queryType": "instant"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "(sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | builtin_theme=\"true\" [$__range])) or vector(0)) / sum(count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__range]))",
+          "legendFormat": "builtin_theme",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "github"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "linear"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "reviews"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "D"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "compact"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "E"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "cmux"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "F"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "builtin_theme"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic"
+      }
+    },
+    {
+      "id": 14,
+      "title": "Agent sessions seen in heartbeats (by harness)",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_claude!=\"\" | unwrap sessions_claude [$__range]))",
+          "legendFormat": "claude",
+          "queryType": "instant"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_codex!=\"\" | unwrap sessions_codex [$__range]))",
+          "legendFormat": "codex",
+          "queryType": "instant"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_gemini!=\"\" | unwrap sessions_gemini [$__range]))",
+          "legendFormat": "gemini",
+          "queryType": "instant"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_cursor!=\"\" | unwrap sessions_cursor [$__range]))",
+          "legendFormat": "cursor",
+          "queryType": "instant"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_copilot!=\"\" | unwrap sessions_copilot [$__range]))",
+          "legendFormat": "copilot",
+          "queryType": "instant"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_opencode!=\"\" | unwrap sessions_opencode [$__range]))",
+          "legendFormat": "opencode",
+          "queryType": "instant"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_amp!=\"\" | unwrap sessions_amp [$__range]))",
+          "legendFormat": "amp",
+          "queryType": "instant"
+        },
+        {
+          "refId": "H",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_qwen!=\"\" | unwrap sessions_qwen [$__range]))",
+          "legendFormat": "qwen",
+          "queryType": "instant"
+        },
+        {
+          "refId": "I",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_droid!=\"\" | unwrap sessions_droid [$__range]))",
+          "legendFormat": "droid",
+          "queryType": "instant"
+        },
+        {
+          "refId": "J",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_kiro!=\"\" | unwrap sessions_kiro [$__range]))",
+          "legendFormat": "kiro",
+          "queryType": "instant"
+        },
+        {
+          "refId": "K",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_pi!=\"\" | unwrap sessions_pi [$__range]))",
+          "legendFormat": "pi",
+          "queryType": "instant"
+        },
+        {
+          "refId": "L",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | sessions_custom!=\"\" | unwrap sessions_custom [$__range]))",
+          "legendFormat": "custom",
+          "queryType": "instant"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic"
+      },
+      "description": "Sum of open sessions per built-in harness across daily heartbeats; custom manifest plugins count as custom.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "claude"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "codex"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "gemini"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "D"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "cursor"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "E"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "copilot"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "F"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "opencode"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "G"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "amp"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "H"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "qwen"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "I"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "droid"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "J"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "kiro"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "K"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "pi"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "L"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "custom"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 15,
+      "title": "Repositories and worktrees per install (median)",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.5, {service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | unwrap repos [$__range])",
+          "legendFormat": "repos",
+          "queryType": "instant"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "quantile_over_time(0.5, {service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" | unwrap worktrees [$__range])",
+          "legendFormat": "worktrees",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "repositories"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "worktrees"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Features",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 17,
+      "title": "Dashboard commands",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (command) (sum_over_time({service_name=\"am\"} | event_name=\"am.features\" | service_version=~\"$version\" | unwrap count [$__interval]))",
+          "legendFormat": "{{command}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      },
+      "description": "How often each key-bar command ran (Command::id), summed over the range."
+    },
+    {
+      "id": 18,
+      "title": "CLI commands (you vs. agents through MCP)",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (command, via) (count_over_time({service_name=\"am\"} | event_name=\"am.command\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "{{command}} ({{via}})",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 19,
+      "title": "Commands over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (via) (count_over_time({service_name=\"am\"} | event_name=\"am.command\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "CLI ({{via}})",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum(sum_over_time({service_name=\"am\"} | event_name=\"am.features\" | service_version=~\"$version\" | unwrap count [$__interval]))",
+          "legendFormat": "dashboard",
+          "queryType": "range"
+        }
+      ]
+    }
+  ]
+}

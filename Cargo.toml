@@ -18,6 +18,16 @@ uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 libc = "0.2"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"] }
+# OpenTelemetry over OTLP/HTTP with our own ureq client: no tokio, reqwest or
+# hyper, and no `internal-logs` (the SDK would log into our own subscriber).
+opentelemetry = { version = "0.33.1", default-features = false, features = ["trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.33.1", default-features = false, features = ["trace", "metrics", "logs"] }
+opentelemetry-otlp = { version = "0.33.1", default-features = false, features = ["http-proto", "trace", "metrics", "logs"] }
+opentelemetry-http = { version = "0.33.1", default-features = false }
+opentelemetry-appender-tracing = { version = "0.33.1", default-features = false }
+tracing-opentelemetry = { version = "0.34.0", default-features = false }
 
 [profile.release]
 lto = true

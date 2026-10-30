@@ -74,6 +74,13 @@ test("first run walks the setup wizard to the dashboard", async ({ page }) => {
   await tui.screenshot("setup-context");
   await tui.sendKey("Enter");
 
+  // 7. Privacy: opt-in, so "Don't send anything" is preselected; keep it.
+  await tui.waitForText("Help improve am with anonymous usage reports?");
+  await tui.waitForText("● Don't send anything");
+  await tui.waitForText("Never your code, log text, paths");
+  await tui.screenshot("setup-privacy");
+  await tui.sendKey("Enter");
+
   await tui.waitForGone("Welcome to agent-monitor");
   // First sync + git scan of the new repo can be slow on a cold container.
   await tui.waitForText("feature/to-delete", 20_000);

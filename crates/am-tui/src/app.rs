@@ -156,6 +156,9 @@ pub struct App {
     /// `am-tui --reviews` (the window `ctrl-v` opens, or `am reviews`): only
     /// the review page, whatever `appMode` says. See [`App::reviews_only`].
     pub reviews_window: bool,
+    /// How often each dashboard command ran since the last usage report
+    /// (`Command::id` → count); main.rs drains it into `am.features`.
+    pub command_counts: std::collections::BTreeMap<&'static str, u64>,
     /// The review page was opened by a mode change and wants a fetch (main
     /// takes it and asks the collector).
     pub review_fetch_due: bool,
@@ -222,6 +225,7 @@ impl App {
             setup: None,
             reviews: None,
             reviews_window: false,
+            command_counts: Default::default(),
             review_fetch_due: false,
             group_preview: None,
             pending_select: None,
@@ -670,6 +674,25 @@ impl App {
                     self.modal = None;
                     Action::ResetSettings
                 }
+                Effect::SetTelemetry(on) => {
+                    self.modal = None;
+                    let choice = if on { am_core::settings::TelemetryChoice::On } else { am_core::settings::TelemetryChoice::Off };
+                    match crate::settings_ui::persist("telemetry", serde_json::Value::from(choice.id())) {
+                        Ok(s) => {
+                            self.set_settings(s);
+                            self.notice = Some(if on {
+                                "Thanks! Usage reports on (Settings → Usage reports)".into()
+                            } else {
+                                "No usage reports (Settings → Usage reports)".into()
+                            });
+                            Action::SettingsChanged
+                        }
+                        Err(e) => {
+                            self.notice = Some(e);
+                            Action::None
+                        }
+                    }
+                }
                 Effect::AddReviewScript(r) => {
                     self.modal = None;
                     match self.start_review_pull(&r) {
@@ -790,6 +813,8 @@ impl App {
     /// Run a dashboard command (from its key, a key-bar click or a double-click).
     pub fn run_command(&mut self, cmd: crate::keymap::Command) -> Action {
         use crate::keymap::Command as C;
+        // For the `am.features` usage report (main.rs drains it).
+        *self.command_counts.entry(cmd.id()).or_default() += 1;
         if cmd.is_row_action() && self.selected_view().is_some_and(|v| self.is_deleting(&v.worktree.id)) {
             self.notice = Some("Deleting in the background…".into());
             return Action::None;
@@ -1037,6 +1062,11 @@ impl App {
                 let Some(s) = &mut self.setup else { return Action::None };
                 // A click picks; a second one goes on.
                 (std::mem::replace(&mut s.reviews_mode, i == 1) == (i == 1)).then_some(Key::Enter)
+            }
+            L::SetupPrivacy => {
+                let Some(s) = &mut self.setup else { return Action::None };
+                // A click picks; a second one finishes.
+                (std::mem::replace(&mut s.telemetry, i == 0) == (i == 0)).then_some(Key::Enter)
             }
             L::SetupReviews => {
                 let Some(s) = &mut self.setup else { return Action::None };

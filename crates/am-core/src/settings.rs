@@ -130,6 +130,10 @@ pub struct Settings {
     /// What `am` opens to (see [`AppMode`]): `full` (the dashboard) or
     /// `reviews` (only the review-requests page). Unknown values are `full`.
     pub app_mode: String,
+    /// Anonymous usage and error reports (see [`TelemetryChoice`] and
+    /// `crate::telemetry`): `ask` (not decided yet; nothing is recorded),
+    /// `on` or `off`. Unknown values are `ask`.
+    pub telemetry: String,
     /// Where a repo's startup script runs after creating a worktree: `pane`
     /// (default; output streams into the TUI's jobs pane) or `window` (a new
     /// terminal window, falling back to the pane when none can be opened).
@@ -244,6 +248,7 @@ impl Default for Settings {
             check_for_updates: true,
             cmux_sync: true,
             app_mode: "full".into(),
+            telemetry: "ask".into(),
             startup_script_mode: "pane".into(),
             key_bindings: Default::default(),
             review_requests_enabled: true,
@@ -290,6 +295,10 @@ impl Settings {
     /// that page needs is fetched, shown in Settings and asked in setup.
     pub fn reviews_mode(&self) -> bool {
         self.app_mode() == AppMode::Reviews
+    }
+
+    pub fn telemetry(&self) -> TelemetryChoice {
+        TelemetryChoice::parse(&self.telemetry).unwrap_or(TelemetryChoice::Ask)
     }
 
     /// Review requests are fetched at all (they ride on the PR integration).
@@ -452,6 +461,36 @@ impl AppMode {
         match self {
             AppMode::Full => "full",
             AppMode::Reviews => "reviews",
+        }
+    }
+}
+
+/// Whether anonymous usage and error reports are sent (`telemetry`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelemetryChoice {
+    /// Not decided: the setup wizard (or a one-time prompt) asks; nothing is recorded.
+    Ask,
+    On,
+    Off,
+}
+
+impl TelemetryChoice {
+    pub const IDS: [&str; 3] = ["ask", "on", "off"];
+
+    pub fn parse(s: &str) -> Option<TelemetryChoice> {
+        Some(match s {
+            "ask" => TelemetryChoice::Ask,
+            "on" => TelemetryChoice::On,
+            "off" => TelemetryChoice::Off,
+            _ => return None,
+        })
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            TelemetryChoice::Ask => "ask",
+            TelemetryChoice::On => "on",
+            TelemetryChoice::Off => "off",
         }
     }
 }
@@ -785,6 +824,14 @@ mod tests {
         assert!(Settings::parse("{}").cmux_sync);
         assert!(!Settings::parse(r#"{"cmuxSync":false}"#).cmux_sync);
         assert_eq!(Settings::default().to_file_json()["cmuxSync"], true);
+    }
+
+    #[test]
+    fn telemetry_defaults_to_ask_and_unknown_values_ask() {
+        assert_eq!(Settings::parse("{}").telemetry(), TelemetryChoice::Ask);
+        assert_eq!(Settings::parse(r#"{"telemetry":"on"}"#).telemetry(), TelemetryChoice::On);
+        assert_eq!(Settings::parse(r#"{"telemetry":"off"}"#).telemetry(), TelemetryChoice::Off);
+        assert_eq!(Settings::parse(r#"{"telemetry":"yes"}"#).telemetry(), TelemetryChoice::Ask);
     }
 
     #[test]

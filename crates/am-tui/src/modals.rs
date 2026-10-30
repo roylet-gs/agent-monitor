@@ -126,6 +126,9 @@ pub enum Modal {
     AddRepo(crate::folder_browser::FolderBrowser),
     /// Settings → Reset settings: `y` resets, any other key cancels.
     ConfirmReset,
+    /// Once, for a user who set am up before usage reports existing
+    /// (`telemetry: "ask"`): `y`/⏎ turns them on, `n`/esc off.
+    Telemetry,
     /// "Pull + run script" on a PR whose repo (named `repo`) has no review
     /// script: `y` adds one and pulls, any other key cancels.
     AddReviewScript { review: Box<am_core::model::ReviewRequest>, repo: String },
@@ -139,6 +142,8 @@ pub enum Effect {
     AddRepo(String),
     /// Put settings.json back to defaults, then run setup.
     ResetSettings,
+    /// Save the `telemetry` choice (true = on).
+    SetTelemetry(bool),
     /// Add the repo's review script, then pull + run it for this PR.
     AddReviewScript(Box<am_core::model::ReviewRequest>),
 }
@@ -206,6 +211,12 @@ impl Modal {
             Modal::ConfirmReset => match key {
                 Key::Char('y') | Key::Char('Y') => Effect::ResetSettings,
                 _ => Effect::Close,
+            },
+            Modal::Telemetry => match key {
+                Key::Char('y') | Key::Char('Y') | Key::Enter => Effect::SetTelemetry(true),
+                Key::Char('n') | Key::Char('N') | Key::Esc => Effect::SetTelemetry(false),
+                // A real answer only: a stray key mustn't decide.
+                _ => Effect::None,
             },
             Modal::AddReviewScript { review, .. } => match key {
                 Key::Char('y') | Key::Char('Y') | Key::Enter => Effect::AddReviewScript(review.clone()),
@@ -307,6 +318,15 @@ impl Modal {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn telemetry_prompt_needs_a_real_answer() {
+        assert!(matches!(Modal::Telemetry.on_key(Key::Char('y')), Effect::SetTelemetry(true)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Enter), Effect::SetTelemetry(true)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Char('n')), Effect::SetTelemetry(false)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Esc), Effect::SetTelemetry(false)));
+        assert!(matches!(Modal::Telemetry.on_key(Key::Char('j')), Effect::None));
+    }
     use super::*;
 
     fn repos() -> Vec<Repository> {
