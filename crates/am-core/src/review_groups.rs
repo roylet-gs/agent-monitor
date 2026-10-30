@@ -347,6 +347,7 @@ mod tests {
             assignee: None,
             project: None,
             pr_attachment: None,
+            parent: None,
         });
         assert!(!group(r#"{"asked": "you"}"#).matches(&t, "", now, &hits));
         assert!(group(r#"{"ticket": "yes"}"#).matches(&t, "", now, &hits));

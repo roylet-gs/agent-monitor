@@ -18,7 +18,7 @@ use std::cell::Cell;
 use unicode_width::UnicodeWidthStr;
 
 use crate::actions::{ActionBar, BarHit, Entry};
-use crate::app::{App, Key, Row};
+use crate::app::{FOLD_CLOSED, FOLD_OPEN, App, Key, Row};
 use crate::keymap::Command;
 use crate::theme::{Theme, status_glyph, status_label};
 
@@ -139,6 +139,8 @@ pub enum Target {
     Command(Command),
     /// A worktree (or one of its session rows) in the dashboard list.
     Worktree(usize),
+    /// A stack root's fold arrow or `+N stacked hidden` pill: fold/unfold.
+    Fold(usize),
     /// The `⬆ vX.Y.Z available` notice: offer to update.
     Update,
     /// Anywhere in the jobs pane: focus it.
@@ -2068,14 +2070,6 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
 
     let height = inner.height as usize;
     let start = list_start(app, height);
-    // Worktree and session rows select their worktree; the focused
-    // selection keeps its own highlight.
-    for (n, row) in app.rows.iter().skip(start).take(height).enumerate() {
-        if let Row::Worktree(i) | Row::Session(i, _) = row {
-            let selected = *row == Row::Worktree(app.selected) && focused;
-            push_row(hits, inner, n, Target::Worktree(*i), selected);
-        }
-    }
     let lines: Vec<Line> = app
         .rows
         .iter()
@@ -2097,6 +2091,13 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
                 Span::styled(" ═", theme.fg(theme.magenta)),
             ]),
             Row::Ticket(t) => Line::styled(format!("  — {} —", truncate(t, inner.width as usize - 6)), theme.faint()),
+            // The stack below is built on this branch, which has no worktree.
+            Row::Base(b) => {
+                // Over the root's status glyph (past the fold gutter).
+                let lead = if app.fold_gutter { "   " } else { " " };
+                let room = (inner.width as usize).saturating_sub(16 + lead.len());
+                Line::styled(format!("{lead}┌ {} · no worktree", truncate(b, room)), theme.faint())
+            }
             Row::Worktree(i) => {
                 worktree_line(app, theme, &app.flat[*i], &app.tree[*i], *i == app.selected, focused, &cols, inner.width, now)
             }
@@ -2104,6 +2105,34 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
             Row::Session(i, k) => session_line(app, theme, &app.flat[*i], &app.tree[*i], *k, &cols, inner.width, now),
         })
         .collect();
+    // Worktree and session rows select their worktree; the focused
+    // selection keeps its own highlight. A stack root's fold arrow and
+    // `+N stacked hidden` pill fold/unfold it (pushed after, so they win).
+    for (n, row) in app.rows.iter().skip(start).take(height).enumerate() {
+        if let Row::Worktree(i) | Row::Session(i, _) = row {
+            let selected = *row == Row::Worktree(app.selected) && focused;
+            push_row(hits, inner, n, Target::Worktree(*i), selected);
+        }
+        let Row::Worktree(i) = row else { continue };
+        if n >= inner.height as usize {
+            continue;
+        }
+        let y = inner.y + n as u16;
+        if app.tree[*i].starts_with([FOLD_OPEN, FOLD_CLOSED]) {
+            hits.push(Hit { rect: Rect::new(inner.x + 1, y, 1, 1), target: Target::Fold(*i), selected: false });
+        }
+        if let Some(&hidden) = app.folded.get(&app.flat[*i].worktree.id) {
+            let mut x = 0u16;
+            for span in &lines[n].spans {
+                let w = span.content.width() as u16;
+                if span.content == fold_pill(hidden, wide(inner.width)) {
+                    hits.push(Hit { rect: Rect::new(inner.x + x, y, w, 1), target: Target::Fold(*i), selected: false });
+                    break;
+                }
+                x += w;
+            }
+        }
+    }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -2506,6 +2535,11 @@ fn scroll_start(offset: &Cell<usize>, len: usize, height: usize, sel: (usize, us
     start
 }
 
+/// The pill on a folded stack's root: ` +3 stacked hidden ` (` +3 ` when narrow).
+fn fold_pill(hidden: usize, wide: bool) -> String {
+    if wide { format!(" +{hidden} stacked hidden ") } else { format!(" +{hidden} ") }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn worktree_line<'a>(
     app: &App,
@@ -2556,16 +2590,26 @@ fn worktree_line<'a>(
     let right_w: usize = right.iter().map(|s| s.content.width()).sum();
 
     let bar = if selected { if focused { "▌" } else { "▏" } } else { " " };
-    let mut left = vec![
-        Span::styled(bar, theme.bold(theme.border_focus)),
-        Span::styled(tree.to_string(), theme.fg(theme.border)),
+    // A stack root's fold arrow leads its tree prefix: accent while open,
+    // yellow while folded.
+    let (arrow, tree_rest) = match tree.chars().next() {
+        Some(c @ (FOLD_OPEN | FOLD_CLOSED)) => (Some(c), &tree[c.len_utf8()..]),
+        _ => (None, tree),
+    };
+    let mut left = vec![Span::styled(bar, theme.bold(theme.border_focus))];
+    if let Some(c) = arrow {
+        let color = if c == FOLD_CLOSED { theme.yellow } else { theme.accent };
+        left.push(Span::styled(c.to_string(), theme.bold(color)));
+    }
+    left.extend([
+        Span::styled(tree_rest.to_string(), theme.fg(theme.border)),
         if deleting {
             Span::styled(spinner(now), theme.fg(theme.red))
         } else {
             Span::styled(status_glyph(status), theme.fg(theme.status(status)))
         },
         Span::raw(" "),
-    ];
+    ]);
     let mut badge = String::new();
     // A row being deleted shows only that, in place of its other badges.
     if deleting {
@@ -2610,12 +2654,15 @@ fn worktree_line<'a>(
             badge.push_str(&format!(" ◆{subagents}"));
         }
     }
+    // A folded stack (←): a loud pill saying how much it hides, so a
+    // hidden stack is never missed.
+    let fold_badge = app.folded.get(&v.worktree.id).map(|n| format!(" {}", fold_pill(*n, wide(width)))).unwrap_or_default();
     // The tmp space mixes repos: name the row's own when several are tracked.
     let repo_tag = match app.snapshot.repos.iter().find(|r| r.id == v.worktree.repo_id) {
         Some(r) if v.worktree.tmp_space && app.snapshot.repos.len() > 1 => format!(" ({})", r.name),
         _ => String::new(),
     };
-    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + repo_tag.width() + tree.width());
+    let name_w = (width as usize).saturating_sub(right_w + 3 + badge.width() + fold_badge.width() + repo_tag.width() + tree.width());
     // Nickname (e.g. from the Linear ticket) first, then the branch, dimmed.
     // When space is short they share it so the branch never disappears.
     let w = &v.worktree;
@@ -2679,6 +2726,12 @@ fn worktree_line<'a>(
         rest = r;
     }
     left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
+    let mut pill_at = None;
+    if let Some(pill) = fold_badge.strip_prefix(' ') {
+        left.push(Span::raw(" "));
+        pill_at = Some(left.len());
+        left.push(Span::styled(pill.to_string(), theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
+    }
     left.push(Span::raw(" ".repeat(fill)));
 
     let ctx_range = ctx_range.start + left.len()..ctx_range.end + left.len();
@@ -2697,6 +2750,10 @@ fn worktree_line<'a>(
                 .map(|(i, s)| {
                     if ctx_range.contains(&i) {
                         Span::styled(s.content, s.style.remove_modifier(Modifier::REVERSED))
+                    } else if pill_at == Some(i) {
+                        // Reversed inside the reversed row it would vanish:
+                        // un-reverse it so it still stands out.
+                        Span::styled(s.content, theme.bold(theme.yellow).remove_modifier(Modifier::REVERSED))
                     } else {
                         Span::raw(s.content)
                     }
@@ -3243,6 +3300,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::ToggleLog), 3),
     (Some(Command::Refresh), 1),
     (Some(Command::Bottom), 3),
+    (Some(Command::FoldAll), 2),
 ];
 
 /// A key-bar entry: a key hint or a `│` separator.
@@ -3280,6 +3338,14 @@ fn dashboard_actions(app: &App) -> ActionBar {
             Some(Command::ReviewSplit) => bar.command(&app.keymap, Command::ReviewSplit, "reviews beside list", prio),
             Some(Command::ReviewWindow) => bar.command(&app.keymap, Command::ReviewWindow, "reviews in new window", prio),
             Some(Command::Bottom) => bar.command(&app.keymap, Command::Bottom, "bottom", prio),
+            // Only while there are stacks to fold.
+            Some(Command::FoldAll) => {
+                let roots = app.stack_roots();
+                if !roots.is_empty() {
+                    let label = if roots.iter().all(|r| app.collapsed.contains(r)) { "unfold all" } else { "fold all" };
+                    bar.command(&app.keymap, Command::FoldAll, label, prio);
+                }
+            }
             Some(c) => {
                 if let Some(label) = c.bar_label() {
                     bar.command(&app.keymap, c, label, prio);
@@ -3558,6 +3624,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::MoveDown, C::MoveUp], "  ↑ / ↓", "move"),
         (&[C::Top, C::Bottom], "", "top / bottom"),
         (&[C::PageDown, C::PageUp], "", "page down / up"),
+        (&[C::Collapse, C::Expand, C::FoldAll], "", "fold / unfold the stack (▾ ▸, clickable) / all stacks"),
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
@@ -3756,6 +3823,7 @@ mod tests {
             assignee: None,
             project: None,
             pr_attachment: None,
+            parent: None,
         });
         refactor.context = Some(ContextUsage { tokens: 121_000, model: Some("claude-opus-5-5".into()), window: None });
         let mut waiting = view("w2", "r1", "fix/offline-cache", Some(Status::Waiting));
@@ -3781,6 +3849,7 @@ mod tests {
             ],
             health: Default::default(),
             stack: Default::default(),
+            stack_base: Default::default(),
             today_tokens: None,
             reviews: None,
             review_error: None,
@@ -4507,6 +4576,7 @@ mod tests {
             assignee: None,
             project: None,
             pr_attachment: None,
+            parent: None,
         });
         snap.reviews = Some(vec![fork, ticket, pulled]);
         app.apply(snap);
@@ -4932,7 +5002,7 @@ mod tests {
             let mut app = by_repo();
             app.on_key(Key::Char('v'));
             let before = render(&app, 120, 20);
-            let key = app.keymap.key(cmd).unwrap();
+            let key = app.keymap.key(cmd).or_else(|| cmd.fixed_keys().first().copied()).unwrap();
             assert_eq!(app.on_key(key), crate::app::Action::None, "{cmd:?}");
             assert!(app.reviews.is_some() && app.modal.is_none() && app.settings_editor.is_none(), "{cmd:?}");
             assert_eq!(render(&app, 120, 20), before, "{cmd:?}");
@@ -6220,8 +6290,8 @@ mod tests {
         let order: Vec<(&str, &str)> = app.flat.iter().zip(&app.tree).map(|(v, t)| (v.worktree.id.as_str(), t.as_str())).collect();
         assert_eq!(
             order,
-            [("w1", ""), ("w4", "├─ "), ("w5", "│  └─ "), ("w6", "└─ "), ("w2", ""), ("w3", "")],
-            "children follow the parent, depth-first, with tree lines"
+            [("w1", "▾ "), ("w4", "  ├─ "), ("w5", "  │  └─ "), ("w6", "  └─ "), ("w2", "  "), ("w3", "  ")],
+            "children follow the parent, depth-first, with tree lines; the root has a fold arrow, every row its gutter"
         );
         insta::assert_snapshot!(render(&app, 100, 14));
     }
@@ -6559,6 +6629,7 @@ mod tests {
                 Row::Repo(_) => "repo",
                 Row::Project(_) => "project",
                 Row::Ticket(_) => "ticket",
+                Row::Base(_) => "base",
                 Row::Worktree(_) => "wt",
                 Row::Pending(_) => "pending",
                 Row::Session(..) => "session",
@@ -6587,6 +6658,7 @@ mod tests {
                 Row::Repo(_) => "repo",
                 Row::Project(_) => "project",
                 Row::Ticket(_) => "ticket",
+                Row::Base(_) => "base",
                 Row::Worktree(_) => "wt",
                 Row::Pending(_) => "pending",
                 Row::Session(..) => "session",
@@ -6617,12 +6689,221 @@ mod tests {
                 Row::Repo(_) => "repo",
                 Row::Project(_) => "project",
                 Row::Ticket(_) => "ticket",
+                Row::Base(_) => "base",
                 Row::Worktree(_) => "wt",
                 Row::Pending(_) => "pending",
                 Row::Session(..) => "session",
             })
             .collect();
         assert_eq!(kinds, ["repo", "wt", "spacer", "ticket", "wt", "wt", "spacer", "repo", "wt"]);
+    }
+
+    fn row_kinds(app: &App) -> Vec<String> {
+        app.rows
+            .iter()
+            .map(|r| match r {
+                Row::Spacer => "spacer".to_string(),
+                Row::Repo(_) => "repo".into(),
+                Row::Project(_) => "project".into(),
+                Row::Ticket(t) => format!("ticket {}", t.split(' ').next().unwrap_or("")),
+                Row::Base(b) => format!("base {b}"),
+                Row::Worktree(i) => app.flat[*i].worktree.id.clone(),
+                Row::Pending(_) => "pending".into(),
+                Row::Session(..) => "session".into(),
+            })
+            .collect()
+    }
+
+    /// Three stacks in one repo, listed interleaved: `a` (ENG-1 → ENG-2) and
+    /// `d` (ENG-7) under epic EPIC-A, `b` (rooted on a branch named after
+    /// another epic's ticket, ENG-5, with two EPIC-B tickets on it) and `c`
+    /// (ENG-5 → ENG-6, epic EPIC-C).
+    fn epic_stacks() -> App {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        let ticket = |id: &str, parent: Option<&str>| {
+            let mut l = snap.groups[0].worktrees[0].linear.clone().unwrap();
+            l.identifier = id.into();
+            l.title = format!("Ticket {id}");
+            l.parent = parent.map(|p| am_core::model::LinearParent { identifier: p.into(), title: format!("Epic {p}") });
+            l
+        };
+        let mut rows = Vec::new();
+        for (id, t, parent) in [
+            ("a1", "ENG-1", Some("EPIC-A")),
+            ("b1", "ENG-5", Some("EPIC-C")),
+            ("c1", "ENG-5", Some("EPIC-C")),
+            ("d1", "ENG-7", Some("EPIC-A")),
+            ("a2", "ENG-2", Some("EPIC-A")),
+            ("b2", "ENG-8", Some("EPIC-B")),
+            ("b3", "ENG-9", Some("EPIC-B")),
+            ("c2", "ENG-6", Some("EPIC-C")),
+        ] {
+            let mut v = view(id, "r1", &format!("feature/{id}"), None);
+            v.linear = Some(ticket(t, parent));
+            rows.push(v);
+        }
+        snap.groups[0].worktrees = rows;
+        snap.stack = [("a2", "a1"), ("b2", "b1"), ("b3", "b2"), ("c2", "c1")]
+            .into_iter()
+            .map(|(c, p)| (c.to_string(), p.to_string()))
+            .collect();
+        app.apply(snap);
+        app
+    }
+
+    #[test]
+    fn stacks_group_under_the_parent_ticket_most_of_their_tickets_have() {
+        let app = epic_stacks();
+        assert_eq!(
+            row_kinds(&app),
+            [
+                "repo", "ticket EPIC-A", "a1", "a2", "d1", "spacer",
+                // b's root is on ENG-5 (EPIC-C) but its stack is EPIC-B's.
+                "ticket EPIC-B", "b1", "b2", "b3", "spacer",
+                "ticket EPIC-C", "c1", "c2", "spacer",
+                "repo", "w3",
+            ],
+        );
+        assert!(app.rows.contains(&Row::Ticket("EPIC-A Epic EPIC-A".into())));
+        let order: Vec<&str> = app.flat.iter().map(|v| v.worktree.id.as_str()).collect();
+        assert_eq!(order, ["a1", "a2", "d1", "b1", "b2", "b3", "c1", "c2", "w3"], "flat follows the rows");
+    }
+
+    #[test]
+    fn grouping_stacks_by_ticket_can_be_turned_off() {
+        let mut app = epic_stacks();
+        let mut s = app.settings.clone();
+        s.group_stacks_by_ticket = false;
+        app.set_settings(s);
+        assert_eq!(row_kinds(&app), ["repo", "a1", "a2", "b1", "b2", "b3", "c1", "c2", "d1", "spacer", "repo", "w3"]);
+    }
+
+    #[test]
+    fn stack_ticket_without_parents_is_the_roots_own() {
+        let app = fixture();
+        let v = &app.snapshot.groups[0].worktrees[0];
+        let t = crate::app::stack_ticket(&[v]).unwrap();
+        assert_eq!((t.id.as_str(), t.parent), ("ENG-412", false));
+        // A lone stack on its own ticket gets no header (nothing shares it).
+        assert!(!row_kinds(&app).iter().any(|k| k.starts_with("ticket")));
+        let mut child = v.clone();
+        child.linear.as_mut().unwrap().parent =
+            Some(am_core::model::LinearParent { identifier: "ENG-412".into(), title: "Refactor grouping core".into() });
+        let t = crate::app::stack_ticket(&[v, &child]).unwrap();
+        assert_eq!((t.id.as_str(), t.parent), ("ENG-412", true), "the root is the epic of its children");
+    }
+
+    #[test]
+    fn a_stack_on_a_branch_without_a_worktree_gets_a_faint_base_line() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        snap.stack_base.insert("w1".into(), "feature/not-pulled".into());
+        app.apply(snap);
+        let kinds = row_kinds(&app);
+        let at = kinds.iter().position(|k| k == "w1").unwrap();
+        assert_eq!(kinds[at - 1], "base feature/not-pulled");
+        assert_eq!(app.flat.len(), 3, "the base line takes no selection index");
+        assert!(render(&app, 100, 10).contains("┌ feature/not-pulled · no worktree"));
+    }
+
+    #[test]
+    fn left_and_right_fold_and_unfold_stacks_at_their_root() {
+        let mut app = epic_stacks();
+        let at = |app: &App, id: &str| app.flat.iter().position(|v| v.worktree.id == id).unwrap();
+        let selected = |app: &App| app.selected_view().unwrap().worktree.id.clone();
+        // ← anywhere in a stack folds it to its root.
+        app.selected = at(&app, "b3");
+        app.on_key(Key::Left);
+        assert_eq!(app.folded.get("b1"), Some(&2));
+        assert_eq!(selected(&app), "b1", "the root is selected");
+        assert!(!app.flat.iter().any(|v| v.worktree.id == "b2" || v.worktree.id == "b3"));
+        assert_eq!(app.tree[at(&app, "b1")], "▸ ");
+        let screen = render(&app, 120, 24);
+        assert!(screen.contains("+2 stacked hidden"), "{screen}");
+        // Folded: survives a refresh; ← again changes nothing.
+        app.apply(app.snapshot.clone());
+        app.on_key(Key::Left);
+        assert!(app.folded.contains_key("b1") && selected(&app) == "b1");
+        // → unfolds, then steps into the stack; → on a stacked row does nothing.
+        app.on_key(Key::Right);
+        assert!(app.folded.is_empty());
+        assert_eq!(app.tree[at(&app, "b1")], "▾ ");
+        app.on_key(Key::Right);
+        assert_eq!(selected(&app), "b2");
+        app.on_key(Key::Right);
+        assert_eq!(selected(&app), "b2");
+        // Only roots fold: a row without a stack has no arrow and ← leaves it.
+        app.selected = at(&app, "d1");
+        app.on_key(Key::Left);
+        assert!(app.folded.is_empty() && selected(&app) == "d1");
+        assert_eq!(app.tree[at(&app, "d1")], "  ");
+        // A worktree created inside a folded stack unfolds it.
+        app.selected = at(&app, "c2");
+        app.on_key(Key::Left);
+        assert!(app.folded.contains_key("c1"));
+        app.pending_select = Some("c2".into());
+        app.apply(app.snapshot.clone());
+        assert_eq!(selected(&app), "c2");
+        assert!(app.folded.is_empty());
+    }
+
+    #[test]
+    fn z_folds_every_stack_then_unfolds_them_all() {
+        let mut app = epic_stacks();
+        let screen = render(&app, 160, 24);
+        assert!(screen.contains("z fold all"), "on the key bar while there are stacks:\n{screen}");
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "b3").unwrap();
+        app.on_key(Key::Char('z'));
+        let mut folded: Vec<&str> = app.folded.keys().map(String::as_str).collect();
+        folded.sort();
+        assert_eq!(folded, ["a1", "b1", "c1"]);
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b1", "a hidden selection moves to its root");
+        assert_eq!(app.notice.as_deref(), Some("Folded 3 stacks"));
+        assert!(render(&app, 160, 24).contains("z unfold all"));
+        // One stack opened by hand: `z` folds it again rather than unfolding all.
+        app.on_key(Key::Right);
+        app.on_key(Key::Char('z'));
+        assert_eq!(app.folded.len(), 3);
+        app.on_key(Key::Char('z'));
+        assert!(app.folded.is_empty());
+        assert_eq!(app.notice.as_deref(), Some("Unfolded 3 stacks"));
+        // No stacks: says so, and the key bar leaves it out.
+        let mut flat = fixture();
+        flat.on_key(Key::Char('z'));
+        assert_eq!(flat.notice.as_deref(), Some("No stacked branches to fold"));
+        assert!(!render(&flat, 160, 12).contains("fold all"));
+    }
+
+    #[test]
+    fn clicking_the_fold_arrow_or_pill_folds_and_unfolds() {
+        use crate::app::Mouse;
+        let mut app = epic_stacks();
+        render(&app, 120, 24);
+        let (x, y) = find(&app, 120, 24, "▾ · feature/b1");
+        app.on_mouse(Mouse::Click { x, y, double: false });
+        assert_eq!(app.folded.get("b1"), Some(&2), "the arrow folds");
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b1");
+        render(&app, 120, 24);
+        let (x, y) = find(&app, 120, 24, "+2 stacked hidden");
+        app.on_mouse(Mouse::Click { x, y, double: false });
+        assert!(app.folded.is_empty(), "the pill unfolds");
+        // A click elsewhere on the row only selects it.
+        render(&app, 120, 24);
+        let (x, y) = find(&app, 120, 24, "feature/c1");
+        app.on_mouse(Mouse::Click { x, y, double: false });
+        assert!(app.folded.is_empty());
+    }
+
+    #[test]
+    fn grouped_and_folded_stacks_render() {
+        let mut app = epic_stacks();
+        let mut snap = app.snapshot.clone();
+        snap.stack_base.insert("c1".into(), "feature/connect-1787".into());
+        app.apply(snap);
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "b1").unwrap();
+        app.on_key(Key::Left);
+        insta::assert_snapshot!(render(&app, 110, 20));
     }
 
     #[test]

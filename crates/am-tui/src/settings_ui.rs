@@ -83,6 +83,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "themeBuilder", label: "Theme builder…", help: "Make your own theme from the current one: pick colours, preview live, save", section: "Appearance", kind: Kind::ThemeBuilder },
     Field { key: "compactView", label: "Compact view", help: "Dense layout for small panes: top title lines only, no blank rows, fewer columns, side panes open below", section: "Appearance", kind: Kind::Bool },
     Field { key: "worktreeSort", label: "Sort order", help: "Criteria applied in order; first difference wins", section: "Dashboard", kind: Kind::Sort },
+    Field { key: "groupStacksByTicket", label: "Group stacks by ticket", help: "Stacks sit under the Linear ticket they belong to (their parent issue); off: by branch only", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showPrStatus", label: "Show PR column", help: "PR number and checks on each row", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showLinearTicket", label: "Show ticket column", help: "Linear identifier on each row", section: "Dashboard", kind: Kind::Bool },
     Field { key: "showGitAheadBehind", label: "Show git column", help: "Ahead/behind/dirty counts", section: "Dashboard", kind: Kind::Bool },

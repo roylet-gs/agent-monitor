@@ -444,6 +444,7 @@ pub(crate) mod tests {
                     url: None,
                 }),
                 pr_attachment: None,
+                parent: None,
             });
             self
         }

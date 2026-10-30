@@ -160,6 +160,18 @@ pub struct LinearInfo {
     pub project: Option<LinearProject>,
     #[serde(default)]
     pub pr_attachment: Option<LinearPrAttachment>,
+    /// The ticket this one is a sub-issue of (its epic): stacks are grouped
+    /// under it (`groupStacksByTicket`). (Rust-only; absent in payloads
+    /// written by the TS app.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<LinearParent>,
+}
+
+/// A Linear ticket's parent issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinearParent {
+    pub identifier: String,
+    pub title: String,
 }
 
 /// An open PR in a tracked repo that is waiting on your (or your team's)

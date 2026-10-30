@@ -50,6 +50,10 @@ pub struct Settings {
     /// Dense layout for small panes (1.x's key, reused): panes keep only
     /// their top line, no blank rows, fewer columns, side panes open below.
     pub compact_view: bool,
+    /// Stacks sit together under the Linear ticket they belong to (most of
+    /// the stack's tickets' parent issue, else the shared ticket), with a
+    /// `— ticket —` header; off, stacks only follow their branches.
+    pub group_stacks_by_ticket: bool,
     pub hide_main_branch: bool,
     pub audio_notifications: bool,
     pub audio_waiting_sound: String,
@@ -194,6 +198,7 @@ impl Default for Settings {
             polling_interval_ms: 30_000,
             auto_sync_on_startup: true,
             compact_view: false,
+            group_stacks_by_ticket: true,
             hide_main_branch: true,
             audio_notifications: false,
             audio_waiting_sound: "Glass".into(),
@@ -729,6 +734,14 @@ mod tests {
         assert!(!Settings::default().startup_script_in_window());
         assert!(!Settings::parse(r#"{"startupScriptMode":"bogus"}"#).startup_script_in_window());
         assert!(Settings::parse(r#"{"startupScriptMode":"window"}"#).startup_script_in_window());
+    }
+
+    #[test]
+    fn group_stacks_by_ticket_is_on_by_default() {
+        assert!(Settings::parse("{}").group_stacks_by_ticket);
+        let off = Settings::parse(r#"{"groupStacksByTicket":false}"#);
+        assert!(!off.group_stacks_by_ticket);
+        assert_eq!(off.to_file_json()["groupStacksByTicket"], false);
     }
 
     #[test]

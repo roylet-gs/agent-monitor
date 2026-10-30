@@ -181,6 +181,9 @@ struct Worker {
     /// Per repo: (branch-tips signature, trunk ref, git view) — rev-lists only
     /// rerun when some branch tip moved.
     stack_git: HashMap<String, (String, stacks::GitView)>,
+    /// Per repo: (main branch, `origin/*` tips), re-read every full sweep so a
+    /// fetch shows up without a local commit (for [`stacks::base_branch`]).
+    stack_remote: HashMap<String, (String, HashMap<String, String>)>,
     agent_seen: HashMap<String, String>,
     last_full: Option<Instant>,
     data_version: i64,
@@ -227,6 +230,7 @@ impl Worker {
             plugins_stamp: am_core::harness::plugins_stamp(),
             last_sync: None,
             stack_git: HashMap::new(),
+            stack_remote: HashMap::new(),
             agent_seen: HashMap::new(),
             last_full: None,
             data_version: -1,
@@ -484,6 +488,7 @@ impl Worker {
             self.perf.record("collector.stacks", started.elapsed());
         }
         let stack = self.infer_stacks(&views);
+        let stack_base = self.stack_bases(&views, &stack);
         let reviews = self.reviews_with_worktrees(&views);
         if dashboard {
             // Before the hide* filters: a hidden row's workspace still gets its pills.
@@ -510,6 +515,7 @@ impl Worker {
             subagents,
             health: self.health.clone(),
             stack,
+            stack_base,
             today_tokens,
             reviews,
             review_error,
@@ -581,6 +587,8 @@ impl Worker {
     fn refresh_stack_git(&mut self, repos: &[am_core::model::Repository], worktrees: &[Worktree]) {
         for repo in repos {
             let path = Path::new(&repo.path);
+            let main = worktrees::main_branch(path).unwrap_or_else(|_| "main".into());
+            self.stack_remote.insert(repo.id.clone(), (main, stacks::remote_tips(path)));
             let tips = stacks::branch_tips(path);
             let mut sig: Vec<String> = tips.iter().map(|(b, s)| format!("{b}={s}")).collect();
             sig.sort();
@@ -589,8 +597,8 @@ impl Worker {
                 continue;
             }
             let branches = stack_branches(worktrees, &repo.id);
-            let main = worktrees::main_branch(path).unwrap_or_else(|_| "main".into());
-            let trunk = stacks::trunk_ref(path, &main);
+            let main = &self.stack_remote[&repo.id].0;
+            let trunk = stacks::trunk_ref(path, main);
             let started = Instant::now();
             let view = stacks::collect(path, &branches, &trunk, tips);
             debug!("stacks", "{}: rev-lists for {} branch(es) in {:?}", repo.name, view.unmerged.len(), started.elapsed());
@@ -598,20 +606,48 @@ impl Worker {
         }
     }
 
-    /// child worktree id → parent worktree id, across all repos.
-    fn infer_stacks(&self, views: &[WorktreeView]) -> HashMap<String, String> {
-        let worktrees = worktrees_for_stacks(views);
-        let pr_base: HashMap<String, String> = views
+    /// worktree id → its open PR's base branch.
+    fn pr_bases(&self, views: &[WorktreeView]) -> HashMap<String, String> {
+        views
             .iter()
             .filter_map(|v| {
                 let (pr, _) = self.fields.get(&(v.worktree.repo_id.clone(), v.worktree.branch.clone()))?;
                 let pr = pr.as_ref().filter(|p| p.state == "OPEN")?;
                 Some((v.worktree.id.clone(), pr.base_ref_name.clone()?))
             })
-            .collect();
+            .collect()
+    }
+
+    /// child worktree id → parent worktree id, across all repos.
+    fn infer_stacks(&self, views: &[WorktreeView]) -> HashMap<String, String> {
+        let worktrees = worktrees_for_stacks(views);
+        let pr_base = self.pr_bases(views);
         let mut out = HashMap::new();
         for (repo_id, (_, git)) in &self.stack_git {
             out.extend(stacks::infer_parents(&stack_branches(&worktrees, repo_id), git, &pr_base));
+        }
+        out
+    }
+
+    /// Stack roots built on a branch that isn't the trunk and has no
+    /// worktree: root worktree id → that branch (the dashboard's faint
+    /// `┌ branch` line). `views` is every worktree, so a filtered-out one
+    /// still counts as pulled.
+    fn stack_bases(&self, views: &[WorktreeView], stack: &HashMap<String, String>) -> HashMap<String, String> {
+        let pr_base = self.pr_bases(views);
+        let mut out = HashMap::new();
+        for v in views.iter().filter(|v| !v.worktree.is_main && !stack.contains_key(&v.worktree.id)) {
+            let w = &v.worktree;
+            let (Some((_, git)), Some((main, remote))) = (self.stack_git.get(&w.repo_id), self.stack_remote.get(&w.repo_id)) else {
+                continue;
+            };
+            let Some(base) = stacks::base_branch(&w.branch, main, pr_base.get(&w.id).map(String::as_str), git, remote) else {
+                continue;
+            };
+            if views.iter().any(|o| o.worktree.repo_id == w.repo_id && o.worktree.branch == base) {
+                continue;
+            }
+            out.insert(w.id.clone(), base);
         }
         out
     }

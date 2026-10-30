@@ -24,6 +24,9 @@ pub struct Snapshot {
     pub health: Health,
     /// Stacked branches: child worktree id → parent worktree id.
     pub stack: std::collections::HashMap<String, String>,
+    /// Stack roots built on a branch that has no worktree (and isn't the
+    /// trunk): worktree id → that branch, drawn as a faint line above it.
+    pub stack_base: std::collections::HashMap<String, String>,
     /// Usage today (`showDailyTokens`/`dailyTokensScope`), shown per
     /// `dailyTokensMode`; `None` when the setting is off.
     pub today_tokens: Option<am_core::usage::Tally>,
@@ -70,6 +73,9 @@ pub enum Row {
     Repo(String),
     Project(String),
     Ticket(String),
+    /// Faint line above a stack whose root is built on a branch that has no
+    /// worktree (`Snapshot::stack_base`). No selection index.
+    Base(String),
     Worktree(usize),
     /// Placeholder for a worktree being created (jobs-pane job id). Like
     /// headers, it takes no selection index.
@@ -212,6 +218,13 @@ pub struct App {
     /// First visible row of the worktree list, kept between draws so the
     /// list only scrolls when the selection leaves the view.
     pub list_scroll: std::cell::Cell<usize>,
+    /// Worktrees whose stacked branches are folded away (←/→).
+    pub collapsed: std::collections::HashSet<String>,
+    /// Rows start with a 2-column gutter for stack roots' fold arrows (any
+    /// stack is listed).
+    pub fold_gutter: bool,
+    /// Collapsed worktree id → how many stacked rows it hides.
+    pub folded: std::collections::HashMap<String, usize>,
 }
 
 impl App {
@@ -253,6 +266,9 @@ impl App {
             modifiers_reported: false,
             hits: Default::default(),
             list_scroll: Default::default(),
+            collapsed: Default::default(),
+            folded: Default::default(),
+            fold_gutter: false,
         }
     }
 
@@ -261,6 +277,9 @@ impl App {
         let keep = self.pending_select.clone().or_else(|| self.selected_view().map(|v| v.worktree.id.clone()));
         self.snapshot = snapshot;
         self.deleting.retain(|_, finished| !*finished);
+        if let Some(id) = self.pending_select.clone() {
+            self.reveal(&id);
+        }
         self.rebuild_rows();
         if let Some(i) = keep.and_then(|id| self.flat.iter().position(|v| v.worktree.id == id)) {
             self.selected = i;
@@ -420,9 +439,16 @@ impl App {
     pub fn rebuild_rows(&mut self) {
         let by_project = am_core::grouping::top_sort_key(&self.settings) == Some(SortKey::LinearProject);
         let multi_repo = self.snapshot.groups.len() > 1;
+        // With any stack listed, every row gets room for a fold arrow
+        // (`▾`/`▸`) in front, so names stay aligned.
+        let listed_ids: std::collections::HashSet<&str> =
+            self.snapshot.groups.iter().flat_map(|g| &g.worktrees).map(|v| v.worktree.id.as_str()).collect();
+        let gutter = self.snapshot.stack.iter().any(|(c, p)| listed_ids.contains(c.as_str()) && listed_ids.contains(p.as_str()));
+        self.fold_gutter = gutter;
         self.flat.clear();
         self.rows.clear();
         self.tree.clear();
+        self.folded.clear();
         // Creates whose worktree isn't in the snapshot yet: (job, group id, group name).
         // Tmp-space creates wait at the end of the tmp space.
         let listed = |id: &str| self.snapshot.groups.iter().any(|g| g.worktrees.iter().any(|v| v.worktree.id == id));
@@ -450,55 +476,112 @@ impl App {
                 self.rows.push(Row::Repo(group.repo.name.clone()));
             }
             let ordered = stack_order(&group.worktrees, &self.snapshot.stack);
-            // Headers (project / ticket cluster) only consider top-level rows,
-            // so a stack is never split by a header.
-            let tops: Vec<usize> = ordered.iter().filter(|(_, prefix)| prefix.is_empty()).map(|(i, _)| *i).collect();
-            let mut last_project: Option<Option<String>> = None;
-            let mut top_pos: usize = 0;
-            // Set after the last top-level row of a ticket cluster: whatever
-            // follows the cluster (and its stacked children) gets a blank line.
-            let mut cluster_ended = false;
+            // One entry per stack (a top-level row and everything under it).
+            let mut stacks: Vec<Vec<(usize, String)>> = Vec::new();
             for (i, prefix) in ordered {
-                let v = &group.worktrees[i];
-                if prefix.is_empty() {
-                    if std::mem::take(&mut cluster_ended) && !matches!(self.rows.last(), Some(Row::Spacer)) {
-                        self.rows.push(Row::Spacer);
-                    }
-                    if by_project {
-                        let project = v.linear.as_ref().and_then(|l| l.project.as_ref()).map(|p| p.name.clone());
-                        if last_project.as_ref() != Some(&project) {
-                            // Breathing room between project sections (not right under the repo header).
-                            if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Spacer)) {
-                                self.rows.push(Row::Spacer);
-                            }
-                            // Rows without a project get the spacer but no header.
-                            if let Some(name) = &project {
-                                self.rows.push(Row::Project(name.clone()));
-                            }
-                            last_project = Some(project);
+                match stacks.last_mut() {
+                    Some(s) if !prefix.is_empty() => s.push((i, prefix)),
+                    _ => stacks.push(vec![(i, prefix)]),
+                }
+            }
+            let project_of = |s: &[(usize, String)]| {
+                group.worktrees[s[0].0].linear.as_ref().and_then(|l| l.project.as_ref()).map(|p| p.name.clone())
+            };
+            let tickets: Vec<Option<StackTicket>> = match self.settings.group_stacks_by_ticket {
+                true => stacks.iter().map(|s| stack_ticket(&s.iter().map(|(i, _)| &group.worktrees[*i]).collect::<Vec<_>>())).collect(),
+                false => vec![None; stacks.len()],
+            };
+            // Stacks of one ticket sit together, where the first of them is
+            // (within its project section, which the sort keeps together).
+            // Keyed by (project, ticket id); a stack without one stays put.
+            let keys: Vec<Option<(Option<String>, &str)>> = tickets
+                .iter()
+                .enumerate()
+                .map(|(n, t)| t.as_ref().map(|t| (if by_project { project_of(&stacks[n]) } else { None }, t.id.as_str())))
+                .collect();
+            let mut units: Vec<Vec<usize>> = Vec::new();
+            let mut unit_of: std::collections::HashMap<&(Option<String>, &str), usize> = Default::default();
+            for (n, key) in keys.iter().enumerate() {
+                match key.as_ref().and_then(|k| unit_of.get(k)) {
+                    Some(&u) => units[u].push(n),
+                    None => {
+                        if let Some(k) = key {
+                            unit_of.insert(k, units.len());
                         }
+                        units.push(vec![n]);
                     }
-                    let ticket = ticket_of(v);
-                    let prev = top_pos.checked_sub(1).map(|p| ticket_of(&group.worktrees[tops[p]]));
-                    let next = tops.get(top_pos + 1).map(|&n| ticket_of(&group.worktrees[n]));
-                    if ticket.is_some() && prev != Some(ticket) && next == Some(ticket) {
+                }
+            }
+            let order: Vec<usize> = units.into_iter().flatten().collect();
+            let key_at = |pos: usize| order.get(pos).and_then(|&n| keys[n].as_ref());
+            let mut last_project: Option<Option<String>> = None;
+            // Set after the last stack of a ticket cluster: whatever follows
+            // the cluster gets a blank line.
+            let mut cluster_ended = false;
+            for (pos, &n) in order.iter().enumerate() {
+                let stack = &stacks[n];
+                if std::mem::take(&mut cluster_ended) && !matches!(self.rows.last(), Some(Row::Spacer)) {
+                    self.rows.push(Row::Spacer);
+                }
+                if by_project {
+                    let project = project_of(stack);
+                    if last_project.as_ref() != Some(&project) {
+                        // Breathing room between project sections (not right under the repo header).
+                        if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Spacer)) {
+                            self.rows.push(Row::Spacer);
+                        }
+                        // Rows without a project get the spacer but no header.
+                        if let Some(name) = &project {
+                            self.rows.push(Row::Project(name.clone()));
+                        }
+                        last_project = Some(project);
+                    }
+                }
+                // A header for a ticket two or more stacks share, or for the
+                // parent ticket a stack's tickets belong to (even alone).
+                if let Some(t) = &tickets[n] {
+                    let (prev, next) = (pos.checked_sub(1).and_then(key_at), key_at(pos + 1));
+                    let me = keys[n].as_ref();
+                    if prev != me && (next == me || t.parent) {
                         // A blank line above the cluster too, unless it opens a section.
                         if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Project(_)) | Some(Row::Spacer)) {
                             self.rows.push(Row::Spacer);
                         }
-                        let l = v.linear.as_ref().unwrap();
-                        self.rows.push(Row::Ticket(format!("{} {}", l.identifier, l.title)));
+                        self.rows.push(Row::Ticket(format!("{} {}", t.id, t.title)));
                     }
-                    cluster_ended = ticket.is_some() && prev == Some(ticket) && next != Some(ticket);
-                    top_pos += 1;
+                    cluster_ended = next != me && (prev == me || t.parent);
                 }
-                let i = self.flat.len();
-                self.rows.push(Row::Worktree(i));
-                if v.sessions.len() > 1 {
-                    self.rows.extend((0..v.sessions.len()).map(|k| Row::Session(i, k)));
+                let root = &group.worktrees[stack[0].0];
+                if let Some(base) = self.snapshot.stack_base.get(&root.worktree.id) {
+                    self.rows.push(Row::Base(base.clone()));
                 }
-                self.flat.push(v.clone());
-                self.tree.push(prefix);
+                // A folded stack shows only its root.
+                let root_id = &group.worktrees[stack[0].0].worktree.id;
+                let folded = stack.len() > 1 && self.collapsed.contains(root_id);
+                if folded {
+                    self.folded.insert(root_id.clone(), stack.len() - 1);
+                }
+                let shown = if folded { &stack[..1] } else { &stack[..] };
+                for (i, prefix) in shown {
+                    let v = &group.worktrees[*i];
+                    let at = self.flat.len();
+                    let arrow = match (prefix.is_empty() && stack.len() > 1, folded) {
+                        (false, _) => ' ',
+                        (true, false) => FOLD_OPEN,
+                        (true, true) => FOLD_CLOSED,
+                    };
+                    self.rows.push(Row::Worktree(at));
+                    if v.sessions.len() > 1 {
+                        self.rows.extend((0..v.sessions.len()).map(|k| Row::Session(at, k)));
+                    }
+                    self.flat.push(v.clone());
+                    // A stack's root carries its fold arrow in the gutter.
+                    self.tree.push(match gutter {
+                        false => prefix.clone(),
+                        true if prefix.is_empty() => format!("{arrow} "),
+                        true => format!("  {prefix}"),
+                    });
+                }
             }
             pending.retain(|(job, repo_id, _)| {
                 let here = *repo_id == group.repo.id;
@@ -930,6 +1013,9 @@ impl App {
             C::PageUp => self.move_by(-crate::nav::PAGE),
             C::Bottom => self.move_by(isize::MAX / 2),
             C::Top => self.move_by(isize::MIN / 2),
+            C::Collapse => self.collapse_selected(),
+            C::Expand => self.expand_selected(),
+            C::FoldAll => self.toggle_fold_all(),
         }
         Action::None
     }
@@ -1003,6 +1089,14 @@ impl App {
                 self.selected = i;
                 self.mark_selected_seen();
                 if double { self.run_command(crate::keymap::Command::Open) } else { Action::None }
+            }
+            Target::Fold(i) => {
+                self.jobs.focused = false;
+                if let Some(p) = &mut self.reviews {
+                    p.focused = false;
+                }
+                self.toggle_fold(i);
+                Action::None
             }
             Target::Item(list, i) => self.pick(list, i),
         }
@@ -1576,6 +1670,128 @@ impl App {
     }
 
 
+    fn listed(&self, id: &str) -> bool {
+        self.snapshot.groups.iter().any(|g| g.worktrees.iter().any(|v| v.worktree.id == id))
+    }
+
+    /// The root of the stack `id` is in (itself when it isn't stacked):
+    /// only a root folds.
+    fn stack_root(&self, id: &str) -> String {
+        let mut cur = id.to_string();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(parent) = self.snapshot.stack.get(&cur).filter(|p| self.listed(p)) {
+            if !seen.insert(cur.clone()) {
+                break;
+            }
+            cur = parent.clone();
+        }
+        cur
+    }
+
+    /// Whether any listed worktree is stacked on `id`.
+    fn has_stacked(&self, id: &str) -> bool {
+        self.snapshot.stack.iter().any(|(child, parent)| parent == id && self.listed(child))
+    }
+
+    fn select_worktree(&mut self, id: &str) {
+        if let Some(i) = self.flat.iter().position(|v| v.worktree.id == id) {
+            self.selected = i;
+            self.mark_selected_seen();
+        }
+    }
+
+    /// ←: fold the selected row's stack (anywhere in it) down to its root.
+    fn collapse_selected(&mut self) {
+        let Some(id) = self.selected_view().map(|v| v.worktree.id.clone()) else { return };
+        let root = self.stack_root(&id);
+        if self.has_stacked(&root) && self.collapsed.insert(root.clone()) {
+            self.rebuild_rows();
+        }
+        self.select_worktree(&root);
+    }
+
+    /// →: unfold the selected root; on an unfolded one, go to the first
+    /// branch stacked on it.
+    fn expand_selected(&mut self) {
+        let Some(id) = self.selected_view().map(|v| v.worktree.id.clone()) else { return };
+        if self.collapsed.remove(&id) {
+            self.rebuild_rows();
+            self.select_worktree(&id);
+        } else if self.snapshot.stack.get(&id).is_none_or(|p| !self.listed(p)) && self.has_stacked(&id) {
+            self.move_by(1);
+        }
+    }
+
+    /// The listed stack roots (worktrees with listed branches stacked on
+    /// them and no listed parent).
+    pub fn stack_roots(&self) -> Vec<String> {
+        let listed: std::collections::HashSet<&str> =
+            self.snapshot.groups.iter().flat_map(|g| &g.worktrees).map(|v| v.worktree.id.as_str()).collect();
+        let is_listed = |id: &str| listed.contains(id);
+        let mut roots: Vec<String> = Vec::new();
+        for (child, parent) in &self.snapshot.stack {
+            if !is_listed(child) || !is_listed(parent) {
+                continue;
+            }
+            let mut cur = parent.as_str();
+            let mut steps = 0;
+            while let Some(p) = self.snapshot.stack.get(cur).filter(|p| is_listed(p)) {
+                cur = p;
+                steps += 1;
+                if steps > listed.len() {
+                    break;
+                }
+            }
+            if !roots.iter().any(|r| r == cur) {
+                roots.push(cur.to_string());
+            }
+        }
+        roots
+    }
+
+    /// `z`: fold every stack; when all are folded already, unfold them all.
+    fn toggle_fold_all(&mut self) {
+        let roots = self.stack_roots();
+        if roots.is_empty() {
+            self.notice = Some("No stacked branches to fold".into());
+            return;
+        }
+        let keep = self.selected_view().map(|v| v.worktree.id.clone());
+        let fold = !roots.iter().all(|r| self.collapsed.contains(r));
+        if fold {
+            self.collapsed.extend(roots.iter().cloned());
+        } else {
+            roots.iter().for_each(|r| {
+                self.collapsed.remove(r);
+            });
+        }
+        let n = roots.len();
+        let s = if n == 1 { "" } else { "s" };
+        self.notice = Some(if fold { format!("Folded {n} stack{s}") } else { format!("Unfolded {n} stack{s}") });
+        self.rebuild_rows();
+        if let Some(id) = keep {
+            let root = self.stack_root(&id);
+            self.select_worktree(if self.flat.iter().any(|v| v.worktree.id == id) { &id } else { &root });
+        }
+    }
+
+    /// Unfold the stack hiding `id` (a just-created worktree must show up).
+    fn reveal(&mut self, id: &str) {
+        let root = self.stack_root(id);
+        self.collapsed.remove(&root);
+    }
+
+    /// A click on a stack root's fold arrow or its `+N stacked hidden` pill:
+    /// select it and fold or unfold it.
+    pub fn toggle_fold(&mut self, i: usize) {
+        let Some(id) = self.flat.get(i).map(|v| v.worktree.id.clone()) else { return };
+        if !self.collapsed.remove(&id) && self.has_stacked(&id) {
+            self.collapsed.insert(id.clone());
+        }
+        self.rebuild_rows();
+        self.select_worktree(&id);
+    }
+
     fn move_by(&mut self, delta: isize) {
         let len = self.flat.len();
         if len == 0 {
@@ -1669,8 +1885,43 @@ fn linear_url(url: &str, s: &Settings) -> String {
     }
 }
 
-fn ticket_of(v: &WorktreeView) -> Option<&str> {
-    v.linear.as_ref().map(|l| l.identifier.as_str())
+/// Fold arrows in a stack root's tree prefix (`App::tree`).
+pub const FOLD_OPEN: char = '▾';
+pub const FOLD_CLOSED: char = '▸';
+
+/// The Linear ticket a stack is grouped under (`groupStacksByTicket`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StackTicket {
+    pub id: String,
+    pub title: String,
+    /// It's the parent issue of the stack's tickets (so it gets a header
+    /// even when no other stack shares it), not just the root's own ticket.
+    pub parent: bool,
+}
+
+/// What a stack (`members`, root first) is grouped under: the parent issue
+/// most of its tickets have (a root without a parent counts its own ticket;
+/// a tie goes to the root's), else none.
+pub fn stack_ticket(members: &[&WorktreeView]) -> Option<StackTicket> {
+    let mut votes: Vec<(StackTicket, usize)> = Vec::new();
+    for (k, v) in members.iter().enumerate() {
+        let Some(l) = &v.linear else { continue };
+        let vote = match &l.parent {
+            Some(p) => StackTicket { id: p.identifier.clone(), title: p.title.clone(), parent: true },
+            None if k == 0 => StackTicket { id: l.identifier.clone(), title: l.title.clone(), parent: false },
+            None => continue,
+        };
+        match votes.iter_mut().find(|(t, _)| t.id == vote.id) {
+            Some((t, n)) => {
+                t.parent |= vote.parent;
+                *n += 1;
+            }
+            None => votes.push((vote, 1)),
+        }
+    }
+    // `max_by_key` keeps the last of equals: walk backwards so the first
+    // (the root's) wins a tie.
+    votes.into_iter().rev().max_by_key(|(_, n)| *n).map(|(t, _)| t)
 }
 
 /// Modifier keys held on their own (mapped from crossterm in main.rs).

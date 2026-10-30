@@ -24,6 +24,11 @@ let outage = false;
  */
 let linearByBranch: Record<string, unknown> = {};
 /**
+ * Per-branch PR overrides for the batched `gh api graphql` lookup: branch →
+ * a gh fixture (`null` = no PR). Branches not listed get the `gh` fixture.
+ */
+let ghByBranch: Record<string, unknown> = {};
+/**
  * The review-request search (`gh api graphql` with a `search(` query): the
  * `gh-review-requests.json` fixture when on, an empty result otherwise, so
  * only the specs that turn it on see a `N to review` badge.
@@ -56,6 +61,8 @@ interface GhFixture {
   reviewDecision?: string;
   mergeable?: string;
   headRefName?: string;
+  /** The branch the PR targets (stacked branches); omitted = none reported. */
+  baseRefName?: string;
   statusCheckRollup?: Array<Record<string, unknown>>;
 }
 
@@ -70,6 +77,7 @@ function toGraphqlPr(f: GhFixture, branch: string): unknown {
     reviewDecision: f.reviewDecision || null,
     mergeable: f.mergeable ?? "MERGEABLE",
     headRefName: f.headRefName ?? branch,
+    ...(f.baseRefName !== undefined ? { baseRefName: f.baseRefName } : {}),
     isCrossRepository: false,
     commits: {
       nodes: [
@@ -251,8 +259,9 @@ const server = http.createServer(async (req, res) => {
         if (args[i] !== "-f" && args[i] !== "-F") continue;
         const m = /^(b\d+)=([\s\S]*)$/.exec(args[i + 1] ?? "");
         if (!m) continue;
+        const fixture = m[2]! in ghByBranch ? ghByBranch[m[2]!] : ghFixture;
         repository[m[1]!] = {
-          nodes: ghFixture === null ? [] : [toGraphqlPr(ghFixture as GhFixture, m[2]!)],
+          nodes: fixture === null ? [] : [toGraphqlPr(fixture as GhFixture, m[2]!)],
         };
       }
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -333,6 +342,9 @@ const server = http.createServer(async (req, res) => {
       if (config.linearByBranch !== undefined) {
         linearByBranch = config.linearByBranch ?? {};
       }
+      if (config.ghByBranch !== undefined) {
+        ghByBranch = config.ghByBranch ?? {};
+      }
       if (config.reviews !== undefined) {
         reviews = Boolean(config.reviews);
       }
@@ -358,6 +370,7 @@ const server = http.createServer(async (req, res) => {
     ghVersionResponse = "gh version 2.62.0 (2024-12-05)";
     outage = false;
     linearByBranch = {};
+    ghByBranch = {};
     reviews = false;
     rateLimited = false;
     approvedPulled = false;

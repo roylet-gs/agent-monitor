@@ -39,12 +39,15 @@ pub enum Command {
     PageUp,
     Top,
     Bottom,
+    Collapse,
+    Expand,
+    FoldAll,
 }
 
 impl Command {
     /// Every command, in the order the Key bindings page lists them (grouped
     /// by `section`).
-    pub const ALL: [Command; 25] = [
+    pub const ALL: [Command; 28] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -70,6 +73,9 @@ impl Command {
         Command::PageUp,
         Command::Top,
         Command::Bottom,
+        Command::Collapse,
+        Command::Expand,
+        Command::FoldAll,
     ];
 
     fn index(self) -> usize {
@@ -104,6 +110,9 @@ impl Command {
             Command::PageUp => "pageUp",
             Command::Top => "top",
             Command::Bottom => "bottom",
+            Command::Collapse => "collapse",
+            Command::Expand => "expand",
+            Command::FoldAll => "toggleFoldAll",
         }
     }
 
@@ -143,6 +152,9 @@ impl Command {
             Command::PageUp => "Page up",
             Command::Top => "Jump to top",
             Command::Bottom => "Jump to bottom",
+            Command::Collapse => "Collapse stack",
+            Command::Expand => "Expand stack",
+            Command::FoldAll => "Fold all stacks",
         }
     }
 
@@ -162,7 +174,15 @@ impl Command {
                 "Review requests"
             },
             Command::ToggleLog | Command::Settings | Command::Refresh | Command::Help | Command::Quit => "General",
-            Command::MoveDown | Command::MoveUp | Command::PageDown | Command::PageUp | Command::Top | Command::Bottom => "Moving",
+            Command::MoveDown
+            | Command::MoveUp
+            | Command::PageDown
+            | Command::PageUp
+            | Command::Top
+            | Command::Bottom
+            | Command::Collapse
+            | Command::Expand
+            | Command::FoldAll => "Moving",
         }
     }
 
@@ -194,6 +214,9 @@ impl Command {
             Command::PageUp => "Ten rows up (pgup always works)",
             Command::Top => "First row (home always works)",
             Command::Bottom => "Last row (end always works)",
+            Command::Collapse => "Fold the selected row's stack down to its root (← always works)",
+            Command::Expand => "Unfold the selected stack, or go to its first stacked branch (→ always works)",
+            Command::FoldAll => "Fold every stack to its root; when all are folded, unfold them all",
         }
     }
 
@@ -215,7 +238,14 @@ impl Command {
             Command::Refresh => "clear cache and refetch",
             Command::Quit => "back",
             Command::MoveDown | Command::MoveUp | Command::PageDown | Command::PageUp | Command::Top | Command::Bottom => "same",
-            Command::OpenProject | Command::NewWorktree | Command::AddRepo | Command::ToggleLog | Command::ToggleFilters => {
+            Command::OpenProject
+            | Command::NewWorktree
+            | Command::AddRepo
+            | Command::ToggleLog
+            | Command::ToggleFilters
+            | Command::Collapse
+            | Command::Expand
+            | Command::FoldAll => {
                 return None;
             }
         })
@@ -283,8 +313,9 @@ impl Command {
             Command::MoveUp => Key::Char('k'),
             Command::PageDown => Key::CtrlD,
             Command::PageUp => Key::CtrlU,
-            Command::Top => return None,
+            Command::Top | Command::Collapse | Command::Expand => return None,
             Command::Bottom => Key::Char('G'),
+            Command::FoldAll => Key::Char('z'),
         })
     }
 
@@ -300,6 +331,8 @@ impl Command {
             Command::PageUp => &[Key::PageUp],
             Command::Top => &[Key::Home],
             Command::Bottom => &[Key::End],
+            Command::Collapse => &[Key::Left],
+            Command::Expand => &[Key::Right],
             _ => &[],
         }
     }

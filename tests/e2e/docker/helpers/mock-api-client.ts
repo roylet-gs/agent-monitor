@@ -15,6 +15,12 @@ interface MockSetupConfig {
    */
   linearByBranch?: Record<string, unknown>;
   /**
+   * Per-branch PRs for the batched GitHub lookup: branch → gh fixture (may
+   * carry `baseRefName`, e.g. to stack it on another branch; `null` = no PR).
+   * Unlisted branches get the `gh` fixture.
+   */
+  ghByBranch?: Record<string, unknown>;
+  /**
    * Answer the review-request search with `gh-review-requests.json` (three
    * PRs in acme/work); off (no PRs waiting) after a reset.
    */
