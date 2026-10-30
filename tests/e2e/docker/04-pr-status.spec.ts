@@ -165,3 +165,74 @@ test("closed (unmerged) PR reads closed", async ({ page }) => {
   expect(await tui.selectedRow()).toContain("#44✓ closed");
   await tui.screenshot("pr-closed");
 });
+
+// An approval outranks `draft`: an approved draft reads `approved` (yellow
+// with CI failing, bold green with it passing); an unapproved one stays `draft`.
+
+test("approved draft PR with a failing check reads approved, not draft", async ({ page }) => {
+  await setupMock({
+    gh: {
+      number: 43,
+      title: "wip: draft feature",
+      url: "https://github.com/test/repo/pull/43",
+      state: "OPEN",
+      isDraft: true,
+      reviewDecision: "APPROVED",
+      mergeable: "MERGEABLE",
+      statusCheckRollup: [
+        { status: "COMPLETED", conclusion: "SUCCESS", name: "build" },
+        { status: "COMPLETED", conclusion: "FAILURE", name: "test" },
+      ],
+    },
+  });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("main");
+  await tui.waitForMatch(/│▌.*#43✗ approved/m, 15_000);
+  const row = await tui.selectedRow();
+  expect(row).toContain("#43✗ approved");
+  expect(row).not.toContain("draft");
+  await tui.screenshot("pr-approved-draft");
+});
+
+test("approved draft PR with passing checks reads approved", async ({ page }) => {
+  await setupMock({
+    gh: {
+      number: 43,
+      title: "wip: draft feature",
+      url: "https://github.com/test/repo/pull/43",
+      state: "OPEN",
+      isDraft: true,
+      reviewDecision: "APPROVED",
+      mergeable: "MERGEABLE",
+      statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS", name: "build" }],
+    },
+  });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("main");
+  await tui.waitForMatch(/│▌.*#43✓ approved/m, 15_000);
+  const row = await tui.selectedRow();
+  expect(row).toContain("#43✓ approved");
+  expect(row).not.toContain("draft");
+  await tui.screenshot("pr-approved-draft-checks-passing");
+});
+
+test("unapproved draft PR with checks still reads draft", async ({ page }) => {
+  await setupMock({
+    gh: {
+      number: 43,
+      title: "wip: draft feature",
+      url: "https://github.com/test/repo/pull/43",
+      state: "OPEN",
+      isDraft: true,
+      reviewDecision: "REVIEW_REQUIRED",
+      statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS", name: "build" }],
+    },
+  });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.selectRow("main");
+  await tui.waitForMatch(/│▌.*#43✓ draft/m, 15_000);
+  expect(await tui.selectedRow()).not.toContain("approved");
+});
