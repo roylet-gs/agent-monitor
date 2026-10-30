@@ -42,7 +42,11 @@ def dashboard(uid, title, desc, panels):
         "schemaVersion": 39, "editable": True, "time": {"from": "now-30d", "to": "now"},
         "refresh": "", "timezone": "utc", "graphTooltip": 1,
         "templating": {"list": [
-            {"name": "loki", "label": "Logs", "type": "datasource", "query": "loki", "current": {}, "hide": 0},
+            # Grafana Cloud stacks also have alert-state-history and
+            # usage-insights Loki sources, which sort first: skip them so the
+            # stack's own logs are picked by default.
+            {"name": "loki", "label": "Logs", "type": "datasource", "query": "loki", "current": {}, "hide": 0,
+             "regex": "/^(?!.*(alert-state-history|usage-insights)).*$/"},
             {"name": "version", "label": "Version", "type": "query", "datasource": DS,
              "query": {"label": "service_version", "stream": SEL, "type": 1},
              "definition": f"label_values({SEL}, service_version)",

@@ -23,7 +23,8 @@
         "type": "datasource",
         "query": "loki",
         "current": {},
-        "hide": 0
+        "hide": 0,
+        "regex": "/^(?!.*(alert-state-history|usage-insights)).*$/"
       },
       {
         "name": "version",
