@@ -3292,6 +3292,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::ToggleLog), 3),
     (Some(Command::Refresh), 1),
     (Some(Command::Bottom), 3),
+    (Some(Command::FoldAll), 2),
 ];
 
 /// A key-bar entry: a key hint or a `│` separator.
@@ -3329,6 +3330,14 @@ fn dashboard_actions(app: &App) -> ActionBar {
             Some(Command::ReviewSplit) => bar.command(&app.keymap, Command::ReviewSplit, "reviews beside list", prio),
             Some(Command::ReviewWindow) => bar.command(&app.keymap, Command::ReviewWindow, "reviews in new window", prio),
             Some(Command::Bottom) => bar.command(&app.keymap, Command::Bottom, "bottom", prio),
+            // Only while there are stacks to fold.
+            Some(Command::FoldAll) => {
+                let roots = app.stack_roots();
+                if !roots.is_empty() {
+                    let label = if roots.iter().all(|r| app.collapsed.contains(r)) { "unfold all" } else { "fold all" };
+                    bar.command(&app.keymap, Command::FoldAll, label, prio);
+                }
+            }
             Some(c) => {
                 if let Some(label) = c.bar_label() {
                     bar.command(&app.keymap, c, label, prio);
@@ -3607,7 +3616,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::MoveDown, C::MoveUp], "  ↑ / ↓", "move"),
         (&[C::Top, C::Bottom], "", "top / bottom"),
         (&[C::PageDown, C::PageUp], "", "page down / up"),
-        (&[C::Collapse, C::Expand], "", "fold / unfold the selected stack (▾ / ▸, clickable)"),
+        (&[C::Collapse, C::Expand, C::FoldAll], "", "fold / unfold the stack (▾ ▸, clickable) / all stacks"),
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
@@ -6829,6 +6838,33 @@ mod tests {
         app.apply(app.snapshot.clone());
         assert_eq!(selected(&app), "c2");
         assert!(app.folded.is_empty());
+    }
+
+    #[test]
+    fn z_folds_every_stack_then_unfolds_them_all() {
+        let mut app = epic_stacks();
+        let screen = render(&app, 160, 24);
+        assert!(screen.contains("z fold all"), "on the key bar while there are stacks:\n{screen}");
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "b3").unwrap();
+        app.on_key(Key::Char('z'));
+        let mut folded: Vec<&str> = app.folded.keys().map(String::as_str).collect();
+        folded.sort();
+        assert_eq!(folded, ["a1", "b1", "c1"]);
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b1", "a hidden selection moves to its root");
+        assert_eq!(app.notice.as_deref(), Some("Folded 3 stacks"));
+        assert!(render(&app, 160, 24).contains("z unfold all"));
+        // One stack opened by hand: `z` folds it again rather than unfolding all.
+        app.on_key(Key::Right);
+        app.on_key(Key::Char('z'));
+        assert_eq!(app.folded.len(), 3);
+        app.on_key(Key::Char('z'));
+        assert!(app.folded.is_empty());
+        assert_eq!(app.notice.as_deref(), Some("Unfolded 3 stacks"));
+        // No stacks: says so, and the key bar leaves it out.
+        let mut flat = fixture();
+        flat.on_key(Key::Char('z'));
+        assert_eq!(flat.notice.as_deref(), Some("No stacked branches to fold"));
+        assert!(!render(&flat, 160, 12).contains("fold all"));
     }
 
     #[test]

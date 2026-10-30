@@ -6,7 +6,7 @@ expression: "render(&app, 100, 20)"
 │agent-mon│    j / k  ↑ / ↓  move                                                        │─────────│
 │▌◑ featur│        home / G  top / bottom                                                │░░░ 121k │
 │ ◐ fix/of│ ctrl-d / ctrl-u  page down / up                                              │░░░ 185k │
-│         │           ← / →  fold / unfold the selected stack (▾ / ▸, clickable)         │         │
+│         │       ← / → / z  fold / unfold the stack (▾ ▸, clickable) / all stacks       │         │
 │gridsight│               ⏎  open (IDE; resumes last agent session)                      │─────────│
 │ · main  │       g / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane (Settings → View logs… opens the file)      │         │

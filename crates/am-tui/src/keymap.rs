@@ -41,12 +41,13 @@ pub enum Command {
     Bottom,
     Collapse,
     Expand,
+    FoldAll,
 }
 
 impl Command {
     /// Every command, in the order the Key bindings page lists them (grouped
     /// by `section`).
-    pub const ALL: [Command; 27] = [
+    pub const ALL: [Command; 28] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -74,6 +75,7 @@ impl Command {
         Command::Bottom,
         Command::Collapse,
         Command::Expand,
+        Command::FoldAll,
     ];
 
     fn index(self) -> usize {
@@ -110,6 +112,7 @@ impl Command {
             Command::Bottom => "bottom",
             Command::Collapse => "collapse",
             Command::Expand => "expand",
+            Command::FoldAll => "toggleFoldAll",
         }
     }
 
@@ -151,6 +154,7 @@ impl Command {
             Command::Bottom => "Jump to bottom",
             Command::Collapse => "Collapse stack",
             Command::Expand => "Expand stack",
+            Command::FoldAll => "Fold all stacks",
         }
     }
 
@@ -177,7 +181,8 @@ impl Command {
             | Command::Top
             | Command::Bottom
             | Command::Collapse
-            | Command::Expand => "Moving",
+            | Command::Expand
+            | Command::FoldAll => "Moving",
         }
     }
 
@@ -211,6 +216,7 @@ impl Command {
             Command::Bottom => "Last row (end always works)",
             Command::Collapse => "Fold the selected row's stack down to its root (← always works)",
             Command::Expand => "Unfold the selected stack, or go to its first stacked branch (→ always works)",
+            Command::FoldAll => "Fold every stack to its root; when all are folded, unfold them all",
         }
     }
 
@@ -238,7 +244,8 @@ impl Command {
             | Command::ToggleLog
             | Command::ToggleFilters
             | Command::Collapse
-            | Command::Expand => {
+            | Command::Expand
+            | Command::FoldAll => {
                 return None;
             }
         })
@@ -308,6 +315,7 @@ impl Command {
             Command::PageUp => Key::CtrlU,
             Command::Top | Command::Collapse | Command::Expand => return None,
             Command::Bottom => Key::Char('G'),
+            Command::FoldAll => Key::Char('z'),
         })
     }
 

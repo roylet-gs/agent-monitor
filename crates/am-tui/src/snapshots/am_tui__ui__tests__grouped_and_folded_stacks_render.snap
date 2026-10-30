@@ -21,4 +21,4 @@ expression: "render(&app, 110, 20)"
 │   · main                                                                                         ↑2 ±3  4m │
 │                                                                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────── 4 of 7 ╯
- ⏎ open  │ g PR  l linear  │ n new  d delete  f filter  │ v reviews  s settings  r refresh  │ h help  q quit
+ ⏎ open  │ g PR  l linear  │ n new  d delete  │ v reviews  s settings  r refresh  │ h help  q quit

@@ -1010,6 +1010,7 @@ impl App {
             C::Top => self.move_by(isize::MIN / 2),
             C::Collapse => self.collapse_selected(),
             C::Expand => self.expand_selected(),
+            C::FoldAll => self.toggle_fold_all(),
         }
         Action::None
     }
@@ -1713,6 +1714,59 @@ impl App {
             self.select_worktree(&id);
         } else if self.snapshot.stack.get(&id).is_none_or(|p| !self.listed(p)) && self.has_stacked(&id) {
             self.move_by(1);
+        }
+    }
+
+    /// The listed stack roots (worktrees with listed branches stacked on
+    /// them and no listed parent).
+    pub fn stack_roots(&self) -> Vec<String> {
+        let listed: std::collections::HashSet<&str> =
+            self.snapshot.groups.iter().flat_map(|g| &g.worktrees).map(|v| v.worktree.id.as_str()).collect();
+        let is_listed = |id: &str| listed.contains(id);
+        let mut roots: Vec<String> = Vec::new();
+        for (child, parent) in &self.snapshot.stack {
+            if !is_listed(child) || !is_listed(parent) {
+                continue;
+            }
+            let mut cur = parent.as_str();
+            let mut steps = 0;
+            while let Some(p) = self.snapshot.stack.get(cur).filter(|p| is_listed(p)) {
+                cur = p;
+                steps += 1;
+                if steps > listed.len() {
+                    break;
+                }
+            }
+            if !roots.iter().any(|r| r == cur) {
+                roots.push(cur.to_string());
+            }
+        }
+        roots
+    }
+
+    /// `z`: fold every stack; when all are folded already, unfold them all.
+    fn toggle_fold_all(&mut self) {
+        let roots = self.stack_roots();
+        if roots.is_empty() {
+            self.notice = Some("No stacked branches to fold".into());
+            return;
+        }
+        let keep = self.selected_view().map(|v| v.worktree.id.clone());
+        let fold = !roots.iter().all(|r| self.collapsed.contains(r));
+        if fold {
+            self.collapsed.extend(roots.iter().cloned());
+        } else {
+            roots.iter().for_each(|r| {
+                self.collapsed.remove(r);
+            });
+        }
+        let n = roots.len();
+        let s = if n == 1 { "" } else { "s" };
+        self.notice = Some(if fold { format!("Folded {n} stack{s}") } else { format!("Unfolded {n} stack{s}") });
+        self.rebuild_rows();
+        if let Some(id) = keep {
+            let root = self.stack_root(&id);
+            self.select_worktree(if self.flat.iter().any(|v| v.worktree.id == id) { &id } else { &root });
         }
     }
 
