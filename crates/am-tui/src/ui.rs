@@ -139,6 +139,8 @@ pub enum Target {
     Command(Command),
     /// A worktree (or one of its session rows) in the dashboard list.
     Worktree(usize),
+    /// The `⬆ vX.Y.Z available` notice: offer to update.
+    Update,
     /// Anywhere in the jobs pane: focus it.
     JobsPane,
     /// A key answering job `.0`'s question, as if pressed with it selected.
@@ -1435,6 +1437,32 @@ fn draw_modal(f: &mut Frame, theme: &Theme, area: Rect, modal: &crate::modals::M
             marks.push((4, Target::Key(Key::Esc), false));
             ("Add a review script".into(), theme.yellow, "", lines)
         }
+        Modal::ConfirmUpdate(u) => {
+            let command = u.method.upgrade_steps().map(|s| am_core::update_check::shell_text(&s)).unwrap_or_default();
+            let lines = vec![
+                Line::raw(format!("Update am v{} → v{}?", u.current, u.latest)),
+                Line::styled(format!("Runs: {command}"), theme.faint()),
+                Line::styled("Its output shows in the jobs pane; am offers to restart once it's done.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "⏎ / y", "Update now", true),
+                key_line(theme, "any key", "Cancel", false),
+            ];
+            marks.push((4, Target::Key(Key::Char('y')), false));
+            marks.push((5, Target::Key(Key::Esc), false));
+            ("Update am".into(), theme.green, "", lines)
+        }
+        Modal::Restart { latest } => {
+            let lines = vec![
+                Line::raw(format!("am v{latest} is installed. Restart now to use it?")),
+                Line::styled("Agent hooks pick it up on their own; only this dashboard runs the old version.", theme.faint()),
+                Line::raw(""),
+                key_line(theme, "⏎ / y", "Restart am", true),
+                key_line(theme, "any key", "Later", false),
+            ];
+            marks.push((3, Target::Key(Key::Char('y')), false));
+            marks.push((4, Target::Key(Key::Esc), false));
+            ("Updated".into(), theme.green, "", lines)
+        }
         Modal::AddRepo(_) => unreachable!("drawn by draw_browser"),
     };
     // Long names wrap rather than run off the edge; size the box to fit.
@@ -1837,11 +1865,21 @@ fn shown_update(app: &App) -> Option<&am_core::update_check::Update> {
 /// when it would run into the `─Worktrees` title.
 fn update_label(app: &App, width: u16) -> Option<String> {
     let latest = &shown_update(app)?.latest;
+    let room = |badge: usize| (width as usize).saturating_sub(2 + "─Worktrees ".width() + badge + 1);
     // Two corners, the shortest title (`─Worktrees `, which gives way to
     // it), the review badge beside it, and one border cell between the titles.
     let badge = review_badge(app, width).map_or(0, |b| b.width());
-    let room = (width as usize).saturating_sub(2 + "─Worktrees ".width() + badge + 1);
-    [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room)
+    update_forms(app, latest).into_iter().find(|l| l.width() <= room(badge))
+}
+
+/// The update notice, longest first: ` ⬆ v2.2.0 available `, or
+/// ` ⬆ updating to v2.2.0… ` while the upgrade job runs.
+fn update_forms(app: &App, latest: &str) -> [String; 2] {
+    if app.jobs.updating().is_some() {
+        [format!(" ⬆ updating to v{latest}… "), format!(" ⬆ v{latest}… ")]
+    } else {
+        [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")]
+    }
 }
 
 /// Top-right ` 3 to review ` in the `─Worktrees` border's corner (`⚑3` on
@@ -1968,6 +2006,11 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
     // Top right: the update notice, then the review badge in the corner.
     let mut corner: Vec<Span> = Vec::new();
     if let Some(label) = update_label(app, area.width) {
+        // Clickable: offers to update. It sits just left of the badge.
+        let badge = review_badge(app, area.width).map_or(0, |b| b.width() as u16);
+        let w = label.width() as u16;
+        let rect = Rect::new((area.x + area.width).saturating_sub(edge() + badge + w), area.y, w, 1).intersection(area);
+        hits.push(Hit { rect, target: Target::Update, selected: false });
         corner.push(Span::styled(label, theme.bold(theme.green)));
     }
     if let Some(badge) = review_badge(app, area.width) {
@@ -2122,7 +2165,10 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     if let Some(latest) = shown_update(app).map(|u| &u.latest).filter(|_| app.reviews_only()) {
         let used = corner.iter().map(|s| s.content.width()).sum::<usize>();
         let room = (area.width as usize).saturating_sub(2 + title_w + used + 1);
-        if let Some(label) = [format!(" ⬆ v{latest} available "), format!(" ⬆ v{latest} ")].into_iter().find(|l| l.width() <= room) {
+        if let Some(label) = update_forms(app, latest).into_iter().find(|l| l.width() <= room) {
+            let w = label.width() as u16;
+            let rect = Rect::new((area.x + area.width).saturating_sub(edge() + used as u16 + w), area.y, w, 1).intersection(area);
+            hits.push(Hit { rect, target: Target::Update, selected: false });
             corner.insert(0, Span::styled(label, theme.bold(theme.green)));
         }
     }
@@ -3812,6 +3858,7 @@ mod tests {
             latest: latest.into(),
             current: "2.1.1".into(),
             hint: am_core::update_check::InstallMethod::Homebrew.upgrade_hint(),
+            method: am_core::update_check::InstallMethod::Homebrew,
         }
     }
 
@@ -3865,6 +3912,70 @@ mod tests {
         let mut app = fixture();
         app.update_available = Some(update("2.2.0"));
         insta::assert_snapshot!(render(&app, 120, 16));
+    }
+
+    #[test]
+    fn clicking_the_update_notice_asks_then_runs_the_upgrade_as_a_job() {
+        use am_core::update_check::InstallMethod;
+        let mut app = fixture();
+        app.update_available = Some(update("2.2.0"));
+        let at = find(&app, 120, 16, "⬆ v2.2.0 available");
+        assert_eq!(target_at(&app, 120, 16, at), Some(Target::Update));
+        assert_eq!(click(&mut app, 120, 16, at, false), crate::app::Action::None);
+        assert!(matches!(&app.modal, Some(crate::modals::Modal::ConfirmUpdate(u)) if u.latest == "2.2.0"));
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("Update am v2.1.1 → v2.2.0?"), "{screen}");
+        assert!(screen.contains("Runs: brew update && brew upgrade agent-monitor"), "{screen}");
+        insta::assert_snapshot!(screen);
+        let crate::app::Action::Update(job, InstallMethod::Homebrew) = app.on_key(Key::Char('y')) else { panic!("expected the upgrade") };
+        assert!(app.modal.is_none());
+        assert_eq!(app.jobs.updating(), Some("2.2.0"));
+        assert!(render(&app, 120, 16).contains("⬆ updating to v2.2.0…"));
+        // A second click while it runs doesn't start another.
+        let at = find(&app, 120, 16, "⬆ updating to v2.2.0…");
+        assert_eq!(click(&mut app, 120, 16, at, false), crate::app::Action::None);
+        assert!(app.modal.is_none());
+        assert_eq!(app.notice.as_deref(), Some("Already updating to v2.2.0"));
+        assert_eq!(app.jobs.get(job).map(|j| j.label.as_str()), Some("Update am to v2.2.0"));
+    }
+
+    #[test]
+    fn the_update_notice_says_how_to_update_where_am_cannot() {
+        use am_core::update_check::{InstallMethod, Update};
+        let mut app = fixture();
+        app.update_available = Some(Update { method: InstallMethod::Cargo, hint: InstallMethod::Cargo.upgrade_hint(), ..update("2.2.0") });
+        let at = find(&app, 120, 16, "⬆ v2.2.0 available");
+        click(&mut app, 120, 16, at, false);
+        assert!(app.modal.is_none());
+        let popup = app.popup.clone().unwrap_or_default();
+        assert!(popup.contains("am v2.2.0 is available") && popup.contains("cargo install --path"), "{popup}");
+    }
+
+    #[test]
+    fn restart_after_an_update_waits_for_other_jobs() {
+        let mut app = fixture();
+        app.modal = Some(crate::modals::Modal::Restart { latest: "2.2.0".into() });
+        insta::assert_snapshot!(render(&app, 120, 16));
+        assert_eq!(app.on_key(Key::Enter), crate::app::Action::Restart);
+
+        app.modal = Some(crate::modals::Modal::Restart { latest: "2.2.0".into() });
+        assert_eq!(app.on_key(Key::Char('n')), crate::app::Action::None);
+        assert_eq!(app.notice.as_deref(), Some("Restart am to use v2.2.0"));
+
+        app.jobs.start_delete("w2".into(), "feature/x");
+        app.modal = Some(crate::modals::Modal::Restart { latest: "2.2.0".into() });
+        assert_eq!(app.on_key(Key::Char('y')), crate::app::Action::None, "a restart would drop the delete");
+        assert_eq!(app.notice.as_deref(), Some("Restart am to use v2.2.0 once the job is done"));
+    }
+
+    #[test]
+    fn the_review_only_page_update_notice_is_clickable() {
+        let mut app = by_repo();
+        app.settings.app_mode = "reviews".into();
+        app.update_available = Some(update("2.2.0"));
+        app.enter_reviews_mode();
+        let at = find(&app, 120, 16, "⬆ v2.2.0 available");
+        assert_eq!(target_at(&app, 120, 16, at), Some(Target::Update));
     }
 
     #[test]

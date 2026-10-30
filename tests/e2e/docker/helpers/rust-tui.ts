@@ -12,6 +12,9 @@ export const FRESH_URL = process.env.TUI_FRESH_URL || "http://localhost:7682";
  */
 export const LATE_SESSION_URL = process.env.TUI_LATE_SESSION_URL || "http://localhost:7683";
 
+/** ttyd serving the seeded dashboard as an npm install (`AM_INSTALL_METHOD=npm`) with a fake `npm`. */
+export const NPM_URL = process.env.TUI_NPM_URL || "http://localhost:7684";
+
 /**
  * TuiPage plus helpers for the native (ratatui) dashboard. Layout reminder:
  * one full-width `am v… · Worktrees` pane (bottom-right `N of M`), then the key bar

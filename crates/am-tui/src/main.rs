@@ -194,7 +194,32 @@ fn main() -> io::Result<()> {
     set_mouse(false);
     ratatui::restore();
     collector.shutdown();
+    if app.restart {
+        // exec skips destructors: flush the telemetry exporters first.
+        drop(_telemetry);
+        restart();
+    }
     result
+}
+
+/// Replace this process with the am-tui just installed, with the same
+/// arguments (`--reviews`…). `am-tui` on `$PATH` first: an upgrade can remove
+/// the running binary's own directory (Homebrew's `Cellar/<old version>`).
+fn restart() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::process::CommandExt;
+    let exec = |p: &std::path::Path| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+    let on_path = std::env::var_os("PATH")
+        .and_then(|path| std::env::split_paths(&path).map(|d| d.join("am-tui")).find(|p| exec(p)));
+    let Some(bin) = on_path.or_else(|| std::env::current_exe().ok().filter(|p| exec(p))) else {
+        eprintln!("am was updated, but no am-tui was found to restart: run am again");
+        std::process::exit(1);
+    };
+    info!("tui", "Restarting into {}", bin.display());
+    let err = std::process::Command::new(&bin).args(std::env::args_os().skip(1)).exec();
+    am_core::warn!("tui", "Restart into {} failed: {err}", bin.display());
+    eprintln!("Couldn't restart am ({}): {err}", bin.display());
+    std::process::exit(1);
 }
 
 /// The day's `am.heartbeat`, once the first snapshot of the day is in.
@@ -412,7 +437,29 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                         _ => app.popup = Some(format!("✗ Couldn't add {path}: {e}")),
                     },
                 },
-                launcher::Msg::UpdateAvailable(update) => app.update_available = Some(update),
+                launcher::Msg::UpdateAvailable(update) if app.installed_update.as_ref() != Some(&update.latest) => {
+                    app.update_available = Some(update)
+                }
+                launcher::Msg::UpdateAvailable(_) => {}
+                launcher::Msg::Updated(job, result) => {
+                    let latest = match app.jobs.get(job).map(|j| &j.kind) {
+                        Some(jobs::JobKind::Update { latest }) => latest.clone(),
+                        _ => String::new(),
+                    };
+                    match &result {
+                        Ok(()) => {
+                            app.update_available = None;
+                            app.installed_update = Some(latest.clone());
+                            if app.modal.is_none() && app.setup.is_none() {
+                                app.modal = Some(modals::Modal::Restart { latest });
+                            } else {
+                                app.notice = Some(format!("Updated — restart am to use v{latest}"));
+                            }
+                        }
+                        Err(e) => app.notice = Some(format!("Update failed: {e}")),
+                    }
+                    app.jobs.finish(job, result, Instant::now());
+                }
                 launcher::Msg::Deleted(job, id, label, result) => {
                     app.finish_delete(&id, result.is_ok());
                     match result {
@@ -628,6 +675,11 @@ fn dispatch(
     let mouse_before = app.settings.mouse_enabled;
     match action {
         Action::Quit => return Ok(true),
+        Action::Update(job, method) => launcher::run_update(method, job, launch_tx.clone()),
+        Action::Restart => {
+            app.restart = true;
+            return Ok(true);
+        }
         Action::Refresh => collector.refresh(true),
         Action::RefreshReviews => collector.refresh_reviews(),
         Action::ReloadReviews => collector.reload_reviews(),

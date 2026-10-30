@@ -1,0 +1,20 @@
+---
+source: crates/am-tui/src/ui.rs
+expression: screen
+---
+╭─am v0.0.0 · Worktrees ─────────────────────────────────────────────────────────────────────────── ⬆ v2.2.0 available ╮
+│agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
+│▌◑ feature/refactor ◆ 2 subagents                                      ENG-412 #127✓ approved ↑2 ±3  4m █░░░░░░░ 121k │
+│ ◐ fix/offline-cache   ╭─Update am ───────────────────────────────────────────────────────────╮      4m █▒░░░░░░ 185k │
+│                       │ Update am v2.1.1 → v2.2.0?                                           │                       │
+│gridsight ─────────────│ Runs: brew update && brew upgrade agent-monitor                      │───────────────────────│
+│ · main                │ Its output shows in the jobs pane; am offers to restart once it's    │2 ±3  4m               │
+│                       │ done.                                                                │                       │
+│                       │                                                                      │                       │
+│                       │     ⏎ / y  Update now                                                │                       │
+│                       │   any key  Cancel                                                    │                       │
+│                       ╰──────────────────────────────────────────────────────────────────────╯                       │
+│                                                                                                                      │
+│                                                                                                                      │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
+ ⏎ open  │ g PR  l linear  │ n new  d delete  f filter  │ v reviews  s settings  r refresh  │ h help  q quit
