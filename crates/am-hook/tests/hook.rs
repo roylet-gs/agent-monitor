@@ -46,7 +46,13 @@ impl Env {
     }
 
     /// `agent` is the `--agent` flag (`None` = a Claude hook, which has none).
-    fn send_as(&self, agent: Option<&str>, event: &str, mut payload: Value) {
+    fn send_as(&self, agent: Option<&str>, event: &str, payload: Value) {
+        self.send_env(agent, event, payload, &[]);
+    }
+
+    /// `send_as` with extra environment (e.g. cmux's pane ids). The test's
+    /// own cmux variables never leak in.
+    fn send_env(&self, agent: Option<&str>, event: &str, mut payload: Value, envs: &[(&str, &str)]) {
         payload["hook_event_name"] = event.into();
         payload["session_id"] = payload.get("session_id").cloned().unwrap_or("s1".into());
         let sub = self.worktree.path().join("pkg");
@@ -59,6 +65,9 @@ impl Env {
         let mut child = cmd
             .args(["--worktree", sub.to_str().unwrap(), "--event", event])
             .env("AM_DATA_DIR", self.data.path())
+            .env_remove("CMUX_WORKSPACE_ID")
+            .env_remove("CMUX_SURFACE_ID")
+            .envs(envs.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -76,6 +85,8 @@ impl Env {
         let mut child = Command::new(env!("CARGO_BIN_EXE_am-hook"))
             .args(["hook-event", "--agent", agent, "--worktree", worktree, "--event", event])
             .env("AM_DATA_DIR", self.data.path())
+            .env_remove("CMUX_WORKSPACE_ID")
+            .env_remove("CMUX_SURFACE_ID")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1019,4 +1030,30 @@ fn a_new_session_keeps_another_live_sessions_subagents() {
     env.send("SessionEnd", with_session("A", json!({})));
     env.send("SessionStart", with_session("C", json!({ "source": "startup" })));
     assert_eq!(env.running_subagents_of("A"), 0);
+}
+
+#[test]
+fn a_session_records_its_cmux_pane_and_what_it_waits_on() {
+    let env = Env::new();
+    let extras = || -> (Option<String>, Option<String>, Option<String>) {
+        env.db()
+            .query_row("SELECT cmux_workspace, cmux_surface, waiting_on FROM sessions WHERE session_id = 's1'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap()
+    };
+    let cmux = [("CMUX_WORKSPACE_ID", "ws-1"), ("CMUX_SURFACE_ID", "sf-1")];
+    env.send_env(None, "UserPromptSubmit", json!({}), &cmux);
+    assert_eq!(extras(), (Some("ws-1".into()), Some("sf-1".into()), None));
+
+    // A blocking watch marks the session; events without cmux's env keep the pane.
+    let watch = json!({ "tool_name": "Bash", "tool_input": { "command": "gh run watch 7" } });
+    env.send("PreToolUse", watch);
+    assert_eq!(extras(), (Some("ws-1".into()), Some("sf-1".into()), Some("gh run watch 7".into())));
+    // A subagent's tool call doesn't clear it; the watch finishing does.
+    env.send("PostToolUse", sub("a1", json!({ "tool_name": "Read" })));
+    assert_eq!(extras().2.as_deref(), Some("gh run watch 7"));
+    env.send("PostToolUse", json!({ "tool_name": "Bash" }));
+    assert_eq!(extras().2, None);
+    assert_eq!(env.session("s1"), ("executing".into(), true));
 }

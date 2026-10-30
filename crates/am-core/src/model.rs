@@ -288,11 +288,41 @@ pub struct SessionView {
     pub started_at: String,
     pub updated_at: String,
     pub context: Option<crate::context::ContextUsage>,
+    /// The cmux pane it runs in (schema v8).
+    pub cmux: Option<crate::db::CmuxPane>,
+    /// What its current tool call blocks on (`gh run watch 12`…).
+    pub waiting_on: Option<String>,
+}
+
+impl SessionView {
+    /// Executing, but only waiting for something outside the agent.
+    pub fn watching(&self) -> Option<&str> {
+        self.waiting_on.as_deref().filter(|_| self.status == Status::Executing)
+    }
 }
 
 impl WorktreeView {
     pub fn status(&self) -> Option<Status> {
         self.agent.as_ref().map(|a| a.status)
+    }
+
+    /// The headline session (the one `agent` mirrors), when it is live.
+    pub fn headline_session(&self) -> Option<&SessionView> {
+        let id = self.agent.as_ref()?.session_id.as_deref()?;
+        self.sessions.iter().find(|s| s.session_id == id)
+    }
+
+    /// What the headline session is watching, when that is all it is doing.
+    pub fn watching(&self) -> Option<&str> {
+        self.headline_session().filter(|_| self.status() == Some(Status::Executing))?.watching()
+    }
+
+    /// The cmux pane an agent here runs in: the headline session's, else the
+    /// most recently active live session that knows one.
+    pub fn cmux_pane(&self) -> Option<&crate::db::CmuxPane> {
+        self.headline_session().and_then(|s| s.cmux.as_ref()).or_else(|| {
+            self.sessions.iter().filter(|s| s.cmux.is_some()).max_by(|a, b| a.updated_at.cmp(&b.updated_at))?.cmux.as_ref()
+        })
     }
 }
 

@@ -196,6 +196,8 @@ struct Worker {
     /// (`cmuxSync` on, inside cmux, this process holding the cmux role), and
     /// what it was last sent.
     cmux: Option<(crate::cmux_sync::Handle, crate::cmux_sync::Desired)>,
+    /// What `cmux_sync::alerts` last saw of each worktree.
+    alert_seen: Option<HashMap<String, crate::cmux_sync::Seen>>,
 }
 
 impl Worker {
@@ -231,6 +233,7 @@ impl Worker {
             last_sent: None,
             perf: Perf::new(),
             cmux: None,
+            alert_seen: None,
         }
     }
 
@@ -282,6 +285,8 @@ impl Worker {
     /// (an empty set once `cmuxSync` is turned off clears them).
     fn sync_cmux(&mut self, views: &[WorktreeView], reviews: Option<&[ReviewRequest]>, repos: &[am_core::model::Repository]) {
         let on = self.settings.cmux_sync && am_core::cmux::inside() && crate::cmux_sync::role::owned();
+        // Tracked whether on or not, so turning it on doesn't alert on old news.
+        let alerts = crate::cmux_sync::alerts(&mut self.alert_seen, views, &self.settings);
         if !on && self.cmux.is_none() {
             return;
         }
@@ -295,6 +300,10 @@ impl Worker {
         if *last != desired {
             tx.send(desired.clone());
             *last = desired;
+        }
+        if on && !alerts.is_empty() {
+            info!("cmux", "Alerts: {:?}", alerts.iter().map(|a| a.title.as_str()).collect::<Vec<_>>());
+            tx.alert(alerts);
         }
     }
 
@@ -429,6 +438,8 @@ impl Worker {
                         last_response: s.last_response,
                         started_at: s.started_at,
                         updated_at: s.updated_at,
+                        cmux: s.cmux,
+                        waiting_on: s.waiting_on,
                     })
                     .collect();
                 WorktreeView {
@@ -1212,6 +1223,8 @@ mod tests {
             is_open: true,
             started_at: "2099-01-01 00:00:00".into(),
             updated_at: updated.into(),
+            cmux: None,
+            waiting_on: None,
         }
     }
 

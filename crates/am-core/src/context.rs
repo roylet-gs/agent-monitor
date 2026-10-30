@@ -3,9 +3,10 @@
 //! (`Harness::context_usage`); Claude Code's reader is
 //! `harness::claude::transcript`.
 //!
-//! The window itself isn't recorded, and the app doesn't assume any model, so it
-//! comes from the `contextWindowTokens` setting, doubled until it holds a session
-//! that has gone past it.
+//! The app doesn't assume any model, so the window is the one the harness
+//! recorded with the usage (Codex writes `model_context_window`), else the
+//! `contextWindowTokens` setting, doubled until it holds a session that has
+//! gone past it.
 
 /// Smallest `contextWindowTokens` the editors accept.
 pub const MIN_WINDOW: u64 = 1_000;
@@ -18,6 +19,19 @@ pub struct ContextUsage {
     /// Tokens in the context at the last main-chain turn.
     pub tokens: u64,
     pub model: Option<String>,
+    /// The window as the harness recorded it, when it does.
+    pub window: Option<u64>,
+}
+
+impl ContextUsage {
+    /// The window to measure this usage against: the recorded one, else
+    /// [`window_for`] the setting.
+    pub fn window(&self, configured: u64) -> u64 {
+        match self.window {
+            Some(w) if w >= self.tokens && w > 0 => w,
+            _ => window_for(self.tokens, configured),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +108,15 @@ mod tests {
         assert_eq!(window_for(10, 1_000_000), 1_000_000);
         assert_eq!(window_for(5, 0), 8);
         assert_eq!(window_for(u64::MAX, 3), u64::MAX);
+    }
+
+    #[test]
+    fn a_recorded_window_beats_the_setting_unless_the_session_outgrew_it() {
+        let u = |tokens, window| ContextUsage { tokens, model: None, window };
+        assert_eq!(u(60_000, Some(272_000)).window(1_000_000), 272_000);
+        assert_eq!(u(60_000, None).window(200_000), 200_000);
+        assert_eq!(u(300_000, Some(272_000)).window(200_000), 400_000);
+        assert_eq!(u(60_000, Some(0)).window(200_000), 200_000);
     }
 
     #[test]

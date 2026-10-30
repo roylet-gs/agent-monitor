@@ -482,14 +482,18 @@ fn draw_settings(
 
     if let Some(m) = &ed.multi {
         hits.clear();
-        let header = format!(" {}: show worktrees in any of the ticked; none ticked shows all", m.label);
+        let header = if m.options == am_core::settings::WORKTREE_STATUS_FILTERS {
+            format!(" {}: show worktrees in any of the ticked; none ticked shows all", m.label)
+        } else {
+            format!(" {}: post the ticked on the worktree's cmux workspace", m.label)
+        };
         let mut lines = vec![Line::styled(header, theme.faint()), Line::raw("")];
         for (i, (id, on)) in m.options.iter().zip(&m.picked).enumerate() {
             let sel = i == m.cursor;
             let line = Line::from(vec![
                 Span::styled(if sel { "▌" } else { " " }, theme.bold(theme.border_focus)),
                 Span::styled(if *on { "[x] " } else { "[ ] " }, theme.fg(if *on { theme.green } else { theme.faint })),
-                Span::styled(crate::settings_ui::multi_label(id).to_string(), if *on { theme.fg(theme.text) } else { theme.faint() }),
+                Span::styled(crate::settings_ui::multi_label(m.options, id).to_string(), if *on { theme.fg(theme.text) } else { theme.faint() }),
             ]);
             push_row(hits, list, lines.len(), Target::Item(List::Multi, i), sel);
             lines.push(if sel { line.style(theme.selected()) } else { line });
@@ -2300,7 +2304,7 @@ fn worktree_filter_summary(s: &am_core::settings::Settings, hidden: usize) -> Op
         }
         let picks = am_core::settings::worktree_status_picks(&s.worktree_filter_status);
         if !picks.is_empty() {
-            parts.push(picks.into_iter().map(crate::settings_ui::multi_label).collect::<Vec<_>>().join("/"));
+            parts.push(picks.into_iter().map(|id| crate::settings_ui::multi_label(&am_core::settings::WORKTREE_STATUS_FILTERS, id)).collect::<Vec<_>>().join("/"));
         }
         match s.worktree_filter_pr.as_str() {
             "open" => parts.push("open PR".into()),
@@ -2593,6 +2597,12 @@ fn worktree_line<'a>(
         _ => String::new(),
     };
     badge.push_str(&agent_badge);
+    // Busy, but only waiting on something outside (`gh run watch`, `sleep`…).
+    let watch_badge = match v.watching() {
+        Some(_) if !deleting && !listed => if wide(width) { " ⧗ watching".to_string() } else { " ⧗".to_string() },
+        _ => String::new(),
+    };
+    badge.push_str(&watch_badge);
     if !deleting && subagents > 0 {
         if wide(width) {
             badge.push_str(&format!(" ◆ {subagents} subagent{}", if subagents == 1 { "" } else { "s" }));
@@ -2658,6 +2668,10 @@ fn worktree_line<'a>(
     }
     if let Some(r) = rest.strip_prefix(agent_badge.as_str()).filter(|_| !agent_badge.is_empty()) {
         left.push(Span::styled(agent_badge.clone(), theme.fg(if listed { theme.magenta } else { theme.blue })));
+        rest = r;
+    }
+    if let Some(r) = rest.strip_prefix(watch_badge.as_str()).filter(|_| !watch_badge.is_empty()) {
+        left.push(Span::styled(watch_badge.clone(), theme.fg(theme.blue)));
         rest = r;
     }
     if let Some(r) = rest.strip_prefix(" deleting…") {
@@ -2746,7 +2760,12 @@ fn session_line<'a>(
         theme.fg(theme.blue)
     };
     let age = timefmt::parse_sqlite(&s.updated_at).map(|t| timefmt::short_age(now - t)).unwrap_or_default();
-    let detail = if age.is_empty() { format!("  {}", status_label(status)) } else { format!("  {} · {age}", status_label(status)) };
+    // Executing, but only watching something: say what.
+    let label = match s.watching() {
+        Some(what) => format!("watching {what}"),
+        None => status_label(status).to_string(),
+    };
+    let detail = if age.is_empty() { format!("  {label}") } else { format!("  {label} · {age}") };
     let badge = match subagents {
         0 => String::new(),
         n if wide(width) => format!(" ◆ {n} subagent{}", if n == 1 { "" } else { "s" }),
@@ -2786,7 +2805,7 @@ fn ctx_spans<'a>(usage: Option<&ContextUsage>, theme: &Theme, bar_w: usize, conf
     // Compact: the bar without the token count.
     let count_w = if compact() { 0 } else { 5 };
     let Some(u) = usage else { return vec![Span::raw(" ".repeat(bar_w + count_w))] };
-    let window = context::window_for(u.tokens, configured);
+    let window = u.window(configured);
     let style = if deleting {
         theme.faint()
     } else {
@@ -3593,6 +3612,10 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         Span::styled("$ 1 command", theme.bold(theme.teal)),
         Span::styled(" an agent's shell command matching the process filter is running; the name turns teal", theme.faint()),
     ]));
+    lines.push(Line::from(vec![
+        Span::styled("⧗ watching", theme.fg(theme.blue)),
+        Span::styled(" busy, but only waiting on something outside (gh run watch, a Monitor, sleep)", theme.faint()),
+    ]));
     draw_help_box(f, theme, area, lines);
 }
 
@@ -3731,10 +3754,10 @@ mod tests {
             project: None,
             pr_attachment: None,
         });
-        refactor.context = Some(ContextUsage { tokens: 121_000, model: Some("claude-opus-5-5".into()) });
+        refactor.context = Some(ContextUsage { tokens: 121_000, model: Some("claude-opus-5-5".into()), window: None });
         let mut waiting = view("w2", "r1", "fix/offline-cache", Some(Status::Waiting));
         waiting.git = Some(GitStatus::default());
-        waiting.context = Some(ContextUsage { tokens: 185_000, model: Some("claude-opus-5-5".into()) });
+        waiting.context = Some(ContextUsage { tokens: 185_000, model: Some("claude-opus-5-5".into()), window: None });
         let main = view("w3", "r2", "main", None);
         let snapshot = Snapshot {
             repos: vec![],
@@ -6061,7 +6084,7 @@ mod tests {
         let theme = Theme::ansi();
         let mut v = fixture().flat[0].clone();
         let at = |v: &mut WorktreeView, tokens| {
-            v.context = Some(ContextUsage { tokens, model: None });
+            v.context = Some(ContextUsage { tokens, model: None, window: None });
             let spans = ctx_spans(v.context.as_ref(), &theme, 8, 200_000, false);
             let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
             (text, spans[0].style.fg, spans[2].style.fg)
@@ -6223,8 +6246,40 @@ mod tests {
             last_response: None,
             started_at: "2025-10-11 09:00:00".into(),
             updated_at: updated.into(),
-            context: tokens.map(|tokens| ContextUsage { tokens, model: None }),
+            context: tokens.map(|tokens| ContextUsage { tokens, model: None, window: None }),
+            cmux: None,
+            waiting_on: None,
         }
+    }
+
+    #[test]
+    fn an_agent_only_watching_ci_says_so_on_its_row_and_session() {
+        let mut app = fixture();
+        let mut snap = app.snapshot.clone();
+        let w1 = &mut snap.groups[0].worktrees[0];
+        let a = w1.agent.as_mut().unwrap();
+        a.status = Status::Executing;
+        a.session_id = Some("s".into());
+        let mut watching = session(HarnessKind::CLAUDE, "s", Status::Executing, "2025-10-11 09:59:00", None);
+        watching.waiting_on = Some("gh run watch 12".into());
+        w1.sessions = vec![watching.clone()];
+        app.apply(snap.clone());
+        let out = render(&app, 120, 11);
+        let row = out.lines().find(|l| l.contains("feature/refactor")).unwrap_or_default().to_string();
+        assert!(row.contains("⧗ watching"), "{row}");
+        assert!(render(&app, 90, 11).lines().any(|l| l.contains("feature/refactor") && l.contains("⧗") && !l.contains("watching")));
+
+        // With two sessions, the session row says what it watches.
+        let other = session(HarnessKind::CLAUDE, "t", Status::Done, "2025-10-11 09:58:00", None);
+        snap.groups[0].worktrees[0].sessions = vec![watching, other];
+        app.apply(snap.clone());
+        let out = render(&app, 120, 11);
+        assert!(out.lines().any(|l| l.contains("├ ") && l.contains("watching gh run watch 12")), "{out}");
+
+        // Waiting on the user wins: no watching badge.
+        snap.groups[0].worktrees[0].agent.as_mut().unwrap().status = Status::Waiting;
+        app.apply(snap);
+        assert!(!render(&app, 120, 11).lines().any(|l| l.contains("feature/refactor") && l.contains("⧗")));
     }
 
     #[test]

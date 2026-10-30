@@ -66,8 +66,15 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
                     // am's own workspace isn't one to switch to (am started at the repo root).
                     let own = cmux::own_workspace();
                     list.retain(|w| own.as_deref() != Some(w.id.as_str()));
-                    if let Some(w) = cmux::workspace_for(&list, &v.worktree.path, &roots) {
-                        let r = cmux::select_workspace(&cmux::SystemCmux, &w.id).map_err(|e| format!("Couldn't switch cmux workspace: {e}"));
+                    // The agent's own pane first (the hooks recorded it), then by directory.
+                    if let Some((ws, surface)) = cmux::target_for(&list, v.cmux_pane(), &v.worktree.path, &roots) {
+                        let r = cmux::select_workspace(&cmux::SystemCmux, &ws).map_err(|e| format!("Couldn't switch cmux workspace: {e}"));
+                        if r.is_ok()
+                            && let Some(s) = surface
+                            && let Err(e) = cmux::focus_surface(&cmux::SystemCmux, &ws, &s)
+                        {
+                            am_core::debug!("launcher", "Couldn't focus cmux surface {s} in {ws}: {e}");
+                        }
                         report(&tx, r, format!("Switched to {label} in cmux"));
                         return;
                     }

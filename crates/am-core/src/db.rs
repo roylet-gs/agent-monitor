@@ -13,7 +13,7 @@ use crate::harness::HarnessKind;
 use crate::paths;
 use crate::status::Status;
 
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 /// How long a connection waits for another one's lock before giving up.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -164,6 +164,15 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
         // look at): grouped apart and left out of the worktree limit.
         if !has_column(&tx, "worktrees", "tmp_space")? {
             tx.execute_batch("ALTER TABLE worktrees ADD COLUMN tmp_space INTEGER NOT NULL DEFAULT 0")?;
+        }
+    }
+    if v < 8 {
+        // The cmux workspace/surface a session runs in (from the hook's
+        // environment), and what its turn is blocked on (`gh run watch`…).
+        for col in ["cmux_workspace", "cmux_surface", "waiting_on"] {
+            if !has_column(&tx, "sessions", col)? {
+                tx.execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {col} TEXT"))?;
+            }
         }
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -562,21 +571,54 @@ pub struct SessionRow {
     pub is_open: bool,
     pub started_at: String,
     pub updated_at: String,
+    /// The cmux workspace and surface (pane tab) the session runs in, from
+    /// the hook's `CMUX_WORKSPACE_ID`/`CMUX_SURFACE_ID` (schema v8).
+    pub cmux: Option<CmuxPane>,
+    /// What the session's current tool call blocks on (`gh run watch`,
+    /// `sleep 300`…), from `status::waits_on_event`; `None` when it isn't.
+    pub waiting_on: Option<String>,
 }
 
-fn row_to_session(r: &rusqlite::Row) -> rusqlite::Result<SessionRow> {
+/// A cmux pane: the workspace plus, when known, the surface in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CmuxPane {
+    pub workspace: String,
+    pub surface: Option<String>,
+}
+
+impl CmuxPane {
+    /// The pane in this process's environment, when it runs inside cmux.
+    pub fn from_env() -> Option<CmuxPane> {
+        let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+        Some(CmuxPane { workspace: var("CMUX_WORKSPACE_ID")?, surface: var("CMUX_SURFACE_ID") })
+    }
+}
+
+/// Read a `SESSION_COLS` row starting at column `at`.
+fn session_from(r: &rusqlite::Row, at: usize) -> rusqlite::Result<SessionRow> {
+    let workspace: Option<String> = r.get(at + 7)?;
     Ok(SessionRow {
-        agent: HarnessKind::from_db(r.get::<_, Option<String>>(0)?.as_deref()),
-        session_id: r.get(1)?,
-        status: r.get::<_, Option<String>>(2)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle),
-        last_response: r.get(3)?,
-        is_open: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
-        started_at: r.get(5)?,
-        updated_at: r.get(6)?,
+        agent: HarnessKind::from_db(r.get::<_, Option<String>>(at)?.as_deref()),
+        session_id: r.get(at + 1)?,
+        status: r.get::<_, Option<String>>(at + 2)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle),
+        last_response: r.get(at + 3)?,
+        is_open: r.get::<_, Option<i64>>(at + 4)?.unwrap_or(0) != 0,
+        started_at: r.get(at + 5)?,
+        updated_at: r.get(at + 6)?,
+        cmux: match workspace {
+            Some(workspace) => Some(CmuxPane { workspace, surface: r.get(at + 8)? }),
+            None => None,
+        },
+        waiting_on: r.get(at + 9)?,
     })
 }
 
-const SESSION_COLS: &str = "agent, session_id, status, last_response, is_open, started_at, updated_at";
+fn row_to_session(r: &rusqlite::Row) -> rusqlite::Result<SessionRow> {
+    session_from(r, 0)
+}
+
+const SESSION_COLS: &str =
+    "agent, session_id, status, last_response, is_open, started_at, updated_at, cmux_workspace, cmux_surface, waiting_on";
 
 pub fn get_session(conn: &Connection, agent: HarnessKind, session_id: &str) -> rusqlite::Result<Option<SessionRow>> {
     conn.query_row(
@@ -642,6 +684,32 @@ pub fn touch_session(conn: &Connection, owner: &Owner, agent: HarnessKind, sessi
     Ok(())
 }
 
+/// Record the cmux pane a session runs in (`None` keeps the stored one) and
+/// what its current tool call blocks on (`None` clears it).
+pub fn set_session_extras(
+    conn: &Connection,
+    agent: HarnessKind,
+    session_id: &str,
+    cmux: Option<&CmuxPane>,
+    waiting_on: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE sessions SET
+           cmux_workspace = COALESCE(?3, cmux_workspace),
+           cmux_surface = CASE WHEN ?3 IS NOT NULL THEN ?4 ELSE cmux_surface END,
+           waiting_on = ?5
+         WHERE agent = ?1 AND session_id = ?2",
+        params![
+            agent.id(),
+            session_id,
+            cmux.map(|p| p.workspace.as_str()),
+            cmux.and_then(|p| p.surface.as_deref()),
+            waiting_on
+        ],
+    )?;
+    Ok(())
+}
+
 /// Every session recorded at this owner, most recently active first.
 pub fn sessions_at(conn: &Connection, owner: &Owner) -> rusqlite::Result<Vec<SessionRow>> {
     let (owner_sql, key) = owner_where(owner);
@@ -679,16 +747,7 @@ pub fn open_worktree_sessions(conn: &Connection) -> rusqlite::Result<std::collec
     let mut rows = stmt.query([])?;
     while let Some(r) = rows.next()? {
         let wt: String = r.get(0)?;
-        let s = SessionRow {
-            agent: HarnessKind::from_db(r.get::<_, Option<String>>(1)?.as_deref()),
-            session_id: r.get(2)?,
-            status: r.get::<_, Option<String>>(3)?.as_deref().and_then(Status::parse).unwrap_or(Status::Idle),
-            last_response: r.get(4)?,
-            is_open: r.get::<_, Option<i64>>(5)?.unwrap_or(0) != 0,
-            started_at: r.get(6)?,
-            updated_at: r.get(7)?,
-        };
-        out.entry(wt).or_default().push(s);
+        out.entry(wt).or_default().push(session_from(r, 1)?);
     }
     Ok(out)
 }

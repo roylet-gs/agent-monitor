@@ -203,6 +203,7 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
                 }
             }
         }
+        record_extras(&conn, kind, sid, session.as_ref(), ev)?;
         refresh_headline(&conn, &owner, ev, &root_str)?;
     } else {
         // No session id (very old CLIs): status the owner directly, as before v4.
@@ -230,6 +231,41 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
         db::checkpoint_passive(&conn);
     }
     Ok(())
+}
+
+/// Record the cmux pane the agent runs in (the hook inherits its
+/// `CMUX_WORKSPACE_ID`/`CMUX_SURFACE_ID`) and what its current tool call
+/// blocks on. Writes only when either changed, so most events cost nothing.
+fn record_extras(
+    conn: &rusqlite::Connection,
+    kind: HarnessKind,
+    sid: &str,
+    before: Option<&db::SessionRow>,
+    ev: &HookEvent,
+) -> rusqlite::Result<()> {
+    let pane = db::CmuxPane::from_env();
+    let stored_wait = before.and_then(|s| s.waiting_on.clone());
+    // Only the main conversation's own tool calls say what the turn waits on.
+    let waiting_on = if ev.from_subagent() || ev.is_subagent_lifecycle() {
+        stored_wait.clone()
+    } else if ev.is("PreToolUse") && !ev.needs_user() {
+        ev.tool_name.as_deref().and_then(|t| status::waits_on_event(t, ev.tool_input.as_ref()))
+    } else if ev.is("SessionStart") {
+        stored_wait.clone()
+    } else {
+        None
+    };
+    let pane_changed = pane.is_some() && pane.as_ref() != before.and_then(|s| s.cmux.as_ref());
+    if !pane_changed && waiting_on == stored_wait {
+        return Ok(());
+    }
+    if waiting_on != stored_wait {
+        debug!(MODULE, "Session {}:{sid} waiting on {waiting_on:?} ({})", kind.id(), ev.event);
+    }
+    if pane_changed && let Some(p) = &pane {
+        debug!(MODULE, "Session {}:{sid} runs in cmux workspace {} surface {:?}", kind.id(), p.workspace, p.surface);
+    }
+    db::set_session_extras(conn, kind, sid, pane.as_ref(), waiting_on.as_deref())
 }
 
 /// Mirror the most urgent open session into the owner's `agent_status` /
