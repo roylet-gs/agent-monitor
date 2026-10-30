@@ -114,8 +114,8 @@ test("never makes a client retry what it can't fix", async () => {
   // Grafana refusing the data (4xx) isn't retried either…
   const refused = await run(post(payload([record("am.command", [str("command", "doctor")])])), { status: 400 });
   assert.equal(refused.response.status, 200);
-  // …but Grafana throttling or down is.
-  for (const status of [429, 500, 502]) {
+  // …but Grafana throttling, down, or refusing the relay's credentials is.
+  for (const status of [401, 403, 429, 500, 502]) {
     const r = await run(post(payload([record("am.command", [str("command", "doctor")])])), { status });
     assert.equal(r.response.status, 503, `upstream ${status}`);
   }

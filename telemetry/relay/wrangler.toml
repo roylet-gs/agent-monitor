@@ -2,12 +2,15 @@
 name = "am-telemetry-relay"
 main = "src/worker.js"
 compatibility_date = "2026-10-01"
+# What released am binaries post to (telemetry::upload::DEFAULT_ENDPOINT).
+# The zone (royle.au) is on Cloudflare, which adds the DNS record on deploy.
+routes = [{ pattern = "am-telemetry.royle.au", custom_domain = true }]
 # No logs of request bodies or headers: the relay keeps nothing.
 observability = { enabled = false }
 
 [vars]
-# Your stack's OTLP endpoint: Grafana Cloud → your stack → OpenTelemetry → Configure.
-GRAFANA_OTLP_ENDPOINT = "https://otlp-gateway-prod-REGION.grafana.net/otlp"
+# The stack's OTLP endpoint: Grafana Cloud → the stack → OpenTelemetry → Configure.
+GRAFANA_OTLP_ENDPOINT = "https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp"
 # Secrets (never in this file): `npx wrangler@4 secret put GRAFANA_INSTANCE_ID`
 # and `npx wrangler@4 secret put GRAFANA_API_TOKEN` (an access-policy token
 # with only the logs:write scope).

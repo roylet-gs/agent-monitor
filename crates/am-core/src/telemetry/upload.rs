@@ -18,10 +18,9 @@ use super::spool;
 use crate::{debug, info};
 
 const MODULE: &str = "telemetry";
-/// The relay that forwards reports to Grafana Cloud. `None` until it is
-/// deployed: reports then wait in the spool (capped and aged out) unless
-/// `AM_TELEMETRY_ENDPOINT` names one.
-pub const DEFAULT_ENDPOINT: Option<&str> = None;
+/// The relay that forwards reports to Grafana Cloud (`telemetry/relay`, a
+/// Cloudflare Worker on this custom domain). `AM_TELEMETRY_ENDPOINT` overrides it.
+pub const DEFAULT_ENDPOINT: Option<&str> = Some("https://am-telemetry.royle.au");
 /// Events per request (well under the relay's 256 KB body limit).
 const CHUNK: usize = 300;
 const TIMEOUT: Duration = Duration::from_secs(10);

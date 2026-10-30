@@ -35,6 +35,8 @@ services:
       - AM_DATA_DIR=/tmp/am-e2e
       - AM_MOCK_API_URL=http://mock-api:4100
       - AM_LINEAR_API_URL=http://mock-api:4100/linear
+      # Usage reports a spec turns on must never reach the real relay.
+      - AM_TELEMETRY_ENDPOINT=http://mock-api:4100/telemetry
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:7681/"]
       interval: 2s

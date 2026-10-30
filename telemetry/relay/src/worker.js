@@ -190,8 +190,11 @@ export default {
       return json(503, { error: "upstream unreachable" });
     }
     if (upstream.ok) return json(200, partial);
-    // Grafana throttling or down: the client keeps the batch and retries.
-    if (upstream.status === 429 || upstream.status >= 500) return json(503, { error: `upstream ${upstream.status}` });
+    // Grafana throttling or down, or refusing the relay's own credentials (a
+    // relay misconfiguration, not bad data): the client keeps the batch and retries.
+    if ([401, 403, 429].includes(upstream.status) || upstream.status >= 500) {
+      return json(503, { error: `upstream ${upstream.status}` });
+    }
     // Grafana refused the data itself: retrying won't help.
     return json(200, { partialSuccess: { rejectedLogRecords: String(kept + dropped), errorMessage: `upstream ${upstream.status}` } });
   },
