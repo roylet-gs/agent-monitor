@@ -18,7 +18,7 @@ use std::cell::Cell;
 use unicode_width::UnicodeWidthStr;
 
 use crate::actions::{ActionBar, BarHit, Entry};
-use crate::app::{App, Key, Row};
+use crate::app::{FOLD_CLOSED, FOLD_OPEN, App, Key, Row};
 use crate::keymap::Command;
 use crate::theme::{Theme, status_glyph, status_label};
 
@@ -139,6 +139,8 @@ pub enum Target {
     Command(Command),
     /// A worktree (or one of its session rows) in the dashboard list.
     Worktree(usize),
+    /// A stack root's fold arrow or `+N stacked hidden` pill: fold/unfold.
+    Fold(usize),
     /// The `⬆ vX.Y.Z available` notice: offer to update.
     Update,
     /// Anywhere in the jobs pane: focus it.
@@ -2068,14 +2070,6 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
 
     let height = inner.height as usize;
     let start = list_start(app, height);
-    // Worktree and session rows select their worktree; the focused
-    // selection keeps its own highlight.
-    for (n, row) in app.rows.iter().skip(start).take(height).enumerate() {
-        if let Row::Worktree(i) | Row::Session(i, _) = row {
-            let selected = *row == Row::Worktree(app.selected) && focused;
-            push_row(hits, inner, n, Target::Worktree(*i), selected);
-        }
-    }
     let lines: Vec<Line> = app
         .rows
         .iter()
@@ -2109,6 +2103,34 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
             Row::Session(i, k) => session_line(app, theme, &app.flat[*i], &app.tree[*i], *k, &cols, inner.width, now),
         })
         .collect();
+    // Worktree and session rows select their worktree; the focused
+    // selection keeps its own highlight. A stack root's fold arrow and
+    // `+N stacked hidden` pill fold/unfold it (pushed after, so they win).
+    for (n, row) in app.rows.iter().skip(start).take(height).enumerate() {
+        if let Row::Worktree(i) | Row::Session(i, _) = row {
+            let selected = *row == Row::Worktree(app.selected) && focused;
+            push_row(hits, inner, n, Target::Worktree(*i), selected);
+        }
+        let Row::Worktree(i) = row else { continue };
+        if n >= inner.height as usize {
+            continue;
+        }
+        let y = inner.y + n as u16;
+        if app.tree[*i].starts_with([FOLD_OPEN, FOLD_CLOSED]) {
+            hits.push(Hit { rect: Rect::new(inner.x + 1, y, 1, 1), target: Target::Fold(*i), selected: false });
+        }
+        if let Some(&hidden) = app.folded.get(&app.flat[*i].worktree.id) {
+            let mut x = 0u16;
+            for span in &lines[n].spans {
+                let w = span.content.width() as u16;
+                if span.content == fold_pill(hidden, wide(inner.width)) {
+                    hits.push(Hit { rect: Rect::new(inner.x + x, y, w, 1), target: Target::Fold(*i), selected: false });
+                    break;
+                }
+                x += w;
+            }
+        }
+    }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -2511,6 +2533,11 @@ fn scroll_start(offset: &Cell<usize>, len: usize, height: usize, sel: (usize, us
     start
 }
 
+/// The pill on a folded stack's root: ` +3 stacked hidden ` (` +3 ` when narrow).
+fn fold_pill(hidden: usize, wide: bool) -> String {
+    if wide { format!(" +{hidden} stacked hidden ") } else { format!(" +{hidden} ") }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn worktree_line<'a>(
     app: &App,
@@ -2561,16 +2588,26 @@ fn worktree_line<'a>(
     let right_w: usize = right.iter().map(|s| s.content.width()).sum();
 
     let bar = if selected { if focused { "▌" } else { "▏" } } else { " " };
-    let mut left = vec![
-        Span::styled(bar, theme.bold(theme.border_focus)),
-        Span::styled(tree.to_string(), theme.fg(theme.border)),
+    // A stack root's fold arrow leads its tree prefix: accent while open,
+    // yellow while folded.
+    let (arrow, tree_rest) = match tree.chars().next() {
+        Some(c @ (FOLD_OPEN | FOLD_CLOSED)) => (Some(c), &tree[c.len_utf8()..]),
+        _ => (None, tree),
+    };
+    let mut left = vec![Span::styled(bar, theme.bold(theme.border_focus))];
+    if let Some(c) = arrow {
+        let color = if c == FOLD_CLOSED { theme.yellow } else { theme.accent };
+        left.push(Span::styled(c.to_string(), theme.bold(color)));
+    }
+    left.extend([
+        Span::styled(tree_rest.to_string(), theme.fg(theme.border)),
         if deleting {
             Span::styled(spinner(now), theme.fg(theme.red))
         } else {
             Span::styled(status_glyph(status), theme.fg(theme.status(status)))
         },
         Span::raw(" "),
-    ];
+    ]);
     let mut badge = String::new();
     // A row being deleted shows only that, in place of its other badges.
     if deleting {
@@ -2615,12 +2652,9 @@ fn worktree_line<'a>(
             badge.push_str(&format!(" ◆{subagents}"));
         }
     }
-    // Collapsed (←): how many stacked rows it hides.
-    let fold_badge = match app.folded.get(&v.worktree.id) {
-        Some(n) if wide(width) => format!(" ▸ {n} stacked"),
-        Some(n) => format!(" ▸{n}"),
-        None => String::new(),
-    };
+    // A folded stack (←): a loud pill saying how much it hides, so a
+    // hidden stack is never missed.
+    let fold_badge = app.folded.get(&v.worktree.id).map(|n| format!(" {}", fold_pill(*n, wide(width)))).unwrap_or_default();
     // The tmp space mixes repos: name the row's own when several are tracked.
     let repo_tag = match app.snapshot.repos.iter().find(|r| r.id == v.worktree.repo_id) {
         Some(r) if v.worktree.tmp_space && app.snapshot.repos.len() > 1 => format!(" ({})", r.name),
@@ -2690,7 +2724,10 @@ fn worktree_line<'a>(
         rest = r;
     }
     left.push(Span::styled(rest.to_string(), theme.fg(theme.magenta)));
-    left.push(Span::styled(fold_badge, theme.faint()));
+    if let Some(pill) = fold_badge.strip_prefix(' ') {
+        left.push(Span::raw(" "));
+        left.push(Span::styled(pill.to_string(), theme.bold(theme.yellow).add_modifier(Modifier::REVERSED)));
+    }
     left.push(Span::raw(" ".repeat(fill)));
 
     let ctx_range = ctx_range.start + left.len()..ctx_range.end + left.len();
@@ -3570,7 +3607,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::MoveDown, C::MoveUp], "  ↑ / ↓", "move"),
         (&[C::Top, C::Bottom], "", "top / bottom"),
         (&[C::PageDown, C::PageUp], "", "page down / up"),
-        (&[C::Collapse, C::Expand], "", "fold / unfold stacked branches (▸ N stacked)"),
+        (&[C::Collapse, C::Expand], "", "fold / unfold the selected stack (▾ / ▸, clickable)"),
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
@@ -6236,8 +6273,8 @@ mod tests {
         let order: Vec<(&str, &str)> = app.flat.iter().zip(&app.tree).map(|(v, t)| (v.worktree.id.as_str(), t.as_str())).collect();
         assert_eq!(
             order,
-            [("w1", ""), ("w4", "├─ "), ("w5", "│  └─ "), ("w6", "└─ "), ("w2", ""), ("w3", "")],
-            "children follow the parent, depth-first, with tree lines"
+            [("w1", "▾ "), ("w4", "  ├─ "), ("w5", "  │  └─ "), ("w6", "  └─ "), ("w2", "  "), ("w3", "  ")],
+            "children follow the parent, depth-first, with tree lines; the root has a fold arrow, every row its gutter"
         );
         insta::assert_snapshot!(render(&app, 100, 14));
     }
@@ -6754,33 +6791,63 @@ mod tests {
     }
 
     #[test]
-    fn left_and_right_fold_and_unfold_stacks() {
+    fn left_and_right_fold_and_unfold_stacks_at_their_root() {
         let mut app = epic_stacks();
-        app.selected = app.flat.iter().position(|v| v.worktree.id == "b1").unwrap();
+        let at = |app: &App, id: &str| app.flat.iter().position(|v| v.worktree.id == id).unwrap();
+        let selected = |app: &App| app.selected_view().unwrap().worktree.id.clone();
+        // ← anywhere in a stack folds it to its root.
+        app.selected = at(&app, "b3");
         app.on_key(Key::Left);
         assert_eq!(app.folded.get("b1"), Some(&2));
-        assert_eq!(app.selected_view().unwrap().worktree.id, "b1", "the selection stays");
+        assert_eq!(selected(&app), "b1", "the root is selected");
         assert!(!app.flat.iter().any(|v| v.worktree.id == "b2" || v.worktree.id == "b3"));
-        assert!(render(&app, 120, 24).contains("▸ 2 stacked"));
-        // Folded: survives a refresh, and ← again has no parent to go to.
+        assert_eq!(app.tree[at(&app, "b1")], "▸ ");
+        let screen = render(&app, 120, 24);
+        assert!(screen.contains("+2 stacked hidden"), "{screen}");
+        // Folded: survives a refresh; ← again changes nothing.
         app.apply(app.snapshot.clone());
         app.on_key(Key::Left);
-        assert!(app.folded.contains_key("b1") && app.selected_view().unwrap().worktree.id == "b1");
+        assert!(app.folded.contains_key("b1") && selected(&app) == "b1");
+        // → unfolds, then steps into the stack; → on a stacked row does nothing.
         app.on_key(Key::Right);
         assert!(app.folded.is_empty());
-        // → on an unfolded row goes to the first stacked one; ← on a leaf
-        // goes to its parent, and again folds that.
+        assert_eq!(app.tree[at(&app, "b1")], "▾ ");
         app.on_key(Key::Right);
+        assert_eq!(selected(&app), "b2");
         app.on_key(Key::Right);
-        assert_eq!(app.selected_view().unwrap().worktree.id, "b3");
+        assert_eq!(selected(&app), "b2");
+        // Only roots fold: a row without a stack has no arrow and ← leaves it.
+        app.selected = at(&app, "d1");
         app.on_key(Key::Left);
-        assert_eq!(app.selected_view().unwrap().worktree.id, "b2");
+        assert!(app.folded.is_empty() && selected(&app) == "d1");
+        assert_eq!(app.tree[at(&app, "d1")], "  ");
+        // A worktree created inside a folded stack unfolds it.
+        app.selected = at(&app, "c2");
         app.on_key(Key::Left);
-        assert_eq!(app.folded.get("b2"), Some(&1));
-        // A worktree created under a folded row unfolds it to show up.
-        app.pending_select = Some("b3".into());
+        assert!(app.folded.contains_key("c1"));
+        app.pending_select = Some("c2".into());
         app.apply(app.snapshot.clone());
-        assert_eq!(app.selected_view().unwrap().worktree.id, "b3");
+        assert_eq!(selected(&app), "c2");
+        assert!(app.folded.is_empty());
+    }
+
+    #[test]
+    fn clicking_the_fold_arrow_or_pill_folds_and_unfolds() {
+        use crate::app::Mouse;
+        let mut app = epic_stacks();
+        render(&app, 120, 24);
+        let (x, y) = find(&app, 120, 24, "▾ · feature/b1");
+        app.on_mouse(Mouse::Click { x, y, double: false });
+        assert_eq!(app.folded.get("b1"), Some(&2), "the arrow folds");
+        assert_eq!(app.selected_view().unwrap().worktree.id, "b1");
+        render(&app, 120, 24);
+        let (x, y) = find(&app, 120, 24, "+2 stacked hidden");
+        app.on_mouse(Mouse::Click { x, y, double: false });
+        assert!(app.folded.is_empty(), "the pill unfolds");
+        // A click elsewhere on the row only selects it.
+        render(&app, 120, 24);
+        let (x, y) = find(&app, 120, 24, "feature/c1");
+        app.on_mouse(Mouse::Click { x, y, double: false });
         assert!(app.folded.is_empty());
     }
 

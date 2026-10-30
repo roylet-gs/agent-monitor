@@ -435,6 +435,11 @@ impl App {
     pub fn rebuild_rows(&mut self) {
         let by_project = am_core::grouping::top_sort_key(&self.settings) == Some(SortKey::LinearProject);
         let multi_repo = self.snapshot.groups.len() > 1;
+        // With any stack listed, every row gets room for a fold arrow
+        // (`▾`/`▸`) in front, so names stay aligned.
+        let listed_ids: std::collections::HashSet<&str> =
+            self.snapshot.groups.iter().flat_map(|g| &g.worktrees).map(|v| v.worktree.id.as_str()).collect();
+        let gutter = self.snapshot.stack.iter().any(|(c, p)| listed_ids.contains(c.as_str()) && listed_ids.contains(p.as_str()));
         self.flat.clear();
         self.rows.clear();
         self.tree.clear();
@@ -545,30 +550,32 @@ impl App {
                 if let Some(base) = self.snapshot.stack_base.get(&root.worktree.id) {
                     self.rows.push(Row::Base(base.clone()));
                 }
-                // Collapsed rows hide everything stacked under them.
-                let depth = |prefix: &str| prefix.chars().count() / 3;
-                let mut hide_below: Option<usize> = None;
-                for (k, (i, prefix)) in stack.iter().enumerate() {
-                    let d = depth(prefix);
-                    if hide_below.is_some_and(|h| d > h) {
-                        continue;
-                    }
-                    hide_below = None;
+                // A folded stack shows only its root.
+                let root_id = &group.worktrees[stack[0].0].worktree.id;
+                let folded = stack.len() > 1 && self.collapsed.contains(root_id);
+                if folded {
+                    self.folded.insert(root_id.clone(), stack.len() - 1);
+                }
+                let shown = if folded { &stack[..1] } else { &stack[..] };
+                for (i, prefix) in shown {
                     let v = &group.worktrees[*i];
                     let at = self.flat.len();
-                    if self.collapsed.contains(&v.worktree.id) {
-                        let hidden = stack[k + 1..].iter().take_while(|(_, p)| depth(p) > d).count();
-                        if hidden > 0 {
-                            self.folded.insert(v.worktree.id.clone(), hidden);
-                            hide_below = Some(d);
-                        }
-                    }
+                    let arrow = match (prefix.is_empty() && stack.len() > 1, folded) {
+                        (false, _) => ' ',
+                        (true, false) => FOLD_OPEN,
+                        (true, true) => FOLD_CLOSED,
+                    };
                     self.rows.push(Row::Worktree(at));
                     if v.sessions.len() > 1 {
                         self.rows.extend((0..v.sessions.len()).map(|k| Row::Session(at, k)));
                     }
                     self.flat.push(v.clone());
-                    self.tree.push(prefix.clone());
+                    // A stack's root carries its fold arrow in the gutter.
+                    self.tree.push(match gutter {
+                        false => prefix.clone(),
+                        true if prefix.is_empty() => format!("{arrow} "),
+                        true => format!("  {prefix}"),
+                    });
                 }
             }
             pending.retain(|(job, repo_id, _)| {
@@ -1076,6 +1083,14 @@ impl App {
                 self.selected = i;
                 self.mark_selected_seen();
                 if double { self.run_command(crate::keymap::Command::Open) } else { Action::None }
+            }
+            Target::Fold(i) => {
+                self.jobs.focused = false;
+                if let Some(p) = &mut self.reviews {
+                    p.focused = false;
+                }
+                self.toggle_fold(i);
+                Action::None
             }
             Target::Item(list, i) => self.pick(list, i),
         }
@@ -1649,10 +1664,27 @@ impl App {
     }
 
 
+    fn listed(&self, id: &str) -> bool {
+        self.snapshot.groups.iter().any(|g| g.worktrees.iter().any(|v| v.worktree.id == id))
+    }
+
+    /// The root of the stack `id` is in (itself when it isn't stacked):
+    /// only a root folds.
+    fn stack_root(&self, id: &str) -> String {
+        let mut cur = id.to_string();
+        let mut seen = std::collections::HashSet::new();
+        while let Some(parent) = self.snapshot.stack.get(&cur).filter(|p| self.listed(p)) {
+            if !seen.insert(cur.clone()) {
+                break;
+            }
+            cur = parent.clone();
+        }
+        cur
+    }
+
     /// Whether any listed worktree is stacked on `id`.
     fn has_stacked(&self, id: &str) -> bool {
-        let listed = |c: &str| self.snapshot.groups.iter().any(|g| g.worktrees.iter().any(|v| v.worktree.id == c));
-        self.snapshot.stack.iter().any(|(child, parent)| parent == id && listed(child))
+        self.snapshot.stack.iter().any(|(child, parent)| parent == id && self.listed(child))
     }
 
     fn select_worktree(&mut self, id: &str) {
@@ -1662,42 +1694,43 @@ impl App {
         }
     }
 
-    /// ←: fold away what's stacked on the selected row; on a row with
-    /// nothing (more) to fold, go to the branch it's stacked on.
+    /// ←: fold the selected row's stack (anywhere in it) down to its root.
     fn collapse_selected(&mut self) {
         let Some(id) = self.selected_view().map(|v| v.worktree.id.clone()) else { return };
-        if !self.collapsed.contains(&id) && self.has_stacked(&id) {
-            self.collapsed.insert(id.clone());
+        let root = self.stack_root(&id);
+        if self.has_stacked(&root) && self.collapsed.insert(root.clone()) {
             self.rebuild_rows();
-            self.select_worktree(&id);
-        } else if let Some(parent) = self.snapshot.stack.get(&id).cloned() {
-            self.select_worktree(&parent);
         }
+        self.select_worktree(&root);
     }
 
-    /// →: unfold the selected row; on an unfolded one, go to the first
+    /// →: unfold the selected root; on an unfolded one, go to the first
     /// branch stacked on it.
     fn expand_selected(&mut self) {
         let Some(id) = self.selected_view().map(|v| v.worktree.id.clone()) else { return };
         if self.collapsed.remove(&id) {
             self.rebuild_rows();
             self.select_worktree(&id);
-        } else if self.has_stacked(&id) {
+        } else if self.snapshot.stack.get(&id).is_none_or(|p| !self.listed(p)) && self.has_stacked(&id) {
             self.move_by(1);
         }
     }
 
-    /// Unfold whatever hides `id` (a just-created worktree must show up).
+    /// Unfold the stack hiding `id` (a just-created worktree must show up).
     fn reveal(&mut self, id: &str) {
-        let mut cur = id.to_string();
-        let mut seen = std::collections::HashSet::new();
-        while let Some(parent) = self.snapshot.stack.get(&cur).cloned() {
-            if !seen.insert(parent.clone()) {
-                break;
-            }
-            self.collapsed.remove(&parent);
-            cur = parent;
+        let root = self.stack_root(id);
+        self.collapsed.remove(&root);
+    }
+
+    /// A click on a stack root's fold arrow or its `+N stacked hidden` pill:
+    /// select it and fold or unfold it.
+    pub fn toggle_fold(&mut self, i: usize) {
+        let Some(id) = self.flat.get(i).map(|v| v.worktree.id.clone()) else { return };
+        if !self.collapsed.remove(&id) && self.has_stacked(&id) {
+            self.collapsed.insert(id.clone());
         }
+        self.rebuild_rows();
+        self.select_worktree(&id);
     }
 
     fn move_by(&mut self, delta: isize) {
@@ -1792,6 +1825,10 @@ fn linear_url(url: &str, s: &Settings) -> String {
         url.to_string()
     }
 }
+
+/// Fold arrows in a stack root's tree prefix (`App::tree`).
+pub const FOLD_OPEN: char = '▾';
+pub const FOLD_CLOSED: char = '▸';
 
 /// The Linear ticket a stack is grouped under (`groupStacksByTicket`).
 #[derive(Debug, Clone, PartialEq, Eq)]

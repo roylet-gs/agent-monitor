@@ -163,7 +163,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `j` / `k`, `↑` / `↓` | Move the selection |
 | `Home` / `G` (`End`) | Jump to top / bottom |
 | `Ctrl-d` / `Ctrl-u` (`PgDn` / `PgUp`) | Page down / up |
-| `←` / `→` | Fold / unfold the branches stacked on the selected one (see [Stacked Branches](#stacked-branches)) |
+| `←` / `→` | Fold / unfold the selected stack (see [Stacked Branches](#stacked-branches)) |
 | `Enter` | Open the worktree in your editor (and resume its last agent session, see below) |
 | `g` / `o` | Open the PR in the browser (a merged PR opens its last active check) |
 | `l` | Open the Linear ticket |
@@ -291,7 +291,7 @@ When the bottom of a stack is built on a branch you haven't checked out as a wor
 └─ ○ feature/connect-1789
 ```
 
-`←` folds away the branches stacked on the selected row, which then reads `▸ 3 stacked`. On a row with nothing to fold, `←` goes to the branch it's stacked on. `→` unfolds the row, or goes to its first stacked branch. Folds last until you quit, and a worktree created inside a fold opens it.
+A stack folds at its root, the bottom branch, which carries a `▾` (`▸` when folded) in front of it. `←` anywhere in a stack folds it down to the root, and the root then shows a yellow ` +3 stacked hidden ` pill so a folded stack is hard to miss. `→` on a folded root unfolds it; on an open root it goes to the first stacked branch. Clicking the arrow or the pill folds or unfolds it too. Folds last until you quit, and a worktree created inside a folded stack opens it.
 
 With `groupStacksByTicket` on (the default; **Settings → Dashboard → Group stacks by ticket**), stacks sit together under the Linear ticket they belong to, with a `— EPIC-12 Epic title —` header. That ticket is the parent issue that most of the stack's tickets have. A stack root without a parent counts its own ticket, and a tie goes to the root's. So a stack whose sub-issues share an epic is filed under that epic, even when its root branch is named after another ticket. Stacks under the same ticket are moved next to the first of them (within their Linear project section, when you sort by project). A ticket that is only some stack's own gets a header only when two or more stacks share it. With the setting off, stacks follow their branches only, with no ticket headers.
 

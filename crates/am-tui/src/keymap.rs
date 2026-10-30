@@ -209,8 +209,8 @@ impl Command {
             Command::PageUp => "Ten rows up (pgup always works)",
             Command::Top => "First row (home always works)",
             Command::Bottom => "Last row (end always works)",
-            Command::Collapse => "Fold away the branches stacked on the selected one, or go to its parent (← always works)",
-            Command::Expand => "Show the folded branches again, or go to the first stacked one (→ always works)",
+            Command::Collapse => "Fold the selected row's stack down to its root (← always works)",
+            Command::Expand => "Unfold the selected stack, or go to its first stacked branch (→ always works)",
         }
     }
 

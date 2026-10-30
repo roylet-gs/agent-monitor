@@ -5,20 +5,20 @@ expression: "render(&app, 110, 20)"
 ╭─am v0.0.0 · Worktrees ─────────────────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ──────────────────────────────────────────────────────────────────────────────────────────────│
 │  — EPIC-A Epic EPIC-A —                                                                                    │
-│ · feature/a1                                                                               ENG-1 ↑2 ±3  4m │
-│ └─ · feature/a2                                                                            ENG-2 ↑2 ±3  4m │
-│ · feature/d1                                                                               ENG-7 ↑2 ±3  4m │
+│ ▾ · feature/a1                                                                             ENG-1 ↑2 ±3  4m │
+│   └─ · feature/a2                                                                          ENG-2 ↑2 ±3  4m │
+│   · feature/d1                                                                             ENG-7 ↑2 ±3  4m │
 │                                                                                                            │
 │  — EPIC-B Epic EPIC-B —                                                                                    │
-│▌· feature/b1 ▸ 2 stacked                                                                   ENG-5 ↑2 ±3  4m │
+│▌▸ · feature/b1  +2 stacked hidden                                                          ENG-5 ↑2 ±3  4m │
 │                                                                                                            │
 │  — EPIC-C Epic EPIC-C —                                                                                    │
 │ ┌ feature/connect-1787 · no worktree                                                                       │
-│ · feature/c1                                                                               ENG-5 ↑2 ±3  4m │
-│ └─ · feature/c2                                                                            ENG-6 ↑2 ±3  4m │
+│ ▾ · feature/c1                                                                             ENG-5 ↑2 ±3  4m │
+│   └─ · feature/c2                                                                          ENG-6 ↑2 ±3  4m │
 │                                                                                                            │
 │gridsight ──────────────────────────────────────────────────────────────────────────────────────────────────│
-│ · main                                                                                           ↑2 ±3  4m │
+│   · main                                                                                         ↑2 ±3  4m │
 │                                                                                                            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────── 4 of 7 ╯
  ⏎ open  │ g PR  l linear  │ n new  d delete  f filter  │ v reviews  s settings  r refresh  │ h help  q quit
