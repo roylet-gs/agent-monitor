@@ -1,0 +1,837 @@
+{
+  "uid": "am-overview",
+  "title": "am \u2014 Usage overview",
+  "description": "How many people use am and on which versions: opted-in usage reports (TELEMETRY.md) beside GitHub's own counts (telemetry/github-stats).",
+  "tags": [
+    "am",
+    "usage-reports"
+  ],
+  "schemaVersion": 39,
+  "editable": true,
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "",
+  "timezone": "utc",
+  "graphTooltip": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "loki",
+        "label": "Logs",
+        "type": "datasource",
+        "query": "loki",
+        "current": {},
+        "hide": 0,
+        "regex": "/^(?!.*(alert-state-history|usage-insights)).*$/"
+      },
+      {
+        "name": "prom",
+        "label": "Metrics",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0,
+        "regex": "/prom/i"
+      },
+      {
+        "name": "version",
+        "label": "Version",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "${loki}"
+        },
+        "query": {
+          "label": "service_version",
+          "stream": "{service_name=\"am\"}",
+          "type": 1
+        },
+        "definition": "label_values({service_name=\"am\"}, service_version)",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": {},
+        "refresh": 2,
+        "sort": 4
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Installs",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Active installs, opted in (7 d)",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [7d])))",
+          "legendFormat": "",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "description": "Installs with usage reports on that sent a heartbeat in the last 7 days. Only installs that opted in (2.1.69 and later) count."
+    },
+    {
+      "id": 3,
+      "title": "Active installs, opted in (30 d)",
+      "type": "stat",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [30d])))",
+          "legendFormat": "",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Unique cloners (GitHub, 14 d)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "max(last_over_time(am_github_clones_uniques_14d{job=~\".*am-github-stats\"}[26h]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "description": "Distinct machines that cloned the repo in GitHub's last 14 days: brew tap/update (the repo is the Homebrew tap) and CI runs, so an upper bound on Homebrew installs."
+    },
+    {
+      "id": 5,
+      "title": "npm downloads (all time)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "sum(last_over_time(am_github_npm_downloads{job=~\".*am-github-stats\"}[26h]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "description": "GitHub Packages downloads of the npm packages (empty unless the collector can read packages)."
+    },
+    {
+      "id": 6,
+      "title": "Release downloads (7 d)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "sum((max_over_time(am_github_release_downloads{job=~\".*am-github-stats\"}[7d]) - min_over_time(am_github_release_downloads{job=~\".*am-github-stats\"}[7d])))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "description": "Release tarballs downloaded in the last 7 days, every platform (crawlers included). Counts come from the daily collector, so this lags up to a day."
+    },
+    {
+      "id": 7,
+      "title": "GitHub stars",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 1,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "max(last_over_time(am_github_stars{job=~\".*am-github-stats\"}[26h]))",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "title": "Installs over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count(sum by (am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [1d])))",
+          "legendFormat": "active installs, opted in (rolling 24 h)",
+          "queryType": "range"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "max(last_over_time(am_github_clones_uniques_14d{job=~\".*am-github-stats\"}[26h]))",
+          "legendFormat": "unique cloners (GitHub, 14 d)",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "description": "Opted-in installs (left axis) beside GitHub's unique cloners (right axis), a much larger but noisier count."
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Versions",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "title": "Opted-in installs per version (latest day)",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 8,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count by (service_version) (sum by (service_version, am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" [1d])))",
+          "legendFormat": "{{service_version}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      },
+      "description": "Distinct installs per am version that sent a heartbeat in the day before the latest point."
+    },
+    {
+      "id": 11,
+      "title": "Opted-in installs per version over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 14,
+        "w": 16,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "count by (service_version) (sum by (service_version, am_install_id) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" [1d])))",
+          "legendFormat": "{{service_version}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 40,
+            "drawStyle": "bars"
+          }
+        },
+        "overrides": []
+      },
+      "description": "How fast installs move to a new release, and who stays behind."
+    },
+    {
+      "id": 12,
+      "title": "Release downloads per version, above the crawler baseline",
+      "type": "barchart",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 12,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "sort_desc((sum by (version) (last_over_time(am_github_release_downloads{job=~\".*am-github-stats\", platform=\"darwin-arm64\"}[26h])) - min by (version) (last_over_time(am_github_release_downloads{job=~\".*am-github-stats\"}[26h]))) and on (version) topk(15, last_over_time(am_github_release_published_seconds{job=~\".*am-github-stats\"}[26h])))",
+          "legendFormat": "{{version}}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "xField": "version",
+        "showValue": "always",
+        "legend": {
+          "showLegend": false
+        },
+        "barWidth": 0.8,
+        "xTickLabelSpacing": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "description": "The 15 most recent releases: macOS arm64 downloads of each minus its least-downloaded platform. Crawlers fetch every platform alike, so the rest is mostly Homebrew installs and upgrades.",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Release downloads per version (all platforms)",
+      "type": "barchart",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 23,
+        "w": 12,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "sort_desc(sum by (version) (last_over_time(am_github_release_downloads{job=~\".*am-github-stats\"}[26h])) and on (version) topk(15, last_over_time(am_github_release_published_seconds{job=~\".*am-github-stats\"}[26h])))",
+          "legendFormat": "{{version}}",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "xField": "version",
+        "showValue": "always",
+        "legend": {
+          "showLegend": false
+        },
+        "barWidth": 0.8,
+        "xTickLabelSpacing": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "description": "The 15 most recent releases.",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Release downloads per day",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "sum by (platform) ((max_over_time(am_github_release_downloads{job=~\".*am-github-stats\"}[25h]) - min_over_time(am_github_release_downloads{job=~\".*am-github-stats\"}[25h])))",
+          "legendFormat": "{{platform}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "interval": "1d",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "Channels and engagement",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 16,
+      "title": "Installed with (opted in)",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (am_install_method) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "{{am_install_method}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 17,
+      "title": "OS / CPU (opted in)",
+      "type": "piechart",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 44,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (os_type, host_arch) (count_over_time({service_name=\"am\"} | event_name=\"am.heartbeat\" | service_version=~\"$version\" [$__interval]))",
+          "legendFormat": "{{os_type}} {{host_arch}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Top dashboard commands",
+      "type": "bargauge",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (command) (sum_over_time({service_name=\"am\"} | event_name=\"am.features\" | service_version=~\"$version\" | unwrap count [$__interval]))",
+          "legendFormat": "{{command}}",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "basic",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 19,
+      "title": "CLI commands per day (you vs. agents through MCP)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "loki",
+        "uid": "${loki}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "${loki}"
+          },
+          "expr": "sum by (via) (count_over_time({service_name=\"am\"} | event_name=\"am.command\" | service_version=~\"$version\" [1d]))",
+          "legendFormat": "{{via}}",
+          "queryType": "range"
+        }
+      ],
+      "interval": "1d",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "title": "Repo traffic (GitHub, rolling 14 d)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "max(last_over_time(am_github_clones_14d{job=~\".*am-github-stats\"}[26h]))",
+          "legendFormat": "clones",
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "max(last_over_time(am_github_clones_uniques_14d{job=~\".*am-github-stats\"}[26h]))",
+          "legendFormat": "unique cloners",
+          "instant": false,
+          "range": true
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${prom}"
+          },
+          "expr": "max(last_over_time(am_github_views_uniques_14d{job=~\".*am-github-stats\"}[26h]))",
+          "legendFormat": "unique visitors",
+          "instant": false,
+          "range": true
+        }
+      ]
+    }
+  ]
+}

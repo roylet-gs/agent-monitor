@@ -6,9 +6,15 @@ days and flags errors and empty results. See telemetry/README.md.
 import json, os, sys, urllib.request, base64
 files = sys.argv[1:]
 auth = "Basic " + base64.b64encode(b"admin:admin").decode()
-def query(expr, qtype):
-    body = {"from": "now-2d", "to": "now", "queries": [{"refId": "A", "datasource": {"type": "loki", "uid": "loki"},
-            "expr": expr, "queryType": qtype, "maxLines": 100, "intervalMs": 3600000}]}
+def query(expr, qtype, kind="loki"):
+    q = {"refId": "A", "datasource": {"type": kind, "uid": kind}, "expr": expr, "maxLines": 100, "intervalMs": 3600000}
+    if kind == "prometheus":
+        # 1-minute steps: freshly seeded samples are newer than the last hourly
+        # step Grafana would align to.
+        q.update({"instant": qtype == "instant", "range": qtype == "range", "intervalMs": 60000, "maxDataPoints": 5000})
+    else:
+        q["queryType"] = qtype
+    body = {"from": "now-2d", "to": "now", "queries": [q]}
     req = urllib.request.Request(os.environ.get("GRAFANA_URL", "http://localhost:13000") + "/api/ds/query", data=json.dumps(body).encode(),
                                  headers={"content-type": "application/json", "authorization": auth})
     try:
@@ -29,7 +35,9 @@ for path in files:
     for p in d["panels"]:
         for t in p.get("targets", []):
             expr = t["expr"].replace('$version', '.+').replace('$__range', '2d').replace('$__auto', '1h')
-            out = query(expr, t["queryType"])
+            kind = t["datasource"]["type"]
+            qtype = t.get("queryType") or ("instant" if t.get("instant") else "range")
+            out = query(expr, qtype, kind)
             ok = isinstance(out, list) and len(out) > 0
             bad += not ok
             shown = (out[:3] if isinstance(out, list) else out)

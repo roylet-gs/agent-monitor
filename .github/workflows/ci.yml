@@ -23,6 +23,8 @@ jobs:
       # Rust client test above keeps in step with schema.rs.
       - name: usage-report relay
         run: node --test telemetry/relay/test/*.test.js
+      - name: usage-stats collector
+        run: node --test telemetry/github-stats/test/*.test.js
       - name: npm launcher finds and runs the native binary
         run: |
           cargo build -p am-cli -p am-tui -p am-hook
