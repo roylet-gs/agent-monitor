@@ -317,11 +317,11 @@
         },
         "overrides": []
       },
-      "description": "The 95th percentile, across installs, of each install's 5-minute p95. Budgets (perf::BUDGETS): ui.frame 16ms, ui.input 50ms, collector.cycle 500ms, collector.sync 300ms, collector.git 3000ms, collector.context 100ms, collector.procscan 50ms, collector.usage 100ms, collector.stacks 1000ms, integrations.github 10000ms, integrations.linear 10000ms, integrations.reviews 10000ms"
+      "description": "The 95th percentile, across installs, of each install's hourly p95. Budgets (perf::BUDGETS): ui.frame 16ms, ui.input 50ms, collector.cycle 500ms, collector.sync 300ms, collector.git 3000ms, collector.context 100ms, collector.procscan 50ms, collector.usage 100ms, collector.stacks 1000ms, integrations.github 10000ms, integrations.linear 10000ms, integrations.reviews 10000ms"
     },
     {
       "id": 9,
-      "title": "Stages over budget (share of 5-minute reports)",
+      "title": "Stages over budget (share of hourly reports)",
       "type": "bargauge",
       "datasource": {
         "type": "loki",

@@ -250,7 +250,7 @@ impl Worker {
             }
             match cmds.recv_timeout(TICK) {
                 Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => {
-                    self.perf.report(Instant::now());
+                    self.perf.finish(Instant::now());
                     // Take the cmux pills down before the process exits.
                     if let Some((h, _)) = self.cmux.take() {
                         h.stop(Duration::from_secs(2));
@@ -760,7 +760,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         let mut people_now = false;
         match cmds.recv_timeout(Duration::from_secs(1)) {
             Ok(Cmd::Quit) | Err(RecvTimeoutError::Disconnected) => {
-                perf.report(Instant::now());
+                perf.finish(Instant::now());
                 return;
             }
             Ok(Cmd::Refresh { force: f }) => force = f,

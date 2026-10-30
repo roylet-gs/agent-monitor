@@ -26,6 +26,10 @@ use crate::{info, warn};
 pub const MODULE: &str = "perf";
 /// How often each thread writes its summary line.
 pub const REPORT_EVERY: Duration = Duration::from_secs(300);
+/// How often each thread records its `am.perf` usage-report events (when
+/// reports are on): hourly, from every sample in the hour, to keep the
+/// volume down (a busy install produced ~130 events an hour at 5 minutes).
+pub const USAGE_REPORT_EVERY: Duration = Duration::from_secs(3600);
 /// Samples kept per stage for the percentiles.
 const WINDOW: usize = 128;
 /// A stage is only judged once it has this many samples in its window: with
@@ -94,6 +98,8 @@ struct Stage {
     window: VecDeque<Duration>,
     /// Samples since the last summary line.
     period: Vec<Duration>,
+    /// Samples since the last `am.perf` usage report (budgeted stages only).
+    hour: Vec<Duration>,
     slow: bool,
 }
 
@@ -102,6 +108,7 @@ struct Stage {
 pub struct Perf {
     stages: Vec<Stage>,
     last_report: Instant,
+    last_usage_report: Instant,
 }
 
 impl Default for Perf {
@@ -112,7 +119,8 @@ impl Default for Perf {
 
 impl Perf {
     pub fn new() -> Self {
-        Perf { stages: Vec::new(), last_report: Instant::now() }
+        let now = Instant::now();
+        Perf { stages: Vec::new(), last_report: now, last_usage_report: now }
     }
 
     pub fn record(&mut self, stage: &'static str, elapsed: Duration) {
@@ -131,7 +139,13 @@ impl Perf {
         let i = match self.stages.iter().position(|s| s.name == stage) {
             Some(i) => i,
             None => {
-                self.stages.push(Stage { name: stage, window: VecDeque::with_capacity(WINDOW), period: Vec::new(), slow: false });
+                self.stages.push(Stage {
+                    name: stage,
+                    window: VecDeque::with_capacity(WINDOW),
+                    period: Vec::new(),
+                    hour: Vec::new(),
+                    slow: false,
+                });
                 self.stages.len() - 1
             }
         };
@@ -144,6 +158,9 @@ impl Perf {
         }
         s.window.push_back(elapsed);
         s.period.push(elapsed);
+        if budget(stage).is_some() && crate::telemetry::public::is_on() {
+            s.hour.push(elapsed);
+        }
         if let (Some(budget), true) = (budget(stage), s.window.len() >= MIN_SAMPLES)
             && let Some(sum) = summarize(s.window.iter().copied())
         {
@@ -157,6 +174,9 @@ impl Perf {
         }
         if now.duration_since(self.last_report) >= REPORT_EVERY {
             self.report(now);
+        }
+        if now.duration_since(self.last_usage_report) >= USAGE_REPORT_EVERY {
+            self.report_usage(now);
         }
     }
 
@@ -174,33 +194,55 @@ impl Perf {
         (!parts.is_empty()).then(|| parts.join("; "))
     }
 
-    /// Write the summary line (and an `am.perf` usage-report event per
-    /// budgeted stage, when reports are on) and start a new period.
+    /// Write the summary line and start a new period.
     pub fn report(&mut self, now: Instant) {
         if let Some(line) = self.summary_line() {
             info!(MODULE, "{line}");
-        }
-        if crate::telemetry::public::is_on() {
-            let ts = crate::telemetry::public::now_ms();
-            for s in self.stages.iter().filter(|s| budget(s.name).is_some()) {
-                if let Some(sum) = summarize(s.period.iter().copied()) {
-                    let us = |d: Duration| d.as_micros() as u64;
-                    crate::telemetry::record(crate::telemetry::schema::Event::perf(
-                        crate::telemetry::public::binary(),
-                        ts,
-                        s.name,
-                        sum.n as u64,
-                        us(sum.p50),
-                        us(sum.p95),
-                        us(sum.max),
-                    ));
-                }
-            }
         }
         for s in &mut self.stages {
             s.period.clear();
         }
         self.last_report = now;
+    }
+
+    /// The `am.perf` usage-report events for the samples since the last ones:
+    /// one per budgeted stage that has any.
+    pub fn usage_events(&self, ts: u64) -> Vec<crate::telemetry::schema::Event> {
+        let us = |d: Duration| d.as_micros() as u64;
+        self.stages
+            .iter()
+            .filter_map(|s| {
+                let sum = summarize(s.hour.iter().copied())?;
+                Some(crate::telemetry::schema::Event::perf(
+                    crate::telemetry::public::binary(),
+                    ts,
+                    s.name,
+                    sum.n as u64,
+                    us(sum.p50),
+                    us(sum.p95),
+                    us(sum.max),
+                ))
+            })
+            .collect()
+    }
+
+    /// Record the `am.perf` events (when reports are on) and start a new hour.
+    pub fn report_usage(&mut self, now: Instant) {
+        if crate::telemetry::public::is_on() {
+            for e in self.usage_events(crate::telemetry::public::now_ms()) {
+                crate::telemetry::record(e);
+            }
+        }
+        for s in &mut self.stages {
+            s.hour.clear();
+        }
+        self.last_usage_report = now;
+    }
+
+    /// On exit: the last summary line, and the part of the hour so far.
+    pub fn finish(&mut self, now: Instant) {
+        self.report(now);
+        self.report_usage(now);
     }
 
     /// Stages currently over budget.
@@ -405,6 +447,30 @@ mod tests {
             p.record_at("something.else", d(60_000), now);
         }
         assert!(p.slow_stages().is_empty());
+    }
+
+    #[test]
+    fn usage_reports_cover_every_sample_in_the_hour() {
+        let mut p = Perf::new();
+        let t0 = Instant::now();
+        // As if reports were on (is_on is false in tests): fill the hour directly.
+        for i in 1..=100 {
+            p.record_at("collector.git", d(i), t0);
+            let s = p.stages.iter_mut().find(|s| s.name == "collector.git").unwrap();
+            s.hour.push(d(i));
+        }
+        p.record_at("not.budgeted", d(5), t0);
+        let events = p.usage_events(1);
+        assert_eq!(events.len(), 1, "budgeted stages only");
+        let a = &events[0].attrs;
+        use crate::telemetry::schema::Attr::Int;
+        assert_eq!((a["n"].clone(), a["p95_us"].clone(), a["max_us"].clone()), (Int(100), Int(95_000), Int(100_000)));
+        // The 5-minute summary line doesn't reset the hour…
+        p.record_at("collector.git", d(1), t0 + REPORT_EVERY);
+        assert_eq!(p.usage_events(1).len(), 1);
+        // …the hourly report does.
+        p.report_usage(t0 + USAGE_REPORT_EVERY);
+        assert!(p.usage_events(1).is_empty());
     }
 
     #[test]

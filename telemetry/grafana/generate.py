@@ -153,8 +153,8 @@ budgets = {"ui.frame": 16, "ui.input": 50, "collector.cycle": 500, "collector.sy
 p.append(panel(8, "Stage p95 across installs (ms)", "timeseries",
                [(f'quantile_over_time(0.95, {ev("am.perf")} {V} | unwrap p95_us [$__interval]) by (stage) / 1000', "{{stage}}", "range")],
                0, 28, 24, 10, fieldConfig={"defaults": {"unit": "ms"}, "overrides": []},
-               description="The 95th percentile, across installs, of each install's 5-minute p95. Budgets (perf::BUDGETS): " + ", ".join(f"{k} {v}ms" for k, v in budgets.items())))
-p.append(named(panel(9, "Stages over budget (share of 5-minute reports)", "bargauge",
+               description="The 95th percentile, across installs, of each install's hourly p95. Budgets (perf::BUDGETS): " + ", ".join(f"{k} {v}ms" for k, v in budgets.items())))
+p.append(named(panel(9, "Stages over budget (share of hourly reports)", "bargauge",
                [(f'(sum(count_over_time({ev("am.perf")} {V} | stage="{s}" | p95_us > {b*1000} [$__range])) or vector(0)) / sum(count_over_time({ev("am.perf")} {V} | stage="{s}" [$__range]))', s, "instant") for s, b in budgets.items()],
                0, 38, 24, 10, fieldConfig={"defaults": {"unit": "percentunit", "min": 0, "max": 1,
                    "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}, {"color": "yellow", "value": 0.05}, {"color": "red", "value": 0.2}]}}, "overrides": []},

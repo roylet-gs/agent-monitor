@@ -650,7 +650,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             if let Some(action) = action {
                 if dispatch(action, terminal, app, collector, &mut theme, &launch_tx)? {
                     // What this session's timings were, even if it was short.
-                    perf.report(Instant::now());
+                    perf.finish(Instant::now());
                     return Ok(());
                 }
                 for sound in app.sounds.drain(..) {

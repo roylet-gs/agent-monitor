@@ -37,7 +37,7 @@ And one of these events:
 | `am.command` | A CLI command's name as `am` defines it (`worktree.create`), and whether you or an agent (through MCP) ran it. Never its arguments. |
 | `am.features` | How many times a dashboard command ran (`command: newWorktree, count: 3`), one event per command, every 15 minutes. |
 | `am.heartbeat` | Once a day: dashboard or review-only mode, which editor setting (`vscode`, …, or `custom`), how many repositories and worktrees, how many sessions per built-in agent (a custom plugin counts as `custom`), whether GitHub, Linear, review requests, compact view and cmux are on, how many review groups and changed key bindings, whether the theme is built in, and the terminal app's name (`iTerm.app`, `ghostty`). |
-| `am.perf` | Every 5 minutes, per stage (`collector.git`, `ui.frame`, …): sample count and p50/p95/max time. |
+| `am.perf` | Every hour, per stage (`collector.git`, `ui.frame`, …): sample count and p50/p95/max time. |
 | `am.error` | A warning or error was logged: its level, `am`'s module (`github`), the file and line in `am`'s own source (`crates/am-core/src/integrations/github.rs:120`), and an error kind where the code gives one (`rate_limited`). **Not the message.** |
 | `am.crash` | `am` panicked: the file and line in its own source. Not the message. |
 
