@@ -45,6 +45,12 @@ let rateLimited = false;
  */
 let approvedPulled = false;
 const APPROVED_PR = 61;
+/**
+ * Someone requested changes on #62: its `reviewDecision` reads
+ * CHANGES_REQUESTED (a status change, which un-ignores it on the page).
+ */
+let changesRequested = false;
+const CHANGES_PR = 62;
 
 /** The review fixture's PR nodes. */
 function reviewNodes(): Array<Record<string, unknown>> {
@@ -214,7 +220,11 @@ const server = http.createServer(async (req, res) => {
         res.end("simulated outage");
         return;
       }
-      const nodes = reviews ? reviewNodes().filter((n) => !(approvedPulled && n.number === APPROVED_PR)) : [];
+      const nodes = reviews
+        ? reviewNodes()
+            .filter((n) => !(approvedPulled && n.number === APPROVED_PR))
+            .map((n) => (changesRequested && n.number === CHANGES_PR ? { ...n, reviewDecision: "CHANGES_REQUESTED" } : n))
+        : [];
       const body = { data: { viewer: { login: "e2e-user" }, search: { nodes } } };
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
@@ -354,6 +364,9 @@ const server = http.createServer(async (req, res) => {
       if (config.approvedPulled !== undefined) {
         approvedPulled = Boolean(config.approvedPulled);
       }
+      if (config.changesRequested !== undefined) {
+        changesRequested = Boolean(config.changesRequested);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "configured" }));
     } catch (err) {
@@ -374,6 +387,7 @@ const server = http.createServer(async (req, res) => {
     reviews = false;
     rateLimited = false;
     approvedPulled = false;
+    changesRequested = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "reset" }));
     return;

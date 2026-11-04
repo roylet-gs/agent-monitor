@@ -3377,6 +3377,8 @@ fn review_actions(app: &App) -> ActionBar {
     bar.command(km, Command::OpenLinear, "ticket", 0);
     bar.command(km, Command::Delete, "remove", 2);
     bar.command(km, Command::Filter, "filter", 2);
+    let ignored = app.selected_review().is_some_and(|r| app.grouping().is_ignored(r));
+    bar.command(km, Command::IgnoreReview, if ignored { "un-ignore" } else { "ignore" }, 2);
     // What a held key adds: pull + run the review script, the page beside
     // the list or in a new window.
     bar.command(km, Command::PullAndRunScript, "pull + run script", 3);
@@ -3581,6 +3583,7 @@ fn draw_review_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::ke
         (&[C::PullToTmpSpace], ""),
         (&[C::PullAndRunScript], " / ctrl-⏎"),
         (&[C::Delete], " / del"),
+        (&[C::IgnoreReview], ""),
         (&[C::Filter], ""),
         (&[C::Refresh], ""),
         (&[C::Settings], ""),
@@ -5452,6 +5455,46 @@ mod tests {
         app.apply(snap);
         let top = render(&app, 120, 10).lines().next().unwrap().to_string();
         assert!(top.ends_with(" ⚠ GitHub rate-limited — showing cached  3 to review ╮"), "{top}");
+    }
+
+    #[test]
+    fn review_page_i_ignores_a_pr_until_its_status_changes() {
+        let (_guard, _) = crate::settings_ui::tests::data_dir();
+        let mut app = with_reviews();
+        app.on_key(Key::Char('v'));
+        let first = app.selected_review().unwrap().pr.url.clone();
+        assert!(render(&app, 120, 12).lines().last().unwrap().contains("i ignore"));
+        assert_eq!(app.on_key(Key::Char('i')), crate::app::Action::SettingsChanged);
+        assert_eq!(app.settings.ignored_reviews.len(), 1);
+        assert_eq!(app.settings.ignored_reviews[0].url, first);
+        let screen = render(&app, 120, 12);
+        assert!(screen.contains("Ignored") && screen.lines().next().unwrap().ends_with(" 2 to review ╮"), "{screen}");
+        assert!(app.notice.as_deref().is_some_and(|n| n.starts_with("Ignored #")));
+        assert_ne!(app.selected_review().unwrap().pr.url, first, "the next PR moves under the cursor");
+        assert!(app.stale_ignores().is_none(), "still in force");
+
+        // `i` on it again un-ignores it.
+        let at = app.review_list().iter().position(|r| r.pr.url == first).unwrap();
+        app.reviews.as_mut().unwrap().cursor = at;
+        app.notice = None;
+        let screen = render(&app, 120, 12);
+        assert!(screen.lines().last().unwrap().contains("i un-ignore"), "{screen}");
+        app.on_key(Key::Char('i'));
+        assert!(app.settings.ignored_reviews.is_empty());
+        assert!(render(&app, 120, 12).lines().next().unwrap().ends_with(" 3 to review ╮"));
+
+        // Its status changes: back on the list, and the entry is stale.
+        app.reviews.as_mut().unwrap().cursor = app.review_list().iter().position(|r| r.pr.url == first).unwrap();
+        app.on_key(Key::Char('i'));
+        assert_eq!(app.settings.ignored_reviews[0].url, first);
+        let mut snap = app.snapshot.clone();
+        let r = snap.reviews.as_mut().unwrap().iter_mut().find(|r| r.pr.url == first).unwrap();
+        r.pr.review_decision = "APPROVED".into();
+        app.apply(snap);
+        assert!(render(&app, 120, 12).lines().next().unwrap().ends_with(" 3 to review ╮"));
+        assert_eq!(app.stale_ignores(), Some(vec![]));
+        assert!(app.save_ignored(vec![]));
+        assert!(app.settings.ignored_reviews.is_empty());
     }
 
     #[test]

@@ -22,6 +22,8 @@ pub enum Command {
     Delete,
     PullToTmpSpace,
     PullAndRunScript,
+    /// Review page only: ignore the selected PR until its status changes.
+    IgnoreReview,
     ReviewRequests,
     ReviewSplit,
     ReviewWindow,
@@ -47,7 +49,7 @@ pub enum Command {
 impl Command {
     /// Every command, in the order the Key bindings page lists them (grouped
     /// by `section`).
-    pub const ALL: [Command; 28] = [
+    pub const ALL: [Command; 29] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -62,6 +64,7 @@ impl Command {
         Command::ReviewWindow,
         Command::PullToTmpSpace,
         Command::PullAndRunScript,
+        Command::IgnoreReview,
         Command::ToggleLog,
         Command::Settings,
         Command::Refresh,
@@ -93,6 +96,7 @@ impl Command {
             Command::Delete => "deleteWorktree",
             Command::PullToTmpSpace => "pullToTmpSpace",
             Command::PullAndRunScript => "pullAndRunScript",
+            Command::IgnoreReview => "ignoreReview",
             Command::ReviewRequests => "reviewRequests",
             Command::ReviewSplit => "reviewSplit",
             Command::ReviewWindow => "reviewWindow",
@@ -135,6 +139,7 @@ impl Command {
             Command::Delete => "Delete worktree",
             Command::PullToTmpSpace => "Pull into Reviewing",
             Command::PullAndRunScript => "Pull + run script",
+            Command::IgnoreReview => "Ignore PR",
             Command::ReviewRequests => "Review requests",
             Command::ReviewSplit => "Reviews beside list",
             Command::ReviewWindow => "Reviews in new window",
@@ -170,7 +175,7 @@ impl Command {
             | Command::AddRepo
             | Command::Filter
             | Command::ToggleFilters => "Worktrees",
-            Command::ReviewRequests | Command::ReviewSplit | Command::ReviewWindow | Command::PullToTmpSpace | Command::PullAndRunScript => {
+            Command::ReviewRequests | Command::ReviewSplit | Command::ReviewWindow | Command::PullToTmpSpace | Command::PullAndRunScript | Command::IgnoreReview => {
                 "Review requests"
             },
             Command::ToggleLog | Command::Settings | Command::Refresh | Command::Help | Command::Quit => "General",
@@ -201,6 +206,7 @@ impl Command {
             Command::ReviewWindow => "The review page in a new terminal window",
             Command::PullToTmpSpace => "Pull the selected PR into the Reviewing group (review page only)",
             Command::PullAndRunScript => "Pull the selected PR into Reviewing, then run the repo's review script (review page only)",
+            Command::IgnoreReview => "Move the selected PR to Ignored until its status changes; again to un-ignore (review page only)",
             Command::ToggleLog => "Show or hide the debug.log pane",
             Command::Settings => "Open settings",
             Command::Filter => "Worktree filters: text, status, PR, git and the hide toggles (the review filters on the review page)",
@@ -233,6 +239,7 @@ impl Command {
             Command::ReviewWindow => "new window",
             Command::PullToTmpSpace => "pull into Reviewing",
             Command::PullAndRunScript => "pull, then run its script",
+            Command::IgnoreReview => "ignore / un-ignore",
             Command::Settings | Command::Help => "same",
             Command::Filter => "review filters",
             Command::Refresh => "clear cache and refetch",
@@ -273,6 +280,7 @@ impl Command {
             Command::Delete => "delete",
             Command::PullToTmpSpace => "pull",
             Command::PullAndRunScript => "pull + script",
+            Command::IgnoreReview => "ignore",
             Command::ReviewRequests => "reviews",
             Command::ReviewSplit => "split",
             Command::ReviewWindow => "new window",
@@ -298,6 +306,7 @@ impl Command {
             Command::Delete => Key::Char('d'),
             Command::PullToTmpSpace => Key::Char('t'),
             Command::PullAndRunScript => Key::Char('T'),
+            Command::IgnoreReview => Key::Char('i'),
             Command::ReviewRequests => Key::Char('v'),
             Command::ReviewSplit => Key::Char('V'),
             Command::ReviewWindow => Key::CtrlV,

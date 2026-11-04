@@ -315,6 +315,12 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     loop {
         while let Some(snapshot) = collector.try_recv() {
             app.apply(snapshot);
+            // Ignored PRs whose status moved on (or that left the list) come back for good.
+            if let Some(kept) = app.stale_ignores()
+                && app.save_ignored(kept)
+            {
+                collector.update_settings(app.settings.clone());
+            }
             record_heartbeat(app);
             for sound in app.sounds.drain(..) {
                 play_sound(&sound);

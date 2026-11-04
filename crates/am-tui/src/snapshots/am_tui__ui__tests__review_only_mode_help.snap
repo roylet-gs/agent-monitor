@@ -5,10 +5,9 @@ expression: help
 ╭─am v0.0.0 · Review requests ──────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌◑ Batch the PR queries  @alice ✓ pulled                                               you           #51✓ review   0s │
-│ Typo in README  @outsider fork                                                        @docs         #48✓ review   0s │
-│gridsight ─────────╭ Keys ────────────────────────────────────────────────────────────────────────╮───────────────────│
-│ Feeder load foreca│    j / k  ↑ / ↓  move                                                        │7 #902✗ review  0s │
-│                   │        home / G  top / bottom                                                │                   │
+│ Typo in README  @o╭ Keys ────────────────────────────────────────────────────────────────────────╮  #48✓ review   0s │
+│gridsight ─────────│    j / k  ↑ / ↓  move                                                        │───────────────────│
+│ Feeder load foreca│        home / G  top / bottom                                                │7 #902✗ review  0s │
 │                   │ ctrl-d / ctrl-u  page down / up                                              │                   │
 │                   │               ⏎  pull, or open the pulled one                                │                   │
 │                   │               g  open the PR                                                 │                   │
@@ -16,6 +15,7 @@ expression: help
 │                   │               t  pull into Reviewing                                         │                   │
 │                   │      T / ctrl-⏎  pull + run the review script (in a new terminal window)     │                   │
 │                   │         d / del  remove the pulled worktree                                  │                   │
+│                   │               i  ignore / un-ignore                                          │                   │
 │                   │               f  review filters                                              │                   │
 │                   │               r  clear cache and refetch                                     │                   │
 │                   │               s  settings (Mode: full brings the agent dashboard back)       │                   │
@@ -31,4 +31,4 @@ expression: help
 │                                                                                                                      │
 │                                                                                                                      │
 ╰ you + your teams ──────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
- ⏎ open  g PR  l ticket  d remove  f filter  │ r refresh  │ T pull + run script  │ h help  esc quit
+ ⏎ open  g PR  l ticket  d remove  f filter  i ignore  │ r refresh  │ T pull + run script  │ h help  esc quit

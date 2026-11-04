@@ -2,7 +2,7 @@
 //! in tests. Data arrives as a `Snapshot` from the collector (data.rs).
 
 use am_core::model::{Repository, ReviewRequest, Subagent, WorktreeGroup, WorktreeView};
-use am_core::settings::{SortKey, Settings};
+use am_core::settings::{IgnoredReview, SortKey, Settings};
 use am_core::status::Status;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -355,7 +355,9 @@ impl App {
         let now = am_core::timefmt::now_unix();
         let hits = &self.snapshot.review_query_hits;
         match &self.group_preview {
-            Some((groups, default)) => crate::reviews_ui::Grouping { groups, default, now, hits },
+            Some((groups, default)) => {
+                crate::reviews_ui::Grouping { groups, default, now, hits, ignored: &self.settings.ignored_reviews }
+            }
             None => crate::reviews_ui::Grouping::new(&self.settings, now, hits),
         }
     }
@@ -978,7 +980,7 @@ impl App {
                 }
             }
             // Only the review page pulls (its selected PR).
-            C::PullToTmpSpace | C::PullAndRunScript => {}
+            C::PullToTmpSpace | C::PullAndRunScript | C::IgnoreReview => {}
             C::Filter => {
                 self.settings_editor =
                     Some(crate::settings_ui::SettingsEditor::only(&self.settings, crate::settings_ui::WORKTREE_FILTERS));
@@ -1256,6 +1258,67 @@ impl App {
         }
     }
 
+    /// `i` on the review page: ignore the selected PR until its status
+    /// changes, or un-ignore it. The cursor stays where it is, so the next PR
+    /// moves under it.
+    fn toggle_ignore_review(&mut self) -> Action {
+        let Some(r) = self.selected_review().cloned() else { return Action::None };
+        let was = self.grouping().is_ignored(&r);
+        let mut list: Vec<IgnoredReview> =
+            self.settings.ignored_reviews.iter().filter(|e| e.url != r.pr.url).cloned().collect();
+        if !was {
+            list.push(IgnoredReview { url: r.pr.url.clone(), status: am_core::review_groups::review_status_key(&r) });
+        }
+        if !self.save_ignored(list) {
+            return Action::None;
+        }
+        am_core::info!("tui", "{} review request {}", if was { "Un-ignored" } else { "Ignored" }, r.pr.url);
+        self.notice = Some(match was {
+            true => format!("#{} no longer ignored", r.pr.number),
+            false => format!("Ignored #{} — it comes back when its status changes", r.pr.number),
+        });
+        Action::SettingsChanged
+    }
+
+    /// Save `ignoredReviews`; false (with the error as the notice) when it
+    /// couldn't be written.
+    pub fn save_ignored(&mut self, list: Vec<IgnoredReview>) -> bool {
+        let value = serde_json::to_value(&list).unwrap_or_default();
+        match crate::settings_ui::persist("ignoredReviews", value) {
+            Ok(s) => {
+                self.set_settings(s);
+                let n = self.review_list().len();
+                if let Some(p) = &mut self.reviews {
+                    p.clamp(n);
+                }
+                true
+            }
+            Err(e) => {
+                self.notice = Some(e);
+                false
+            }
+        }
+    }
+
+    /// The `ignoredReviews` entries still in force, when some aren't: a PR
+    /// whose status moved on (so going back to it doesn't re-ignore it) or
+    /// that the list no longer holds (merged, closed, not asking you). Only
+    /// judged against a list fetched without error.
+    pub fn stale_ignores(&self) -> Option<Vec<IgnoredReview>> {
+        if self.settings.ignored_reviews.is_empty() || self.snapshot.review_error.is_some() {
+            return None;
+        }
+        let list = self.snapshot.reviews.as_ref()?;
+        let kept: Vec<IgnoredReview> = self
+            .settings
+            .ignored_reviews
+            .iter()
+            .filter(|e| list.iter().any(|r| r.pr.url == e.url && am_core::review_groups::review_status_key(r) == e.status))
+            .cloned()
+            .collect();
+        (kept.len() != self.settings.ignored_reviews.len()).then_some(kept)
+    }
+
     pub fn set_settings(&mut self, settings: Settings) {
         let to_reviews_mode = settings.reviews_mode() && !self.settings.reviews_mode();
         self.keymap = crate::keymap::Keymap::from_settings(&settings);
@@ -1399,6 +1462,7 @@ impl App {
         match self.keymap.command(key) {
             _ if key == Key::Enter => r.is_some(),
             Some(C::OpenLinear) => r.is_some_and(|r| r.linear.is_some()),
+            Some(C::IgnoreReview) => r.is_some(),
             Some(C::Delete) => r.and_then(|r| r.worktree_id.as_deref()).is_some_and(|id| !self.is_deleting(id)),
             Some(C::PullToTmpSpace) => r.is_some_and(|r| {
                 !r.is_cross_repository
@@ -1470,6 +1534,7 @@ impl App {
             }
             Some(C::PullToTmpSpace) => return self.pull_review(false),
             Some(C::PullAndRunScript) => return self.pull_review(true),
+            Some(C::IgnoreReview) => return self.toggle_ignore_review(),
             Some(C::Delete) => self.remove_review_worktree(),
             // `f` opens the review filters here.
             Some(C::Filter) => {
