@@ -113,6 +113,39 @@ pub fn queries(groups: &[ReviewGroup], default: &ReviewGroup) -> Vec<String> {
     out
 }
 
+/// A PR ignored on the review page (`i`, `ignoredReviews`): shown in the
+/// page's `Ignored` section, out of the counts, until its status
+/// ([`review_status_key`]) moves on from `status`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoredReview {
+    pub url: String,
+    /// [`review_status_key`] when it was ignored.
+    pub status: String,
+}
+
+/// What "the PR's status" is for un-ignoring: open/merged/closed, draft,
+/// review decision, who is asked and your own review. CI, conflicts, new
+/// commits and comments don't count.
+pub fn review_status_key(r: &ReviewRequest) -> String {
+    let mut asked: Vec<String> = r.requested.iter().map(|w| norm(w)).collect();
+    asked.sort();
+    format!(
+        "{}|{}|{}|{}|{}|{}",
+        r.pr.state,
+        if r.pr.is_draft { "draft" } else { "ready" },
+        r.pr.review_decision,
+        asked.join(","),
+        if r.reviewed_by_you { "reviewed" } else { "-" },
+        if r.approved_by_you { "approved" } else { "-" },
+    )
+}
+
+/// `r` is ignored: an entry names it and its status hasn't changed since.
+pub fn is_ignored(r: &ReviewRequest, ignored: &[IgnoredReview]) -> bool {
+    !ignored.is_empty() && ignored.iter().any(|e| e.url == r.pr.url && e.status == review_status_key(r))
+}
+
 /// A login or team as compared: lower-case, no `@`.
 fn norm(s: &str) -> String {
     s.trim().trim_start_matches('@').to_lowercase()

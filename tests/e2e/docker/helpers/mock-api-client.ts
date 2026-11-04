@@ -32,6 +32,8 @@ interface MockSetupConfig {
    * returns it as approved by you (shown while feature/on-origin is pulled).
    */
   approvedPulled?: boolean;
+  /** #62's review decision reads CHANGES_REQUESTED (a status change). */
+  changesRequested?: boolean;
 }
 
 /** Configure mock-api fixtures for the current test. */

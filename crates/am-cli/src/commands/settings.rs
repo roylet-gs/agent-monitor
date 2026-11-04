@@ -159,6 +159,11 @@ pub fn set(key: &str, value: &str) {
         ));
     }
 
+    if key == "ignoredReviews" {
+        fail("ignoredReviews lists the PRs ignored on the review page and can't be set from the CLI.\n\
+              Press i on a PR on the review page (v) to ignore or un-ignore it.");
+    }
+
     if key == "dailyTokensMode" && am_core::settings::DailyTokensMode::parse(value).is_none() {
         fail(&format!(
             "Invalid value for dailyTokensMode: {value}. Use one of: {}.",

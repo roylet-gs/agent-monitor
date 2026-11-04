@@ -11,12 +11,16 @@ use std::cmp::Ordering;
 use std::sync::LazyLock;
 
 use am_core::model::{Repository, ReviewRequest};
-use am_core::review_groups::{QueryHits, ReviewGroup, assign};
+use am_core::review_groups::{IgnoredReview, QueryHits, ReviewGroup, assign, is_ignored};
 use am_core::settings::{ReviewSort, Settings};
 
 /// Header of the bottom section: PRs you approved whose worktree is still
 /// there ([`cleanup`]).
 pub const APPROVED_PULLED: &str = "Approved, still pulled";
+
+/// Header of the last section: PRs ignored with `i` until their status
+/// changes ([`Grouping::is_ignored`]).
+pub const IGNORED: &str = "Ignored";
 
 /// A visual row of the page. Headers take no cursor index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +54,8 @@ pub struct Grouping<'a> {
     pub now: i64,
     /// Which PRs match each group's GitHub search terms.
     pub hits: &'a QueryHits,
+    /// PRs ignored with `i` (`ignoredReviews`).
+    pub ignored: &'a [IgnoredReview],
 }
 
 #[cfg(test)]
@@ -57,7 +63,23 @@ static NO_HITS: LazyLock<QueryHits> = LazyLock::new(QueryHits::new);
 
 impl<'a> Grouping<'a> {
     pub fn new(settings: &'a Settings, now: i64, hits: &'a QueryHits) -> Self {
-        Grouping { groups: &settings.review_groups, default: &settings.review_default_group, now, hits }
+        Grouping {
+            groups: &settings.review_groups,
+            default: &settings.review_default_group,
+            now,
+            hits,
+            ignored: &settings.ignored_reviews,
+        }
+    }
+
+    /// The [`IGNORED`] section's index: after the bottom section.
+    pub fn ignored_index(&self) -> usize {
+        self.groups.len() + 2
+    }
+
+    /// `r` is ignored (`i`) and its status hasn't changed since.
+    pub fn is_ignored(&self, r: &ReviewRequest) -> bool {
+        is_ignored(r, self.ignored)
     }
 
     /// The bottom section's index: after the default group (`groups.len()`).
@@ -67,7 +89,7 @@ impl<'a> Grouping<'a> {
 
     /// The order group `g` (`groups.len()` = the default) sorts by.
     pub fn sort(&self, g: usize) -> ReviewSort {
-        if g == self.cleanup_index() {
+        if g >= self.cleanup_index() {
             return ReviewSort::Updated;
         }
         let group = self.groups.get(g).unwrap_or(self.default);
@@ -85,6 +107,9 @@ impl<'a> Grouping<'a> {
     fn name(&self, g: usize) -> Option<String> {
         if g == self.cleanup_index() {
             return Some(APPROVED_PULLED.into());
+        }
+        if g == self.ignored_index() {
+            return Some(IGNORED.into());
         }
         match self.groups.get(g) {
             Some(group) if group.name.trim().is_empty() => Some(format!("Group {}", g + 1)),
@@ -118,10 +143,17 @@ pub fn groups_of(reviews: &[ReviewRequest], repos: &[Repository], g: Grouping) -
         let named = assign(std::slice::from_ref(r), g.groups, &named_only, repos, g.now, g.hits)[0];
         out[i] = Some(named.unwrap_or(bottom));
     }
+    let ignored: Vec<bool> = reviews.iter().map(|r| g.is_ignored(r)).collect();
+    for (i, _) in ignored.iter().enumerate().filter(|(_, ig)| **ig) {
+        out[i] = Some(g.ignored_index());
+    }
+    // A section of its own: no stack links into or out of it.
+    let apart = |i: usize| cleanup(&reviews[i]) || ignored[i];
     let all: Vec<usize> = (0..reviews.len()).collect();
     let parents: Vec<Option<usize>> = reviews
         .iter()
-        .map(|r| stacked_on(reviews, &all, r).filter(|&p| !cleanup(r) && !cleanup(&reviews[p])))
+        .enumerate()
+        .map(|(i, r)| stacked_on(reviews, &all, r).filter(|&p| !apart(i) && !apart(p)))
         .collect();
     // A chain settles in at most its length.
     for _ in 0..reviews.len() {
@@ -144,7 +176,8 @@ pub fn groups_of(reviews: &[ReviewRequest], repos: &[Repository], g: Grouping) -
 }
 
 /// How many PRs each group shows (the default group last) and how many are
-/// hidden. The bottom section isn't counted: nothing there waits on a review.
+/// hidden. The bottom sections aren't counted: nothing there waits on a
+/// review, and an ignored PR doesn't until its status changes.
 pub fn counts(reviews: &[ReviewRequest], repos: &[Repository], g: Grouping) -> (Vec<usize>, usize) {
     let mut per = vec![0; g.groups.len() + 1];
     let mut hidden = 0;
@@ -252,9 +285,9 @@ pub fn rows(
         };
         sections.push(sec);
     }
-    // The bottom section always says what it is.
-    let several =
-        sections.windows(2).any(|w| w[0] != w[1]) || sections.iter().any(|s| s.as_deref() == Some(APPROVED_PULLED));
+    // The bottom sections always say what they are.
+    let several = sections.windows(2).any(|w| w[0] != w[1])
+        || sections.iter().any(|s| matches!(s.as_deref(), Some(APPROVED_PULLED | IGNORED)));
     let mut out = Vec::new();
     for (pos, sec) in sections.iter().enumerate() {
         if several && (pos == 0 || sections[pos - 1] != *sec) {
@@ -324,7 +357,7 @@ pub(crate) mod tests {
     }
 
     fn by(default: &ReviewGroup) -> Grouping<'_> {
-        Grouping { groups: &[], default, now: 0, hits: &NO_HITS }
+        Grouping { groups: &[], default, now: 0, hits: &NO_HITS, ignored: &[] }
     }
 
     fn repo(id: &str) -> Repository {
@@ -421,7 +454,7 @@ pub(crate) mod tests {
         let repos = vec![repo("a"), repo("b")];
         let gs = groups(r#"[{"name": "Bob", "authors": ["bob"]}, {"asked": "you", "repos": ["b"]}]"#);
         let all = ReviewGroup::default();
-        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS };
+        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS, ignored: &[] };
         let header = |s: &str| ReviewRow::Header(s.into());
 
         // Bob's PR first; the second group (unnamed) catches nothing; the
@@ -451,7 +484,7 @@ pub(crate) mod tests {
         // A default that only takes PRs asking you hides the rest.
         let only_you = groups(r#"[{"asked": "you"}]"#).remove(0);
         list[3].requested = vec!["acme/platform".into()];
-        let g3 = Grouping { groups: &[], default: &only_you, now: 0, hits: &NO_HITS };
+        let g3 = Grouping { groups: &[], default: &only_you, now: 0, hits: &NO_HITS, ignored: &[] };
         assert_eq!(order(&list, &repos, g3), [0, 2, 1]);
         assert_eq!(counts(&list, &repos, g3), (vec![3], 1));
     }
@@ -466,7 +499,7 @@ pub(crate) mod tests {
         let gs = groups(r#"[{"name": "Urgent", "query": "label:urgent"}, {"name": "Old first", "sort": "oldest"}]"#);
         let hits = QueryHits::from([("label:urgent".to_string(), vec!["u3".to_string()])]);
         let all = ReviewGroup::default();
-        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &hits };
+        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &hits, ignored: &[] };
         // #3 matches GitHub's search for label:urgent; the rest go oldest first.
         assert_eq!(order(&list, &[repo("a")], g), [2, 0, 1]);
         let none = QueryHits::new();
@@ -509,15 +542,57 @@ pub(crate) mod tests {
         // A named group that matches still takes it; the setup's "asked you,
         // not reviewed" group doesn't.
         let gs = groups(r#"[{"name": "Asked you", "asked": "you", "reviewed": "no"}, {"name": "Done", "reviewed": "yes"}]"#);
-        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS };
+        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS, ignored: &[] };
         assert_eq!(groups_of(&list, &repos, g), [Some(1), Some(0), Some(1), Some(1)]);
         let gs = groups(r#"[{"name": "Asked you", "asked": "you", "reviewed": "no"}]"#);
-        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS };
+        let g = Grouping { groups: &gs, default: &all, now: 0, hits: &NO_HITS, ignored: &[] };
         assert_eq!(groups_of(&list, &repos, g), [Some(2), Some(0), Some(2), Some(1)]);
         assert_eq!(counts(&list, &repos, g), (vec![1, 1], 0));
         // A default group that would hide it doesn't either.
         let none = groups(r#"[{"enabled": false}]"#).remove(0);
         assert_eq!(groups_of(&list, &repos, by(&none)), [Some(1), None, Some(1), None]);
+    }
+
+    #[test]
+    fn ignored_prs_sit_apart_until_their_status_changes() {
+        use am_core::model::ChecksStatus;
+        use am_core::review_groups::{IgnoredReview, review_status_key};
+        let mut list = vec![review("a", 1, "2026-10-09"), review("a", 2, "2026-10-01"), review("a", 3, "2026-10-05")];
+        // #3 is stacked on #2.
+        list[1].head_ref_name = "feature/2".into();
+        list[2].pr.base_ref_name = Some("feature/2".into());
+        let repos = vec![repo("a")];
+        let header = |s: &str| ReviewRow::Header(s.into());
+        let all = ReviewGroup::default();
+        let ignored = vec![IgnoredReview { url: list[1].pr.url.clone(), status: review_status_key(&list[1]) }];
+        let g = Grouping { ignored: &ignored, ..by(&all) };
+        assert_eq!(groups_of(&list, &repos, g), [Some(0), Some(2), Some(0)], "#3 doesn't follow its ignored parent");
+        let ordered = order(&list, &repos, g);
+        assert_eq!(ordered, [0, 2, 1]);
+        assert_eq!(
+            rows(&list, &ordered, &repos, g),
+            [header("Asked you"), ReviewRow::Pr(0), ReviewRow::Pr(1), header(IGNORED), ReviewRow::Pr(2)]
+        );
+        assert_eq!(counts(&list, &repos, g), (vec![2], 0), "not counted");
+
+        // CI, conflicts, new activity: still ignored.
+        let mut same = list.clone();
+        same[1].pr.checks_status = ChecksStatus::Failing;
+        same[1].pr.mergeable = Some("CONFLICTING".into());
+        same[1].updated_at = "2026-10-20".into();
+        assert!(g.is_ignored(&same[1]));
+        // A review decision, a new reviewer asked, or your own review: back.
+        for change in [
+            |r: &mut ReviewRequest| r.pr.review_decision = "CHANGES_REQUESTED".into(),
+            |r: &mut ReviewRequest| r.requested.push("org/team".into()),
+            |r: &mut ReviewRequest| r.reviewed_by_you = true,
+            |r: &mut ReviewRequest| r.pr.is_draft = true,
+        ] {
+            let mut moved = list.clone();
+            change(&mut moved[1]);
+            assert!(!g.is_ignored(&moved[1]));
+            assert_eq!(groups_of(&moved, &repos, g), [Some(0), Some(0), Some(0)]);
+        }
     }
 
     #[test]
@@ -543,7 +618,7 @@ pub(crate) mod tests {
         let gs = groups(r#"[{"name": "Bob", "authors": ["bob"]}]"#);
         // The default would hide #2 and #3 — but they're stacked on Bob's #1.
         let none = groups(r#"[{"authors": ["nobody"]}]"#).remove(0);
-        let g = Grouping { groups: &gs, default: &none, now: 0, hits: &NO_HITS };
+        let g = Grouping { groups: &gs, default: &none, now: 0, hits: &NO_HITS, ignored: &[] };
         assert_eq!(groups_of(&list, &[repo("a")], g), [Some(0), Some(0), Some(0)]);
         assert_eq!(order(&list, &[repo("a")], g), [0, 1, 2]);
     }

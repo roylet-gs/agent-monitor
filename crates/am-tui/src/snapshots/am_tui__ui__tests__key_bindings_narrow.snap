@@ -22,13 +22,13 @@ expression: "render(&app, 66, 34)"
 ││   Reviews in new window   ctrl-v                             ││
 ││   Pull into Reviewing     t                                  ││
 ││   Pull + run script       T                                  ││
+││   Ignore PR               i                                  ││
 ││ General                                                      ││
 ││   Toggle log pane         w                                  ││
 ││   Settings                s                                  ││
 ││   Refresh now             r                                  ││
 ││   Help                    h                                  ││
 ││   Quit                    q                                  ││
-││ Moving                                                       ││
 ││                                                              ││
 ││ Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc…││
 ││                                                              ││

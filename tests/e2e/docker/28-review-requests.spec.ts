@@ -293,6 +293,57 @@ test("review groups: a group takes its PRs first, with autocomplete and a badge"
   await tui.waitForText("Nothing waiting on your review", 20_000);
 });
 
+test("i ignores a PR until its status changes", async ({ page }) => {
+  await setupMock({ reviews: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.waitForText("3 to review", 20_000);
+  await tui.sendKey("v");
+  await tui.waitForText("Update onboarding copy", 20_000);
+  const lineOf = async (re: RegExp) => (await tui.lines()).findIndex((l) => re.test(l));
+  expect(await tui.keyBar()).toContain("i ignore");
+
+  // #62 (Update onboarding copy) is last; select it and ignore it.
+  await tui.sendKey("G");
+  await tui.waitForMatch(/│▌.*Update onboarding copy/);
+  await tui.sendKey("i");
+  await tui.waitForText("Ignored ─");
+  expect(await lineOf(/Ignored ─/)).toBeLessThan(await lineOf(/Update onboarding copy/));
+  expect(await lineOf(/Asked your team ─/)).toBe(-1);
+  expect((await tui.lines())[0]).toMatch(/─Review requests.* 2 to review ╮$/);
+  await tui.screenshot("review-page-ignored");
+
+  // i on it again brings it back.
+  await tui.waitForMatch(/│▌.*Update onboarding copy/);
+  expect(await tui.keyBar()).toContain("i un-ignore");
+  await tui.sendKey("i");
+  await tui.waitForGone("Ignored ─");
+  await tui.waitForText("Asked your team ─");
+  expect((await tui.lines())[0]).toMatch(/3 to review ╮$/);
+
+  // Ignored again, then someone requests changes: it's back for good.
+  await tui.sendKey("G");
+  await tui.waitForMatch(/│▌.*Update onboarding copy/);
+  await tui.sendKey("i");
+  await tui.waitForText("Ignored ─");
+  await setupMock({ changesRequested: true });
+  await tui.sendKey("r");
+  await tui.waitForGone("Ignored ─", 20_000);
+  await tui.waitForMatch(/Update onboarding copy.*changes/);
+  await tui.waitForText("Asked your team ─");
+  expect((await tui.lines())[0]).toMatch(/3 to review ╮$/);
+  await tui.screenshot("review-page-unignored");
+  // And stays back when the status returns.
+  await setupMock({ changesRequested: false });
+  await tui.sendKey("r");
+  await tui.waitForMatch(/Update onboarding copy.*#62\S* review/, 20_000);
+  expect(await tui.getScreenText()).not.toContain("Ignored ─");
+
+  await setupMock({ reviews: false });
+  await tui.sendKey("r");
+  await tui.waitForText("Nothing waiting on your review", 20_000);
+});
+
 test("V puts the review page beside the list; ctrl-v opens it in a new window", async ({ page }) => {
   await setupMock({ reviews: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });
   const tui = new RustTui(page);

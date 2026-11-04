@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::log::Level;
-pub use crate::review_groups::ReviewGroup;
+pub use crate::review_groups::{IgnoredReview, ReviewGroup};
 use crate::paths;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +181,9 @@ pub struct Settings {
     /// The review badge also shows every open PR requesting you or your
     /// teams on GitHub, ignoring the filters (`· 60 on GitHub`).
     pub review_badge_total: bool,
+    /// PRs ignored on the review page (`i`) and their status then; each
+    /// counts only while that status holds (`review_groups::is_ignored`).
+    pub ignored_reviews: Vec<IgnoredReview>,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -274,6 +277,7 @@ impl Default for Settings {
             review_groups: Vec::new(),
             review_default_group: ReviewGroup::default(),
             review_badge_total: false,
+            ignored_reviews: Vec::new(),
             raw: Default::default(),
         }
     }
@@ -799,6 +803,17 @@ mod tests {
         // A malformed list is ignored, not the whole file.
         let bad = Settings::parse(r#"{"reviewGroups":"nope","reviewSort":"repo"}"#);
         assert!(bad.review_groups.is_empty() && bad.review_sort() == ReviewSort::Repo);
+    }
+
+    #[test]
+    fn ignored_reviews_round_trip() {
+        assert!(Settings::default().ignored_reviews.is_empty());
+        let s = Settings::parse(r#"{"ignoredReviews":[{"url":"https://x/pull/1","status":"OPEN|ready"}],"ide":"zed"}"#);
+        assert_eq!(s.ignored_reviews, [IgnoredReview { url: "https://x/pull/1".into(), status: "OPEN|ready".into() }]);
+        let back = Settings::parse(&serde_json::to_string(&s).unwrap());
+        assert_eq!(back.ignored_reviews, s.ignored_reviews);
+        let bad = Settings::parse(r#"{"ignoredReviews":"nope","ide":"zed"}"#);
+        assert!(bad.ignored_reviews.is_empty() && bad.ide == "zed");
     }
 
     #[test]
