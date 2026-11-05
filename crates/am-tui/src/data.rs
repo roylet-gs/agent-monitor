@@ -7,7 +7,7 @@
 //! rescanning git. Git is refreshed for the worktrees whose agent just did
 //! something, plus a full sweep every polling interval.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
@@ -44,6 +44,10 @@ const RECENT_SUBAGENT_MINUTES: u32 = 30;
 const PARKED_SUBAGENT_MINUTES: u32 = 120;
 /// The tool a background subagent calls to hand its final report back.
 const HANDBACK_TOOL: &str = "SubagentHandback";
+/// A branch a live watcher picked out is refetched at most this often.
+const LIVE_REFETCH_EVERY: Duration = Duration::from_secs(20);
+/// A live nudge searches review requests again at most this often.
+const LIVE_REVIEWS_EVERY: Duration = Duration::from_secs(30);
 
 enum Cmd {
     Refresh { force: bool },
@@ -789,6 +793,11 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
     let mut known_repos: Vec<String> = Vec::new();
     let mut known_branches: Vec<(String, String)> = Vec::new();
     let mut first = true;
+    // Branches a live watcher refetched, and when (one refetch per 20 s each).
+    let mut last_targeted: HashMap<(String, String), Instant> = HashMap::new();
+    // Nudged branches waiting for their 20 s to pass. Never dropped: the
+    // watcher reports a change once, so a lost nudge would wait for the poll.
+    let mut live_pending: BTreeSet<(String, String)> = BTreeSet::new();
 
     loop {
         let mut force = false;
@@ -857,6 +866,38 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
         // A new worktree should get its PR/ticket now, not in three minutes.
         let new_branches = !first && branches != known_branches;
 
+        // Review-only mode shows no worktree rows, so their PRs and tickets
+        // aren't fetched (review rows get theirs with the review search).
+        let dashboard = !settings.reviews_mode();
+        // Live updates: free conditional requests say which PRs changed.
+        let mut targeted: Vec<RepoBranches> = Vec::new();
+        if settings.gh_pr_status && settings.gh_live_updates && !first {
+            let started = Instant::now();
+            let nudges = ints.watch_live(&groups, dashboard, started);
+            if nudges.polled {
+                perf.record("integrations.live", started.elapsed());
+            }
+            if nudges.reviews && last_reviews.is_none_or(|t| t.elapsed() >= LIVE_REVIEWS_EVERY) {
+                debug!("integrations", "live: review requests changed on GitHub");
+                reviews_now = true;
+            }
+            if dashboard {
+                live_pending.extend(nudges.branches);
+            }
+            last_targeted.retain(|_, t| t.elapsed() < LIVE_REFETCH_EVERY);
+            let ready: Vec<(String, String)> =
+                live_pending.iter().filter(|k| !last_targeted.contains_key(*k)).cloned().collect();
+            for (repo_id, branch) in ready {
+                live_pending.remove(&(repo_id.clone(), branch.clone()));
+                let Some(repo) = groups.iter().find(|g| g.repo_id == repo_id) else { continue };
+                last_targeted.insert((repo_id.clone(), branch.clone()), Instant::now());
+                match targeted.iter_mut().find(|t| t.repo_id == repo_id) {
+                    Some(t) => t.branches.push(branch),
+                    None => targeted.push(RepoBranches::new(repo_id, repo.repo_path.clone(), vec![branch])),
+                }
+            }
+        }
+
         let mut repo_ids: Vec<String> = repos.iter().map(|r| r.id.clone()).collect();
         repo_ids.sort();
         let reviews_every = Duration::from_millis(settings.review_polling_interval_ms.max(30_000));
@@ -866,9 +907,6 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
                 || repo_ids != known_repos
                 || last_reviews.is_none_or(|t| t.elapsed() >= reviews_every));
 
-        // Review-only mode shows no worktree rows, so their PRs and tickets
-        // aren't fetched (review rows get theirs with the review search).
-        let dashboard = !settings.reviews_mode();
         let gh_due = dashboard
             && settings.gh_pr_status
             && ((force && settings.gh_refresh_on_manual) || new_branches || last_gh.is_none_or(|t| t.elapsed() >= gh_every));
@@ -877,7 +915,12 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             && ((force && settings.linear_refresh_on_manual) || new_branches || last_linear.is_none_or(|t| t.elapsed() >= linear_every));
 
         let people_due = people_now && settings.gh_pr_status;
-        if !(gh_due || linear_due || reviews_due || people_due || first || new_branches) {
+        // A full fetch covers whatever the watchers picked out.
+        if gh_due {
+            targeted.clear();
+            live_pending.clear();
+        }
+        if !(gh_due || linear_due || reviews_due || people_due || first || new_branches || !targeted.is_empty()) {
             continue;
         }
         // Intervals run from the start of a cycle, so a slow GitHub PR fetch
@@ -895,6 +938,12 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             info!("integrations", "github refresh: {outcome:?} in {:?}", started.elapsed());
             perf.record("integrations.github", started.elapsed());
             last_gh = Some(Instant::now());
+        }
+        if !targeted.is_empty() {
+            let started = Instant::now();
+            let n: usize = targeted.iter().map(|t| t.branches.len()).sum();
+            let outcome = ints.refresh_github_branches(&conn, &targeted);
+            info!("integrations", "live github refresh of {n} branch(es): {outcome:?} in {:?}", started.elapsed());
         }
         if linear_due {
             let started = Instant::now();

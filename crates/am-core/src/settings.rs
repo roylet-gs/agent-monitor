@@ -66,6 +66,10 @@ pub struct Settings {
     pub linear_api_key: String,
     pub linear_polling_interval_ms: u64,
     pub gh_refresh_on_manual: bool,
+    /// Live PR updates between polls: GitHub's notifications inbox and
+    /// conditional check-suite requests (free while nothing changed) pick
+    /// out the PRs to refetch (`integrations::{notifications, ci_watch}`).
+    pub gh_live_updates: bool,
     pub linear_refresh_on_manual: bool,
     pub linear_auto_nickname: bool,
     pub worktree_sort: Vec<SortCriterion>,
@@ -214,6 +218,7 @@ impl Default for Settings {
             linear_api_key: String::new(),
             linear_polling_interval_ms: 180_000,
             gh_refresh_on_manual: true,
+            gh_live_updates: true,
             linear_refresh_on_manual: true,
             linear_auto_nickname: true,
             worktree_sort: vec![

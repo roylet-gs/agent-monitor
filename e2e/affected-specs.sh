@@ -60,7 +60,7 @@ specs_for() {
     crates/am-tui/src/modals.rs) echo 09 10 13 22 23 27 34 ;;
     crates/am-tui/src/jobs.rs) echo 09 10 13 22 27 28 31 ;;
     crates/am-tui/src/ops.rs) echo 09 10 11 23 24 28 ;;
-    crates/am-tui/src/data.rs | crates/am-tui/src/gitwork.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 32 33 36 ;;
+    crates/am-tui/src/data.rs | crates/am-tui/src/gitwork.rs) echo 01 06 07 08 13 14 17 18 24 25 26 28 32 33 36 37 ;;
     crates/am-tui/src/cmux_sync.rs) echo - ;; # only runs inside cmux; unit tests cover it
     crates/am-tui/src/launcher.rs) echo 13 21 23 28 ;; # opens IDEs/terminals; 21 covers the settings.json and debug.log opens, 28 the review window, 13 the update job
 
@@ -86,11 +86,13 @@ specs_for() {
     crates/am-core/src/usage.rs) echo 17 ;;        # today's token total
     crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice, clicking it to update
     crates/am-core/src/themes.rs | crates/am-core/src/themes/*) echo 12 ;;
-    crates/am-core/src/integrations/github.rs) echo 04 28 36 ;;
+    crates/am-core/src/integrations/github.rs) echo 04 28 36 37 ;;
+    crates/am-core/src/integrations/notifications.rs | crates/am-core/src/integrations/ci_watch.rs | \
+    crates/am-core/src/integrations/rest.rs) echo 37 ;; # live PR updates
     crates/am-core/src/integrations/reviews.rs | crates/am-core/src/review_groups.rs) echo 28 ;;
     crates/am-core/src/integrations/linear.rs) echo 04 05 36 ;;
     crates/am-core/src/integrations/cache.rs | crates/am-core/src/integrations/breaker.rs) echo 06 28 ;;
-    crates/am-core/src/integrations/mod.rs) echo 04 05 06 28 ;;
+    crates/am-core/src/integrations/mod.rs) echo 04 05 06 28 37 ;;
     crates/am-core/src/launch.rs) echo 21 ;; # open_in_editor's failure path (no IDE in the container)
     crates/am-core/src/procscan.rs) echo 25 26 ;; # the seeded agent shell command, the editor-spawned dev server
     crates/am-core/src/stacks.rs) echo 36 ;; # stack grouping, the `┌ base · no worktree` line, folding

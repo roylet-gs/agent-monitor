@@ -200,6 +200,57 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Live updates: conditional REST through `gh api -i [-H …] <path>`. The
+    // answer is what `gh api -i` prints (status line, headers, blank line,
+    // body), so a 304 comes back as its status line.
+    if (args[0] === "api" && args[1] === "-i") {
+      if (outage) {
+        res.writeHead(503, { "Content-Type": "text/plain" });
+        res.end("simulated outage");
+        return;
+      }
+      const path = args[args.length - 1] ?? "";
+      const header = (name: string) =>
+        args.find((a) => a.toLowerCase().startsWith(`${name.toLowerCase()}: `))?.slice(name.length + 2);
+      const answer = (etag: string | null, body: unknown, extra: Record<string, string> = {}) => {
+        const matched = etag !== null && header("If-None-Match") === etag;
+        const notModified = matched || (etag === null && header("If-Modified-Since") !== undefined);
+        const headers = { ...(etag ? { ETag: etag } : {}), "X-RateLimit-Remaining": "4900", ...extra };
+        const head = `HTTP/2.0 ${notModified ? "304 Not Modified" : "200 OK"}\r\n${Object.entries(headers)
+          .map(([k, v]) => `${k}: ${v}\r\n`)
+          .join("")}\r\n`;
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end(notModified ? head : head + JSON.stringify(body));
+      };
+      // The inbox never has anything new (the first answer only primes it).
+      if (path.startsWith("notifications")) {
+        answer(null, [], { "Last-Modified": "Thu, 05 Nov 2026 10:00:00 GMT", "X-Poll-Interval": "60" });
+        return;
+      }
+      // `repos/{owner}/{repo}/commits/<branch>/check-suites` and `…/status`:
+      // one suite per check of the branch's current gh fixture, so the REST
+      // view always agrees with the GraphQL one; the ETag follows the content.
+      const m = /^repos\/[^/]+\/[^/]+\/commits\/([^/]+)\/(check-suites|status)/.exec(path);
+      if (m) {
+        const branch = decodeURIComponent(m[1]!);
+        const fixture = (branch in ghByBranch ? ghByBranch[branch] : ghFixture) as GhFixture | null;
+        if (m[2] === "status") {
+          answer('W/"status-none"', { state: "pending", total_count: 0, statuses: [] });
+          return;
+        }
+        const suites = (fixture?.statusCheckRollup ?? []).map((c) => ({
+          status: String(c.status ?? "completed").toLowerCase(),
+          conclusion: c.conclusion ? String(c.conclusion).toLowerCase() : null,
+          latest_check_runs_count: 1,
+        }));
+        const body = { total_count: suites.length, check_suites: suites };
+        answer(`W/"suites-${Buffer.from(JSON.stringify(suites)).toString("base64url")}"`, body);
+        return;
+      }
+      answer(null, {}, {});
+      return;
+    }
+
     // Who can author PRs (priority-authors autocomplete):
     // `gh api graphql -f o0=<owner> -f n0=<name> … -f query=…assignableUsers…`.
     if (args[0] === "api" && args[1] === "graphql" && argsStr.includes("assignableUsers")) {

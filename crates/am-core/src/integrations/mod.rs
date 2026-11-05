@@ -23,11 +23,14 @@
 
 pub mod breaker;
 pub mod cache;
+pub mod ci_watch;
 pub mod github;
 pub mod linear;
+pub mod notifications;
+pub mod rest;
 pub mod reviews;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -126,6 +129,21 @@ pub struct Integrations {
     people: Vec<ReviewPerson>,
     /// When `people` was last fetched by this process.
     people_at: Option<Instant>,
+    /// The GitHub notifications inbox (live updates).
+    notifications: notifications::NotificationsWatch,
+    /// Conditional check-suite polls on open PRs (live updates).
+    ci_watch: ci_watch::CiWatch,
+}
+
+/// What the live watchers found ([`Integrations::watch_live`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Nudges {
+    /// `(repo_id, branch)` whose PR is worth fetching now.
+    pub branches: BTreeSet<(String, String)>,
+    /// The review requests are worth searching again now.
+    pub reviews: bool,
+    /// A watcher asked GitHub this time (for timings).
+    pub polled: bool,
 }
 
 /// How long a people lookup is reused before asking GitHub again.
@@ -160,6 +178,8 @@ impl Integrations {
             slugs: HashMap::new(),
             people: Vec::new(),
             people_at: None,
+            notifications: Default::default(),
+            ci_watch: Default::default(),
         }
     }
 
@@ -448,9 +468,22 @@ impl Integrations {
     /// Branches whose fetch failed keep their cached PR. `force` (user
     /// refresh) bypasses the backoff.
     pub fn refresh_github(&mut self, conn: &Connection, repos: &[RepoBranches], force: bool) -> RefreshOutcome {
+        self.github_fetch(conn, repos, force, true)
+    }
+
+    /// Fetch just these branches (a live watcher's nudge). Unlike
+    /// [`refresh_github`](Self::refresh_github) it leaves every other
+    /// branch's cache alone, so `repos` may be any subset.
+    pub fn refresh_github_branches(&mut self, conn: &Connection, repos: &[RepoBranches]) -> RefreshOutcome {
+        self.github_fetch(conn, repos, false, false)
+    }
+
+    fn github_fetch(&mut self, conn: &Connection, repos: &[RepoBranches], force: bool, prune: bool) -> RefreshOutcome {
         self.cache.hydrate(conn);
         let all_keys = all_keys(repos);
-        self.cache.prune_prs(conn, &all_keys);
+        if prune {
+            self.cache.prune_prs(conn, &all_keys);
+        }
         if all_keys.is_empty() {
             return RefreshOutcome::Idle;
         }
@@ -499,6 +532,101 @@ impl Integrations {
         }
         finish(&mut self.github_breaker, now, network_error.as_deref(), first_error.as_deref());
         RefreshOutcome::Ran { fetched, failed, aborted: network_error.is_some() }
+    }
+
+    /// Run whichever live watcher is due: the notifications inbox (always) and
+    /// the CI watch (with `ci`, i.e. on the dashboard). Both use conditional
+    /// REST requests, free while nothing changed, and only say *what* to fetch;
+    /// the caller fetches it. Nothing runs while GitHub is backing off.
+    pub fn watch_live(&mut self, repos: &[RepoBranches], ci: bool, now: Instant) -> Nudges {
+        let mut nudges = Nudges::default();
+        if repos.is_empty() || !self.github_breaker.allow(now, false) {
+            return nudges;
+        }
+        if self.notifications.due(now) {
+            nudges.polled = true;
+            let threads = self.notifications.poll(self.gh.as_ref(), &repos[0].repo_path, now);
+            if !threads.is_empty() {
+                self.apply_threads(repos, &threads, &mut nudges);
+            }
+        }
+        if ci && self.ci_watch.due(now) {
+            let targets = self.ci_targets(repos);
+            if !targets.is_empty() {
+                nudges.polled = true;
+                nudges.branches.extend(self.ci_watch.poll(self.gh.as_ref(), &targets, now));
+            }
+        }
+        nudges
+    }
+
+    /// Open PRs on worktree branches, pending CI first (it changes on its
+    /// own), then the rest (a push restarts their CI).
+    fn ci_targets(&self, repos: &[RepoBranches]) -> Vec<ci_watch::Target> {
+        let mut targets: Vec<ci_watch::Target> = repos
+            .iter()
+            .flat_map(|r| distinct(&r.branches).into_iter().map(move |b| (r, b)))
+            .filter_map(|(r, b)| {
+                let pr = self.cache.pr(&r.repo_id, &b)?;
+                (pr.state == "OPEN").then(|| ci_watch::Target {
+                    repo_id: r.repo_id.clone(),
+                    repo_path: r.repo_path.clone(),
+                    branch: b,
+                    cached: pr.checks_status,
+                })
+            })
+            .collect();
+        targets.sort_by_key(|t| t.cached != crate::model::ChecksStatus::Pending);
+        targets
+    }
+
+    /// New notification threads → the branches and review list they touch.
+    fn apply_threads(&mut self, repos: &[RepoBranches], threads: &[notifications::Thread], nudges: &mut Nudges) {
+        let mut by_slug: HashMap<String, &RepoBranches> = HashMap::new();
+        for repo in repos {
+            if !self.slugs.contains_key(&repo.repo_path)
+                && let Ok(slug) = reviews::repo_slug(self.gh.as_ref(), &repo.repo_path)
+            {
+                self.slugs.insert(repo.repo_path.clone(), slug);
+            }
+            if let Some(slug) = self.slugs.get(&repo.repo_path) {
+                by_slug.insert(slug.to_lowercase(), repo);
+            }
+        }
+        for t in threads {
+            let Some(repo) = by_slug.get(&t.repo) else { continue };
+            let pr_branches = distinct(&repo.branches).into_iter().filter_map(|b| {
+                let pr = self.cache.pr(&repo.repo_id, &b)?;
+                Some((b, pr.number, pr.state == "OPEN"))
+            });
+            match (t.kind.as_str(), t.pr_number) {
+                ("PullRequest", Some(n)) => {
+                    for (b, number, _) in pr_branches {
+                        if number == n {
+                            nudges.branches.insert((repo.repo_id.clone(), b));
+                        }
+                    }
+                    let listed = self.reviews.as_ref().is_some_and(|rs| {
+                        rs.iter().any(|r| r.repo_id == repo.repo_id && r.pr.number == n)
+                    });
+                    nudges.reviews |= t.reason == "review_requested" || listed;
+                }
+                ("CheckSuite", _) => {
+                    for (b, _, open) in pr_branches {
+                        if open {
+                            nudges.branches.insert((repo.repo_id.clone(), b));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        debug!(
+            "github",
+            "notifications → {} branch(es) to refetch{}",
+            nudges.branches.len(),
+            if nudges.reviews { ", review requests" } else { "" }
+        );
     }
 
     /// Refresh Linear tickets. `issueVcsBranchSearch` is workspace-wide, so each
@@ -1164,5 +1292,101 @@ mod tests {
         e.http.push(linear_ok("ENG-9"));
         assert_eq!(e.ints.fetch_linear_now("k", "feature/x").value().unwrap().identifier, "ENG-9");
         assert!(e.ints.cached_pr("r1", "feature/x").is_none());
+    }
+
+    fn two_branches() -> Vec<RepoBranches> {
+        vec![RepoBranches::new("r1", "/repo", vec!["a".into(), "b".into()])]
+    }
+
+    fn running() -> Value {
+        json!([{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS", "conclusion": null}])
+    }
+
+    #[test]
+    fn a_targeted_refresh_keeps_the_other_branches() {
+        let mut e = env();
+        e.gh.push(GhOutput::success(gql_response(vec![
+            vec![gql_node(1, "a", "OPEN", json!([]))],
+            vec![gql_node(2, "b", "OPEN", json!([]))],
+        ])));
+        e.ints.refresh_github(&e.conn, &two_branches(), false);
+        e.gh.push(GhOutput::success(gql_response(vec![vec![gql_node(2, "b", "MERGED", json!([]))]])));
+        let only_b = vec![RepoBranches::new("r1", "/repo", vec!["b".into()])];
+        e.ints.refresh_github_branches(&e.conn, &only_b);
+        assert_eq!(e.ints.cached_pr("r1", "a").unwrap().number, 1, "a's cache survives");
+        assert_eq!(e.ints.cached_pr("r1", "b").unwrap().state, "MERGED");
+        assert_eq!(e.rows(cache::CacheKind::Pr), ["r1:a", "r1:b"]);
+    }
+
+    #[test]
+    fn notification_threads_pick_out_branches_and_reviews() {
+        use super::notifications::tests::{page, thread};
+        let mut e = env();
+        e.gh.push(GhOutput::success(gql_response(vec![
+            vec![gql_node(5, "a", "OPEN", json!([]))],
+            vec![gql_node(6, "b", "MERGED", json!([]))],
+        ])));
+        e.ints.refresh_github(&e.conn, &two_branches(), false);
+        let t0 = Instant::now();
+        e.gh.push(page("LM1", vec![]));
+        assert_eq!(e.ints.watch_live(&two_branches(), false, t0), Nudges { polled: true, ..Default::default() });
+        let pr = |n: u64| format!("https://api.github.com/repos/Acme/Web/pulls/{n}");
+        e.gh.push(page(
+            "LM2",
+            vec![
+                thread("author", "PullRequest", "Acme/Web", Some(&pr(5)), "2026-11-05T10:00:00Z"),
+                thread("review_requested", "PullRequest", "Acme/Web", Some(&pr(99)), "2026-11-05T10:01:00Z"),
+                thread("comment", "PullRequest", "other/repo", Some(&pr(6)), "2026-11-05T10:02:00Z"),
+            ],
+        ));
+        e.gh.push(GhOutput::success("Acme/Web\n"));
+        let n = e.ints.watch_live(&two_branches(), false, t0 + notifications::MIN_INTERVAL);
+        assert_eq!(n.branches.into_iter().collect::<Vec<_>>(), [("r1".to_string(), "a".to_string())]);
+        assert!(n.reviews, "a new review request");
+
+        // A failed Actions run: every open PR in the repo is worth a look.
+        e.gh.push(page("LM3", vec![thread("ci_activity", "CheckSuite", "acme/web", None, "2026-11-05T11:00:00Z")]));
+        let n = e.ints.watch_live(&two_branches(), false, t0 + notifications::MIN_INTERVAL * 2);
+        assert_eq!(n.branches.into_iter().collect::<Vec<_>>(), [("r1".to_string(), "a".to_string())]);
+        assert!(!n.reviews);
+        assert_eq!(e.gh.call_count(), 5, "the slug is looked up once");
+    }
+
+    #[test]
+    fn ci_watch_takes_open_prs_pending_first() {
+        use super::notifications::tests::page;
+        use super::rest::tests::include;
+        // Answers by path: the CI watch asks its branches in parallel.
+        struct ByPath;
+        impl GhRunner for ByPath {
+            fn run(&self, _cwd: &Path, args: &[String], _t: Duration) -> GhOutput {
+                let path = args.last().unwrap();
+                let rest = |body: Value| GhOutput::success(include(200, &[("ETag", "e")], &body.to_string()));
+                if args[1] == "graphql" {
+                    GhOutput::success(gql_response(vec![
+                        vec![gql_node(1, "a", "OPEN", json!([]))],
+                        vec![gql_node(2, "b", "OPEN", running())],
+                        vec![gql_node(3, "c", "MERGED", json!([]))],
+                    ]))
+                } else if path.starts_with("notifications") {
+                    page("LM1", vec![])
+                } else if path.ends_with("/status") {
+                    rest(json!({"statuses": []}))
+                } else if path.contains("/commits/b/") {
+                    rest(json!({"check_suites": [{"status": "completed", "conclusion": "success", "latest_check_runs_count": 1}]}))
+                } else {
+                    rest(json!({"check_suites": []}))
+                }
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::db::open_at(&dir.path().join("t.db")).unwrap();
+        let mut ints = Integrations::with_transports(Box::new(ByPath), Box::new(FakeHttp::default()), "x".into());
+        let repos = vec![RepoBranches::new("r1", "/repo", vec!["a".into(), "b".into(), "c".into()])];
+        ints.refresh_github(&conn, &repos, false);
+        let order: Vec<String> = ints.ci_targets(&repos).into_iter().map(|t| t.branch).collect();
+        assert_eq!(order, ["b", "a"], "open PRs only, pending CI first");
+        let n = ints.watch_live(&repos, true, Instant::now());
+        assert_eq!(n.branches.into_iter().collect::<Vec<_>>(), [("r1".to_string(), "b".to_string())], "b's CI finished");
     }
 }
