@@ -4,10 +4,10 @@ expression: "render(&app, 80, 10)"
 ---
 ╭─Review requests ──────────────────────────────────────────────── 3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────│
-│▌◑ Batch the PR queries  @alice ✓ pulled            you           #51✓ …   0s │
-│ Typo in README  @outsider fork                     @docs         #48✓ …   0s │
+│▌◑ Batch the PR queries  @alice ✓ pulled        you           14f #51✓ …   0s │
+│ Typo in README  @outsider fork                 @docs          1f #48✓ …   0s │
 │gridsight ────────────────────────────────────────────────────────────────────│
-│ Feeder load forecast v2  @alice                    you +1 ENG-77 #902✗ …  0s │
+│ Feeder load forecast v2  @alice                you +1 ENG-77     #902✗ …  0s │
 │                                                                              │
 │                                                                              │
 ╰ you + your teams ──────────────────────────────────────────────────── 1 of 3 ╯

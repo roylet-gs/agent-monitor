@@ -209,6 +209,10 @@ pub struct ReviewRequest {
     /// tmp-space worktree still has it (`integrations::reviews::fetch_pulled`).
     #[serde(default)]
     pub approved_only: bool,
+    /// Files the PR changes (GitHub's `changedFiles`), a size hint; `None`
+    /// in a list cached before it was fetched.
+    #[serde(default)]
+    pub changed_files: Option<u64>,
     /// The worktree that already has this branch checked out (filled in by
     /// the TUI collector; never cached).
     #[serde(skip)]

@@ -4,11 +4,11 @@ expression: screen
 ---
 ╭─Review requests ──────────────────────────────────────────────────────────────────────────────────────── 2 to review ╮
 │Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ Batch the PR queries  @alice (agent-monitor) ✓ pulled                             you           #51✓ review     0s │
+│▌◑ Batch the PR queries  @alice (agent-monitor) ✓ pulled                    you           14 files #51✓ review     0s │
 │Asked your team ──────────────────────────────────────────────────────────────────────────────────────────────────────│
-│ Typo in README  @outsider (agent-monitor) fork                                      @docs         #48✓ review     0s │
+│ Typo in README  @outsider (agent-monitor) fork                             @docs           1 file #48✓ review     0s │
 │Approved, still pulled ───────────────────────────────────────────────────────────────────────────────────────────────│
-│ Feeder load forecast v2  @alice (gridsight) ✓ pulled                                you +1 ENG-77 #902✗ approved  0s │
+│ Feeder load forecast v2  @alice (gridsight) ✓ pulled                       you +1 ENG-77          #902✗ approved  0s │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

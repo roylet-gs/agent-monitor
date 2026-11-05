@@ -131,7 +131,7 @@ pub struct Extras<'a> {
 /// dates, author, repo, your latest review and the pending reviewers.
 fn review_fields() -> String {
     format!(
-        "{} createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
+        "{} changedFiles createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
          reviewRequests(first: 20) {{ nodes {{ requestedReviewer {{ ... on User {{ login }} \
          ... on Team {{ combinedSlug }} ... on Bot {{ login }} ... on Mannequin {{ login }} }} }} }}",
         pr_selection_counts()
@@ -262,6 +262,7 @@ fn review_from_node(node: &Value, repo_id: &str, repo: &str, viewer: &str) -> Op
         reviewed_by_you: latest.is_some(),
         approved_by_you: latest == Some("APPROVED"),
         approved_only: false,
+        changed_files: node.get("changedFiles").and_then(Value::as_u64),
         worktree_id: None,
     })
 }
@@ -564,6 +565,7 @@ pub(crate) mod tests {
         // Check counts only: per-check nodes made a real search time out.
         assert!(args[5].contains("checkRunCountsByState") && !args[5].contains("CheckRun {"));
         assert!(args[5].contains("viewerLatestReview { state }"));
+        assert!(args[5].contains(" changedFiles "));
         assert_eq!(search_args("q", Some("Y3Vy"), Extras::default())[5], "after=Y3Vy");
         // The unfiltered count and the group queries ride along.
         let queries = vec!["label:urgent".to_string()];
@@ -610,8 +612,10 @@ pub(crate) mod tests {
 
     #[test]
     fn parses_prs_of_tracked_repos_with_their_reviewers() {
+        let mut node = search_node(7, "acme/web", "feature/x", vec![json!({"login": "me"}), json!({"combinedSlug": "acme/frontend"})]);
+        node["changedFiles"] = json!(12);
         let body = json!({"data": {"viewer": {"login": "me"}, "search": {"nodes": [
-            search_node(7, "acme/web", "feature/x", vec![json!({"login": "me"}), json!({"combinedSlug": "acme/frontend"})]),
+            node,
             search_node(8, "other/repo", "y", vec![]),
             {},
         ]}}})
@@ -626,6 +630,10 @@ pub(crate) mod tests {
         assert_eq!(r.requested, ["you", "acme/frontend"]);
         assert_eq!(r.pr.checks_status, crate::model::ChecksStatus::Passing);
         assert_eq!(r.pr.review_decision, "REVIEW_REQUIRED");
+        assert_eq!(r.changed_files, Some(12));
+        // A node without the field (an older cache) reads as unknown.
+        let body = json!({"data": {"search": {"nodes": [search_node(9, "acme/web", "z", vec![])]}}}).to_string();
+        assert_eq!(parse_search(&body, &ids, &[]).unwrap().prs[0].changed_files, None);
     }
 
     #[test]

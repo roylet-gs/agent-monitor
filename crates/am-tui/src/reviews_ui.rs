@@ -347,6 +347,7 @@ pub(crate) mod tests {
             reviewed_by_you: false,
             approved_by_you: false,
             approved_only: false,
+            changed_files: None,
             worktree_id: None,
         }
     }

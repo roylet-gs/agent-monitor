@@ -36,6 +36,10 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   expect(screen).toContain("@platform");
   expect(screen).toMatch(/Fix typo in README +@outsider fork/);
   expect(screen).toContain("ENG-123");
+  // Each row's size: the files the PR changes (#61 4, #62 1, #63 23).
+  expect(screen).toMatch(/Add retry to the sync job.* 4 files #61/);
+  expect(screen).toMatch(/Update onboarding copy.* 1 file #62/);
+  expect(screen).toMatch(/Fix typo in README.* 23 files #63/);
   expect(screen).toContain("1 of 3");
   const lineOf = async (re: RegExp) => (await tui.lines()).findIndex((l) => re.test(l));
   expect(await lineOf(/Asked you ─/)).toBeLessThan(await lineOf(/Add retry to the sync job/));
