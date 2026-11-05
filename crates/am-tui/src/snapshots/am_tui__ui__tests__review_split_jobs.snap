@@ -4,10 +4,10 @@ expression: "render(&app, 120, 16)"
 ---
 ╭─am v0.0.0 · Worktrees ────────────────────── 3 to review ╮╭─Review requests ─────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────││agent-monitor ────────────────────────────────────────────│
-│▏◑ feature/refac… ◆2 ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││ ◑ Batch the …  @alice ✓ pulled you           #51✓ …   0s │
-│ ◐ fix/offline-cache                        4m ▓░░░░ 185k ││ Typo in README  @outsider fork @docs         #48✓ …   0s │
+│▏◑ feature/refac… ◆2 ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││ ◑ Batch the…  @a… ✓ pulled you           14f #51✓ …   0s │
+│ ◐ fix/offline-cache                        4m ▓░░░░ 185k ││ Typo in R…  @outsider fork @docs          1f #48✓ …   0s │
 │                                                          ││gridsight ────────────────────────────────────────────────│
-│gridsight ────────────────────────────────────────────────││▌Feeder loa…  @alice ◐ pulling… you +1 ENG-77 #902✗ …  0s │
+│gridsight ────────────────────────────────────────────────││▌Feeder lo…  @a… ◐ pulling… you +1 ENG-77     #902✗ …  0s │
 │ · main                              ↑2 ±3  4m            ││                                                          │
 │                                                          ││                                                          │
 │Reviewing ────────────────────────────────────────────────│╰ you + your teams ──────────────────────────────── 3 of 3 ╯

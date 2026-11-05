@@ -4,9 +4,9 @@ expression: screen
 ---
 ╭─Review requests ──────────────────────────────────────────────────────────────────────────── Outside 1 · 2 to review ╮
 │Outside ──────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌Typo in README  @outsider (agent-monitor) fork                                        @docs         #48✓ review   0s │
+│▌Typo in README  @outsider (agent-monitor) fork                               @docs           1 file #48✓ review   0s │
 │Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│ Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
+│ Feeder load forecast v2  @alice (gridsight)                                  you +1 ENG-77          #902✗ review  0s │
 │ ◑ Batch the PR q╭─Review filters ──────────────────────────────────────────────────────────────────╮#51✓ review   0s │
 │                 │ Outside — ⏎ change · ←→ adjust · esc back                                        │                 │
 │                 │                                                                                  │                 │

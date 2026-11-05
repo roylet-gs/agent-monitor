@@ -4,10 +4,10 @@ expression: help
 ---
 ╭─am v0.0.0 · Review requests ──────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ Batch the PR queries  @alice ✓ pulled                                               you           #51✓ review   0s │
-│ Typo in README  @o╭ Keys ────────────────────────────────────────────────────────────────────────╮  #48✓ review   0s │
+│▌◑ Batch the PR queries  @alice ✓ pulled                                      you           14 files #51✓ review   0s │
+│ Typo in README  @o╭ Keys ────────────────────────────────────────────────────────────────────────╮e #48✓ review   0s │
 │gridsight ─────────│    j / k  ↑ / ↓  move                                                        │───────────────────│
-│ Feeder load foreca│        home / G  top / bottom                                                │7 #902✗ review  0s │
+│ Feeder load foreca│        home / G  top / bottom                                                │  #902✗ review  0s │
 │                   │ ctrl-d / ctrl-u  page down / up                                              │                   │
 │                   │               ⏎  pull, or open the pulled one                                │                   │
 │                   │               g  open the PR                                                 │                   │
@@ -25,10 +25,10 @@ expression: help
 │                   │                                                                              │                   │
 │                   │✓ pulled checked out in a worktree (⏎ opens it, d removes it)  fork from a    │                   │
 │                   │fork: ⏎ opens the PR                                                          │                   │
+│                   │12 files (12f when narrow): how many files the PR changes                     │                   │
 │                   │PR approved=CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting        │                   │
 │                   │closed=not merged                                                             │                   │
 │                   ╰──────────────────────────────────────────────────────────────────────────────╯                   │
-│                                                                                                                      │
 │                                                                                                                      │
 ╰ you + your teams ──────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯
  ⏎ open  g PR  l ticket  d remove  f filter  i ignore  │ r refresh  │ T pull + run script  │ h help  esc quit

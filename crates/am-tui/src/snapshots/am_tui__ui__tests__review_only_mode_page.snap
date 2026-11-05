@@ -4,10 +4,10 @@ expression: screen
 ---
 ╭─am v0.0.0 · Review requests ──────────────────────────────────────────────────────── ⬆ v2.2.0 available  3 to review ╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ Batch the PR queries  @alice ✓ pulled                                               you           #51✓ review   0s │
-│ Typo in README  @outsider fork                                                        @docs         #48✓ review   0s │
+│▌◑ Batch the PR queries  @alice ✓ pulled                                      you           14 files #51✓ review   0s │
+│ Typo in README  @outsider fork                                               @docs           1 file #48✓ review   0s │
 │gridsight ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│ Feeder load forecast v2  @alice                                                       you +1 ENG-77 #902✗ review  0s │
+│ Feeder load forecast v2  @alice                                              you +1 ENG-77          #902✗ review  0s │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

@@ -4,10 +4,10 @@ expression: screen
 ---
 ╭─Review requests ──────────────────────────────────────────────── 3 to review ╮╭─Jobs ────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────││ ? Create feature/902                 │
-│ ◑ Batch the PR queries  @alice ✓ pulled            you           #51✓ …   0s ││   Branch "feature/902" exists locally│
-│ Typo in README  @outsider fork                     @docs         #48✓ …   0s ││   and on origin                      │
+│ ◑ Batch the PR queries  @alice ✓ pulled        you           14f #51✓ …   0s ││   Branch "feature/902" exists locally│
+│ Typo in README  @outsider fork                 @docs          1f #48✓ …   0s ││   and on origin                      │
 │gridsight ────────────────────────────────────────────────────────────────────││   ⏎ / p Pull remote (reset local to  │
-│▌Feeder load forec…  @alice ? waiting — ⇥ to answer you +1 ENG-77 #902✗ …  0s ││         origin)                      │
+│▌Feeder load f…  @alice ? waiting — ⇥ to answer you +1 ENG-77     #902✗ …  0s ││         origin)                      │
 │                                                                              ││   n     Cancel                       │
 │                                                                              ││                                      │
 │                                                                              ││                                      │

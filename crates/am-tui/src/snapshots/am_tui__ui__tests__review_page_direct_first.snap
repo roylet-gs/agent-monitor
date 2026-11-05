@@ -4,10 +4,10 @@ expression: screen
 ---
 ╭─Review requests ──────────────────────────────────────────────────────────────────────────────────────── 3 to review ╮
 │Asked you ────────────────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌Feeder load forecast v2  @alice (gridsight)                                           you +1 ENG-77 #902✗ review  0s │
-│ ◑ Batch the PR queries  @alice (agent-monitor) ✓ pulled                               you           #51✓ review   0s │
+│▌Feeder load forecast v2  @alice (gridsight)                                  you +1 ENG-77          #902✗ review  0s │
+│ ◑ Batch the PR queries  @alice (agent-monitor) ✓ pulled                      you           14 files #51✓ review   0s │
 │Asked your team ──────────────────────────────────────────────────────────────────────────────────────────────────────│
-│ Typo in README  @outsider (agent-monitor) fork                                        @docs         #48✓ review   0s │
+│ Typo in README  @outsider (agent-monitor) fork                               @docs           1 file #48✓ review   0s │
 │                                                                                                                      │
 │                                                                                                                      │
 ╰ you + your teams ──────────────────────────────────────────────────────────────────────────────────────────── 1 of 3 ╯

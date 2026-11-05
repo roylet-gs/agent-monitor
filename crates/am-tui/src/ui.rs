@@ -2249,6 +2249,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
     let ticket_w = ordered.iter().map(|&i| list[i].linear.as_ref().map_or(0, |l| l.identifier.width())).max().unwrap_or(0);
     let pr_w = ordered.iter().map(|&i| pr_text(Some(&list[i].pr), words).width()).max().unwrap_or(0);
     let who_w = ordered.iter().map(|&i| reviewers_text(&list[i]).width()).max().unwrap_or(0).min(if words { 16 } else { 10 });
+    let files_w = ordered.iter().map(|&i| files_text(list[i].changed_files, words).width()).max().unwrap_or(0);
 
     let rows = rows(list, &ordered, &app.snapshot.repos, grouping);
     let tree = crate::reviews_ui::prefixes(list, &ordered, &app.snapshot.repos, grouping);
@@ -2283,7 +2284,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
                 let agent = r.worktree_id.as_deref().and_then(|id| {
                     app.snapshot.groups.iter().flat_map(|g| &g.worktrees).find(|v| v.worktree.id == id).and_then(|v| v.status())
                 });
-                review_line(theme, r, &tree[*pos], repo, (pull, agent), |id| app.is_deleting(id), selected, (who_w, ticket_w, pr_w), words, inner.width, now)
+                review_line(theme, r, &tree[*pos], repo, (pull, agent), |id| app.is_deleting(id), selected, (who_w, ticket_w, files_w, pr_w), words, inner.width, now)
             }
         });
     }
@@ -2299,6 +2300,17 @@ fn reset_text(e: &am_core::model::ReviewFetchError, now: i64) -> Option<String> 
 /// Who the review is pending from, kept short (the column matters less
 /// than the title and author): `you` when you're asked by name, else the
 /// first reviewer (`@team` for a team), then `+N` for the rest.
+/// A review row's size hint: `12 files` (`12f` when narrow), empty when
+/// unknown (a list cached before the count was fetched).
+fn files_text(n: Option<u64>, words: bool) -> String {
+    match n {
+        None => String::new(),
+        Some(n) if !words => format!("{n}f"),
+        Some(1) => "1 file".into(),
+        Some(n) => format!("{n} files"),
+    }
+}
+
 fn reviewers_text(r: &am_core::model::ReviewRequest) -> String {
     let short = |w: &String| match w.split_once('/') {
         Some((_, team)) => format!("@{team}"),
@@ -2411,7 +2423,7 @@ fn review_line<'a>(
     (pull, agent): (Option<&crate::jobs::Job>, Option<am_core::status::Status>),
     deleting: impl Fn(&str) -> bool,
     selected: bool,
-    (who_w, ticket_w, pr_w): (usize, usize, usize),
+    (who_w, ticket_w, files_w, pr_w): (usize, usize, usize, usize),
     words: bool,
     width: u16,
     now: i64,
@@ -2426,6 +2438,10 @@ fn review_line<'a>(
         right.push(Span::raw(" "));
         let t = r.linear.as_ref().map(|l| l.identifier.clone()).unwrap_or_default();
         right.push(Span::styled(pad(&t, ticket_w), theme.fg(theme.blue)));
+    }
+    if files_w > 0 {
+        // How big the PR is, right-aligned so the counts line up.
+        right.push(Span::styled(format!(" {:>files_w$}", files_text(r.changed_files, words)), theme.faint()));
     }
     right.push(Span::raw(" "));
     right.extend(pr_spans(Some(&r.pr), theme, pr_w, words));
@@ -3615,6 +3631,10 @@ fn draw_review_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::ke
         Span::styled("fork", theme.faint()),
         Span::styled(" from a fork: ⏎ opens the PR", theme.faint()),
     ]));
+    lines.push(Line::from(vec![
+        Span::styled("12 files", theme.faint()),
+        Span::styled(" (12f when narrow): how many files the PR changes", theme.faint()),
+    ]));
     lines.push(pr_legend(theme));
     draw_help_box(f, theme, area, lines);
 }
@@ -4561,7 +4581,9 @@ mod tests {
         pulled.pr.title = "Batch the PR queries".into();
         pulled.head_ref_name = "feature/refactor".into();
         pulled.worktree_id = Some("w1".into());
+        pulled.changed_files = Some(14);
         let mut fork = review("r1", 48, "2026-10-25T09:00:00Z");
+        fork.changed_files = Some(1);
         fork.pr.title = "Typo in README".into();
         fork.is_cross_repository = true;
         fork.author = "outsider".into();
@@ -4569,6 +4591,7 @@ mod tests {
         let mut ticket = review("r2", 902, "2026-10-26T11:00:00Z");
         ticket.pr.title = "Feeder load forecast v2".into();
         ticket.pr.checks_status = ChecksStatus::Failing;
+        // `changed_files` left unknown: its cell stays blank.
         ticket.requested = vec!["you".into(), "gridsight/platform".into()];
         ticket.linear = Some(LinearInfo {
             identifier: "ENG-77".into(),
