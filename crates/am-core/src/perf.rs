@@ -50,6 +50,7 @@ pub const BUDGETS: &[(&str, u64)] = &[
     ("integrations.github", 10_000),
     ("integrations.linear", 10_000),
     ("integrations.reviews", 10_000),
+    ("integrations.live", 5_000),
     ("hook.event", 50),
 ];
 

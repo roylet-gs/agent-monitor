@@ -115,6 +115,7 @@ pub const FIELDS: &[Field] = &[
     Field { key: "ghPrStatus", label: "Fetch PRs", help: "GitHub PR and CI status via gh", section: "GitHub", kind: Kind::Bool },
     Field { key: "ghPollingIntervalMs", label: "PR refresh (ms)", help: "How often to fetch PR status", section: "GitHub", kind: Kind::Number { step: 30000, min: 30000 } },
     Field { key: "ghRefreshOnManual", label: "Refresh on r", help: "Include GitHub when refreshing manually", section: "GitHub", kind: Kind::Bool },
+    Field { key: "ghLiveUpdates", label: "Live updates", help: "Between refreshes, refetch a PR as soon as GitHub shows a change (notifications, CI)", section: "GitHub", kind: Kind::Bool },
     Field { key: "reviewRequestsEnabled", label: "Show review requests", help: "PRs waiting on your review: the v page and the N to review badge", section: "Review requests", kind: Kind::Bool },
     Field { key: "reviewRequestsScope", label: "Requested from", help: "all: you or a team you're on; direct: you by name; teams: only your teams", section: "Review requests", kind: Kind::Choice(&am_core::settings::ReviewScope::IDS) },
     Field { key: "reviewGroups", label: "Groups…", help: "Each group takes the PRs it matches (with its own order and filters), the rest fall to the next", section: "Review requests", kind: Kind::ReviewGroups },
