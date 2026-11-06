@@ -6,27 +6,27 @@
 class AgentMonitor < Formula
   desc "Terminal dashboard for Claude Code agents across git worktrees"
   homepage "https://github.com/roylet-gs/agent-monitor"
-  version "2.1.79"
+  version "2.1.80"
 
   on_macos do
     on_arm do
-      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.79/agent-monitor-v2.1.79-darwin-arm64.tar.gz"
-      sha256 "91681c7b15a3078d79311e13c708297d848259fd5a698eaa79c5103a17794bdd"
+      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.80/agent-monitor-v2.1.80-darwin-arm64.tar.gz"
+      sha256 "48dc5c62a7952dc78257abe0de947425976576258fbfde36e06d1e4baef975b4"
     end
     on_intel do
-      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.79/agent-monitor-v2.1.79-darwin-x64.tar.gz"
-      sha256 "964594b94f3a3054710ac8cf384468eb71c903f79377ee4e136c6587adb98658"
+      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.80/agent-monitor-v2.1.80-darwin-x64.tar.gz"
+      sha256 "8d019111798051e4ea2bf34e02ebff648c52578dea8bfb3d72b3fac2549cb93b"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.79/agent-monitor-v2.1.79-linux-arm64.tar.gz"
-      sha256 "ef85df3f2be962c8bf16141f44158c02d4ce32f3dd626c35e8f62e00883e059d"
+      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.80/agent-monitor-v2.1.80-linux-arm64.tar.gz"
+      sha256 "0d3d2fb743c453e1706c04715563beed1a358482fd2d73a3ebaaccc2e65b7ee6"
     end
     on_intel do
-      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.79/agent-monitor-v2.1.79-linux-x64.tar.gz"
-      sha256 "325ad45902a21294189c2a9bdee7e3436457168390d6a652d7245f6dafc0d755"
+      url "https://github.com/roylet-gs/agent-monitor/releases/download/v2.1.80/agent-monitor-v2.1.80-linux-x64.tar.gz"
+      sha256 "96417b5476c86b7aec0bd80632a28c1d79ae1656a97fefa7553039401452aa62"
     end
   end
 
