@@ -199,6 +199,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 | `34-usage-reports.spec.ts` | Settings → Usage reports set back to `ask` + a restart opens the one-time `Help improve am…` prompt (a stray key doesn't answer it); `y` → `Usage reports on`, no prompt after another restart, Settings shows `on`; `ask` again + `n` → `off` (the seeded value restored) |
 | `35-cmux-alerts-watching.spec.ts` | Settings → cmux alerts reads `CI started failing, approved / changes…`; ⏎ opens its checklist (header `post the ticked on the worktree's cmux workspace`, the two agent options unticked), space ticks `agent waiting for you` and it survives a restart, then restored to `ci,review,conflicts`; `h` help has the `⧗ watching` line (the badge itself is unit-tested: no seeded worktree can take a watching session without disturbing other specs) |
 | `37-live-pr-status.spec.ts` | Live updates: `main`'s PR reads `#42◌` while CI runs; switching the gh fixture to passed (the mock's check suites follow it) shows `#42✓` within the CI watch's 15 s, long before the 180 s PR poll, then `#42✗` the same way |
+| `38-fold-persists.spec.ts` | Folds are remembered: with `feature/pair`'s PR based on `feature/to-delete` (`ghByBranch`, as in spec 36), `←` folds the stack to `▸ feature/to-delete … +1 stacked hidden`, a restart (`page.reload()`) keeps it folded, `→` unfolds it and that survives another restart; a `finally` unfolds it so `collapsedStacks` is never left set |
 
 **Writing a spec:**
 ```typescript
