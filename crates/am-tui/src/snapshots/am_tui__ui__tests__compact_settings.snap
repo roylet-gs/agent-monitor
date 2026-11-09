@@ -7,6 +7,7 @@ expression: fixed_plugin_count(&screen)
 │▌  Mode                          full                     │
 │   Open in                       vscode                   │
 │   Editor command                —                        │
+│   Editor display                auto                     │
 │   Resume last session on open   on                       │
 │   Repositories…                 0 tracked                │
 │   Harness plugins…              N of N on · default cla… │
@@ -18,7 +19,6 @@ expression: fixed_plugin_count(&screen)
 │   Git refresh (ms)              30000                    │
 │ Appearance                                               │
 │   Theme                         ansi                     │
-│   Theme builder…                ⏎ open                   │
 │                                                          │
 │ reviews: open straight to the review page and hide the ag│
 ╰─────── ⏎/space change  ←→ adjust  e edit file  esc close ╯

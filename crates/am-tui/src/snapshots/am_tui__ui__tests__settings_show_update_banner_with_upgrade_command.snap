@@ -11,6 +11,7 @@ expression: "fixed_plugin_count(&render(&app, 100, 24))"
 │ · main│▌  Mode                          full                                             │       │
 │       │   Open in                       vscode                                           │       │
 │       │   Editor command                —                                                │       │
+│       │   Editor display                auto                                             │       │
 │       │   Resume last session on open   on                                               │       │
 │       │   Repositories…                 0 tracked                                        │       │
 │       │   Harness plugins…              N of N on · default claude                       │       │
@@ -21,7 +22,6 @@ expression: "fixed_plugin_count(&render(&app, 100, 24))"
 │       │   Base branch                   main                                             │       │
 │       │   Git refresh (ms)              30000                                            │       │
 │       │                                                                                  │       │
-│       │ Appearance                                                                       │       │
 │       │                                                                                  │       │
 │       │ reviews: open straight to the review page and hide the agent/worktree settings   │       │
 ╰───────╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯1 of 3 ╯

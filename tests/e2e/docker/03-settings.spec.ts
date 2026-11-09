@@ -29,6 +29,8 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
   await tui.waitForText("Where Enter opens worktrees");
   await tui.sendKey("j"); // → "Editor command"
   await tui.waitForText("For Open in = custom");
+  await tui.sendKey("j"); // → "Editor display"
+  await tui.waitForText("Monitor a built-in editor opens worktrees on");
   await tui.sendKey("j"); // → "Resume last session on open"
   await tui.waitForText("Enter also resumes the worktree's most recent agent session");
   await tui.sendKey(" ");
@@ -43,8 +45,8 @@ test("settings editor opens, a toggle persists across restarts", async ({ page }
   await tui.waitForText("esc close");
   expect(await resumeValue(tui)).toBe(after);
 
-  // Restore (Mode → Open in → Editor command → Resume last session).
-  await tui.press("j", 3);
+  // Restore (Mode → Open in → Editor command → Editor display → Resume last session).
+  await tui.press("j", 4);
   await tui.sendKey(" ");
   expect(await resumeValue(tui)).toBe(before);
   await tui.sendKey("Escape");

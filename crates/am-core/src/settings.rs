@@ -43,6 +43,10 @@ pub struct Settings {
     pub ide: String,
     /// Command line for `ide: "custom"` (see `launch::custom_command`).
     pub ide_command: String,
+    /// Monitor a built-in editor's window is moved to after opening a
+    /// worktree (`launch::open_worktree_in_editor`): `auto` (leave it) or
+    /// `1`… counted left to right. macOS only.
+    pub ide_display: String,
     pub default_branch_prefix: String,
     pub default_base_branch: String,
     pub polling_interval_ms: u64,
@@ -200,6 +204,7 @@ impl Default for Settings {
         Settings {
             ide: "vscode".into(),
             ide_command: String::new(),
+            ide_display: "auto".into(),
             default_branch_prefix: "feature/".into(),
             default_base_branch: "main".into(),
             polling_interval_ms: 30_000,
@@ -291,6 +296,12 @@ impl Default for Settings {
 impl Settings {
     pub fn default_agent(&self) -> crate::harness::HarnessKind {
         crate::harness::HarnessKind::from_db(Some(&self.default_agent))
+    }
+
+    /// The `ideDisplay` monitor number, or `None` for `auto` (or anything
+    /// that isn't a number from 1).
+    pub fn ide_display(&self) -> Option<u8> {
+        self.ide_display.trim().parse::<u8>().ok().filter(|n| *n >= 1)
     }
 
     /// Run startup scripts in a new terminal window rather than the jobs pane.
@@ -834,6 +845,10 @@ mod tests {
         assert_eq!((d.ide.as_str(), d.ide_command.as_str()), ("vscode", ""));
         let c = Settings::parse(r#"{"ide":"custom","ideCommand":"subl -n"}"#);
         assert_eq!((c.ide.as_str(), c.ide_command.as_str()), ("custom", "subl -n"));
+        assert_eq!((d.ide_display.as_str(), d.ide_display()), ("auto", None));
+        assert_eq!(Settings::parse(r#"{"ideDisplay":"2"}"#).ide_display(), Some(2));
+        assert_eq!(Settings::parse(r#"{"ideDisplay":"0"}"#).ide_display(), None);
+        assert_eq!(Settings::parse(r#"{"ideDisplay":"left"}"#).ide_display(), None);
     }
 
     #[test]
