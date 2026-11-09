@@ -292,7 +292,7 @@ When the bottom of a stack is built on a branch you haven't checked out as a wor
 └─ ○ feature/connect-1789
 ```
 
-A stack folds at its root, the bottom branch, which carries a `▾` (`▸` when folded) in front of it. `←` anywhere in a stack folds it down to the root, and the root then shows a yellow ` +3 stacked hidden ` pill so a folded stack is hard to miss. `→` on a folded root unfolds it; on an open root it goes to the first stacked branch. Clicking the arrow or the pill folds or unfolds it too. `z` folds every stack at once, and when they're all folded it unfolds them all; the key bar says which (`z fold all` / `z unfold all`). Folds last until you quit, and a worktree created inside a folded stack opens it.
+A stack folds at its root, the bottom branch, which carries a `▾` (`▸` when folded) in front of it. `←` anywhere in a stack folds it down to the root, and the root then shows a yellow ` +3 stacked hidden ` pill so a folded stack is hard to miss. `→` on a folded root unfolds it; on an open root it goes to the first stacked branch. Clicking the arrow or the pill folds or unfolds it too. `z` folds every stack at once, and when they're all folded it unfolds them all; the key bar says which (`z fold all` / `z unfold all`). Folds are remembered when you quit (under `collapsedStacks` in `settings.json`), and a worktree created inside a folded stack opens it.
 
 With `groupStacksByTicket` on (the default; **Settings → Dashboard → Group stacks by ticket**), stacks sit together under the Linear ticket they belong to, with a `— EPIC-12 Epic title —` header. That ticket is the parent issue that most of the stack's tickets have. A stack root without a parent counts its own ticket, and a tie goes to the root's. So a stack whose sub-issues share an epic is filed under that epic, even when its root branch is named after another ticket. Stacks under the same ticket are moved next to the first of them (within their Linear project section, when you sort by project). A ticket that is only some stack's own gets a header only when two or more stacks share it. With the setting off, stacks follow their branches only, with no ticket headers.
 
@@ -468,6 +468,7 @@ The `hide*` toggles are the base filters: they always apply (`F` doesn't turn th
 | `reviewGroups` | `[]` | The review page's groups, top to bottom (edit them with `f` → Groups… on the page) |
 | `reviewDefaultGroup` | catch-all | The group under them, catching the rest; what its rules don't match is hidden. Without one, the 2.1 keys `reviewHideDrafts`, `reviewHideReviewed`, `reviewIncludeRepos`, `reviewExcludeRepos`, `reviewSearchQualifiers` and `reviewSort` (still read, no longer shown) describe it |
 | `ignoredReviews` | `[]` | PRs ignored with `i` on the review page, each with its status at the time (`{url, status}`); an entry is dropped once that PR's status changes or it leaves the list. Not settable from the CLI |
+| `collapsedStacks` | `[]` | Worktree ids of the dashboard's folded stacks (`←`, `z`), so folds survive a restart; a deleted worktree's id is dropped. Not settable from the CLI |
 | `reviewBadgeTotal` | `false` | The review badge also counts every open PR asking you or your teams on GitHub, unfiltered |
 | `linearEnabled` | `false` | Fetch Linear tickets |
 | `linearApiKey` | `""` | Linear personal API key |

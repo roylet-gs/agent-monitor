@@ -47,6 +47,9 @@ pub struct Snapshot {
     /// Every tracked worktree's path, also those the hide* filters leave out
     /// (matching a cmux workspace to its most specific worktree).
     pub worktree_paths: Vec<String>,
+    /// Every tracked worktree's id, filtered out or not (a remembered fold is
+    /// dropped only once its worktree is gone).
+    pub worktree_ids: Vec<String>,
     /// Worktrees the dashboard's filters leave out (the `─Worktrees` border's
     /// `N hidden`).
     pub hidden_worktrees: usize,
@@ -218,7 +221,8 @@ pub struct App {
     /// First visible row of the worktree list, kept between draws so the
     /// list only scrolls when the selection leaves the view.
     pub list_scroll: std::cell::Cell<usize>,
-    /// Worktrees whose stacked branches are folded away (←/→).
+    /// Worktrees whose stacked branches are folded away (←/→, `z`), seeded
+    /// from and saved to `collapsedStacks` (main.rs, [`App::folds_to_save`]).
     pub collapsed: std::collections::HashSet<String>,
     /// Rows start with a 2-column gutter for stack roots' fold arrows (any
     /// stack is listed).
@@ -229,6 +233,7 @@ pub struct App {
 
 impl App {
     pub fn new(settings: Settings) -> App {
+        let collapsed = settings.collapsed_stacks.iter().cloned().collect();
         App {
             keymap: crate::keymap::Keymap::from_settings(&settings),
             settings,
@@ -266,7 +271,7 @@ impl App {
             modifiers_reported: false,
             hits: Default::default(),
             list_scroll: Default::default(),
-            collapsed: Default::default(),
+            collapsed,
             folded: Default::default(),
             fold_gutter: false,
         }
@@ -1319,8 +1324,45 @@ impl App {
         (kept.len() != self.settings.ignored_reviews.len()).then_some(kept)
     }
 
+    /// The folded stack roots to save as `collapsedStacks`, when they differ
+    /// from what's saved: `collapsed`, minus worktrees that are gone (judged
+    /// only once a snapshot lists worktrees, so a first empty one keeps them).
+    pub fn folds_to_save(&self) -> Option<Vec<String>> {
+        let ids = &self.snapshot.worktree_ids;
+        let mut list: Vec<String> =
+            self.collapsed.iter().filter(|id| ids.is_empty() || ids.contains(id)).cloned().collect();
+        list.sort();
+        let mut saved = self.settings.collapsed_stacks.clone();
+        saved.sort();
+        saved.dedup();
+        (list != saved).then_some(list)
+    }
+
+    /// Save `collapsedStacks`; false (with the error as the notice) when it
+    /// couldn't be written.
+    pub fn save_folds(&mut self, list: Vec<String>) -> bool {
+        match crate::settings_ui::persist("collapsedStacks", serde_json::json!(list)) {
+            Ok(s) => {
+                am_core::debug!("tui", "saved {} folded stack(s)", list.len());
+                self.set_settings(s);
+                true
+            }
+            Err(e) => {
+                // Not retried every loop: they stay folded for this session.
+                self.settings.collapsed_stacks = list;
+                self.notice = Some(e);
+                false
+            }
+        }
+    }
+
     pub fn set_settings(&mut self, settings: Settings) {
         let to_reviews_mode = settings.reviews_mode() && !self.settings.reviews_mode();
+        // Folds changed in settings.json (another window, or by hand); our
+        // own saves already match `collapsed`.
+        if settings.collapsed_stacks != self.settings.collapsed_stacks {
+            self.collapsed = settings.collapsed_stacks.iter().cloned().collect();
+        }
         self.keymap = crate::keymap::Keymap::from_settings(&settings);
         self.settings = settings;
         if to_reviews_mode && self.setup.is_none() {
