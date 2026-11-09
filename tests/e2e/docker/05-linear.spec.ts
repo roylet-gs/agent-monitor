@@ -147,3 +147,58 @@ test("project headers when Linear project is the top sort key", async ({ page })
   await tui.sendKey("Escape");
   await tui.waitForGone("═ Dashboard Revamp ═", 10_000);
 });
+
+test("No project header after the project sections", async ({ page }) => {
+  // Only main has no ticket (so no project); feature/pair and feature/to-delete
+  // stay on ENG-123 in "Dashboard Revamp". With Linear project as the top sort
+  // key, main follows the project section under a faint "═ No project ═".
+  await setupMock({ linearByBranch: { main: null } });
+  const tui = new RustTui(page);
+  await tui.open();
+  await tui.waitForText("ENG-123", 15_000);
+  // Wait until main has lost its ticket (the cache may hydrate it first).
+  await tui.waitForMatch(/^│▌?\s*\S main\b(?!.*ENG-123).*$/m, 15_000);
+
+  await openSortEditor(tui);
+  await tui.press("j", 6);
+  await tui.press("K", 6);
+  await tui.waitForMatch(/▌\s*1\. \[ \] /);
+  await tui.sendKey(" ");
+  await tui.waitForMatch(/▌\s*1\. \[x\] /);
+  await tui.sendKey("Enter");
+  await tui.sendKey("Escape");
+  await tui.waitForGone("esc close");
+
+  try {
+    await tui.waitForText("═ Dashboard Revamp ═", 10_000);
+    await tui.waitForText("═ No project ═", 10_000);
+
+    const lines = await tui.lines();
+    const project = lines.findIndex((l) => l.includes("═ Dashboard Revamp ═"));
+    const noProject = lines.findIndex((l) => l.includes("═ No project ═"));
+    const mainRow = lines.findIndex((l) => /^│▌?\s*\S main\b/.test(l));
+    const others = lines.findIndex((l) => l.includes("Other sessions"));
+    expect(project).toBeGreaterThanOrEqual(0);
+    expect(mainRow).toBeGreaterThanOrEqual(0);
+    // The No project header ends the project section and sits right above main.
+    expect(noProject).toBeGreaterThan(project);
+    expect(mainRow).toBe(noProject + 1);
+    expect(lines[mainRow]).not.toContain("ENG-123");
+    // Only once: the project-less "Other sessions" group gets no header.
+    expect(lines.filter((l) => l.includes("No project"))).toHaveLength(1);
+    expect(others).toBeGreaterThan(mainRow);
+    expect(lines.slice(others).join("\n")).not.toContain("No project");
+    await tui.screenshot("linear-no-project-header");
+  } finally {
+    // Restore the default order (disable it, move it back down) and main's ticket.
+    await openSortEditor(tui);
+    await tui.sendKey(" ");
+    await tui.press("J", 6);
+    await tui.sendKey("Enter");
+    await tui.sendKey("Escape");
+    await tui.waitForGone("═ Dashboard Revamp ═", 10_000);
+    await resetMock();
+    await tui.sendKey("r");
+    await tui.waitForMatch(/^│▌?\s*\S main\b.*ENG-123/m, 15_000);
+  }
+});

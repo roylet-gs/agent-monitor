@@ -2085,11 +2085,13 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
                     Span::styled("─".repeat(rule), theme.fg(theme.border)),
                 ])
             }
-            Row::Project(name) => Line::from(vec![
+            Row::Project(Some(name)) => Line::from(vec![
                 Span::styled("═ ", theme.fg(theme.magenta)),
                 Span::styled(name.clone(), theme.bold(theme.magenta)),
                 Span::styled(" ═", theme.fg(theme.magenta)),
             ]),
+            // Ends the last project section: what follows has no project.
+            Row::Project(None) => Line::styled("═ No project ═", theme.faint()),
             Row::Ticket(t) => Line::styled(format!("  — {} —", truncate(t, inner.width as usize - 6)), theme.faint()),
             // The stack below is built on this branch, which has no worktree.
             Row::Base(b) => {
@@ -6704,6 +6706,28 @@ mod tests {
             .collect();
         // The last repo's worktree has no project: no `No project` header for it.
         assert_eq!(kinds, ["repo", "project", "wt", "spacer", "project", "wt", "spacer", "repo", "wt"]);
+    }
+
+    #[test]
+    fn project_less_rows_after_a_project_section_get_a_no_project_header() {
+        use am_core::settings::{Direction, SortCriterion, SortKey};
+        let mut app = fixture();
+        app.settings.worktree_sort = vec![SortCriterion { key: SortKey::LinearProject, direction: Direction::Asc, enabled: true }];
+        let mut snap = app.snapshot.clone();
+        let mut l = snap.groups[0].worktrees[0].linear.clone().unwrap();
+        l.project = Some(LinearProject { id: "Alpha".into(), name: "Alpha".into(), color: None, url: None });
+        snap.groups[0].worktrees[0].linear = Some(l);
+        snap.groups[0].worktrees[1].linear = None;
+        app.apply(snap);
+        let projects: Vec<Option<&str>> =
+            app.rows.iter().filter_map(|r| match r { Row::Project(p) => Some(p.as_deref()), _ => None }).collect();
+        // The second repo has no project at all: no header there.
+        assert_eq!(projects, [Some("Alpha"), None]);
+        let at = app.rows.iter().position(|r| *r == Row::Project(None)).unwrap();
+        assert_eq!(app.rows[at - 1], Row::Spacer);
+        assert!(matches!(app.rows[at + 1], Row::Worktree(_)));
+        let text = render(&app, 120, 20);
+        assert!(text.contains("═ No project ═"), "{text}");
     }
 
     #[test]
