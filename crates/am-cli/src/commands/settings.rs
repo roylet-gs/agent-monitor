@@ -164,6 +164,11 @@ pub fn set(key: &str, value: &str) {
               Press i on a PR on the review page (v) to ignore or un-ignore it.");
     }
 
+    if key == "collapsedStacks" {
+        fail("collapsedStacks lists the dashboard's folded stacks and can't be set from the CLI.\n\
+              Fold or unfold a stack in the dashboard with ← / → or z.");
+    }
+
     if key == "dailyTokensMode" && am_core::settings::DailyTokensMode::parse(value).is_none() {
         fail(&format!(
             "Invalid value for dailyTokensMode: {value}. Use one of: {}.",

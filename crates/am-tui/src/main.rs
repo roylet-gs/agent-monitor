@@ -566,6 +566,10 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
             }
             dirty = true;
         }
+        // Folded stacks (any key, click or a reveal) are remembered across restarts.
+        if let Some(folds) = app.folds_to_save() {
+            app.save_folds(folds);
+        }
         match &app.notice {
             Some(n) if notice_since.as_ref().is_none_or(|(_, shown)| shown != n) => {
                 notice_since = Some((Instant::now(), n.clone()));

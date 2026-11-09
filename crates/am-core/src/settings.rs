@@ -188,6 +188,9 @@ pub struct Settings {
     /// PRs ignored on the review page (`i`) and their status then; each
     /// counts only while that status holds (`review_groups::is_ignored`).
     pub ignored_reviews: Vec<IgnoredReview>,
+    /// Worktree ids of the dashboard's folded stack roots (`←`, `z`, a click
+    /// on the fold arrow), so folds survive a restart.
+    pub collapsed_stacks: Vec<String>,
     #[serde(skip)]
     pub raw: serde_json::Map<String, serde_json::Value>,
 }
@@ -283,6 +286,7 @@ impl Default for Settings {
             review_default_group: ReviewGroup::default(),
             review_badge_total: false,
             ignored_reviews: Vec::new(),
+            collapsed_stacks: Vec::new(),
             raw: Default::default(),
         }
     }
@@ -819,6 +823,17 @@ mod tests {
         assert_eq!(back.ignored_reviews, s.ignored_reviews);
         let bad = Settings::parse(r#"{"ignoredReviews":"nope","ide":"zed"}"#);
         assert!(bad.ignored_reviews.is_empty() && bad.ide == "zed");
+    }
+
+    #[test]
+    fn collapsed_stacks_round_trip() {
+        assert!(Settings::default().collapsed_stacks.is_empty());
+        let s = Settings::parse(r#"{"collapsedStacks":["wt-1","wt-2"],"ide":"zed"}"#);
+        assert_eq!(s.collapsed_stacks, ["wt-1", "wt-2"]);
+        let back = Settings::parse(&serde_json::to_string(&s).unwrap());
+        assert_eq!(back.collapsed_stacks, s.collapsed_stacks);
+        let bad = Settings::parse(r#"{"collapsedStacks":"nope","ide":"zed"}"#);
+        assert!(bad.collapsed_stacks.is_empty() && bad.ide == "zed");
     }
 
     #[test]
