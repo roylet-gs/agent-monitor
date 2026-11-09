@@ -88,6 +88,26 @@ impl IdeChoice {
             IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
         }
     }
+
+    /// The built-in editor's flag for opening a folder in a new window.
+    fn new_window_flag(self) -> Option<&'static str> {
+        match self {
+            IdeChoice::Vscode | IdeChoice::Cursor | IdeChoice::Windsurf => Some("--new-window"),
+            IdeChoice::Zed => Some("-n"),
+            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
+        }
+    }
+
+    /// The built-in editor's process name in System Events (`crate::window`).
+    fn process_name(self) -> Option<&'static str> {
+        match self {
+            IdeChoice::Vscode => Some("Code"),
+            IdeChoice::Cursor => Some("Cursor"),
+            IdeChoice::Zed => Some("Zed"),
+            IdeChoice::Windsurf => Some("Windsurf"),
+            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -190,15 +210,36 @@ pub fn custom_command(cmd: &str, path: &Path) -> String {
 /// CLI, falling back to `open -a` when the shell command isn't installed; a
 /// custom one by running `custom_cmd` through `sh -c`.
 pub fn open_in_editor(path: &Path, ide: IdeChoice, custom_cmd: &str) -> Result<(), String> {
+    open_editor_with(path, ide, custom_cmd, None)
+}
+
+/// Open a worktree like [`open_in_editor`]; with `display` (the `ideDisplay`
+/// setting) a built-in editor opens a new window, which is then moved to that
+/// monitor (`crate::window`). `Ok(Some(_))`: it opened, but couldn't be moved.
+pub fn open_worktree_in_editor(path: &Path, ide: IdeChoice, custom_cmd: &str, display: Option<u8>) -> Result<Option<crate::window::MoveError>, String> {
+    let process = ide.process_name();
+    let display = display.filter(|_| process.is_some() && cfg!(target_os = "macos"));
+    open_editor_with(path, ide, custom_cmd, display.and(ide.new_window_flag()))?;
+    let (Some(n), Some(process)) = (display, process) else { return Ok(None) };
+    let folder = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    Ok(crate::window::move_to_display(process, &folder, n).err())
+}
+
+fn open_editor_with(path: &Path, ide: IdeChoice, custom_cmd: &str, flag: Option<&str>) -> Result<(), String> {
     let (cli, app) = match ide.editor() {
         Some(e) => e,
         None if ide == IdeChoice::Terminal => return open_terminal(path, None).map(|_| ()),
         None if ide == IdeChoice::Cmux => return open_in_cmux(path, None, None),
         None => return open_custom(path, custom_cmd),
     };
-    let result = run(Command::new(cli).arg(path)).or_else(|e| {
+    let result = run(Command::new(cli).args(flag).arg(path)).or_else(|e| {
         if cfg!(target_os = "macos") {
-            run(Command::new("open").args(["-a", app]).arg(path))
+            let mut open = Command::new("open");
+            open.args(["-a", app]).arg(path);
+            if let Some(f) = flag {
+                open.args(["--args", f]);
+            }
+            run(&mut open)
         } else {
             Err(e)
         }
@@ -520,6 +561,21 @@ mod tests {
         assert_eq!(sh_quote("/plain/path-1.2"), "/plain/path-1.2");
         assert_eq!(sh_quote("it's"), "'it'\\''s'");
         assert_eq!(applescript_string("a \"b\" \\c"), "\"a \\\"b\\\" \\\\c\"");
+    }
+
+    #[test]
+    fn built_in_editors_can_open_a_new_window_that_is_then_moved() {
+        use IdeChoice::*;
+        for ide in [Vscode, Cursor, Zed, Windsurf] {
+            assert!(ide.new_window_flag().is_some() && ide.process_name().is_some(), "{ide:?}");
+        }
+        assert_eq!((Vscode.new_window_flag(), Zed.new_window_flag()), (Some("--new-window"), Some("-n")));
+        for ide in [Terminal, Cmux, Custom] {
+            assert!(ide.new_window_flag().is_none() && ide.process_name().is_none(), "{ide:?}");
+        }
+        // Not a built-in editor: `ideDisplay` is ignored and nothing is moved.
+        let dir = std::env::temp_dir();
+        assert!(matches!(open_worktree_in_editor(&dir, Custom, "true", Some(2)), Ok(None)));
     }
 
     #[test]

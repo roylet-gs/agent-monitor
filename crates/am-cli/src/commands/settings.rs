@@ -104,6 +104,10 @@ pub fn set(key: &str, value: &str) {
         fail(&format!("Invalid value for ide: {value}. Use one of: {}.", am_core::launch::IdeChoice::IDS.join(", ")));
     }
 
+    if key == "ideDisplay" && value != "auto" && !value.parse::<u8>().is_ok_and(|n| (1..=9).contains(&n)) {
+        fail(&format!("Invalid value for ideDisplay: {value}. Use auto or a display number from 1 (leftmost) to 9."));
+    }
+
     if key == "dailyTokensScope" && !["all", "visible"].contains(&value) {
         fail(&format!("Invalid value for dailyTokensScope: {value}. Use all or visible."));
     }

@@ -276,6 +276,14 @@ fn settings_set_coerces_and_validates() {
     assert!(o.stderr.contains("Use one of: vscode, cursor, zed, windsurf, terminal, cmux, custom"), "{}", o.stderr);
     env.ok(&["settings", "set", "ideCommand", "open -a Nova {path}"]);
     assert_eq!(env.settings()["ideCommand"], "open -a Nova {path}");
+    env.ok(&["settings", "set", "ideDisplay", "2"]);
+    assert_eq!(env.settings()["ideDisplay"], "2");
+    for bad in ["0", "left", "10"] {
+        let o = env.run(&["settings", "set", "ideDisplay", bad]);
+        assert_eq!(o.code, 1, "ideDisplay={bad}");
+        assert!(o.stderr.contains("Use auto or a display number"), "{}", o.stderr);
+    }
+    env.ok(&["settings", "set", "ideDisplay", "auto"]);
 
     for (input, expected) in [("true", true), ("0", false), ("1", true), ("false", false)] {
         env.ok(&["settings", "set", "compactView", input]);

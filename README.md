@@ -415,6 +415,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 | --- | ------- | ----------- |
 | `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, `cmux` (see [Use am in cmux](#use-am-in-cmux)), or `custom` |
 | `ideCommand` | `""` | The command `ide: "custom"` runs, through `sh`. `{path}` is replaced by the quoted worktree path, or the path is appended when there's no `{path}`. E.g. `idea`, `subl -n`, `open -a Nova {path}` |
+| `ideDisplay` | `"auto"` | Monitor a built-in editor (VS Code, Cursor, Zed, Windsurf) opens a worktree on: `1` is the leftmost display, `2` the next… The editor opens a new window, which am then moves through System Events, so the terminal am runs in needs Accessibility permission (System Settings → Privacy & Security → Accessibility). macOS only; `auto` leaves it where the editor puts it |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
 | `defaultAgent` | `"claude"` | Harness plugin `Enter` starts in a worktree with no session yet (set it in Settings → Harness plugins) |
 | `disabledAgents` | `[]` | Harness plugins switched off: no hooks, no session discovery (Settings → Harness plugins) |

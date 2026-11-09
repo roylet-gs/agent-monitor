@@ -11,6 +11,7 @@ expression: settings
 │                 │▌  Mode                          reviews                                          │                 │
 │                 │   Open in                       vscode                                           │                 │
 │                 │   Editor command                —                                                │                 │
+│                 │   Editor display                auto                                             │                 │
 │                 │   Repositories…                 2 tracked                                        │                 │
 │                 │   Key bindings…                 defaults                                         │                 │
 │                 │   Mouse                         on                                               │                 │
@@ -47,7 +48,6 @@ expression: settings
 │                 │                                                                                  │                 │
 │                 │ Setup                                                                            │                 │
 │                 │   Run setup again…              ⏎ open                                           │                 │
-│                 │   Reset settings…               ⏎ reset                                          │                 │
 │                 │                                                                                  │                 │
 │                 │ reviews: open straight to the review page and hide the agent/worktree settings   │                 │
 ╰ you + your teams╰─────────────────────────────── ⏎/space change  ←→ adjust  e edit file  esc close ╯───────── 1 of 3 ╯

@@ -371,8 +371,10 @@ pub fn open(target: &str, repo_path: Option<&str>) {
         Ok(true) => println!("Switched to branch {}", wt.branch),
         Ok(false) => {}
     }
-    if let Err(e) = launch::open_in_editor(path, IdeChoice::from_setting(&s.ide), &s.ide_command) {
-        fail(&e);
+    match launch::open_worktree_in_editor(path, IdeChoice::from_setting(&s.ide), &s.ide_command, s.ide_display()) {
+        Err(e) => fail(&e),
+        Ok(Some(e)) => eprintln!("Warning: couldn't move the window to display {}: {}", s.ide_display.trim(), e.message()),
+        Ok(None) => {}
     }
     println!("Opened {} in {}", wt.branch, s.ide);
 }

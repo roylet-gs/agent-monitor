@@ -26,6 +26,7 @@ pub mod themes;
 pub mod timefmt;
 pub mod update_check;
 pub mod usage;
+pub mod window;
 pub mod worktrees;
 
 // Re-exported so the `info!`/`warn!`/`debug!` macros resolve in every crate.

@@ -49,7 +49,7 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 28 32 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 34 35 36 38 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 34 35 36 38 39 ;;
     crates/am-tui/src/usage_reports.rs) echo 34 ;; # heartbeat, feature counts, the sending thread
     crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 33 35 36 38 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/reviews_ui.rs | crates/am-tui/src/review_groups_ui.rs) echo 28 31 32 ;;    # the review-requests page and its groups
@@ -94,6 +94,7 @@ specs_for() {
     crates/am-core/src/integrations/cache.rs | crates/am-core/src/integrations/breaker.rs) echo 06 28 ;;
     crates/am-core/src/integrations/mod.rs) echo 04 05 06 28 37 ;;
     crates/am-core/src/launch.rs) echo 21 ;; # open_in_editor's failure path (no IDE in the container)
+    crates/am-core/src/window.rs) echo 21 39 ;; # ideDisplay window move: macOS only, a no-op in the container
     crates/am-core/src/procscan.rs) echo 25 26 ;; # the seeded agent shell command, the editor-spawned dev server
     crates/am-core/src/stacks.rs) echo 36 38 ;; # stack grouping, the `┌ base · no worktree` line, folding
     crates/am-core/src/cmux.rs) echo - ;; # no cmux in the container: inert there; unit tests cover it

@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
+use am_core::window as launch_window;
 use am_core::{cmux, grouping};
 use am_core::launch::{self, IdeChoice, OpenAction};
 use am_core::model::WorktreeView;
@@ -50,9 +51,22 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
     let resume_on = settings.resume_last_session;
     let default_agent = settings.default_agent();
     let ide_command = settings.ide_command.clone();
+    let display = settings.ide_display();
     std::thread::spawn(move || {
         let path = Path::new(&v.worktree.path);
         let label = v.worktree.display_name().to_string();
+        // A built-in editor: open (a new window, with `ideDisplay`) and move it to that display.
+        let editor = |tx: &Sender<Msg>| {
+            launch::open_worktree_in_editor(path, ide, &ide_command, display).map(|moved| {
+                if let (Some(e), Some(n)) = (moved, display) {
+                    let msg = format!("Opened {label}, but couldn't move it to display {n}: {}", e.message());
+                    let _ = tx.send(match e {
+                        launch_window::MoveError::Permission(_) => Msg::Popup(format!("⚠ {msg}")),
+                        launch_window::MoveError::Other(_) => Msg::Notice(format!("⚠ {msg}")),
+                    });
+                }
+            })
+        };
         // A terminal is already open there: bring it forward rather than open another.
         if ide == IdeChoice::Terminal && v.has_terminal {
             report(&tx, launch::focus_terminal_app(), format!("Focused terminal for {label}"));
@@ -90,7 +104,7 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
         };
         let result = match launch::resolve_open_action(resume_on, already_open, ide, resume) {
             OpenAction::Plain if ide == IdeChoice::Cmux => launch::open_in_cmux(path, Some(&label), None),
-            OpenAction::Plain => launch::open_in_editor(path, ide, &ide_command),
+            OpenAction::Plain => editor(&tx),
             OpenAction::TerminalAgent(r) if ide == IdeChoice::Cmux => {
                 let cmd = launch::agent_command(&r);
                 if !cmux::inside() {
@@ -115,7 +129,7 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
                 };
                 let _ = tx.send(Msg::Popup(msg));
                 std::thread::sleep(POPUP_BEFORE_OPEN);
-                launch::open_in_editor(path, ide, &ide_command)
+                editor(&tx)
             }
         };
         report(&tx, result, format!("Opened {label}"));
