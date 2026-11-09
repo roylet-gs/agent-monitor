@@ -74,7 +74,9 @@ pub enum Row {
     /// Blank line separating repo sections.
     Spacer,
     Repo(String),
-    Project(String),
+    /// `═ Project ═` header; `None` is `═ No project ═`, over the project-less
+    /// rows that follow project sections in the same group.
+    Project(Option<String>),
     Ticket(String),
     /// Faint line above a stack whose root is built on a branch that has no
     /// worktree (`Snapshot::stack_base`). No selection index.
@@ -520,6 +522,10 @@ impl App {
                 }
             }
             let order: Vec<usize> = units.into_iter().flatten().collect();
+            // Project-less rows get a `No project` header only after project
+            // sections, so the last section visibly ends; a group with no
+            // projects at all gets none.
+            let any_project = by_project && stacks.iter().any(|s| project_of(s).is_some());
             let key_at = |pos: usize| order.get(pos).and_then(|&n| keys[n].as_ref());
             let mut last_project: Option<Option<String>> = None;
             // Set after the last stack of a ticket cluster: whatever follows
@@ -537,9 +543,8 @@ impl App {
                         if !matches!(self.rows.last(), None | Some(Row::Repo(_)) | Some(Row::Spacer)) {
                             self.rows.push(Row::Spacer);
                         }
-                        // Rows without a project get the spacer but no header.
-                        if let Some(name) = &project {
-                            self.rows.push(Row::Project(name.clone()));
+                        if project.is_some() || any_project {
+                            self.rows.push(Row::Project(project.clone()));
                         }
                         last_project = Some(project);
                     }
