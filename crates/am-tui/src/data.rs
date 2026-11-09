@@ -500,6 +500,7 @@ impl Worker {
         }
         let mut roots: Vec<String> = views.iter().map(|v| v.worktree.path.clone()).collect();
         let worktree_paths = roots.clone();
+        let worktree_ids: Vec<String> = views.iter().map(|v| v.worktree.id.clone()).collect();
         // Review-only: every worktree, unfiltered, so a pulled PR's ⏎/`d`
         // always find theirs (the dashboard's hide* filters don't apply).
         let total = views.len();
@@ -527,6 +528,7 @@ impl Worker {
             review_total: self.review_total,
             review_query_hits: self.review_hits.clone(),
             worktree_paths,
+            worktree_ids,
             hidden_worktrees,
         };
         if self.last_sent.as_ref() != Some(&snapshot) {

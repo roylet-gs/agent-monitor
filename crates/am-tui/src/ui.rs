@@ -3880,6 +3880,7 @@ mod tests {
             review_total: None,
             review_query_hits: Default::default(),
             worktree_paths: Vec::new(),
+            worktree_ids: Vec::new(),
             hidden_worktrees: 0,
         };
         let settings = Settings { worktree_sort: vec![], ..Settings::default() };
@@ -6939,6 +6940,45 @@ mod tests {
         flat.on_key(Key::Char('z'));
         assert_eq!(flat.notice.as_deref(), Some("No stacked branches to fold"));
         assert!(!render(&flat, 160, 12).contains("fold all"));
+    }
+
+    #[test]
+    fn folds_are_remembered_in_settings() {
+        let mut app = epic_stacks();
+        assert_eq!(app.folds_to_save(), None, "nothing folded, nothing saved");
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "b3").unwrap();
+        app.on_key(Key::Left);
+        assert_eq!(app.folds_to_save(), Some(vec!["b1".to_string()]));
+        // Saved (as main.rs does): nothing more to save.
+        let saved = Settings { collapsed_stacks: vec!["b1".into()], ..app.settings.clone() };
+        app.set_settings(saved.clone());
+        assert_eq!(app.folds_to_save(), None);
+        assert_eq!(app.folded.get("b1"), Some(&2), "still folded after the save");
+        // A restart starts folded.
+        let snapshot = app.snapshot.clone();
+        let mut restarted = App::new(saved.clone());
+        restarted.apply(snapshot.clone());
+        assert_eq!(restarted.folded.get("b1"), Some(&2));
+        assert_eq!(restarted.folds_to_save(), None);
+        // Another window (or a hand edit) folds a different stack.
+        restarted.set_settings(Settings { collapsed_stacks: vec!["c1".into()], ..saved.clone() });
+        assert!(restarted.folded.contains_key("c1") && !restarted.folded.contains_key("b1"));
+        // Pruned once its worktree is gone; never against a list without ids.
+        restarted.apply(Snapshot { worktree_ids: vec!["a1".into(), "b1".into()], ..snapshot.clone() });
+        assert_eq!(restarted.folds_to_save(), Some(vec![]));
+        restarted.apply(Snapshot { worktree_ids: vec!["c1".into()], ..snapshot });
+        assert_eq!(restarted.folds_to_save(), None);
+    }
+
+    #[test]
+    fn save_folds_writes_collapsed_stacks() {
+        let (_guard, dir) = crate::settings_ui::tests::data_dir();
+        let mut app = epic_stacks();
+        assert!(app.save_folds(vec!["b1".into()]));
+        let text = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        assert!(text.contains("\"collapsedStacks\""), "{text}");
+        assert_eq!(app.settings.collapsed_stacks, ["b1"]);
+        assert_eq!(app.folded.get("b1"), Some(&2));
     }
 
     #[test]
