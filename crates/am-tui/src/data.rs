@@ -986,12 +986,22 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
 }
 
 /// Port of `autoSetLinearNicknames`: name un-named worktrees after their
-/// Linear ticket title (user-set names are never touched).
+/// Linear ticket title, and keep the names it set in step when the ticket is
+/// renamed (user-set names are never touched).
 fn auto_nickname(conn: &Connection, ints: &Integrations, worktrees: &[Worktree]) {
-    for w in worktrees.iter().filter(|w| w.custom_name.is_none()) {
-        if let (_, Some(l)) = ints.fields_for(&w.repo_id, &w.branch) {
-            info!("integrations", "Auto-setting nickname for {} from Linear: {:?}", w.branch, l.title);
-            let _ = db::update_worktree_custom_name(conn, &w.id, Some(&l.title), Some("linear"));
+    for w in worktrees {
+        let (_, Some(l)) = ints.fields_for(&w.repo_id, &w.branch) else { continue };
+        match &w.custom_name {
+            None => {
+                info!("integrations", "Auto-setting nickname for {} from Linear: {:?}", w.branch, l.title);
+                let _ = db::update_worktree_custom_name(conn, &w.id, Some(&l.title), Some("linear"));
+            }
+            Some(name) if *name != l.title => {
+                if let Ok(1) = db::sync_linear_nickname(conn, &w.id, &l.title) {
+                    info!("integrations", "Linear ticket for {} renamed; nickname now {:?}", w.branch, l.title);
+                }
+            }
+            Some(_) => {}
         }
     }
 }

@@ -1017,6 +1017,17 @@ pub fn update_worktree_custom_name(
     Ok(())
 }
 
+/// Keep a Linear auto-nickname in step with its ticket title: rewrites the
+/// name only when am set it (`nickname_source = 'linear'`) and it differs, so
+/// user-set names are never touched and an unchanged title writes nothing.
+/// Returns how many rows changed (0 or 1).
+pub fn sync_linear_nickname(conn: &Connection, id: &str, title: &str) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE worktrees SET custom_name = ?1 WHERE id = ?2 AND nickname_source = 'linear' AND custom_name IS NOT ?1",
+        params![title, id],
+    )
+}
+
 /// Put a worktree in the tmp space (or take it out).
 pub fn set_worktree_tmp_space(conn: &Connection, id: &str, tmp_space: bool) -> rusqlite::Result<()> {
     conn.execute("UPDATE worktrees SET tmp_space = ?1 WHERE id = ?2", params![tmp_space as i64, id])?;
@@ -1340,6 +1351,15 @@ mod tests {
         assert_eq!(w2.custom_name.as_deref(), Some("Nick"));
         assert_eq!((w2.path.as_str(), w2.is_main), ("/repo/moved", true));
         assert_eq!(worktree_by_path(&conn, "/repo/moved").unwrap().unwrap().id, w.id);
+
+        // A renamed ticket renames an am-set nickname, once; a user-set one stays.
+        assert_eq!(sync_linear_nickname(&conn, &w.id, "Renamed").unwrap(), 1);
+        assert_eq!(worktree_by_branch(&conn, &r.id, "feature/x").unwrap().unwrap().custom_name.as_deref(), Some("Renamed"));
+        assert_eq!(sync_linear_nickname(&conn, &w.id, "Renamed").unwrap(), 0, "an unchanged title writes nothing");
+        update_worktree_custom_name(&conn, &w.id, Some("Mine"), None).unwrap();
+        assert_eq!(sync_linear_nickname(&conn, &w.id, "Other").unwrap(), 0);
+        assert_eq!(worktree_by_branch(&conn, &r.id, "feature/x").unwrap().unwrap().custom_name.as_deref(), Some("Mine"));
+        update_worktree_custom_name(&conn, &w.id, Some("Nick"), Some("linear")).unwrap();
 
         assert_eq!(clear_linear_nicknames(&conn).unwrap(), 1);
         assert_eq!(worktree_by_branch(&conn, &r.id, "feature/x").unwrap().unwrap().custom_name, None);
