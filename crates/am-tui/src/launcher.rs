@@ -34,6 +34,33 @@ pub enum Msg {
     UpdateAvailable(am_core::update_check::Update),
     /// The update job finished.
     Updated(u64, Result<(), String>),
+    /// A sync job (pull the latest into a review worktree) finished.
+    Synced(u64, Result<am_core::worktrees::UpdateOutcome, String>),
+}
+
+/// Pull the latest of `branch` into the review worktree at `path` (safe:
+/// `worktrees::update_from_origin`), reporting as job `job`.
+pub fn sync_worktree(job: u64, path: String, branch: String, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let _ = tx.send(Msg::JobStep(job, "pulling latest…".into()));
+        let result = am_core::worktrees::update_from_origin(Path::new(&path), &branch);
+        if let Err(e) = &result {
+            am_core::warn!("launcher", kind = "review_sync_failed", "Couldn't pull the latest of {branch} into {path}: {e}");
+        }
+        let _ = tx.send(Msg::Synced(job, result));
+    });
+}
+
+/// The notice for a finished sync of `branch` (`None`: nothing to say).
+pub fn sync_notice(branch: &str, result: &Result<am_core::worktrees::UpdateOutcome, String>) -> Option<String> {
+    use am_core::worktrees::UpdateOutcome as U;
+    Some(match result {
+        Ok(U::UpToDate) => return None,
+        Ok(U::Updated { forced: true, .. }) => format!("↓ {branch}: reset to the force-pushed PR"),
+        Ok(U::Updated { commits, .. }) => format!("↓ {branch}: {commits} new commit{}", if *commits == 1 { "" } else { "s" }),
+        Ok(U::Skipped(why)) => format!("{branch} not updated: {why}"),
+        Err(e) => format!("Couldn't pull the latest of {branch}: {}", e.lines().next().unwrap_or(e)),
+    })
 }
 
 /// Long enough for the popup to register before the editor steals focus.

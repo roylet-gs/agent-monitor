@@ -217,6 +217,24 @@ pub struct ReviewRequest {
     /// the TUI collector; never cached).
     #[serde(skip)]
     pub worktree_id: Option<String>,
+    /// The commit the PR's head branch is at on GitHub (`headRefOid`);
+    /// `None` in a list cached before it was fetched.
+    #[serde(default)]
+    pub head_oid: Option<String>,
+    /// The commit that worktree's HEAD is at (filled in by the TUI
+    /// collector; never cached).
+    #[serde(skip)]
+    pub worktree_head: Option<String>,
+}
+
+impl ReviewRequest {
+    /// Pulled, and GitHub's head commit differs from the worktree's (new
+    /// commits or a force-push; local commits too). Unknown on either side
+    /// never counts.
+    pub fn out_of_sync(&self) -> bool {
+        self.worktree_id.is_some()
+            && matches!((&self.head_oid, &self.worktree_head), (Some(gh), Some(local)) if !gh.is_empty() && gh != local)
+    }
 }
 
 /// A GitHub user who can author PRs in a tracked repo: an autocomplete

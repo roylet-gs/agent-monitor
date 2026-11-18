@@ -335,6 +335,8 @@ mod tests {
             approved_only: false,
             changed_files: None,
             worktree_id: None,
+            head_oid: None,
+            worktree_head: None,
         }
     }
 

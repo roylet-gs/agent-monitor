@@ -105,6 +105,23 @@ test("review requests: badge, page, open, ticket, pull into Reviewing", async ({
   await tui.sendKey("x"); // any key closes the popup
   await tui.waitForGone("Couldn't open");
 
+  // New commits on GitHub: the row says so, and ⏎ pulls the latest into the
+  // worktree first (on its row), then opens it.
+  await setupMock({ prAdvanced: true });
+  await tui.sendKey("r");
+  await tui.waitForText("⇣ new commits", 20_000);
+  expect(await tui.keyBar()).toContain("⏎ update + open");
+  await tui.screenshot("review-out-of-date");
+  await tui.sendKey("Enter");
+  await tui.waitForMatch(/pulling latest…|Couldn't open/, 10_000);
+  expect(await tui.getScreenText()).not.toContain("─Jobs");
+  await tui.waitForText("Couldn't open", 20_000);
+  await tui.sendKey("x");
+  await tui.waitForGone("Couldn't open");
+  await setupMock({ prAdvanced: false });
+  await tui.sendKey("r");
+  await tui.waitForGone("⇣ new commits", 20_000);
+
   // Approved on GitHub: it leaves the search, but while it's still pulled it
   // stays on the page in its own section at the bottom, and the badge drops it.
   await setupMock({ reviews: true, approvedPulled: true, linearByBranch: { "feature/no-ticket": null, "patch-1": null } });

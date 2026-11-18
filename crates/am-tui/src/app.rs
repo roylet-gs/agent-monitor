@@ -106,6 +106,9 @@ pub enum Action {
     OpenReviewWindow,
     /// Enter: open in the configured IDE (resuming the last session if set).
     Open(Box<WorktreeView>),
+    /// Enter on a pulled PR whose head moved on GitHub: job `u64` pulls the
+    /// latest into the worktree, then opens it like [`Action::Open`].
+    SyncAndOpen(u64, Box<WorktreeView>),
     /// `o` / `l` / `p`: PR, Linear ticket, Linear project in the browser/app.
     OpenUrl(String),
     /// A setting was saved; theme/collector need to pick it up.
@@ -952,7 +955,13 @@ impl App {
                 self.notice = Some("Refreshing…".into());
                 return Action::Refresh;
             }
-            C::Open => return self.with_selected(Action::Open),
+            C::Open => {
+                // A Reviewing worktree whose PR moved on GitHub is brought up
+                // to date first.
+                let Some(v) = self.selected_view().cloned() else { return Action::None };
+                let review = v.worktree.tmp_space.then(|| self.review_for_worktree(&v.worktree.id)).flatten().cloned();
+                return self.open_worktree(v, review.as_ref());
+            }
             C::OpenPr => return self.url_action(|v, _| {
                 let pr = v.pr.as_ref()?;
                 // Same rule as the TS app: a merged PR jumps to its last active check.
@@ -1612,8 +1621,9 @@ impl App {
     /// opens its worktree in the IDE, like ⏎ on the dashboard; one that isn't
     /// pulled is pulled into Reviewing like `t`, and a fork's opens the PR.
     fn review_open(&mut self) -> Action {
-        if let Some(v) = self.review_worktree() {
-            return Action::Open(Box::new(v.clone()));
+        if let Some(v) = self.review_worktree().cloned() {
+            let review = self.selected_review().cloned();
+            return self.open_worktree(v, review.as_ref());
         }
         let Some(r) = self.selected_review().cloned() else { return Action::None };
         if r.is_cross_repository {
@@ -1628,6 +1638,31 @@ impl App {
             return Action::None;
         }
         self.pull_review(false)
+    }
+
+    /// The listed PR pulled into worktree `id`.
+    pub fn review_for_worktree(&self, id: &str) -> Option<&ReviewRequest> {
+        self.snapshot.reviews.as_ref()?.iter().find(|r| r.worktree_id.as_deref() == Some(id))
+    }
+
+    /// Open `v` in the IDE; when it holds `review` and that PR's head moved
+    /// on GitHub ([`ReviewRequest::out_of_sync`]), pull the latest into it
+    /// first (a sync job; the row shows `pulling latest…`).
+    fn open_worktree(&mut self, v: WorktreeView, review: Option<&ReviewRequest>) -> Action {
+        if self.jobs.syncing(&v.worktree.id).is_some() {
+            self.notice = Some(format!("Already pulling the latest of {}", v.worktree.branch));
+            return Action::None;
+        }
+        if review.is_some_and(ReviewRequest::out_of_sync) {
+            let job = self.jobs.start_sync(v.clone());
+            return Action::SyncAndOpen(job, Box::new(v));
+        }
+        Action::Open(Box::new(v))
+    }
+
+    /// The running job pulling the latest into `r`'s worktree.
+    pub fn review_sync(&self, r: &ReviewRequest) -> Option<&crate::jobs::Job> {
+        self.jobs.syncing(r.worktree_id.as_deref()?)
     }
 
     fn review_open_pr(&mut self) -> Action {
@@ -1775,10 +1810,6 @@ impl App {
                 Action::None
             }
         }
-    }
-
-    fn with_selected(&self, f: fn(Box<WorktreeView>) -> Action) -> Action {
-        self.selected_view().map(|v| f(Box::new(v.clone()))).unwrap_or(Action::None)
     }
 
 

@@ -131,7 +131,7 @@ pub struct Extras<'a> {
 /// dates, author, repo, your latest review and the pending reviewers.
 fn review_fields() -> String {
     format!(
-        "{} changedFiles createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
+        "{} headRefOid changedFiles createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
          reviewRequests(first: 20) {{ nodes {{ requestedReviewer {{ ... on User {{ login }} \
          ... on Team {{ combinedSlug }} ... on Bot {{ login }} ... on Mannequin {{ login }} }} }} }}",
         pr_selection_counts()
@@ -264,6 +264,8 @@ fn review_from_node(node: &Value, repo_id: &str, repo: &str, viewer: &str) -> Op
         approved_only: false,
         changed_files: node.get("changedFiles").and_then(Value::as_u64),
         worktree_id: None,
+        head_oid: node.get("headRefOid").and_then(Value::as_str).map(str::to_string),
+        worktree_head: None,
     })
 }
 
@@ -566,6 +568,8 @@ pub(crate) mod tests {
         assert!(args[5].contains("checkRunCountsByState") && !args[5].contains("CheckRun {"));
         assert!(args[5].contains("viewerLatestReview { state }"));
         assert!(args[5].contains(" changedFiles "));
+        assert!(args[5].contains(" headRefOid "), "the PR's head commit, to tell a stale pull");
+        assert!(pulled_args(&[Pulled { repo_id: "r".into(), slug: "a/b".into(), branch: "x".into() }]).last().unwrap().contains(" headRefOid "));
         assert_eq!(search_args("q", Some("Y3Vy"), Extras::default())[5], "after=Y3Vy");
         // The unfiltered count and the group queries ride along.
         let queries = vec!["label:urgent".to_string()];
@@ -614,6 +618,7 @@ pub(crate) mod tests {
     fn parses_prs_of_tracked_repos_with_their_reviewers() {
         let mut node = search_node(7, "acme/web", "feature/x", vec![json!({"login": "me"}), json!({"combinedSlug": "acme/frontend"})]);
         node["changedFiles"] = json!(12);
+        node["headRefOid"] = json!("abc123");
         let body = json!({"data": {"viewer": {"login": "me"}, "search": {"nodes": [
             node,
             search_node(8, "other/repo", "y", vec![]),
@@ -626,6 +631,7 @@ pub(crate) mod tests {
         let r = &list[0];
         assert_eq!((r.repo_id.as_str(), r.repo.as_str(), r.pr.number), ("repo-1", "acme/web", 7));
         assert_eq!(r.head_ref_name, "feature/x");
+        assert_eq!(r.head_oid.as_deref(), Some("abc123"));
         assert_eq!(r.author, "alice");
         assert_eq!(r.requested, ["you", "acme/frontend"]);
         assert_eq!(r.pr.checks_status, crate::model::ChecksStatus::Passing);

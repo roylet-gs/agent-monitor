@@ -51,6 +51,12 @@ const APPROVED_PR = 61;
  */
 let changesRequested = false;
 const CHANGES_PR = 62;
+/**
+ * #61's head moved on GitHub: its `headRefOid` is a commit the pulled
+ * worktree doesn't have, so the page shows it out of date.
+ */
+let prAdvanced = false;
+const ADVANCED_OID = "f".repeat(40);
 
 /** The review fixture's PR nodes. */
 function reviewNodes(): Array<Record<string, unknown>> {
@@ -275,6 +281,7 @@ const server = http.createServer(async (req, res) => {
         ? reviewNodes()
             .filter((n) => !(approvedPulled && n.number === APPROVED_PR))
             .map((n) => (changesRequested && n.number === CHANGES_PR ? { ...n, reviewDecision: "CHANGES_REQUESTED" } : n))
+            .map((n) => (prAdvanced && n.number === APPROVED_PR ? { ...n, headRefOid: ADVANCED_OID } : n))
         : [];
       const body = { data: { viewer: { login: "e2e-user" }, search: { nodes } } };
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -418,6 +425,9 @@ const server = http.createServer(async (req, res) => {
       if (config.changesRequested !== undefined) {
         changesRequested = Boolean(config.changesRequested);
       }
+      if (config.prAdvanced !== undefined) {
+        prAdvanced = Boolean(config.prAdvanced);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "configured" }));
     } catch (err) {
@@ -439,6 +449,7 @@ const server = http.createServer(async (req, res) => {
     rateLimited = false;
     approvedPulled = false;
     changesRequested = false;
+    prAdvanced = false;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "reset" }));
     return;

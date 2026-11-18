@@ -469,6 +469,19 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                     }
                     app.jobs.finish(job, result, Instant::now());
                 }
+                launcher::Msg::Synced(job, result) => {
+                    // Opened whatever happened: a failed pull mustn't stop the review.
+                    if let Some(jobs::JobKind::Sync { view, .. }) = app.jobs.get(job).map(|j| j.kind.clone()) {
+                        if let Some(n) = launcher::sync_notice(&view.worktree.branch, &result) {
+                            app.notice = Some(n);
+                            notice_since = None;
+                        }
+                        open_worktree(app, *view, &launch_tx);
+                    }
+                    app.jobs.dismiss(job);
+                    app.rebuild_rows();
+                    collector.rebuild();
+                }
                 launcher::Msg::Deleted(job, id, label, result) => {
                     app.finish_delete(&id, result.is_ok());
                     match result {
@@ -680,6 +693,17 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
 }
 
 /// Run an `Action` from a key or mouse press. Returns `true` to quit.
+/// Open `v` in the IDE (`launcher::open`).
+fn open_worktree(app: &App, v: am_core::model::WorktreeView, launch_tx: &std::sync::mpsc::Sender<launcher::Msg>) {
+    // Every worktree, hidden ones too, so a workspace in a hidden nested
+    // worktree isn't taken for its repo's.
+    let roots = app.snapshot.repos.iter().map(|r| r.path.clone())
+        .chain(app.snapshot.worktree_paths.iter().cloned())
+        .chain(app.snapshot.groups.iter().flat_map(|g| g.worktrees.iter().map(|w| w.worktree.path.clone())))
+        .collect();
+    launcher::open(v, roots, &app.settings, launch_tx.clone())
+}
+
 fn dispatch(
     action: Action,
     terminal: &mut ratatui::DefaultTerminal,
@@ -700,14 +724,10 @@ fn dispatch(
         Action::RefreshReviews => collector.refresh_reviews(),
         Action::ReloadReviews => collector.reload_reviews(),
         Action::LoadReviewPeople => collector.refresh_people(),
-        Action::Open(v) => {
-            // Every worktree, hidden ones too, so a workspace in a hidden
-            // nested worktree isn't taken for its repo's.
-            let roots = app.snapshot.repos.iter().map(|r| r.path.clone())
-                .chain(app.snapshot.worktree_paths.iter().cloned())
-                .chain(app.snapshot.groups.iter().flat_map(|g| g.worktrees.iter().map(|w| w.worktree.path.clone())))
-                .collect();
-            launcher::open(*v, roots, &app.settings, launch_tx.clone())
+        Action::Open(v) => open_worktree(app, *v, launch_tx),
+        Action::SyncAndOpen(job, v) => {
+            app.rebuild_rows();
+            launcher::sync_worktree(job, v.worktree.path.clone(), v.worktree.branch.clone(), launch_tx.clone())
         }
         Action::OpenUrl(url) => launcher::open_url(url, launch_tx.clone()),
         Action::SettingsChanged => {
