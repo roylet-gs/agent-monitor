@@ -339,7 +339,7 @@ Pulling a PR into **Reviewing** (a checkout of someone else's branch, tracking o
 
 | Key | Action |
 | --- | ------ |
-| `Enter` | On a pulled PR, open its worktree in your IDE (just like `Enter` on the dashboard); otherwise pull it into Reviewing, like `t` (a PR from a fork, which can't be pulled, opens in the browser). Clicking the selected row (or double-clicking one) does the same |
+| `Enter` | On a pulled PR, open its worktree in your IDE (just like `Enter` on the dashboard); otherwise pull it into Reviewing, like `t` (a PR from a fork, which can't be pulled, opens in the browser). Clicking the selected row (or double-clicking one) does the same. If someone pushed to the PR since you pulled it, the row reads `⇣ new commits`, and `Enter` first pulls the latest into the worktree (the row shows `pulling latest…`) and then opens it. A worktree that is clean, with no commits of your own, is moved to the PR's head, even after a force-push. With local changes it is only fast-forwarded, and if that isn't possible it is left as it is (a notice says why). `Enter` on its row in the dashboard's `Reviewing` group does the same |
 | `g` / `o` | Open the PR in the browser |
 | `l` | Open its Linear ticket |
 | `t` | Pull its branch into **Reviewing**. You stay on the page, so you can go down the list pulling several; the row shows `pulling…` and then `✓ pulled` (or `✗ pull failed`, and `t` tries again). On a PR that's already pulled, `t` selects that worktree on the dashboard (beside the list, the list takes the keys); a PR from a fork can't be pulled |

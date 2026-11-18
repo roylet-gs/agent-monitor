@@ -245,6 +245,73 @@ pub fn fetch_and_reset_branch(repo_path: &Path, branch: &str) -> bool {
     true
 }
 
+/// What [`update_from_origin`] did to a worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateOutcome {
+    /// HEAD already was `origin/<branch>`.
+    UpToDate,
+    /// Moved to `origin/<branch>`: `commits` new ones, `forced` when origin
+    /// was rewritten (force-push) and the worktree was reset to it.
+    Updated { commits: usize, forced: bool },
+    /// Left alone, with the reason (local commits, or local changes on a
+    /// rewritten branch).
+    Skipped(String),
+}
+
+/// How long the fetch in [`update_from_origin`] may take.
+const UPDATE_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Bring a review worktree up to `origin/<branch>` without losing work:
+/// fetch, then a clean worktree with no commits of its own is reset to
+/// origin (which also follows a force-push), one with local changes is only
+/// fast-forwarded, and one that can't be fast-forwarded is left alone
+/// ([`UpdateOutcome::Skipped`]). `Err` when the fetch fails, origin no
+/// longer has the branch, or git refuses the update.
+pub fn update_from_origin(worktree: &Path, branch: &str) -> Result<UpdateOutcome, String> {
+    let remote_ref = format!("refs/remotes/origin/{branch}");
+    let rev = |r: &str| git(worktree, &["rev-parse", "--verify", "--quiet", r]).ok().map(|s| s.trim().to_string());
+    let old = rev(&remote_ref);
+    let fetch = run_git(worktree, &["fetch", "origin", branch], Some(UPDATE_FETCH_TIMEOUT))?;
+    if fetch.timed_out {
+        return Err(format!("git fetch origin {branch} timed out"));
+    }
+    if fetch.code != Some(0) {
+        return Err(format!("git fetch origin {branch} failed: {}", fetch.stderr.trim()));
+    }
+    let new = rev(&remote_ref).ok_or_else(|| format!("origin has no branch {branch}"))?;
+    let head = rev("HEAD").ok_or_else(|| "the worktree has no HEAD".to_string())?;
+    if head == new {
+        debug!("git", "{} is up to date with origin/{branch}", worktree.display());
+        return Ok(UpdateOutcome::UpToDate);
+    }
+    let fast_forward = git_ok(worktree, &["merge-base", "--is-ancestor", &head, &new]);
+    let clean = git(worktree, &["status", "--porcelain"]).map(|s| s.trim().is_empty()).unwrap_or(false);
+    let no_local_commits = fast_forward || old.as_deref() == Some(head.as_str());
+    let commits = |from: &str| {
+        git(worktree, &["rev-list", "--count", &format!("{from}..{new}")]).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0)
+    };
+    let outcome = if clean && no_local_commits {
+        let n = commits(&head);
+        git(worktree, &["reset", "--hard", &new])?;
+        UpdateOutcome::Updated { commits: n, forced: !fast_forward }
+    } else if fast_forward {
+        let n = commits(&head);
+        git(worktree, &["merge", "--ff-only", &new])?;
+        UpdateOutcome::Updated { commits: n, forced: false }
+    } else if no_local_commits {
+        UpdateOutcome::Skipped("it has local changes and the PR was force-pushed".into())
+    } else {
+        UpdateOutcome::Skipped("it has local commits".into())
+    };
+    match &outcome {
+        UpdateOutcome::Updated { commits, forced } => {
+            info!("git", "Updated {} to origin/{branch} ({commits} new commit(s){})", worktree.display(), if *forced { ", force-pushed" } else { "" })
+        }
+        o => info!("git", "Left {} as is: {o:?}", worktree.display()),
+    }
+    Ok(outcome)
+}
+
 /// `recoverDetachedBranch`: a worktree mid-rebase shows as detached in
 /// `git worktree list`; the branch being rebased is in
 /// `<git-dir>/rebase-merge/head-name` (or `rebase-apply/head-name`).
@@ -1648,6 +1715,100 @@ mod tests {
         let wt = fx.create("mine", CreateMode::ReuseLocal).unwrap();
         assert!(Path::new(&wt.path).join("mine.txt").exists());
         assert_eq!(fx.upstream(&fx.repo_path, "mine"), None);
+    }
+
+    // --- update_from_origin (opening a review worktree) ---
+
+    /// A tracked worktree of origin-only `branch`, and the clone that pushes
+    /// to it.
+    fn review_fx(fx: &Fx, branch: &str) -> (PathBuf, PathBuf) {
+        fx.remote_only_branch(branch);
+        let wt = fx.create(branch, CreateMode::TrackRemote).unwrap();
+        (PathBuf::from(wt.path), fx.root.join(format!("other-{}", branch.replace('/', "-"))))
+    }
+
+    fn push_commit(other: &Path, branch: &str, file: &str) {
+        std::fs::write(other.join(file), "x\n").unwrap();
+        sh(other, &["add", "."]);
+        sh(other, &["commit", "-m", file]);
+        sh(other, &["push", "origin", branch]);
+    }
+
+    /// Rewrite the branch on origin: a new commit in place of its last one.
+    fn force_push(other: &Path, branch: &str) {
+        sh(other, &["reset", "--hard", "HEAD~1"]);
+        std::fs::write(other.join("rewritten.txt"), "w\n").unwrap();
+        sh(other, &["add", "."]);
+        sh(other, &["commit", "-m", "rewritten"]);
+        sh(other, &["push", "-f", "origin", branch]);
+    }
+
+    #[test]
+    fn update_from_origin_is_a_no_op_when_up_to_date() {
+        let fx = Fx::new();
+        let (wt, _) = review_fx(&fx, "pr");
+        assert_eq!(update_from_origin(&wt, "pr"), Ok(UpdateOutcome::UpToDate));
+    }
+
+    #[test]
+    fn update_from_origin_fast_forwards_new_commits() {
+        let fx = Fx::new();
+        let (wt, other) = review_fx(&fx, "pr");
+        push_commit(&other, "pr", "a.txt");
+        push_commit(&other, "pr", "b.txt");
+        assert_eq!(update_from_origin(&wt, "pr"), Ok(UpdateOutcome::Updated { commits: 2, forced: false }));
+        assert!(wt.join("b.txt").exists());
+    }
+
+    #[test]
+    fn update_from_origin_follows_a_force_push_when_clean() {
+        let fx = Fx::new();
+        let (wt, other) = review_fx(&fx, "pr");
+        force_push(&other, "pr");
+        assert_eq!(update_from_origin(&wt, "pr"), Ok(UpdateOutcome::Updated { commits: 1, forced: true }));
+        assert!(wt.join("rewritten.txt").exists() && !wt.join("remote.txt").exists());
+    }
+
+    #[test]
+    fn update_from_origin_keeps_local_changes_on_a_force_push() {
+        let fx = Fx::new();
+        let (wt, other) = review_fx(&fx, "pr");
+        std::fs::write(wt.join("README"), "edited\n").unwrap();
+        force_push(&other, "pr");
+        assert!(matches!(update_from_origin(&wt, "pr"), Ok(UpdateOutcome::Skipped(_))));
+        assert_eq!(std::fs::read_to_string(wt.join("README")).unwrap(), "edited\n");
+        assert!(wt.join("remote.txt").exists());
+    }
+
+    #[test]
+    fn update_from_origin_fast_forwards_around_unrelated_local_edits() {
+        let fx = Fx::new();
+        let (wt, other) = review_fx(&fx, "pr");
+        std::fs::write(wt.join("README"), "edited\n").unwrap();
+        push_commit(&other, "pr", "a.txt");
+        assert_eq!(update_from_origin(&wt, "pr"), Ok(UpdateOutcome::Updated { commits: 1, forced: false }));
+        assert_eq!(std::fs::read_to_string(wt.join("README")).unwrap(), "edited\n");
+        assert!(wt.join("a.txt").exists());
+    }
+
+    #[test]
+    fn update_from_origin_leaves_local_commits_alone() {
+        let fx = Fx::new();
+        let (wt, other) = review_fx(&fx, "pr");
+        std::fs::write(wt.join("mine.txt"), "m\n").unwrap();
+        sh(&wt, &["add", "."]);
+        sh(&wt, &["commit", "-m", "mine"]);
+        push_commit(&other, "pr", "a.txt");
+        assert!(matches!(update_from_origin(&wt, "pr"), Ok(UpdateOutcome::Skipped(_))));
+        assert!(wt.join("mine.txt").exists() && !wt.join("a.txt").exists());
+    }
+
+    #[test]
+    fn update_from_origin_errors_when_origin_lost_the_branch() {
+        let fx = Fx::new();
+        let (wt, other) = review_fx(&fx, "pr");
+        sh(&other, &["push", "origin", "--delete", "pr"]);
+        assert!(update_from_origin(&wt, "pr").is_err());
     }
 
     #[test]

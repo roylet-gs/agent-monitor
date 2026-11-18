@@ -2281,7 +2281,7 @@ fn draw_reviews(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, h
                 let repo = tag_repos
                     .then(|| app.snapshot.repos.iter().find(|x| x.id == r.repo_id).map_or(r.repo.as_str(), |x| x.name.as_str()));
                 // The pull, then (once pulled) a review script it runs.
-                let pull = app.review_pull(r).or_else(|| app.review_script_job(r));
+                let pull = app.review_sync(r).or_else(|| app.review_pull(r)).or_else(|| app.review_script_job(r));
                 // A pulled PR's worktree with an agent in it: its status dot, as on the dashboard.
                 let agent = r.worktree_id.as_deref().and_then(|id| {
                     app.snapshot.groups.iter().flat_map(|g| &g.worktrees).find(|v| v.worktree.id == id).and_then(|v| v.status())
@@ -2460,7 +2460,10 @@ fn review_line<'a>(
         Some(_) => tags.push((" ✓ pulled".into(), theme.fg(theme.teal))),
         None => {}
     }
-    if let Some(job) = pull.filter(|_| r.worktree_id.is_some()) {
+    if pull.is_some_and(|j| matches!(j.kind, crate::jobs::JobKind::Sync { .. })) {
+        // ⏎ on an out-of-date PR: its latest is pulled, then the IDE opens.
+        tags.push((format!(" {} pulling latest…", spinner(now)), theme.fg(theme.green)));
+    } else if let Some(job) = pull.filter(|_| r.worktree_id.is_some()) {
         // Pulled: the job is running the review script.
         tags.push(match &job.state {
             crate::jobs::JobState::Failed(_) => (" ✗ script failed".into(), theme.fg(theme.red)),
@@ -2479,6 +2482,10 @@ fn review_line<'a>(
                 (format!(" {} pulling…{step}", spinner(now)), theme.fg(theme.green))
             }
         });
+    }
+    if pull.is_none() && r.out_of_sync() && !r.worktree_id.as_deref().is_some_and(deleting) {
+        // GitHub's head moved since it was pulled: ⏎ pulls the latest first.
+        tags.push((if words { " ⇣ new commits" } else { " ⇣" }.into(), theme.fg(theme.yellow)));
     }
     if r.is_cross_repository {
         tags.push((" fork".into(), theme.faint()));
@@ -3384,6 +3391,7 @@ fn review_actions(app: &App) -> ActionBar {
     let split = app.reviews.as_ref().is_some_and(|p| p.split);
     // ⏎ opens a pulled PR's worktree, pulls one that isn't, and opens a fork's PR.
     let enter = match app.selected_review() {
+        Some(r) if app.review_worktree().is_some() && r.out_of_sync() => "update + open",
         _ if app.review_worktree().is_some() => "open",
         Some(r) if !r.is_cross_repository => "pull",
         _ => "open PR",
@@ -3630,6 +3638,8 @@ fn draw_review_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::ke
     lines.push(Line::from(vec![
         Span::styled("✓ pulled", theme.fg(theme.green)),
         Span::styled(" checked out in a worktree (⏎ opens it, d removes it)  ", theme.faint()),
+        Span::styled("⇣ new commits", theme.fg(theme.yellow)),
+        Span::styled(" pushed since: ⏎ pulls them, then opens it  ", theme.faint()),
         Span::styled("fork", theme.faint()),
         Span::styled(" from a fork: ⏎ opens the PR", theme.faint()),
     ]));
@@ -4856,6 +4866,47 @@ mod tests {
         assert_eq!(app.on_key(Key::Char('v')), crate::app::Action::RefreshReviews);
         insta::assert_snapshot!("review_page_wide", render(&app, 120, 10));
         insta::assert_snapshot!("review_page_narrow", render(&app, 80, 10));
+    }
+
+    #[test]
+    fn enter_on_an_out_of_date_pull_pulls_the_latest_then_opens() {
+        use crate::app::Action;
+        let mut app = by_repo();
+        let mut snap = app.snapshot.clone();
+        for r in snap.reviews.iter_mut().flatten().filter(|r| r.pr.number == 51) {
+            r.head_oid = Some("b".repeat(40));
+            r.worktree_head = Some("a".repeat(40));
+        }
+        for v in snap.groups.iter_mut().flat_map(|g| &mut g.worktrees).filter(|v| v.worktree.id == "w1") {
+            v.worktree.tmp_space = true;
+        }
+        app.apply(snap);
+        app.on_key(Key::Char('v'));
+        assert_eq!(app.selected_review().unwrap().pr.number, 51);
+        let screen = render(&app, 120, 10);
+        assert!(screen.contains("✓ pulled ⇣ new commits"), "{screen}");
+        assert!(screen.lines().last().unwrap().contains("⏎ update + open"), "{screen}");
+        assert!(render(&app, 80, 10).contains("✓ pulled ⇣"));
+        // ⏎ pulls the latest first; the row says so, and a second ⏎ waits.
+        let Action::SyncAndOpen(job, v) = app.on_key(Key::Enter) else { panic!("expected a sync") };
+        assert_eq!(v.worktree.id, "w1");
+        let screen = render(&app, 120, 10);
+        assert!(screen.contains("pulling latest…") && !screen.contains("⇣ new commits") && !screen.contains("─Jobs"), "{screen}");
+        assert_eq!(app.on_key(Key::Enter), Action::None);
+        assert!(app.notice.as_deref().unwrap().contains("Already pulling the latest"));
+        // On the dashboard too, for its Reviewing row.
+        app.jobs.dismiss(job);
+        app.on_key(Key::Esc);
+        app.selected = app.flat.iter().position(|v| v.worktree.id == "w1").unwrap();
+        assert!(matches!(app.on_key(Key::Enter), Action::SyncAndOpen(_, v) if v.worktree.id == "w1"));
+        // In sync: straight to the IDE.
+        let mut snap = app.snapshot.clone();
+        for r in snap.reviews.iter_mut().flatten() {
+            r.worktree_head = r.head_oid.clone();
+        }
+        app.apply(snap);
+        app.jobs = Default::default();
+        assert!(matches!(app.on_key(Key::Enter), Action::Open(_)));
     }
 
     #[test]

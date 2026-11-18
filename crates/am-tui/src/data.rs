@@ -57,6 +57,9 @@ enum Cmd {
     RefreshPeople,
     /// Clear the review caches, then fetch again (`r` on the review page).
     ReloadReviews,
+    /// Rebuild the snapshot on the next tick (a worktree's HEAD moved, e.g.
+    /// a review worktree was brought up to date).
+    Rebuild,
     Settings(Box<Settings>),
     Quit,
 }
@@ -116,6 +119,11 @@ impl Collector {
     pub fn refresh(&self, force: bool) {
         let _ = self.cmd.send(Cmd::Refresh { force });
         let _ = self.int_cmd.send(Cmd::Refresh { force });
+    }
+
+    /// Rebuild the snapshot now, without refetching anything.
+    pub fn rebuild(&self) {
+        let _ = self.cmd.send(Cmd::Rebuild);
     }
 
     /// Fetch review requests now (the review page opened).
@@ -267,6 +275,7 @@ impl Worker {
                 }
                 Ok(Cmd::Refresh { force: f }) => force = f,
                 Ok(Cmd::RefreshReviews | Cmd::RefreshPeople | Cmd::ReloadReviews) => {}
+                Ok(Cmd::Rebuild) => self.data_version = -1,
                 Ok(Cmd::Settings(s)) => {
                     // Filters/sort/process filter may have changed: rebuild now.
                     self.settings = *s;
@@ -561,10 +570,11 @@ impl Worker {
     fn reviews_with_worktrees(&self, views: &[WorktreeView]) -> Option<Vec<ReviewRequest>> {
         let mut list = self.reviews.clone()?;
         for r in &mut list {
-            r.worktree_id = views
-                .iter()
-                .find(|v| v.worktree.repo_id == r.repo_id && v.worktree.branch == r.head_ref_name)
-                .map(|v| v.worktree.id.clone());
+            let v = views.iter().find(|v| v.worktree.repo_id == r.repo_id && v.worktree.branch == r.head_ref_name);
+            r.worktree_id = v.map(|v| v.worktree.id.clone());
+            // Read from the git files (no spawn), so it works in review-only
+            // mode too, where the collector runs no git status.
+            r.worktree_head = v.and_then(|v| am_core::gitinfo::head_oid(std::path::Path::new(&v.worktree.path)));
         }
         // Listed only to remind you to remove the worktree: gone with it.
         list.retain(|r| !r.approved_only || r.worktree_id.is_some());
@@ -813,6 +823,7 @@ fn run_integrations(mut settings: Settings, cmds: Receiver<Cmd>, tx: Sender<Inte
             Ok(Cmd::Refresh { force: f }) => force = f,
             Ok(Cmd::RefreshReviews) => reviews_now = true,
             Ok(Cmd::RefreshPeople) => people_now = true,
+            Ok(Cmd::Rebuild) => {}
             Ok(Cmd::ReloadReviews) => {
                 ints.forget_reviews(&conn);
                 // Show "Loading…" now rather than the old list until GitHub answers.

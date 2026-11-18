@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use am_core::model::Repository;
+use am_core::model::{Repository, WorktreeView};
 use am_core::worktrees::{CreateMode, CreateRequest};
 
 use crate::app::Key;
@@ -29,6 +29,9 @@ pub enum JobKind {
     Delete { worktree_id: String },
     /// Installing release `latest` (a click on the update notice).
     Update { latest: String },
+    /// Pulling the latest of a pulled PR into its review worktree before
+    /// opening it (`view`) in the IDE.
+    Sync { worktree_id: String, view: Box<WorktreeView> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +143,17 @@ impl Jobs {
 
     pub fn start_update(&mut self, latest: &str) -> u64 {
         self.push(JobKind::Update { latest: latest.to_string() }, format!("Update am to v{latest}"))
+    }
+
+    /// Bring `view`'s review worktree up to date, then open it.
+    pub fn start_sync(&mut self, view: WorktreeView) -> u64 {
+        let label = format!("Pull the latest of {}", view.worktree.branch);
+        self.push(JobKind::Sync { worktree_id: view.worktree.id.clone(), view: Box::new(view) }, label)
+    }
+
+    /// The job pulling the latest into worktree `id`, while it runs.
+    pub fn syncing(&self, id: &str) -> Option<&Job> {
+        self.list.iter().find(|j| j.state == JobState::Running && matches!(&j.kind, JobKind::Sync { worktree_id, .. } if worktree_id == id))
     }
 
     /// The release an update job is installing right now, if any.

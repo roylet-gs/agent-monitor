@@ -34,6 +34,8 @@ interface MockSetupConfig {
   approvedPulled?: boolean;
   /** #62's review decision reads CHANGES_REQUESTED (a status change). */
   changesRequested?: boolean;
+  /** #61's head commit moved on GitHub (a `headRefOid` its pulled worktree doesn't have). */
+  prAdvanced?: boolean;
 }
 
 /** Configure mock-api fixtures for the current test. */

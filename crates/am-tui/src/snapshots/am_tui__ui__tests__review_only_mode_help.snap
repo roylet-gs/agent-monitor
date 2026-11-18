@@ -23,8 +23,8 @@ expression: help
 │                   │          q  esc  quit                                                        │                   │
 │                   │             tab  focus the jobs pane (pulls and removals)                    │                   │
 │                   │                                                                              │                   │
-│                   │✓ pulled checked out in a worktree (⏎ opens it, d removes it)  fork from a    │                   │
-│                   │fork: ⏎ opens the PR                                                          │                   │
+│                   │✓ pulled checked out in a worktree (⏎ opens it, d removes it)  ⇣ new commits  │                   │
+│                   │pushed since: ⏎ pulls them, then opens it  fork from a fork: ⏎ opens the PR   │                   │
 │                   │12 files (12f when narrow): how many files the PR changes                     │                   │
 │                   │PR approved=CI ✓  approved=CI ✗/◌  conflicts  changes  review=awaiting        │                   │
 │                   │closed=not merged                                                             │                   │

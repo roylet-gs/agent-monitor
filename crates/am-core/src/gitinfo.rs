@@ -82,6 +82,35 @@ pub fn git_dirs(worktree: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((dir, common))
 }
 
+/// The commit a worktree's HEAD points at, read from its git files (HEAD,
+/// then the branch's loose ref, then `packed-refs`) without spawning git.
+/// `None` when it can't be found (no git dir, unborn branch).
+pub fn head_oid(worktree: &Path) -> Option<String> {
+    let (dir, common) = git_dirs(worktree)?;
+    let head = std::fs::read_to_string(dir.join("HEAD")).ok()?;
+    let head = head.trim();
+    let Some(name) = head.strip_prefix("ref: ") else {
+        return is_oid(head).then(|| head.to_string());
+    };
+    for base in [&dir, &common] {
+        if let Ok(oid) = std::fs::read_to_string(base.join(name)) {
+            let oid = oid.trim();
+            if is_oid(oid) {
+                return Some(oid.to_string());
+            }
+        }
+    }
+    let packed = std::fs::read_to_string(common.join("packed-refs")).ok()?;
+    packed.lines().find_map(|l| {
+        let (oid, r) = l.split_once(' ')?;
+        (r == name && is_oid(oid)).then(|| oid.to_string())
+    })
+}
+
+fn is_oid(s: &str) -> bool {
+    (40..=64).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// What [`signature`] looks at, each `(mtime, len)` or `None` when missing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signature(Vec<Option<(SystemTime, u64)>>);
@@ -237,5 +266,28 @@ mod tests {
             sh(wt, &["commit", "-q", "--allow-empty", "-m", "two"]);
             assert_ne!(signature(wt).unwrap(), before, "a commit in {}", wt.display());
         }
+    }
+
+    #[test]
+    fn head_oid_reads_loose_packed_linked_and_detached_heads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("r");
+        std::fs::create_dir(&repo).unwrap();
+        sh(&repo, &["init", "-q"]);
+        sh(&repo, &["commit", "-q", "--allow-empty", "-m", "one"]);
+        let rev = |dir: &Path| {
+            let o = Command::new("git").arg("-C").arg(dir).args(["rev-parse", "HEAD"]).output().unwrap();
+            String::from_utf8_lossy(&o.stdout).trim().to_string()
+        };
+        assert_eq!(head_oid(&repo).as_deref(), Some(rev(&repo).as_str()), "loose ref");
+        let linked = tmp.path().join("wt");
+        sh(&repo, &["worktree", "add", "-q", "-b", "feature/x", linked.to_str().unwrap()]);
+        sh(&linked, &["commit", "-q", "--allow-empty", "-m", "two"]);
+        assert_eq!(head_oid(&linked).as_deref(), Some(rev(&linked).as_str()), "linked worktree");
+        sh(&repo, &["pack-refs", "--all"]);
+        assert_eq!(head_oid(&linked).as_deref(), Some(rev(&linked).as_str()), "packed ref");
+        sh(&linked, &["checkout", "-q", "--detach"]);
+        assert_eq!(head_oid(&linked).as_deref(), Some(rev(&linked).as_str()), "detached");
+        assert_eq!(head_oid(tmp.path()), None);
     }
 }
