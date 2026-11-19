@@ -463,6 +463,7 @@ pub(crate) mod tests {
                 checks_waiting: false,
                 base_ref_name: None,
                 mergeable: None,
+                changed_files: None,
             };
             f(&mut pr);
             self.pr = Some(pr);

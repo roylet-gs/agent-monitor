@@ -93,7 +93,11 @@ pub struct Settings {
     /// `WORKTREE_GIT_FILTERS`: local changes or not.
     pub worktree_filter_git: String,
     pub show_pr_status: bool,
+    /// The PR's changed-file count in its own column (`12 files`).
+    pub show_pr_files: bool,
     pub show_linear_ticket: bool,
+    /// The Linear ticket's state (`In Progress`, `Done`…) beside it.
+    pub show_linear_status: bool,
     pub show_git_ahead_behind: bool,
     pub show_last_commit: bool,
     pub show_running_processes: bool,
@@ -250,7 +254,9 @@ impl Default for Settings {
             worktree_filter_pr: "any".into(),
             worktree_filter_git: "any".into(),
             show_pr_status: true,
+            show_pr_files: true,
             show_linear_ticket: true,
+            show_linear_status: true,
             show_git_ahead_behind: true,
             show_last_commit: true,
             show_running_processes: false,
@@ -783,6 +789,9 @@ mod tests {
         assert!(!Settings::parse(r#"{"dailyTokensScope":"bogus"}"#).daily_tokens_visible_only());
         assert!(Settings::parse(r#"{"dailyTokensScope":"visible"}"#).daily_tokens_visible_only());
         assert!(!Settings::parse(r#"{"showDailyTokens":false}"#).show_daily_tokens);
+        assert!(d.show_pr_files && d.show_linear_status);
+        let off = Settings::parse(r#"{"showPrFiles":false,"showLinearStatus":false}"#);
+        assert!(!off.show_pr_files && !off.show_linear_status);
         assert_eq!(d.daily_tokens_mode(), DailyTokensMode::Tokens);
         assert_eq!(Settings::parse(r#"{"dailyTokensMode":"bogus"}"#).daily_tokens_mode(), DailyTokensMode::Tokens);
         assert_eq!(Settings::parse(r#"{"dailyTokensMode":"cost"}"#).daily_tokens_mode(), DailyTokensMode::Cost);

@@ -115,7 +115,10 @@ pub struct PrInfo {
     /// MERGEABLE | CONFLICTING | UNKNOWN (GitHub computes it lazily).
     /// (Rust-only; absent in payloads written by the TS app.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mergeable: Option<String>,
+    pub mergeable: Option<String>,    /// Files the PR changes (GitHub's `changedFiles`), a size hint; `None`
+    /// until fetched. (Rust-only; absent in payloads written by the TS app.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_files: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -375,6 +378,11 @@ mod tests {
         let pr = r#"{"number":127,"title":"t","url":"u","state":"OPEN","isDraft":false,"reviewDecision":"","hasFeedback":false,"checksStatus":"passing","activeCheckUrl":null,"activeCheckName":null,"checksWaiting":false}"#;
         let pr: PrInfo = serde_json::from_str(pr).unwrap();
         assert_eq!(pr.checks_status, ChecksStatus::Passing);
+        assert_eq!(pr.changed_files, None);
+        // Rust-only and camelCase; left out of the payload while unknown.
+        assert!(!serde_json::to_string(&pr).unwrap().contains("changedFiles"));
+        let sized = PrInfo { changed_files: Some(12), ..pr };
+        assert!(serde_json::to_string(&sized).unwrap().contains(r#""changedFiles":12"#));
 
         let li = r##"{"identifier":"ENG-1","title":"t","url":"u","state":{"name":"In Progress","color":"#f00","type":"started"},"priorityLabel":"High","assignee":null,"project":{"id":"p","name":"Q4"},"prAttachment":null}"##;
         let li: LinearInfo = serde_json::from_str(li).unwrap();

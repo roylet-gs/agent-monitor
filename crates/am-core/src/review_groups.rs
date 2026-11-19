@@ -322,6 +322,7 @@ mod tests {
                 checks_waiting: false,
                 base_ref_name: Some("main".into()),
                 mergeable: None,
+                changed_files: None,
             },
             author: author.into(),
             head_ref_name: format!("feature/{number}"),

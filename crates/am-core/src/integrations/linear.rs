@@ -343,6 +343,7 @@ pub fn attachment_to_pr_info(attachment: &LinearPrAttachment) -> PrInfo {
         checks_waiting: false,
         base_ref_name: None,
         mergeable: None,
+        changed_files: None,
     }
 }
 

@@ -1957,7 +1957,11 @@ fn usd_label(usd: f64, unpriced: bool) -> String {
 
 struct Columns {
     ticket: usize,
+    /// The ticket's Linear state (`In Progress`), after the ticket.
+    status: usize,
     pr: usize,
+    /// The PR's changed-file count (`12 files`), after the PR.
+    files: usize,
     /// Review state as a word (`approved`, `changes`…) rather than a glyph.
     pr_words: bool,
     git: usize,
@@ -1965,6 +1969,32 @@ struct Columns {
     /// Context bar cells (0 hides the column); the token count follows it.
     ctx_bar: usize,
     ctx_window: u64,
+}
+
+/// Columns a row's name keeps for itself (selection bar, status glyph and
+/// the start of the name) before the optional columns give way.
+const NAME_ROOM: usize = 24;
+
+impl Columns {
+    /// Width of the right-hand columns, as `worktree_line` lays them out.
+    fn width(&self) -> usize {
+        let cols = [self.ticket, self.status, self.pr, self.files, self.git, self.age];
+        let ctx = if self.ctx_bar > 0 { 1 + self.ctx_bar + if compact() { 0 } else { 5 } } else { 0 };
+        cols.iter().filter(|&&w| w > 0).map(|w| 1 + w).sum::<usize>() + ctx + 1
+    }
+
+    /// Drop the ticket-status column, then the file count, while the name
+    /// (past a `tree`-wide prefix) would get less than [`NAME_ROOM`], so a
+    /// narrow pane (the list beside the review page) keeps its branch names.
+    fn make_room(&mut self, width: usize, tree: usize) {
+        let fits = |c: &Columns| c.width() + tree + NAME_ROOM <= width;
+        if !fits(self) {
+            self.status = 0;
+        }
+        if !fits(self) {
+            self.files = 0;
+        }
+    }
 }
 
 fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64, hits: &mut Vec<Hit>) {
@@ -2051,9 +2081,19 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
 
     let s = &app.settings;
     let pr_words = wide(inner.width);
-    let cols = Columns {
+    let mut cols = Columns {
         ticket: if s.show_linear_ticket { app.flat.iter().map(|v| ticket_text(v).width()).max().unwrap_or(0) } else { 0 },
+        status: if s.show_linear_status {
+            app.flat.iter().map(|v| ticket_status_text(v, pr_words).width()).max().unwrap_or(0)
+        } else {
+            0
+        },
         pr: if s.show_pr_status { app.flat.iter().map(|v| pr_text(v.pr.as_ref(), pr_words).width()).max().unwrap_or(0) } else { 0 },
+        files: if s.show_pr_files {
+            app.flat.iter().map(|v| files_text(pr_files(v), pr_words).width()).max().unwrap_or(0)
+        } else {
+            0
+        },
         pr_words,
         // Compact: no git or last-commit columns.
         git: if s.show_git_ahead_behind && !compact() { app.flat.iter().map(|v| git_text(v).width()).max().unwrap_or(0) } else { 0 },
@@ -2067,6 +2107,7 @@ fn draw_worktrees(f: &mut Frame, app: &App, theme: &Theme, area: Rect, now: i64,
         },
         ctx_window: s.context_window_tokens,
     };
+    cols.make_room(inner.width as usize, app.tree.iter().map(|t| t.width()).max().unwrap_or(0));
 
     let height = inner.height as usize;
     let start = list_start(app, height);
@@ -2302,8 +2343,8 @@ fn reset_text(e: &am_core::model::ReviewFetchError, now: i64) -> Option<String> 
 /// Who the review is pending from, kept short (the column matters less
 /// than the title and author): `you` when you're asked by name, else the
 /// first reviewer (`@team` for a team), then `+N` for the rest.
-/// A review row's size hint: `12 files` (`12f` when narrow), empty when
-/// unknown (a list cached before the count was fetched).
+/// A PR's size hint, on review and worktree rows: `12 files` (`12f` when
+/// narrow), empty when unknown (cached before the count was fetched).
 fn files_text(n: Option<u64>, words: bool) -> String {
     match n {
         None => String::new(),
@@ -2590,9 +2631,18 @@ fn worktree_line<'a>(
         right.push(Span::raw(" "));
         right.push(Span::styled(pad(&ticket_text(v), cols.ticket), theme.fg(theme.blue)));
     }
+    if cols.status > 0 {
+        right.push(Span::raw(" "));
+        let color = v.linear.as_ref().map_or(theme.faint(), |l| ticket_status_style(&l.state.kind, theme));
+        right.push(Span::styled(pad(&ticket_status_text(v, cols.pr_words), cols.status), color));
+    }
     if cols.pr > 0 {
         right.push(Span::raw(" "));
         right.extend(pr_spans(v.pr.as_ref(), theme, cols.pr, cols.pr_words));
+    }
+    if cols.files > 0 {
+        right.push(Span::raw(" "));
+        right.push(Span::styled(format!("{:>w$}", files_text(pr_files(v), cols.pr_words), w = cols.files), theme.faint()));
     }
     if cols.git > 0 {
         right.push(Span::raw(" "));
@@ -2813,7 +2863,7 @@ fn session_line<'a>(
 
     // Same right-hand layout as `worktree_line`, blank but for the context bar.
     let mut blank = 0;
-    for w in [cols.ticket, cols.pr, cols.git, cols.age] {
+    for w in [cols.ticket, cols.status, cols.pr, cols.files, cols.git, cols.age] {
         if w > 0 {
             blank += 1 + w;
         }
@@ -3117,6 +3167,32 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
 
 fn ticket_text(v: &WorktreeView) -> String {
     v.linear.as_ref().map(|l| l.identifier.clone()).unwrap_or_default()
+}
+
+/// The ticket's Linear state (`In Progress`), cut to [`STATUS_MAX`] columns
+/// (fewer when narrow) so a long custom state can't crowd the row.
+fn ticket_status_text(v: &WorktreeView, words: bool) -> String {
+    let Some(l) = v.linear.as_ref() else { return String::new() };
+    truncate(&l.state.name, if words { STATUS_MAX } else { STATUS_MAX_NARROW })
+}
+
+const STATUS_MAX: usize = 14;
+const STATUS_MAX_NARROW: usize = 8;
+
+/// A Linear state's colour by its type, in theme tokens (not Linear's own
+/// hex, which a theme can't keep readable): working yellow, done green,
+/// canceled red, not started faint.
+fn ticket_status_style(kind: &str, theme: &Theme) -> ratatui::style::Style {
+    match kind {
+        "started" => theme.fg(theme.yellow),
+        "completed" => theme.fg(theme.green),
+        "canceled" => theme.fg(theme.red),
+        _ => theme.faint(),
+    }
+}
+
+fn pr_files(v: &WorktreeView) -> Option<u64> {
+    v.pr.as_ref().and_then(|p| p.changed_files)
 }
 
 type ColorPick = fn(&Theme) -> ratatui::style::Color;
@@ -3721,6 +3797,13 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         Span::styled("⧗ watching", theme.fg(theme.blue)),
         Span::styled(" busy, but only waiting on something outside (gh run watch, a Monitor, sleep)", theme.faint()),
     ]));
+    lines.push(Line::from(vec![
+        Span::styled("ENG-1 ", theme.fg(theme.blue)),
+        Span::styled("In Progress", theme.fg(theme.yellow)),
+        Span::styled(" … ", theme.faint()),
+        Span::styled("12 files", theme.faint()),
+        Span::styled(" the ticket's Linear state; files the PR changes (Settings → Dashboard)", theme.faint()),
+    ]));
     draw_help_box(f, theme, area, lines);
 }
 
@@ -3848,6 +3931,7 @@ mod tests {
             checks_waiting: false,
             base_ref_name: None,
             mergeable: None,
+            changed_files: Some(14),
         });
         refactor.linear = Some(LinearInfo {
             identifier: "ENG-412".into(),
@@ -3937,6 +4021,66 @@ mod tests {
     #[test]
     fn dashboard_wide() {
         insta::assert_snapshot!(render(&fixture(), 120, 16));
+    }
+
+    #[test]
+    fn ticket_status_and_pr_files_columns() {
+        let mut app = fixture();
+        // A second ticket in another state, with a one-file PR.
+        let mut li = app.snapshot.groups[0].worktrees[0].linear.clone().unwrap();
+        li.identifier = "ENG-9".into();
+        li.state = LinearState { name: "Done".into(), color: String::new(), kind: "completed".into() };
+        let mut pr = app.snapshot.groups[0].worktrees[0].pr.clone().unwrap();
+        pr.number = 9;
+        pr.changed_files = Some(1);
+        let w = &mut app.snapshot.groups[0].worktrees[1];
+        w.linear = Some(li);
+        w.pr = Some(pr);
+        let snap = app.snapshot.clone();
+        app.apply(snap);
+        let screen = render(&app, 120, 16);
+        assert!(screen.contains("ENG-412 In Progress #127✓ approved 14 files"), "{screen}");
+        assert!(screen.contains("ENG-9   Done        #9✓ approved     1 file "), "{screen}");
+        // Coloured by the state's type (off the selected row, which the
+        // ansi theme reverses).
+        app.selected = 2;
+        let mut term = Terminal::new(TestBackend::new(120, 16)).unwrap();
+        term.draw(|f| draw(f, &app, &Theme::ansi(), NOW, &[])).unwrap();
+        let buf = term.backend().buffer().clone();
+        let fg_of = |needle: &str| {
+            let (x, y) = cell_of(&screen, needle);
+            buf[(x, y)].style().fg
+        };
+        let theme = Theme::ansi();
+        assert_eq!(fg_of("In Progress"), Some(theme.yellow));
+        assert_eq!(fg_of("Done"), Some(theme.green));
+        // Narrow: the state is cut and the count shortened.
+        let narrow = render(&app, 90, 16);
+        assert!(narrow.contains("ENG-412 In Prog… #127✓ ✔ 14f"), "{narrow}");
+        // Too narrow for the name: the status goes, then the file count.
+        let mut cols = Columns { status: 11, files: 8, ..cols_for(&app) };
+        let all = cols.width();
+        cols.make_room(all + NAME_ROOM, 0);
+        assert_eq!((cols.status, cols.files), (11, 8));
+        cols.make_room(all + NAME_ROOM - 1, 0);
+        assert_eq!((cols.status, cols.files), (0, 8));
+        cols.make_room(all + NAME_ROOM - 13, 0);
+        assert_eq!((cols.status, cols.files), (0, 0));
+        // Each has its own toggle; off, the column goes.
+        app.settings.show_linear_status = false;
+        app.settings.show_pr_files = false;
+        let off = render(&app, 120, 16);
+        assert!(off.contains("ENG-412 #127✓ approved ↑2") && !off.contains("In Progress") && !off.contains("files"), "{off}");
+    }
+
+    /// Column and row of the first `needle` on a rendered screen.
+    fn cell_of(screen: &str, needle: &str) -> (u16, u16) {
+        for (y, line) in screen.lines().enumerate() {
+            if let Some(at) = line.find(needle) {
+                return (line[..at].chars().count() as u16, y as u16);
+            }
+        }
+        panic!("{needle:?} not on screen:\n{screen}");
     }
 
     #[test]
@@ -6307,7 +6451,17 @@ mod tests {
     }
 
     fn cols_for(app: &App) -> Columns {
-        Columns { ticket: 7, pr: 12, pr_words: true, git: 5, age: 3, ctx_bar: 8, ctx_window: app.settings.context_window_tokens }
+        Columns {
+            ticket: 7,
+            status: 0,
+            pr: 12,
+            files: 0,
+            pr_words: true,
+            git: 5,
+            age: 3,
+            ctx_bar: 8,
+            ctx_window: app.settings.context_window_tokens,
+        }
     }
 
     #[test]
@@ -6468,6 +6622,8 @@ mod tests {
         let mut watching = session(HarnessKind::CLAUDE, "s", Status::Executing, "2025-10-11 09:59:00", None);
         watching.waiting_on = Some("gh run watch 12".into());
         w1.sessions = vec![watching.clone()];
+        // The badges' room, without the ticket-status and file-count columns.
+        (app.settings.show_linear_status, app.settings.show_pr_files) = (false, false);
         app.apply(snap.clone());
         let out = render(&app, 120, 11);
         let row = out.lines().find(|l| l.contains("feature/refactor")).unwrap_or_default().to_string();
@@ -6551,6 +6707,8 @@ mod tests {
         let mut snap = app.snapshot.clone();
         snap.groups[0].worktrees[0].worktree.custom_name = Some("Refactor grouping core".into());
         app.apply(snap);
+        // The name's room, without the ticket-status and file-count columns.
+        (app.settings.show_linear_status, app.settings.show_pr_files) = (false, false);
         let wide = render(&app, 120, 8);
         assert!(wide.contains("Refactor grouping core  feature/refactor"), "{wide}");
         let narrow = render(&app, 80, 8);

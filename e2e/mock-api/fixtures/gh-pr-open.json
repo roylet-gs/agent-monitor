@@ -5,6 +5,7 @@
   "state": "OPEN",
   "isDraft": false,
   "reviewDecision": "REVIEW_REQUIRED",
+  "changedFiles": 12,
   "statusCheckRollup": [
     {
       "status": "COMPLETED",

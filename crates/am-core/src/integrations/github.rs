@@ -45,7 +45,8 @@ pub const MAX_PARALLEL_CHUNKS: usize = 4;
 pub const GRAPHQL_TIMEOUT: Duration = Duration::from_secs(15);
 pub const PR_VIEW_TIMEOUT: Duration = Duration::from_secs(5);
 
-const GH_PR_FIELDS: &str = "number,title,url,state,isDraft,reviewDecision,mergeable,headRefName,baseRefName,statusCheckRollup";
+const GH_PR_FIELDS: &str =
+    "number,title,url,state,isDraft,reviewDecision,mergeable,headRefName,baseRefName,changedFiles,statusCheckRollup";
 
 // ---------------------------------------------------------------------------
 // gh runner (injectable)
@@ -230,6 +231,7 @@ struct PrFields {
     review_decision: Option<String>,
     mergeable: Option<String>,
     base_ref_name: Option<String>,
+    changed_files: Option<u64>,
     /// Possibly only the first page of checks (see `summary`).
     checks: Vec<Check>,
     /// Status computed from GitHub's per-state counts over *all* checks; when
@@ -310,6 +312,7 @@ fn to_pr_info(pr: PrFields) -> PrInfo {
         checks_waiting,
         base_ref_name: pr.base_ref_name,
         mergeable: pr.mergeable,
+        changed_files: pr.changed_files,
     }
 }
 
@@ -416,7 +419,7 @@ pub(crate) fn pr_selection_counts() -> String {
 /// `contexts` arguments + selection → the shared PR field list.
 fn pr_fields(contexts: &str) -> String {
     format!(
-        "number title url state isDraft reviewDecision mergeable \
+        "number title url state isDraft reviewDecision mergeable changedFiles \
          headRefName baseRefName isCrossRepository commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ \
          contexts({contexts} }} }} }} }}"
     )
@@ -496,6 +499,8 @@ struct GqlPr {
     #[serde(default)]
     base_ref_name: Option<String>,
     #[serde(default)]
+    changed_files: Option<u64>,
+    #[serde(default)]
     is_cross_repository: bool,
     #[serde(default)]
     commits: Option<Value>,
@@ -523,6 +528,7 @@ impl GqlPr {
                 review_decision: self.review_decision,
                 mergeable: self.mergeable,
                 base_ref_name: self.base_ref_name,
+                changed_files: self.changed_files,
                 checks,
                 summary,
             },
@@ -806,6 +812,8 @@ struct GhPrView {
     #[serde(default)]
     base_ref_name: Option<String>,
     #[serde(default)]
+    changed_files: Option<u64>,
+    #[serde(default)]
     status_check_rollup: Option<Vec<Value>>,
 }
 
@@ -853,6 +861,7 @@ pub fn fetch_pr_view(gh: &dyn GhRunner, repo_path: &Path, branch: &str) -> (Fetc
         review_decision: pr.review_decision,
         mergeable: pr.mergeable,
         base_ref_name: pr.base_ref_name,
+        changed_files: pr.changed_files,
         checks,
         summary: None,
     });
@@ -910,6 +919,7 @@ pub(crate) mod tests {
             checks_waiting: false,
             base_ref_name: None,
             mergeable: None,
+            changed_files: None,
         }
     }
 
@@ -1337,6 +1347,21 @@ pub(crate) mod tests {
         let (r, net) = fetch_pr_view(&gh, Path::new("/r"), "mine");
         assert!(matches!(r, FetchResult::Ok(None)));
         assert!(!net);
+    }
+
+    #[test]
+    fn changed_files_come_from_graphql_and_pr_view() {
+        let mut node = gql_node(7, "b", "OPEN", serde_json::json!([]));
+        assert_eq!(pr_info_from_node(&node).unwrap().changed_files, None);
+        node["changedFiles"] = serde_json::json!(12);
+        assert_eq!(pr_info_from_node(&node).unwrap().changed_files, Some(12));
+        assert!(pr_selection().contains(" changedFiles "));
+        assert!(GH_PR_FIELDS.contains("changedFiles"));
+
+        let view = serde_json::json!({"number": 1, "title": "t", "url": "u", "state": "OPEN", "headRefName": "mine", "changedFiles": 3});
+        let gh = FakeGh::new(vec![GhOutput::success(view.to_string())]);
+        let (r, _) = fetch_pr_view(&gh, Path::new("/r"), "mine");
+        assert!(matches!(r, FetchResult::Ok(Some(ref p)) if p.changed_files == Some(3)));
     }
 
     #[test]
