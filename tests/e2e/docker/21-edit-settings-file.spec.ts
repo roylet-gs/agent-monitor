@@ -83,7 +83,7 @@ test("settings.json changed by another process is reloaded live", async ({ page 
   const editor = new RustTui(editorPage);
   try {
     await editor.open();
-    await editor.openSetting(CHECK_HELP);
+    await editor.openSetting(CHECK_HELP, 80);
     expect(await checkValue(editor)).toBe("on");
     await editor.sendKey(" ");
     expect(await checkValue(editor)).toBe("off");

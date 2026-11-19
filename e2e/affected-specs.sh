@@ -49,7 +49,7 @@ specs_for() {
     # ui/app/main draw and drive every screen (and every screenshot).
     crates/am-tui/src/ui.rs | crates/am-tui/src/app.rs | crates/am-tui/src/main.rs) echo ALL ;;
     crates/am-tui/src/setup.rs) echo 11 22 28 32 ;;
-    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 34 35 36 38 39 ;;
+    crates/am-tui/src/settings_ui.rs) echo 03 05 12 13 14 15 16 17 20 21 22 23 24 25 26 28 30 32 33 34 35 36 38 39 40 ;;
     crates/am-tui/src/usage_reports.rs) echo 34 ;; # heartbeat, feature counts, the sending thread
     crates/am-tui/src/keymap.rs | crates/am-tui/src/keys_ui.rs) echo 01 02 15 20 27 28 32 33 35 36 38 ;; # dashboard keys, ? overlay, key-bar clicks, Settings → Key bindings
     crates/am-tui/src/reviews_ui.rs | crates/am-tui/src/review_groups_ui.rs) echo 28 31 32 ;;    # the review-requests page and its groups
@@ -86,11 +86,11 @@ specs_for() {
     crates/am-core/src/usage.rs) echo 17 ;;        # today's token total
     crates/am-core/src/update_check.rs) echo 13 ;; # update-available notice, clicking it to update
     crates/am-core/src/themes.rs | crates/am-core/src/themes/*) echo 12 ;;
-    crates/am-core/src/integrations/github.rs) echo 04 28 36 37 38 ;;
+    crates/am-core/src/integrations/github.rs) echo 04 28 36 37 38 40 ;;
     crates/am-core/src/integrations/notifications.rs | crates/am-core/src/integrations/ci_watch.rs | \
     crates/am-core/src/integrations/rest.rs) echo 37 ;; # live PR updates
     crates/am-core/src/integrations/reviews.rs | crates/am-core/src/review_groups.rs) echo 28 ;;
-    crates/am-core/src/integrations/linear.rs) echo 04 05 36 ;;
+    crates/am-core/src/integrations/linear.rs) echo 04 05 36 40 ;;
     crates/am-core/src/integrations/cache.rs | crates/am-core/src/integrations/breaker.rs) echo 06 28 ;;
     crates/am-core/src/integrations/mod.rs) echo 04 05 06 28 37 ;;
     crates/am-core/src/launch.rs) echo 21 ;; # open_in_editor's failure path (no IDE in the container)

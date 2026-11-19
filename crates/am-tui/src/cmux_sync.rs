@@ -818,6 +818,7 @@ mod tests {
                 checks_waiting: false,
                 base_ref_name: None,
                 mergeable: None,
+                changed_files: None,
             }),
             linear: None,
             has_terminal: false,

@@ -18,6 +18,7 @@ test("open PR with passing checks", async ({ page }) => {
       state: "OPEN",
       isDraft: false,
       reviewDecision: "REVIEW_REQUIRED",
+      changedFiles: 12,
       statusCheckRollup: [{ status: "COMPLETED", conclusion: "SUCCESS", name: "build" }],
     },
   });
@@ -28,6 +29,8 @@ test("open PR with passing checks", async ({ page }) => {
   expect(await tui.selectedRow()).toContain("#42✓");
   // REVIEW_REQUIRED → `review` after the checks glyph.
   await tui.waitForMatch(/│▌.*#42✓ review/m, 15_000);
+  // The PR's changed-file count follows the PR cell (`12f` below 100 columns).
+  await tui.waitForMatch(/│▌.*#42✓ review\s+12( files|f)\s/m, 15_000);
   await tui.screenshot("pr-open");
 });
 
