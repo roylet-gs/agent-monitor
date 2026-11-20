@@ -288,6 +288,9 @@ fn set_mouse(on: bool) {
 /// Two left clicks on the same row within this window are a double-click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
+/// How often the open peek pane re-reads its zmx session.
+const PEEK_EVERY: Duration = Duration::from_secs(1);
+
 /// Input events handled between two draws at most.
 const MAX_EVENTS_PER_FRAME: usize = 64;
 
@@ -298,6 +301,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
     let mut popup_since: Option<Instant> = None;
     let mut log_lines: Vec<String> = Vec::new();
     let mut log_len: Option<u64> = None;
+    // The peek pane's last request (session, when) and whether it's still out.
+    let mut peek_asked: Option<(String, Instant)> = None;
+    let mut peek_inflight = false;
     let mut dirty = true;
     let mut last_second = am_core::timefmt::now_unix();
     // Stage timings (`am perf`); `input_at` is when the oldest undrawn input arrived.
@@ -344,6 +350,12 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                 launcher::Msg::Notice(n) => {
                     app.notice = Some(n);
                     notice_since = None;
+                }
+                launcher::Msg::Peek(session, lines) => {
+                    peek_inflight = false;
+                    if app.peek_open {
+                        app.peek = Some(app::PeekView { session, lines });
+                    }
                 }
                 launcher::Msg::BranchChecked(branch, r) => {
                     if let Some(m) = &mut app.modal {
@@ -578,6 +590,17 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App, collector: &data:
                 }
             }
             dirty = true;
+        }
+        // `P`: refresh the peek pane once a second, and at once when the selection moves.
+        if app.peek_open && !peek_inflight
+            && let Some(target) = app.peek_target()
+        {
+            let moved = peek_asked.as_ref().is_none_or(|(name, _)| *name != target);
+            if moved || peek_asked.as_ref().is_some_and(|(_, at)| at.elapsed() >= PEEK_EVERY) {
+                peek_inflight = true;
+                peek_asked = Some((target.clone(), Instant::now()));
+                launcher::peek(target, launch_tx.clone());
+            }
         }
         // Folded stacks (any key, click or a reveal) are remembered across restarts.
         if let Some(folds) = app.folds_to_save() {

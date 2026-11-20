@@ -68,7 +68,7 @@ const SOUNDS: &[&str] =
 
 pub const FIELDS: &[Field] = &[
     Field { key: "appMode", label: "Mode", help: "reviews: open straight to the review page and hide the agent/worktree settings", section: "General", kind: Kind::Choice(&am_core::settings::AppMode::IDS) },
-    Field { key: "ide", label: "Open in", help: "Where Enter opens worktrees; cmux switches to or makes a workspace; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
+    Field { key: "ide", label: "Open in", help: "Where Enter opens worktrees; cmux switches to or makes a workspace; zmx attaches to a session that outlives the window; custom runs Editor command", section: "General", kind: Kind::Choice(&am_core::launch::IdeChoice::IDS) },
     Field { key: "ideCommand", label: "Editor command", help: "For Open in = custom, e.g. subl -n; {path} = worktree, else it's appended", section: "General", kind: Kind::Text { secret: false } },
     Field { key: "ideDisplay", label: "Editor display", help: "Monitor a built-in editor opens worktrees on (1 = leftmost); macOS Accessibility", section: "General", kind: Kind::Choice(&["auto", "1", "2", "3", "4"]) },
     Field { key: "resumeLastSession", label: "Resume last session on open", help: "Enter also resumes the worktree's most recent agent session", section: "General", kind: Kind::Bool },

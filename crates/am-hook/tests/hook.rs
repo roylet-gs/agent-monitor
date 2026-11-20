@@ -67,6 +67,7 @@ impl Env {
             .env("AM_DATA_DIR", self.data.path())
             .env_remove("CMUX_WORKSPACE_ID")
             .env_remove("CMUX_SURFACE_ID")
+            .env_remove("ZMX_SESSION")
             .envs(envs.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -87,6 +88,7 @@ impl Env {
             .env("AM_DATA_DIR", self.data.path())
             .env_remove("CMUX_WORKSPACE_ID")
             .env_remove("CMUX_SURFACE_ID")
+            .env_remove("ZMX_SESSION")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1056,4 +1058,22 @@ fn a_session_records_its_cmux_pane_and_what_it_waits_on() {
     env.send("PostToolUse", json!({ "tool_name": "Bash" }));
     assert_eq!(extras().2, None);
     assert_eq!(env.session("s1"), ("executing".into(), true));
+}
+
+#[test]
+fn a_session_records_its_zmx_session() {
+    let env = Env::new();
+    let zmx = || -> Option<String> {
+        env.db().query_row("SELECT zmx_session FROM sessions WHERE session_id = 's1'", [], |r| r.get(0)).unwrap()
+    };
+    env.send("UserPromptSubmit", json!({}));
+    assert_eq!(zmx(), None, "outside zmx nothing is recorded");
+    env.send_env(None, "PreToolUse", json!({ "tool_name": "Read" }), &[("ZMX_SESSION", "am.web.feat")]);
+    assert_eq!(zmx().as_deref(), Some("am.web.feat"));
+    // An event without zmx's env (the same agent, from another hook path) keeps it.
+    env.send("PostToolUse", json!({ "tool_name": "Read" }));
+    assert_eq!(zmx().as_deref(), Some("am.web.feat"));
+    // Reattached elsewhere: the newest name wins.
+    env.send_env(None, "Stop", json!({}), &[("ZMX_SESSION", "dev")]);
+    assert_eq!(zmx().as_deref(), Some("dev"));
 }

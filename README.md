@@ -37,6 +37,7 @@
 - [CLI Reference](#cli-reference)
 - [Use am from your agents (MCP)](#use-am-from-your-agents-mcp)
 - [Use am in cmux](#use-am-in-cmux)
+- [Use am with zmx](#use-am-with-zmx)
 - [How It Works](#how-it-works)
   - [Supported harnesses](#supported-harnesses)
 - [Usage Reports](#usage-reports)
@@ -177,6 +178,7 @@ Agent status changes show up within about 200 ms of the hook firing.
 | `Tab` | Focus the Jobs pane (answer its question, `x` dismisses a job); `Tab` again returns to the list. With the review page beside the list, `Tab` goes list → review page → Jobs pane. The Jobs pane stays in view on every page (Settings, help, dialogs) while it has jobs; on the review page only while a job needs an answer |
 | `A` | Add a repository (folder browser: `⏎` adds a git repo or opens a folder, `←` goes up, type to filter or type a `/…`/`~/…` path) |
 | `w` | Toggle the log pane (tail of `debug.log`) |
+| `P` | Peek at the selected worktree's [zmx](#use-am-with-zmx) session (its last lines) |
 | `s` | Settings |
 | `f` | Worktree filters: text search, agent status (a checklist: tick any of `waiting`, `executing`, `planning`, `delegating`, `done`, `idle`, `no agent`), PR (`open` / `none` / `failing`) and git (`changes` / `clean`), on top of the base filters (the `hide*` toggles in Settings → Base filters, which always apply). The `Worktrees` border sums up what's filtered (`filters on: "auth" · waiting · no main · 3 hidden`; a click opens the box) |
 | `F` | Turn the `f` filters off, and back on (`worktreeFiltersEnabled`; the border reads `filters off` meanwhile). The base filters stay on |
@@ -413,7 +415,7 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 
 | Key | Default | Description |
 | --- | ------- | ----------- |
-| `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, `cmux` (see [Use am in cmux](#use-am-in-cmux)), or `custom` |
+| `ide` | `"vscode"` | What `Enter` (and `am open`) opens worktrees in: `vscode`, `cursor`, `zed`, `windsurf`, `terminal`, `cmux` (see [Use am in cmux](#use-am-in-cmux)), `zmx` (see [Use am with zmx](#use-am-with-zmx)), or `custom` |
 | `ideCommand` | `""` | The command `ide: "custom"` runs, through `sh`. `{path}` is replaced by the quoted worktree path, or the path is appended when there's no `{path}`. E.g. `idea`, `subl -n`, `open -a Nova {path}` |
 | `ideDisplay` | `"auto"` | Monitor a built-in editor (VS Code, Cursor, Zed, Windsurf) opens a worktree on: `1` is the leftmost display, `2` the next… The editor opens a new window, which am then moves through System Events, so the terminal am runs in needs Accessibility permission (System Settings → Privacy & Security → Accessibility). macOS only; `auto` leaves it where the editor puts it |
 | `resumeLastSession` | `true` | `Enter` also resumes the worktree's latest agent session |
@@ -621,6 +623,20 @@ am --version
 cmux's control socket only answers programs started inside cmux (its default `cmuxOnly` mode), so the workspace and sidebar features work when am runs in a cmux terminal or the Dock. Run elsewhere, `Enter` with `ide: cmux` opens the worktree through `cmux <path>` and copies the resume command to the clipboard.
 
 ---
+
+## Use am with zmx
+
+[zmx](https://zmx.sh) keeps terminal sessions alive after their window closes: each named session keeps running in the background, and attaching again brings back its screen and scrollback. Agents run in zmx sessions survive closed windows and dropped SSH connections, and am can show you what they are doing.
+
+- **Open worktrees in zmx sessions.** With Open in set to `zmx` (`am settings set ide zmx`), `Enter` opens a terminal attached to the worktree's session. If the session is already running, you get its screen and scrollback back. Otherwise am creates `am.<repo>.<branch>` and starts the agent in it, resumed like terminal mode (`claude --resume <id>`…), with no clipboard step. When the agent exits, a shell stays in the session.
+- **Peek.** `P` shows the selected worktree's zmx session at the bottom of the dashboard (its last lines, refreshed every second), so you can see what an agent is doing without switching windows. `P` again hides it.
+- **The agent's own session.** am's hooks record `ZMX_SESSION`, so `Enter` and `P` find an agent you started yourself in any zmx session, whatever you named it.
+- **Cleaned up with the worktree.** Deleting a worktree ends its `am.`-named sessions. Sessions you named yourself are left alone.
+
+`am doctor` reports whether zmx is installed.
+
+---
+
 
 ## Use am from your agents (MCP)
 

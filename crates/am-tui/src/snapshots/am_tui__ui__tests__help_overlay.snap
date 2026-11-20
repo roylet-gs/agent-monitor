@@ -10,6 +10,7 @@ expression: "render(&app, 100, 20)"
 │gridsight│               ⏎  open (IDE; resumes last agent session)                      │─────────│
 │ · main  │       g / l / p  open PR / Linear ticket / Linear project                    │         │
 │         │               w  toggle log pane (Settings → View logs… opens the file)      │         │
+│         │               P  peek at the agent (its zmx session's last lines)            │         │
 │         │               n  new worktree                                                │         │
 │         │         d / del  delete worktree (asks first)                                │         │
 │         │             tab  focus the jobs pane                                         │         │
@@ -19,6 +20,5 @@ expression: "render(&app, 100, 20)"
 │         │           f / F  filter worktrees / filters on/off                           │         │
 │         │               s  settings (Key bindings… changes these keys)                 │         │
 │         │               r  refresh now (bypasses backoff)                              │         │
-│         │               h  toggle help                                                 │         │
-╰─────────│          q  esc  quit                                                        │─ 1 of 3 ╯
+╰─────────│               h  toggle help                                                 │─ 1 of 3 ╯
  ⏎ open  │╰──────────────────────────────────────────────────────────────────────────────╯  q quit

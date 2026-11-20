@@ -13,7 +13,7 @@ use crate::harness::HarnessKind;
 use crate::paths;
 use crate::status::Status;
 
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 /// How long a connection waits for another one's lock before giving up.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -173,6 +173,12 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
             if !has_column(&tx, "sessions", col)? {
                 tx.execute_batch(&format!("ALTER TABLE sessions ADD COLUMN {col} TEXT"))?;
             }
+        }
+    }
+    if v < 9 {
+        // The zmx session a session runs in (the hook's `ZMX_SESSION`).
+        if !has_column(&tx, "sessions", "zmx_session")? {
+            tx.execute_batch("ALTER TABLE sessions ADD COLUMN zmx_session TEXT")?;
         }
     }
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -577,6 +583,8 @@ pub struct SessionRow {
     /// What the session's current tool call blocks on (`gh run watch`,
     /// `sleep 300`…), from `status::waits_on_event`; `None` when it isn't.
     pub waiting_on: Option<String>,
+    /// The zmx session it runs in, from the hook's `ZMX_SESSION` (schema v9).
+    pub zmx: Option<String>,
 }
 
 /// A cmux pane: the workspace plus, when known, the surface in it.
@@ -610,6 +618,7 @@ fn session_from(r: &rusqlite::Row, at: usize) -> rusqlite::Result<SessionRow> {
             None => None,
         },
         waiting_on: r.get(at + 9)?,
+        zmx: r.get(at + 10)?,
     })
 }
 
@@ -618,7 +627,7 @@ fn row_to_session(r: &rusqlite::Row) -> rusqlite::Result<SessionRow> {
 }
 
 const SESSION_COLS: &str =
-    "agent, session_id, status, last_response, is_open, started_at, updated_at, cmux_workspace, cmux_surface, waiting_on";
+    "agent, session_id, status, last_response, is_open, started_at, updated_at, cmux_workspace, cmux_surface, waiting_on, zmx_session";
 
 pub fn get_session(conn: &Connection, agent: HarnessKind, session_id: &str) -> rusqlite::Result<Option<SessionRow>> {
     conn.query_row(
@@ -706,6 +715,15 @@ pub fn set_session_extras(
             cmux.and_then(|p| p.surface.as_deref()),
             waiting_on
         ],
+    )?;
+    Ok(())
+}
+
+/// Record the zmx session a session runs in.
+pub fn set_session_zmx(conn: &Connection, agent: HarnessKind, session_id: &str, zmx: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE sessions SET zmx_session = ?3 WHERE agent = ?1 AND session_id = ?2",
+        params![agent.id(), session_id, zmx],
     )?;
     Ok(())
 }

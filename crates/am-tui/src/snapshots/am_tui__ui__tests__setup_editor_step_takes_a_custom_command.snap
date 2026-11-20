@@ -4,11 +4,10 @@ expression: out
 ---
 ╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────────────────────────│
-│▌◑ feature/refactor ◆2                                       ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k │
-│ ╭─Welcome to agent-monitor ────────────────────────────────────────────────────────────────────╮ │
+│▌╭─Welcome to agent-monitor ────────────────────────────────────────────────────────────────────╮ │
 │ │                                                                                              │ │
-│g│  ✓ Mode › Editor › Hooks › Repos › Integrations › Reviews › Context › Privacy                │─│
-│ │                                                                                              │ │
+│ │  ✓ Mode › Editor › Hooks › Repos › Integrations › Reviews › Context › Privacy                │ │
+│g│                                                                                              │─│
 │ │ Where should Enter open a worktree?                                                          │ │
 │ │                                                                                              │ │
 │ │   ○ VS Code                                                                                  │ │
@@ -17,6 +16,7 @@ expression: out
 │ │   ○ Windsurf                                                                                 │ │
 │ │   ○ Terminal                                                                                 │ │
 │ │   ○ cmux                                                                                     │ │
+│ │   ○ zmx session                                                                              │ │
 │ │   ● Custom command: subl -n▏                                                                 │ │
 │ │     Runs with the worktree path appended, or in place of {path}                              │ │
 │ │                                                                                              │ │

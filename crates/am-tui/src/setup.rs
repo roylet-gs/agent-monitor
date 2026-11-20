@@ -169,7 +169,7 @@ pub struct Setup {
     pub cancellable: bool,
 }
 
-pub const IDES: [(&str, &str); 7] = am_core::launch::IdeChoice::ALL;
+pub const IDES: [(&str, &str); 8] = am_core::launch::IdeChoice::ALL;
 
 /// The full dashboard's steps (Reviews is skipped with GitHub off).
 pub const STEPS_FULL: &[Step] =

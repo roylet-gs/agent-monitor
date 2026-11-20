@@ -233,8 +233,8 @@ fn handle(worktree_arg: &str, kind: HarnessKind, ev: &HookEvent) -> rusqlite::Re
     Ok(())
 }
 
-/// Record the cmux pane the agent runs in (the hook inherits its
-/// `CMUX_WORKSPACE_ID`/`CMUX_SURFACE_ID`) and what its current tool call
+/// Record the cmux pane and zmx session the agent runs in (the hook inherits
+/// its `CMUX_WORKSPACE_ID`/`CMUX_SURFACE_ID`/`ZMX_SESSION`) and what its current tool call
 /// blocks on. Writes only when either changed, so most events cost nothing.
 fn record_extras(
     conn: &rusqlite::Connection,
@@ -244,6 +244,12 @@ fn record_extras(
     ev: &HookEvent,
 ) -> rusqlite::Result<()> {
     let pane = db::CmuxPane::from_env();
+    if let Some(zmx) = am_core::zmx::current_session()
+        && before.and_then(|s| s.zmx.as_deref()) != Some(zmx.as_str())
+    {
+        debug!(MODULE, "Session {}:{sid} runs in zmx session {zmx}", kind.id());
+        db::set_session_zmx(conn, kind, sid, &zmx)?;
+    }
     let stored_wait = before.and_then(|s| s.waiting_on.clone());
     // Only the main conversation's own tool calls say what the turn waits on.
     let waiting_on = if ev.from_subagent() || ev.is_subagent_lifecycle() {

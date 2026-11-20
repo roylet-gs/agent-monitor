@@ -25,10 +25,10 @@ expression: "render(&app, 100, 34)"
 │       │   Ignore PR               i                        ignore / un-ignore            │       │
 │       │ General                                                                          │       │
 │       │   Toggle log pane         w                        —                             │       │
+│       │ Worktrees                                                                        │       │
+│       │   Peek at the agent       P                        —                             │       │
+│       │ General                                                                          │       │
 │       │   Settings                s                        same                          │       │
-│       │   Refresh now             r                        clear cache and refetch       │       │
-│       │   Help                    h                        same                          │       │
-│       │   Quit                    q                        back                          │       │
 │       │                                                                                  │       │
 │       │ Always on: ↑↓ pgup pgdn home end · ⇥ list/reviews/jobs · esc back · ctrl-c quit  │       │
 │       │                                                                                  │       │

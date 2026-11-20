@@ -91,6 +91,13 @@ pub enum Row {
     Session(usize, usize),
 }
 
+/// The peek pane's content: a zmx session's last lines, or why it has none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeekView {
+    pub session: String,
+    pub lines: Result<Vec<String>, String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     None,
@@ -171,6 +178,11 @@ pub struct App {
     pub popup: Option<String>,
     /// `w`: debug-log pane at the bottom.
     pub show_log: bool,
+    /// `P`: the peek pane (the selected worktree's zmx session) at the
+    /// bottom, in place of the log pane.
+    pub peek_open: bool,
+    /// What the peek pane last fetched (main.rs refreshes it every second).
+    pub peek: Option<PeekView>,
     pub settings_editor: Option<crate::settings_ui::SettingsEditor>,
     pub modal: Option<crate::modals::Modal>,
     pub setup: Option<crate::setup::Setup>,
@@ -255,6 +267,8 @@ impl App {
             restart: false,
             popup: None,
             show_log: false,
+            peek_open: false,
+            peek: None,
             settings_editor: None,
             modal: None,
             setup: None,
@@ -646,6 +660,9 @@ impl App {
     /// always available.
     pub fn key_available(&self, cmd: crate::keymap::Command) -> bool {
         use crate::keymap::Command as C;
+        if cmd == C::Peek {
+            return self.peek_open || self.peek_target().is_some();
+        }
         if !cmd.is_row_action() {
             return true;
         }
@@ -665,6 +682,20 @@ impl App {
 
     pub fn is_deleting(&self, id: &str) -> bool {
         self.deleting.contains_key(id)
+    }
+
+    /// The zmx session the peek pane shows for the selected worktree: the one
+    /// its agent's hooks recorded, else (with `ide: zmx`) the session am names
+    /// for it. `None` while the pane is shut or nothing is selected.
+    pub fn peek_target(&self) -> Option<String> {
+        let v = self.selected_view()?;
+        if let Some(name) = v.zmx_session() {
+            return Some(name.to_string());
+        }
+        (self.settings.ide == "zmx" && !v.worktree.is_standalone()).then(|| {
+            let path = std::path::Path::new(&v.worktree.path);
+            am_core::zmx::session_name(am_core::zmx::repo_dir(path), &v.worktree.branch)
+        })
     }
 
     pub fn selected_view(&self) -> Option<&WorktreeView> {
@@ -973,6 +1004,12 @@ impl App {
                 "No Linear project",
             ),
             C::ToggleLog => self.show_log = !self.show_log,
+            C::Peek => {
+                self.peek_open = !self.peek_open;
+                if !self.peek_open {
+                    self.peek = None;
+                }
+            }
             C::NewWorktree => {
                 if self.snapshot.repos.is_empty() {
                     self.modal = Some(self.add_repo_modal());

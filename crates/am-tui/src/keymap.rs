@@ -29,6 +29,8 @@ pub enum Command {
     ReviewWindow,
     AddRepo,
     ToggleLog,
+    /// A pane with the selected worktree's zmx session (its last lines).
+    Peek,
     Settings,
     Filter,
     ToggleFilters,
@@ -49,7 +51,7 @@ pub enum Command {
 impl Command {
     /// Every command, in the order the Key bindings page lists them (grouped
     /// by `section`).
-    pub const ALL: [Command; 29] = [
+    pub const ALL: [Command; 30] = [
         Command::Open,
         Command::OpenPr,
         Command::OpenLinear,
@@ -66,6 +68,7 @@ impl Command {
         Command::PullAndRunScript,
         Command::IgnoreReview,
         Command::ToggleLog,
+        Command::Peek,
         Command::Settings,
         Command::Refresh,
         Command::Help,
@@ -102,6 +105,7 @@ impl Command {
             Command::ReviewWindow => "reviewWindow",
             Command::AddRepo => "addRepo",
             Command::ToggleLog => "toggleLog",
+            Command::Peek => "peek",
             Command::Settings => "settings",
             Command::Filter => "filter",
             Command::ToggleFilters => "toggleFilters",
@@ -145,6 +149,7 @@ impl Command {
             Command::ReviewWindow => "Reviews in new window",
             Command::AddRepo => "Add repository",
             Command::ToggleLog => "Toggle log pane",
+            Command::Peek => "Peek at the agent",
             Command::Settings => "Settings",
             Command::Filter => "Filter worktrees",
             Command::ToggleFilters => "Filters on/off",
@@ -174,7 +179,8 @@ impl Command {
             | Command::Delete
             | Command::AddRepo
             | Command::Filter
-            | Command::ToggleFilters => "Worktrees",
+            | Command::ToggleFilters
+            | Command::Peek => "Worktrees",
             Command::ReviewRequests | Command::ReviewSplit | Command::ReviewWindow | Command::PullToTmpSpace | Command::PullAndRunScript | Command::IgnoreReview => {
                 "Review requests"
             },
@@ -208,6 +214,7 @@ impl Command {
             Command::PullAndRunScript => "Pull the selected PR into Reviewing, then run the repo's review script (review page only)",
             Command::IgnoreReview => "Move the selected PR to Ignored until its status changes; again to un-ignore (review page only)",
             Command::ToggleLog => "Show or hide the debug.log pane",
+            Command::Peek => "Show or hide the last lines of the selected worktree's zmx session (the agent's terminal)",
             Command::Settings => "Open settings",
             Command::Filter => "Worktree filters: text, status, PR, git and the hide toggles (the review filters on the review page)",
             Command::ToggleFilters => "Turn every worktree filter off, and back on",
@@ -249,6 +256,7 @@ impl Command {
             | Command::NewWorktree
             | Command::AddRepo
             | Command::ToggleLog
+            | Command::Peek
             | Command::ToggleFilters
             | Command::Collapse
             | Command::Expand
@@ -286,6 +294,7 @@ impl Command {
             Command::ReviewWindow => "new window",
             Command::AddRepo => "add repo",
             Command::ToggleLog => "log",
+            Command::Peek => "peek",
             Command::Settings => "settings",
             Command::Filter => "filter",
             Command::ToggleFilters => "filters",
@@ -312,6 +321,7 @@ impl Command {
             Command::ReviewWindow => Key::CtrlV,
             Command::AddRepo => Key::Char('A'),
             Command::ToggleLog => Key::Char('w'),
+            Command::Peek => Key::Char('P'),
             Command::Settings => Key::Char('s'),
             Command::Filter => Key::Char('f'),
             Command::ToggleFilters => Key::Char('F'),

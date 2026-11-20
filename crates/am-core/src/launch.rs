@@ -42,6 +42,9 @@ pub enum IdeChoice {
     Terminal,
     /// A cmux workspace (`crate::cmux`).
     Cmux,
+    /// A terminal attached to a zmx session (`crate::zmx`), which keeps the
+    /// agent running when the window closes.
+    Zmx,
     /// The `ideCommand` setting.
     Custom,
 }
@@ -49,16 +52,17 @@ pub enum IdeChoice {
 impl IdeChoice {
     /// Every `ide` value with its label, in the order the settings editor,
     /// setup wizard and CLI offer them.
-    pub const ALL: [(&'static str, &'static str); 7] = [
+    pub const ALL: [(&'static str, &'static str); 8] = [
         ("vscode", "VS Code"),
         ("cursor", "Cursor"),
         ("zed", "Zed"),
         ("windsurf", "Windsurf"),
         ("terminal", "Terminal"),
         ("cmux", "cmux"),
+        ("zmx", "zmx session"),
         ("custom", "Custom command"),
     ];
-    pub const IDS: [&'static str; 7] = ["vscode", "cursor", "zed", "windsurf", "terminal", "cmux", "custom"];
+    pub const IDS: [&'static str; 8] = ["vscode", "cursor", "zed", "windsurf", "terminal", "cmux", "zmx", "custom"];
 
     /// Unknown values fall back to VS Code.
     pub fn from_setting(s: &str) -> IdeChoice {
@@ -68,6 +72,7 @@ impl IdeChoice {
             "windsurf" => IdeChoice::Windsurf,
             "terminal" => IdeChoice::Terminal,
             "cmux" => IdeChoice::Cmux,
+            "zmx" => IdeChoice::Zmx,
             "custom" => IdeChoice::Custom,
             _ => IdeChoice::Vscode,
         }
@@ -75,7 +80,7 @@ impl IdeChoice {
 
     /// Opens in a terminal (the agent runs there itself), not an editor.
     pub fn is_terminal(self) -> bool {
-        matches!(self, IdeChoice::Terminal | IdeChoice::Cmux)
+        matches!(self, IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Zmx)
     }
 
     /// Shell CLI and macOS app name of a built-in editor.
@@ -85,7 +90,7 @@ impl IdeChoice {
             IdeChoice::Cursor => Some(("cursor", "Cursor")),
             IdeChoice::Zed => Some(("zed", "Zed")),
             IdeChoice::Windsurf => Some(("windsurf", "Windsurf")),
-            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
+            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Zmx | IdeChoice::Custom => None,
         }
     }
 
@@ -94,7 +99,7 @@ impl IdeChoice {
         match self {
             IdeChoice::Vscode | IdeChoice::Cursor | IdeChoice::Windsurf => Some("--new-window"),
             IdeChoice::Zed => Some("-n"),
-            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
+            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Zmx | IdeChoice::Custom => None,
         }
     }
 
@@ -105,7 +110,7 @@ impl IdeChoice {
             IdeChoice::Cursor => Some("Cursor"),
             IdeChoice::Zed => Some("Zed"),
             IdeChoice::Windsurf => Some("Windsurf"),
-            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Custom => None,
+            IdeChoice::Terminal | IdeChoice::Cmux | IdeChoice::Zmx | IdeChoice::Custom => None,
         }
     }
 }
@@ -228,7 +233,7 @@ pub fn open_worktree_in_editor(path: &Path, ide: IdeChoice, custom_cmd: &str, di
 fn open_editor_with(path: &Path, ide: IdeChoice, custom_cmd: &str, flag: Option<&str>) -> Result<(), String> {
     let (cli, app) = match ide.editor() {
         Some(e) => e,
-        None if ide == IdeChoice::Terminal => return open_terminal(path, None).map(|_| ()),
+        None if matches!(ide, IdeChoice::Terminal | IdeChoice::Zmx) => return open_terminal(path, None).map(|_| ()),
         None if ide == IdeChoice::Cmux => return open_in_cmux(path, None, None),
         None => return open_custom(path, custom_cmd),
     };

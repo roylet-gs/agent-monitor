@@ -326,6 +326,8 @@ pub struct SessionView {
     pub cmux: Option<crate::db::CmuxPane>,
     /// What its current tool call blocks on (`gh run watch 12`…).
     pub waiting_on: Option<String>,
+    /// The zmx session it runs in (schema v9).
+    pub zmx: Option<String>,
 }
 
 impl SessionView {
@@ -353,6 +355,14 @@ impl WorktreeView {
 
     /// The cmux pane an agent here runs in: the headline session's, else the
     /// most recently active live session that knows one.
+    /// The zmx session the agent runs in: the headline session's, else the
+    /// most recently active session that recorded one.
+    pub fn zmx_session(&self) -> Option<&str> {
+        self.headline_session().and_then(|s| s.zmx.as_deref()).or_else(|| {
+            self.sessions.iter().filter(|s| s.zmx.is_some()).max_by(|a, b| a.updated_at.cmp(&b.updated_at))?.zmx.as_deref()
+        })
+    }
+
     pub fn cmux_pane(&self) -> Option<&crate::db::CmuxPane> {
         self.headline_session().and_then(|s| s.cmux.as_ref()).or_else(|| {
             self.sessions.iter().filter(|s| s.cmux.is_some()).max_by(|a, b| a.updated_at.cmp(&b.updated_at))?.cmux.as_ref()

@@ -907,6 +907,7 @@ mod tests {
             context: None,
             cmux: Some(CmuxPane { workspace: ws.into(), surface: Some(format!("{ws}-s")) }),
             waiting_on: None,
+            zmx: None,
         }];
         v
     }

@@ -28,6 +28,7 @@ pub mod update_check;
 pub mod usage;
 pub mod window;
 pub mod worktrees;
+pub mod zmx;
 
 // Re-exported so the `info!`/`warn!`/`debug!` macros resolve in every crate.
 pub use tracing;
