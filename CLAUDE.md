@@ -204,6 +204,7 @@ End-to-end tests run the real binaries behind ttyd in Docker with GitHub and Lin
 | `38-fold-persists.spec.ts` | Folds are remembered: with `feature/pair`'s PR based on `feature/to-delete` (`ghByBranch`, as in spec 36), `←` folds the stack to `▸ feature/to-delete … +1 stacked hidden`, a restart (`page.reload()`) keeps it folded, `→` unfolds it and that survives another restart; a `finally` unfolds it so `collapsedStacks` is never left set |
 | `39-editor-display.spec.ts` | Settings → Editor display reads `auto` between Editor command and Resume last session; space cycles it to `2` (help names the monitor), it survives a restart, then restored to `auto` (the window move itself is macOS-only and unit-tested) |
 | `40-ticket-status-files.spec.ts` | With an open PR (`changedFiles: 12`): `main`'s row reads `ENG-123 In Progress` (`In Prog…` narrow) and `#42✓ review 12 files` (`12f` narrow); Settings → Show ticket status off drops the state but keeps `ENG-123` and the file count (Show PR file count stays on), then restored in a `finally` |
+| `41-zmx.spec.ts` | Settings → Open in `zmx` (between `cmux` and `custom`); `P` on `main` opens the peek pane titled `Peek zmx am.work.main` with `⚠ zmx isn't installed` (no zmx in the container), `P` closes it; `⏎` pops up `zmx isn't installed. Install it…`; Open in restored to `vscode`, after which `P` derives no session |
 
 **Writing a spec:**
 ```typescript

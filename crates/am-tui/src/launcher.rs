@@ -198,7 +198,7 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
 /// stops it.
 fn open_zmx(v: &WorktreeView, path: &Path, resume_on: bool, default_agent: am_core::harness::HarnessKind) -> Result<String, String> {
     if !zmx::available() {
-        return Err("zmx isn't installed. Install it (brew install zmx, see https://zmx.sh) or pick another \"Open in\" in Settings.".into());
+        return Err("zmx isn't installed. Install it from https://zmx.sh or pick another \"Open in\" in Settings.".into());
     }
     let label = v.worktree.display_name();
     let name = v

@@ -82,14 +82,14 @@ test("Open in cycles to custom and takes an editor command", async ({ page }) =>
   expect(await rowValue(tui, OPEN_IN)).toBe("vscode");
   expect(await rowValue(tui, EDITOR_CMD)).toBe("—");
 
-  // Every choice in order: vscode → cursor → zed → windsurf → terminal → cmux → custom.
+  // Every choice in order: vscode → cursor → zed → windsurf → terminal → cmux → zmx → custom.
   const seen: string[] = [];
-  for (const want of ["cursor", "zed", "windsurf", "terminal", "cmux", "custom"]) {
+  for (const want of ["cursor", "zed", "windsurf", "terminal", "cmux", "zmx", "custom"]) {
     await tui.sendKey(" ");
     await tui.waitForMatch(new RegExp(`Open in {2,}${want}\\b`));
     seen.push(await rowValue(tui, OPEN_IN));
   }
-  expect(seen).toEqual(["cursor", "zed", "windsurf", "terminal", "cmux", "custom"]);
+  expect(seen).toEqual(["cursor", "zed", "windsurf", "terminal", "cmux", "zmx", "custom"]);
 
   // Editor command: Enter edits (prefilled with the current, empty value).
   await tui.sendKey("j");
