@@ -75,6 +75,8 @@ interface GhFixture {
   headRefName?: string;
   /** The branch the PR targets (stacked branches); omitted = none reported. */
   baseRefName?: string;
+  /** Files the PR changes; omitted = not reported. */
+  changedFiles?: number;
   statusCheckRollup?: Array<Record<string, unknown>>;
 }
 
@@ -90,6 +92,7 @@ function toGraphqlPr(f: GhFixture, branch: string): unknown {
     mergeable: f.mergeable ?? "MERGEABLE",
     headRefName: f.headRefName ?? branch,
     ...(f.baseRefName !== undefined ? { baseRefName: f.baseRefName } : {}),
+    ...(f.changedFiles !== undefined ? { changedFiles: f.changedFiles } : {}),
     isCrossRepository: false,
     commits: {
       nodes: [

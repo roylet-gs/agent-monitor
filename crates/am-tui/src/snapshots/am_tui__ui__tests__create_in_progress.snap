@@ -4,7 +4,7 @@ expression: screen
 ---
 ╭─am v0.0.0 · Worktrees ───────────────────────────────────────────────────────╮╭─Jobs ────────────────────────────────╮
 │agent-monitor ────────────────────────────────────────────────────────────────││ ◐ Create feature/new-thing           │
-│ ◑ feature/refactor ◆2                   ENG-412 #127✓ ✔ ↑2 ±3  4m ▒░░░░ 121k ││   ✓ Fetching origin/main…            │
+│ ◑ feature/refactor ◆2      ENG-412 In Prog… #127✓ ✔ 14f ↑2 ±3  4m ▒░░░░ 121k ││   ✓ Fetching origin/main…            │
 │ ◐ fix/offline-cache                                            4m ▓░░░░ 185k ││   ◐ Adding worktree…                 │
 │ ◐ feature/new-thing creating… Adding worktree…                               ││                                      │
 │                                                                              ││                                      │

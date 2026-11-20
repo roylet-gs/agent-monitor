@@ -131,7 +131,7 @@ pub struct Extras<'a> {
 /// dates, author, repo, your latest review and the pending reviewers.
 fn review_fields() -> String {
     format!(
-        "{} headRefOid changedFiles createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
+        "{} headRefOid createdAt updatedAt author {{ login }} repository {{ nameWithOwner }} viewerLatestReview {{ state }} \
          reviewRequests(first: 20) {{ nodes {{ requestedReviewer {{ ... on User {{ login }} \
          ... on Team {{ combinedSlug }} ... on Bot {{ login }} ... on Mannequin {{ login }} }} }} }}",
         pr_selection_counts()

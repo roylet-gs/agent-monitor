@@ -51,6 +51,7 @@ pub(super) fn big_fixture(worktrees: usize, reviews: usize) -> App {
                 checks_waiting: false,
                 base_ref_name: None,
                 mergeable: None,
+                changed_files: None,
             });
         }
         if i % 2 == 0 {

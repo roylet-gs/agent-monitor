@@ -15,6 +15,8 @@ test("Linear ticket column and ticket cluster header", async ({ page }) => {
   await tui.selectRow("main");
   // The identifier sits in the row's ticket column.
   await tui.waitForMatch(/│▌.*\sENG-123\s/, 5_000);
+  // Its Linear state follows it (`In Prog…` below 100 columns).
+  await tui.waitForMatch(/│▌.*\sENG-123 In Prog(ress|…)\s/, 5_000);
   // Adjacent worktrees with the same ticket get a "— ticket —" header.
   await tui.waitForText("— ENG-123 Implement dashboard feature —");
   // The cluster opens the repo section: no blank line between the repo header

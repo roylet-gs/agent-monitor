@@ -242,7 +242,9 @@ After the name (a nickname, if set, followed by the branch in dim text):
 Right-aligned columns, each of which can be turned off in settings:
 
 - **Linear ticket**: e.g. `ENG-123`
+- **Ticket status**: the ticket's Linear state, e.g. `In Progress`, coloured by its type (yellow while started, green when done, red when canceled, dim before work starts). Long names are cut to 14 columns (8 on narrow terminals)
 - **PR**: `#42` coloured by state (green open, dim draft, yellow pending or changes requested, red failing, magenta merged, dim closed), followed by the checks glyph `✓` passing, `✗` failing or `◌` pending, and `⇡` when merged. Open PRs then show their review state: `approved` (bold green when checks pass and there are no merge conflicts, yellow while checks fail or still run), `conflicts` (approved and green but conflicting with the base), `changes` (changes requested), `review` (awaiting a required review) or `draft`; a PR closed without merging shows red `closed`. Terminals under 100 columns get a glyph instead (`✔` `⚠` `!` `…` `~` `⊘`), and `?` shows the legend. Nothing is shown when the repo doesn't require reviews or the PR only comes from a Linear attachment
+- **PR files**: how many files the PR changes, `12 files` (`12f` on narrow terminals), a quick sense of its size
 - **Git**: `↑2` commits ahead, `↓1` behind, `±3` uncommitted changes
 - **Age** of the last commit (`4m`, `3h`, `2d`, `3w`)
 - **Context window**: `████▌░░░ 121k`, a bar of how much of the agent's context window the session has used, then the tokens in use. The bar and count are green, then yellow from 70% used and red from 90%. Usage comes from the session's transcript (Claude Code's, or Codex's rollout), so it updates after every turn. A Codex session is measured against the window Codex records for its model; others against `contextWindowTokens` (1M by default). A session that has gone past that is measured against the setting doubled until it fits (200k → 400k → 800k …), whatever model it runs. The bar clears after a compaction until the next turn
@@ -441,7 +443,9 @@ Settings are stored in `~/.agent-monitor/settings.json` and can also be read or 
 
 The `hide*` toggles are the base filters: they always apply (`F` doesn't turn them off) and never hide a worktree with a live agent session; they live in Settings → Base filters. The `worktreeFilter*` ones add on top, hide live rows too, since you asked for them, and are in the `f` box and Settings → Filters.
 | `showPrStatus` | `true` | Show the PR column |
+| `showPrFiles` | `true` | Show how many files the PR changes |
 | `showLinearTicket` | `true` | Show the ticket column |
+| `showLinearStatus` | `true` | Show the ticket's Linear state beside it |
 | `showGitAheadBehind` | `true` | Show the ahead/behind/dirty column |
 | `showLastCommit` | `true` | Show the last-commit age |
 | `showContextWindow` | `true` | Show the context-window bar at the far right of each row |
