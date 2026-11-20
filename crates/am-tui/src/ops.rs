@@ -48,6 +48,10 @@ pub fn delete(view: WorktreeView, delete_branch: bool, job: u64, tx: Sender<Msg>
         if let Err(e) = &result {
             am_core::warn!("tui", "Delete of {} failed: {e}", view.worktree.branch);
         }
+        if result.is_ok() {
+            let recorded: Vec<&str> = view.sessions.iter().filter_map(|s| s.zmx.as_deref()).collect();
+            am_core::zmx::kill_worktree_sessions(Path::new(&view.worktree.path), &view.worktree.branch, &recorded);
+        }
         let _ = tx.send(Msg::Deleted(job, view.worktree.id.clone(), label, result.map(|r| r.warnings)));
     });
 }

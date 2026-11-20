@@ -162,6 +162,19 @@ pub fn run(as_json: bool) {
         message: if ttyd { "Available (TUI screenshots enabled)".into() } else { "Not found. Install with: brew install ttyd".into() },
     });
 
+    // zmx only matters once it's the "Open in" choice or installed.
+    let zmx = am_core::zmx::cli_path();
+    if zmx.is_some() || s.ide == "zmx" {
+        checks.push(Check {
+            name: "zmx".into(),
+            status: if zmx.is_some() { "ok" } else { "warn" },
+            message: match &zmx {
+                Some(p) => format!("Available at {} (Open in zmx, peek with P)", p.display()),
+                None => "Not found, but \"Open in\" is zmx. Install it: https://zmx.sh".into(),
+            },
+        });
+    }
+
     // Theme files that don't parse fall back to ansi in the TUI; surface them.
     let custom = am_core::themes::custom_names();
     let broken: Vec<&String> = custom.iter().filter(|n| am_core::themes::load(n).is_err()).collect();

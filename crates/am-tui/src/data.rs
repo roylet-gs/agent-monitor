@@ -456,6 +456,7 @@ impl Worker {
                         started_at: s.started_at,
                         updated_at: s.updated_at,
                         cmux: s.cmux,
+                        zmx: s.zmx,
                         waiting_on: s.waiting_on,
                     })
                     .collect();
@@ -1333,6 +1334,7 @@ mod tests {
             updated_at: updated.into(),
             cmux: None,
             waiting_on: None,
+            zmx: None,
         }
     }
 

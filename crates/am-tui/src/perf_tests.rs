@@ -80,6 +80,7 @@ pub(super) fn big_fixture(worktrees: usize, reviews: usize) -> App {
                     context: None,
                     cmux: None,
                     waiting_on: None,
+                    zmx: None,
                 })
                 .collect();
         }

@@ -7,7 +7,7 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use am_core::window as launch_window;
-use am_core::{cmux, grouping};
+use am_core::{cmux, grouping, zmx};
 use am_core::launch::{self, IdeChoice, OpenAction};
 use am_core::model::WorktreeView;
 use am_core::settings::Settings;
@@ -36,6 +36,26 @@ pub enum Msg {
     Updated(u64, Result<(), String>),
     /// A sync job (pull the latest into a review worktree) finished.
     Synced(u64, Result<am_core::worktrees::UpdateOutcome, String>),
+    /// The peek pane's fetch: zmx session name, and its last lines.
+    Peek(String, Result<Vec<String>, String>),
+}
+
+/// Lines the peek pane asks zmx for (it shows what fits).
+const PEEK_ROWS: usize = 200;
+
+/// Fetch a zmx session's last lines for the peek pane.
+pub fn peek(session: String, tx: Sender<Msg>) {
+    std::thread::spawn(move || {
+        let lines = if zmx::available() {
+            zmx::history(&zmx::SystemZmx, &session, PEEK_ROWS)
+        } else {
+            Err("zmx isn't installed (https://zmx.sh)".into())
+        };
+        if let Err(e) = &lines {
+            am_core::debug!("launcher", "Peek at zmx session {session} failed: {e}");
+        }
+        let _ = tx.send(Msg::Peek(session, lines));
+    });
 }
 
 /// Pull the latest of `branch` into the review worktree at `path` (safe:
@@ -94,6 +114,14 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
                 }
             })
         };
+        if ide == IdeChoice::Zmx {
+            let r = open_zmx(&v, path, resume_on, default_agent);
+            let _ = tx.send(match r {
+                Ok(msg) => Msg::Notice(msg),
+                Err(e) => Msg::Popup(format!("✗ {e}")),
+            });
+            return;
+        }
         // A terminal is already open there: bring it forward rather than open another.
         if ide == IdeChoice::Terminal && v.has_terminal {
             report(&tx, launch::focus_terminal_app(), format!("Focused terminal for {label}"));
@@ -161,6 +189,38 @@ pub fn open(v: WorktreeView, roots: Vec<String>, settings: &Settings, tx: Sender
         };
         report(&tx, result, format!("Opened {label}"));
     });
+}
+
+/// `ide: zmx`: a terminal attached to the worktree's zmx session. The
+/// session the agent's hooks recorded comes first, else `am.<repo>.<branch>`.
+/// A live session is reattached (screen and scrollback come back); a new one
+/// starts the agent, resumed like terminal mode, so closing the window never
+/// stops it.
+fn open_zmx(v: &WorktreeView, path: &Path, resume_on: bool, default_agent: am_core::harness::HarnessKind) -> Result<String, String> {
+    if !zmx::available() {
+        return Err("zmx isn't installed. Install it from https://zmx.sh or pick another \"Open in\" in Settings.".into());
+    }
+    let label = v.worktree.display_name();
+    let name = v
+        .zmx_session()
+        .map(str::to_string)
+        .unwrap_or_else(|| zmx::session_name(zmx::repo_dir(path), &v.worktree.branch));
+    let live = match zmx::list(&zmx::SystemZmx) {
+        Ok(list) => list.iter().any(|s| s.name == name && !s.unreachable),
+        Err(e) => {
+            am_core::warn!("launcher", "Couldn't list zmx sessions: {e}");
+            false
+        }
+    };
+    let command = if live {
+        None
+    } else {
+        let already_open = grouping::is_open_now(v.agent.as_ref());
+        (resume_on && !already_open).then(|| launch::agent_command(&launch::resume_for(path, known_agent(v), default_agent)))
+    };
+    am_core::info!("launcher", "Opening {label} in zmx session {name} (live: {live}, command: {})", command.as_deref().unwrap_or("-"));
+    let opened = launch::open_terminal(path, Some(&zmx::attach_command(&name, command.as_deref())))?;
+    Ok(if live { format!("Reattached to {label} (zmx {name}) in {opened}") } else { format!("Opened {label} in zmx session {name}") })
 }
 
 fn report(tx: &Sender<Msg>, r: Result<(), String>, ok: String) {

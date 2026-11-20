@@ -74,7 +74,9 @@ pub fn draw(f: &mut Frame, app: &App, theme: &Theme, now: i64, log_lines: &[Stri
     let mut hits: Vec<Hit> = Vec::new();
     let areas = dashboard_areas(app, area);
     draw_keybar(f, app, theme, areas.keys, &mut hits);
-    if app.show_log {
+    if app.peek_open {
+        draw_peek(f, app, theme, areas.log);
+    } else if app.show_log {
         draw_log(f, theme, areas.log, log_lines);
     }
 
@@ -292,7 +294,7 @@ struct DashAreas {
 const SPLIT_SIDE_BY_SIDE: u16 = 100;
 
 fn dashboard_areas(app: &App, area: Rect) -> DashAreas {
-    let log_h = match (app.show_log, compact()) {
+    let log_h = match (app.show_log || app.peek_open, compact()) {
         (false, _) => 0,
         (true, false) => (area.height / 3).max(5),
         (true, true) => (area.height / 4).max(3),
@@ -1792,6 +1794,46 @@ fn draw_log(f: &mut Frame, theme: &Theme, area: Rect, lines: &[String]) {
         })
         .collect();
     f.render_widget(Paragraph::new(rendered), inner);
+}
+
+/// `P`: the selected worktree's zmx session, its last lines as plain text.
+fn draw_peek(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let key = app.keymap.key(Command::Peek).map(crate::keymap::display).unwrap_or_else(|| "—".into());
+    let target = app.peek_target();
+    let mut title = vec![Span::styled("─", theme.fg(theme.border)), Span::styled(format!("[{key}] Peek "), theme.fg(theme.text))];
+    if let Some(t) = &target {
+        title.push(Span::styled(format!("zmx {t} "), theme.faint()));
+    }
+    let block = Block::bordered()
+        .borders(if compact() { Borders::TOP } else { Borders::ALL })
+        .border_type(BorderType::Rounded)
+        .border_style(theme.fg(theme.border))
+        .title(Line::from(title));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let note = |msg: String| Paragraph::new(Line::styled(truncate(&msg, inner.width as usize), theme.faint()));
+    let Some(target) = target else {
+        let msg = if app.selected_view().is_none() {
+            "Nothing selected".to_string()
+        } else {
+            "No zmx session here: open it with \"Open in\" set to zmx, or start the agent inside zmx".to_string()
+        };
+        f.render_widget(note(msg), inner);
+        return;
+    };
+    match app.peek.as_ref().filter(|p| p.session == target).map(|p| &p.lines) {
+        None => f.render_widget(note("Loading…".into()), inner),
+        Some(Err(e)) => f.render_widget(note(format!("⚠ {e}")), inner),
+        Some(Ok(lines)) if lines.is_empty() => f.render_widget(note("(empty)".into()), inner),
+        Some(Ok(lines)) => {
+            let take = inner.height as usize;
+            let rendered: Vec<Line> = lines[lines.len().saturating_sub(take)..]
+                .iter()
+                .map(|l| Line::styled(truncate(l, inner.width as usize), theme.fg(theme.text)))
+                .collect();
+            f.render_widget(Paragraph::new(rendered), inner);
+        }
+    }
 }
 
 fn draw_popup(f: &mut Frame, theme: &Theme, area: Rect, msg: &str) {
@@ -3399,6 +3441,7 @@ const KEYS: &[(Option<Command>, u8)] = &[
     (Some(Command::ReviewWindow), 3),
     (Some(Command::Settings), 1),
     (Some(Command::ToggleLog), 3),
+    (Some(Command::Peek), 3),
     (Some(Command::Refresh), 1),
     (Some(Command::Bottom), 3),
     (Some(Command::FoldAll), 2),
@@ -3739,6 +3782,7 @@ fn draw_help(f: &mut Frame, theme: &Theme, area: Rect, keymap: &crate::keymap::K
         (&[C::Open], "", "open (IDE; resumes last agent session)"),
         (&[C::OpenPr, C::OpenLinear, C::OpenProject], "", "open PR / Linear ticket / Linear project"),
         (&[C::ToggleLog], "", "toggle log pane (Settings → View logs… opens the file)"),
+        (&[C::Peek], "", "peek at the agent (its zmx session's last lines)"),
         (&[C::NewWorktree], "", "new worktree"),
         (&[C::Delete], " / del", "delete worktree (asks first)"),
         (&[], "tab", "focus the jobs pane"),
@@ -4657,6 +4701,36 @@ mod tests {
         assert_eq!(app.sounds, vec!["Glass".to_string(), "Funk".to_string()]);
         app.on_key(Key::Char('j'));
         assert!(!app.unseen.contains("w2"), "selecting marks it seen");
+    }
+
+    #[test]
+    fn peek_pane_shows_the_selected_worktrees_zmx_session() {
+        let mut app = fixture();
+        // Without a recorded session or `ide: zmx`, there is nothing to peek at.
+        assert_eq!(app.peek_target(), None);
+        assert!(!app.key_available(Command::Peek));
+        app.settings.ide = "zmx".into();
+        let target = app.peek_target().expect("ide zmx names the worktree's session");
+        assert!(target.starts_with("am.") && target.ends_with(".feature-refactor"), "{target}");
+        assert!(app.key_available(Command::Peek));
+        app.on_key(Key::Char('P'));
+        assert!(app.peek_open);
+        assert!(render(&app, 100, 24).contains("Loading…"));
+        app.peek = Some(crate::app::PeekView { session: target.clone(), lines: Ok(vec!["$ claude".into(), "● Reading files".into()]) });
+        let screen = render(&app, 100, 24);
+        assert!(screen.contains(&format!("[P] Peek zmx {target}")), "{screen}");
+        assert!(screen.contains("● Reading files"), "{screen}");
+        // A session the agent's hooks recorded wins over am's own name.
+        app.snapshot.groups[0].worktrees[0].sessions = vec![SessionView { zmx: Some("dev".into()), ..session(HarnessKind::CLAUDE, "s1", Status::Executing, "2099-01-01 00:00:00", None) }];
+        app.rebuild_rows();
+        assert_eq!(app.peek_target().as_deref(), Some("dev"));
+        // A stale fetch for another session isn't shown; an error is.
+        assert!(render(&app, 100, 24).contains("Loading…"));
+        app.peek = Some(crate::app::PeekView { session: "dev".into(), lines: Err("session \"dev\" does not exist".into()) });
+        assert!(render(&app, 100, 24).contains("⚠ session \"dev\" does not exist"));
+        app.on_key(Key::Char('P'));
+        assert!(!app.peek_open && app.peek.is_none());
+        assert!(!render(&app, 100, 24).contains("Peek"));
     }
 
     /// Cell (x, y) of the first occurrence of `needle` on screen.
@@ -6151,11 +6225,11 @@ mod tests {
         // Key bindings: a click on the selected row starts capturing, and
         // then clicks don't count as the new key.
         app.settings_editor.as_mut().unwrap().keys = Some(crate::keys_ui::KeyEditor::new(app.keymap.clone()));
-        let row = find(&app, 100, 34, "Refresh now");
-        click(&mut app, 100, 34, row, false);
-        click(&mut app, 100, 34, row, false);
+        let row = find(&app, 100, 36, "Refresh now");
+        click(&mut app, 100, 36, row, false);
+        click(&mut app, 100, 36, row, false);
         assert!(app.settings_editor.as_ref().unwrap().keys.as_ref().unwrap().capturing);
-        let esc = find(&app, 100, 34, "Settings");
+        let esc = find(&app, 100, 36, "Settings");
         assert_eq!(target_at(&app, 100, 34, esc), None);
         app.on_mouse(crate::app::Mouse::Scroll(1));
         assert!(app.settings_editor.as_ref().unwrap().keys.as_ref().unwrap().capturing);
@@ -6608,6 +6682,7 @@ mod tests {
             context: tokens.map(|tokens| ContextUsage { tokens, model: None, window: None }),
             cmux: None,
             waiting_on: None,
+            zmx: None,
         }
     }
 
